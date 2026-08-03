@@ -1,0 +1,123 @@
+# =============================================================================
+# CoreTask — development overlay
+# =============================================================================
+#   pnpm dev         (docker compose -f docker-compose.yml -f docker-compose.dev.yml up)
+#   pnpm dev:build   (same, with --build)
+#
+# Mount strategy — this is what keeps restarts fast and Windows hosts clean:
+#   * `./api` and `./web` are bind-mounted for hot reload.
+#   * A *named* volume shadows each `node_modules` inside those mounts. Docker
+#     seeds a named volume from the image the first time it is used, so
+#     dependencies are already installed and are never written back to the
+#     Windows filesystem — no Linux-native binaries in your working tree, and no
+#     reinstall on `docker compose up`.
+#   * `packages/` is NOT mounted; the shared libraries are compiled into the
+#     image. After editing anything under `packages/`, run `pnpm dev:build`.
+# =============================================================================
+
+services:
+  coretask-postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  coretask-redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  coretask-minio:
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+
+  coretask-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile.dev
+    image: coretask/api:dev
+    environment:
+      NODE_ENV: development
+      RUN_MIGRATIONS: "true"
+      # Seeds the demo workspace on first boot. The seed upserts by natural key,
+      # so repeated starts are a no-op rather than a duplicate.
+      RUN_SEED: "${RUN_SEED:-true}"
+    ports:
+      - "${API_PORT:-3000}:3000"
+      - "9229:9229"
+    volumes:
+      - ./api:/app/api
+      - coretask-api-node-modules:/app/api/node_modules
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  coretask-worker:
+    build:
+      context: .
+      dockerfile: api/Dockerfile.dev
+    image: coretask/api:dev
+    command: ["pnpm", "worker"]
+    depends_on:
+      coretask-postgres:
+        condition: service_healthy
+      coretask-redis:
+        condition: service_healthy
+      # Wait for the API to finish migrating before consuming jobs.
+      coretask-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      RUN_MIGRATIONS: "false"
+      RUN_SEED: "false"
+    volumes:
+      - ./api:/app/api
+      - coretask-worker-node-modules:/app/api/node_modules
+
+  coretask-web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.dev
+    image: coretask/web:dev
+    environment:
+      NODE_ENV: development
+      # Resolved by the browser, not by the container, so it is the host origin.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
+      VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
+      VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
+      # Bind mounts from a Windows or macOS host do not deliver inotify events
+      # into the Linux container, so the watcher has to poll. Read by
+      # `server.watch.usePolling` in web/vite.config.ts.
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - ./web:/app/web
+      - coretask-web-node-modules:/app/web/node_modules
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+volumes:
+  coretask-api-node-modules:
+    name: coretask-api-node-modules
+  coretask-worker-node-modules:
+    name: coretask-worker-node-modules
+  coretask-web-node-modules:
+    name: coretask-web-node-modules

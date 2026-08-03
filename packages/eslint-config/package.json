@@ -1,0 +1,29 @@
+{
+  "name": "@coretask/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared ESLint flat configurations for the CoreTask monorepo",
+  "license": "UNLICENSED",
+  "exports": {
+    "./base": "./base.js",
+    "./node": "./node.js",
+    "./react": "./react.js"
+  },
+  "files": [
+    "base.js",
+    "node.js",
+    "react.js"
+  ],
+  "dependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript-eslint": "^8.47.2"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@coretask/types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Type-only API contracts shared by the CoreTask web client and API",
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rimraf dist",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coretask/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@coretask/eslint-config": "workspace:*",
+    "@coretask/tsconfig": "workspace:*",
+    "eslint": "^9.39.1",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}

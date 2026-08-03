@@ -1,0 +1,52 @@
+# =============================================================================
+# CoreTask API — development image
+# =============================================================================
+# Dependencies and the shared packages are baked in, and `api/` is bind-mounted
+# at run time (see docker-compose.dev.yml) with a named volume shadowing
+# `api/node_modules`. Restarting the stack therefore does not reinstall
+# anything, and Linux-native binaries never leak onto the Windows host.
+#
+# Build context is the repository root.
+# =============================================================================
+FROM node:24-alpine
+
+# Prisma's query engine links against OpenSSL; libc6-compat covers prebuilt
+# glibc-targeting native modules that fall back to the musl shim.
+RUN apk add --no-cache openssl libc6-compat tini
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    NODE_ENV=development
+RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
+
+WORKDIR /app
+
+# Manifests first so the dependency layer is cached across source edits.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/tsconfig/package.json      ./packages/tsconfig/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+COPY packages/contracts/package.json     ./packages/contracts/
+COPY packages/types/package.json         ./packages/types/
+COPY packages/validation/package.json    ./packages/validation/
+COPY api/package.json                    ./api/
+
+# `@coretask/api...` pulls in the API plus its workspace dependencies only —
+# the web client's toolchain is not installed here.
+RUN pnpm install --frozen-lockfile --filter "@coretask/api..."
+
+COPY packages ./packages
+RUN pnpm --filter "./packages/*" build
+
+COPY api ./api
+RUN pnpm --filter @coretask/api exec prisma generate
+
+COPY api/docker/entrypoint.dev.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+WORKDIR /app/api
+EXPOSE 3000 9229
+
+# tini reaps the child processes `nest start --watch` spawns, so Ctrl-C and
+# `docker compose down` stop the container promptly.
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["pnpm", "dev"]

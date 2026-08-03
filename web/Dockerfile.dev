@@ -1,0 +1,41 @@
+# =============================================================================
+# CoreTask web client — development image
+# =============================================================================
+# Same shape as the API dev image: dependencies and shared packages baked in,
+# `web/` bind-mounted at run time with a named volume shadowing
+# `web/node_modules`.
+#
+# Build context is the repository root.
+# =============================================================================
+FROM node:24-alpine
+
+RUN apk add --no-cache libc6-compat tini
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    NODE_ENV=development
+RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/tsconfig/package.json      ./packages/tsconfig/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+COPY packages/contracts/package.json     ./packages/contracts/
+COPY packages/types/package.json         ./packages/types/
+COPY packages/validation/package.json    ./packages/validation/
+COPY web/package.json                    ./web/
+
+RUN pnpm install --frozen-lockfile --filter "@coretask/web..."
+
+COPY packages ./packages
+RUN pnpm --filter "./packages/*" build
+
+COPY web ./web
+
+WORKDIR /app/web
+EXPOSE 5173
+
+ENTRYPOINT ["/sbin/tini", "--"]
+# `--host` binds 0.0.0.0 so the port is reachable from the Windows host.
+CMD ["pnpm", "dev", "--host", "0.0.0.0"]

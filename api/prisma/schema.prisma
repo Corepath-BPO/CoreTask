@@ -1,0 +1,450 @@
+// CoreTask database schema
+// ---------------------------------------------------------------------------
+// Conventions
+//   * Primary keys are UUID v7 (`@default(uuid(7))`). They are time-ordered, so
+//     they index like a sequence while staying unguessable. Sequential integer
+//     ids are never exposed.
+//   * Every workspace-owned table carries `workspaceId` directly — even when the
+//     relationship could be derived through a parent — so that a tenant filter
+//     is always one indexed column away and can never be forgotten.
+//   * Soft deletion is used only where history matters (`archivedAt` on
+//     workspace/project/task, `deletedAt` on comment). Everything else is
+//     deleted for real.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  GUEST
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+enum TaskPriority {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum TicketType {
+  BUG
+  FEATURE
+  SUPPORT
+  QUESTION
+  MAINTENANCE
+  INCIDENT
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketSeverity {
+  MINOR
+  MAJOR
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  TRIAGED
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_DUE_SOON
+  TICKET_ASSIGNED
+  TICKET_STATUS_CHANGED
+  COMMENT_CREATED
+  MENTIONED
+  WORKSPACE_INVITE
+}
+
+enum ActivityAction {
+  CREATED
+  UPDATED
+  DELETED
+  ARCHIVED
+  RESTORED
+  ASSIGNED
+  UNASSIGNED
+  STATUS_CHANGED
+  COMMENTED
+  MEMBER_ADDED
+  MEMBER_REMOVED
+  MEMBER_ROLE_CHANGED
+}
+
+enum ActivityEntity {
+  WORKSPACE
+  WORKSPACE_MEMBER
+  PROJECT
+  SECTION
+  TASK
+  TICKET
+  COMMENT
+  USER
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  /// Always stored lower-cased; the application normalises before writing.
+  email           String    @unique @db.VarChar(254)
+  passwordHash    String
+  name            String    @db.VarChar(120)
+  avatarUrl       String?
+  timezone        String    @default("UTC") @db.VarChar(64)
+  emailVerifiedAt DateTime?
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  refreshTokens     RefreshToken[]
+  memberships       WorkspaceMember[]
+  invitedMembers    WorkspaceMember[] @relation("MemberInvitedBy")
+  createdWorkspaces Workspace[]       @relation("WorkspaceCreatedBy")
+  ledProjects       Project[]         @relation("ProjectLead")
+  createdTasks      Task[]            @relation("TaskCreatedBy")
+  assignedTasks     Task[]            @relation("TaskAssignee")
+  reportedTickets   Ticket[]          @relation("TicketReporter")
+  assignedTickets   Ticket[]          @relation("TicketAssignee")
+  comments          Comment[]
+  activityLogs      ActivityLog[]
+  notifications     Notification[]
+
+  @@index([isActive])
+  @@map("users")
+}
+
+/// One row per issued refresh token. Rotation writes a new row and revokes the
+/// previous one, so `sessionId` identifies a token *family* and lets a replayed
+/// token take the whole family down.
+model RefreshToken {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @db.Uuid
+  /// Stable across rotations — one browser/device session.
+  sessionId    String    @db.Uuid
+  /// SHA-256 of the token. High-entropy secrets do not need a slow KDF; the
+  /// hash exists so a database leak cannot be replayed.
+  tokenHash    String    @unique @db.VarChar(64)
+  /// Rotation counter, incremented on every refresh.
+  version      Int       @default(1)
+  userAgent    String?   @db.VarChar(400)
+  ipAddress    String?   @db.VarChar(64)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @db.Uuid
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Workspace {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  name          String  @db.VarChar(80)
+  slug          String  @unique @db.VarChar(40)
+  description   String?
+  logoUrl       String?
+  /// Prefix for human-readable ticket keys, e.g. `CORE` -> `CORE-1001`.
+  ticketPrefix  String  @default("CORE") @db.VarChar(8)
+  /// Last issued ticket number. Incremented inside the ticket-creation
+  /// transaction so keys stay gapless and collision-free.
+  ticketCounter Int     @default(1000)
+
+  createdById String    @db.Uuid
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy     User              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  members       WorkspaceMember[]
+  projects      Project[]
+  sections      Section[]
+  tasks         Task[]
+  tickets       Ticket[]
+  comments      Comment[]
+  activityLogs  ActivityLog[]
+  notifications Notification[]
+
+  @@index([createdById])
+  @@index([archivedAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  workspaceId String        @db.Uuid
+  userId      String        @db.Uuid
+  role        WorkspaceRole @default(MEMBER)
+  invitedById String?       @db.Uuid
+  joinedAt    DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation("MemberInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, role])
+  @@map("workspace_members")
+}
+
+// ---------------------------------------------------------------------------
+// Work items
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  workspaceId String        @db.Uuid
+  name        String        @db.VarChar(120)
+  /// Short uppercase code, unique within the workspace.
+  key         String        @db.VarChar(8)
+  description String?
+  status      ProjectStatus @default(PLANNING)
+  color       String        @default("#6366F1") @db.VarChar(9)
+  leadId      String?       @db.Uuid
+  startDate   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+  archivedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      User?     @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  sections  Section[]
+  tasks     Task[]
+  tickets   Ticket[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId, status])
+  @@index([workspaceId, archivedAt])
+  @@index([leadId])
+  @@map("projects")
+}
+
+model Section {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  name        String   @db.VarChar(120)
+  /// Fractional ordering: inserting between two rows only rewrites one row.
+  position    Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@index([projectId, position])
+  @@index([workspaceId])
+  @@map("sections")
+}
+
+model Task {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  workspaceId      String       @db.Uuid
+  projectId        String?      @db.Uuid
+  sectionId        String?      @db.Uuid
+  parentTaskId     String?      @db.Uuid
+  title            String       @db.VarChar(500)
+  description      String?
+  status           TaskStatus   @default(TODO)
+  priority         TaskPriority @default(NONE)
+  position         Float        @default(0)
+  assigneeId       String?      @db.Uuid
+  createdById      String       @db.Uuid
+  startDate        DateTime?
+  dueDate          DateTime?
+  completedAt      DateTime?
+  estimatedMinutes Int?
+  archivedAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section    Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  parentTask Task?     @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks   Task[]    @relation("TaskSubtasks")
+  assignee   User?     @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy  User      @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  comments   Comment[]
+
+  @@index([workspaceId, status])
+  @@index([projectId, sectionId, position])
+  @@index([assigneeId, status])
+  @@index([workspaceId, dueDate])
+  @@index([parentTaskId])
+  @@map("tasks")
+}
+
+model Ticket {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  workspaceId String         @db.Uuid
+  projectId   String?        @db.Uuid
+  /// Monotonic per workspace; the numeric half of `key`.
+  number      Int
+  /// Denormalised `${workspace.ticketPrefix}-${number}` for direct lookup.
+  key         String         @db.VarChar(24)
+  title       String         @db.VarChar(500)
+  description String?
+  type        TicketType     @default(BUG)
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+  severity    TicketSeverity @default(MINOR)
+  reporterId  String?        @db.Uuid
+  assigneeId  String?        @db.Uuid
+  dueDate     DateTime?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reporter  User?     @relation("TicketReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  assignee  User?     @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  comments  Comment[]
+
+  @@unique([workspaceId, number])
+  @@unique([workspaceId, key])
+  @@index([workspaceId, status])
+  @@index([assigneeId, status])
+  @@index([workspaceId, priority])
+  @@index([projectId])
+  @@map("tickets")
+}
+
+model Comment {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  workspaceId String    @db.Uuid
+  authorId    String    @db.Uuid
+  body        String
+  taskId      String?   @db.Uuid
+  ticketId    String?   @db.Uuid
+  editedAt    DateTime?
+  /// Soft-deleted: threads and activity feeds keep referring to the comment.
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  ticket    Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([ticketId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("comments")
+}
+
+// ---------------------------------------------------------------------------
+// Audit + notifications
+// ---------------------------------------------------------------------------
+
+/// Append-only audit trail. Deliberately has no `updatedAt`: a mutable audit
+/// record would defeat the purpose.
+model ActivityLog {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  workspaceId String         @db.Uuid
+  /// Null for system-generated activity (jobs, automations).
+  actorId     String?        @db.Uuid
+  action      ActivityAction
+  entity      ActivityEntity
+  entityId    String         @db.Uuid
+  summary     String         @db.VarChar(500)
+  /// Before/after payload, request id, and anything else worth auditing.
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@map("activity_logs")
+}
+
+model Notification {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  userId      String           @db.Uuid
+  /// Null for account-level notifications that are not workspace-scoped.
+  workspaceId String?          @db.Uuid
+  type        NotificationType
+  title       String           @db.VarChar(200)
+  body        String?          @db.VarChar(1000)
+  entity      ActivityEntity?
+  entityId    String?          @db.Uuid
+  actionUrl   String?          @db.VarChar(500)
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([workspaceId])
+  @@map("notifications")
+}

@@ -1,0 +1,209 @@
+# =============================================================================
+# CoreTask — base stack
+# =============================================================================
+# Never used on its own. Combine with an overlay:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml  up
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file holds what both environments share: service names, networking,
+# health checks and persistent volumes. Build definitions, port publishing and
+# mounts live in the overlays.
+# =============================================================================
+
+name: coretask
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — primary datastore
+  # ---------------------------------------------------------------------------
+  coretask-postgres:
+    image: postgres:17-alpine
+    container_name: coretask-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-coretask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coretask_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-coretask}
+      # Speeds up index creation on first boot; irrelevant afterwards.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - coretask-postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # `-d`/`-U` matter: without them pg_isready reports ready before the
+      # application database exists, and the API starts against nothing.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coretask} -d ${POSTGRES_DB:-coretask}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [coretask]
+
+  # ---------------------------------------------------------------------------
+  # Redis — cache, BullMQ queues, Socket.IO adapter
+  # ---------------------------------------------------------------------------
+  coretask-redis:
+    image: redis:7-alpine
+    container_name: coretask-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - coretask-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks: [coretask]
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage for attachments
+  # ---------------------------------------------------------------------------
+  coretask-minio:
+    image: minio/minio:latest
+    container_name: coretask-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-coretask_minio}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+    volumes:
+      - coretask-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [coretask]
+
+  # Short-lived: creates the bucket, then exits 0. `docker compose ps` showing
+  # it as "exited" is the success state.
+  coretask-minio-init:
+    image: minio/mc:latest
+    container_name: coretask-minio-init
+    restart: "no"
+    depends_on:
+      coretask-minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set coretask http://coretask-minio:9000 \
+          "${STORAGE_ACCESS_KEY:-coretask_minio}" "${STORAGE_SECRET_KEY:-coretask_minio_dev_password}" &&
+        mc mb --ignore-existing "coretask/${STORAGE_BUCKET:-coretask}" &&
+        echo "bucket ${STORAGE_BUCKET:-coretask} ready"
+    networks: [coretask]
+
+  # ---------------------------------------------------------------------------
+  # API — REST + WebSocket
+  # ---------------------------------------------------------------------------
+  coretask-api:
+    image: coretask/api:local
+    container_name: coretask-api
+    restart: unless-stopped
+    depends_on:
+      coretask-postgres:
+        condition: service_healthy
+      coretask-redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      API_PORT: 3000
+      API_URL: ${API_URL:-http://localhost:3000}
+      WEB_URL: ${WEB_URL:-http://localhost:5173}
+      # Service names, not localhost — these resolve on the compose network.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-coretask}:${POSTGRES_PASSWORD:-coretask_dev_password}@coretask-postgres:5432/${POSTGRES_DB:-coretask}?schema=public
+      REDIS_HOST: coretask-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required — copy .env.example to .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required — copy .env.example to .env}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-10}
+      STORAGE_ENDPOINT: http://coretask-minio:9000
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-coretask}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-coretask_minio}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
+      STORAGE_MAX_FILE_SIZE_MB: ${STORAGE_MAX_FILE_SIZE_MB:-25}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
+    networks: [coretask]
+
+  # ---------------------------------------------------------------------------
+  # Worker — BullMQ consumer, same codebase, different entrypoint
+  # ---------------------------------------------------------------------------
+  coretask-worker:
+    image: coretask/api:local
+    container_name: coretask-worker
+    restart: unless-stopped
+    depends_on:
+      coretask-postgres:
+        condition: service_healthy
+      coretask-redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      API_URL: ${API_URL:-http://localhost:3000}
+      WEB_URL: ${WEB_URL:-http://localhost:5173}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-coretask}:${POSTGRES_PASSWORD:-coretask_dev_password}@coretask-postgres:5432/${POSTGRES_DB:-coretask}?schema=public
+      REDIS_HOST: coretask-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      STORAGE_ENDPOINT: http://coretask-minio:9000
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-coretask}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-coretask_minio}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
+      # Migrations are the API container's job; two processes racing
+      # `migrate deploy` on start would deadlock on the advisory lock.
+      RUN_MIGRATIONS: "false"
+    networks: [coretask]
+
+  # ---------------------------------------------------------------------------
+  # Web client
+  # ---------------------------------------------------------------------------
+  coretask-web:
+    image: coretask/web:local
+    container_name: coretask-web
+    restart: unless-stopped
+    depends_on:
+      - coretask-api
+    networks: [coretask]
+
+networks:
+  coretask:
+    name: coretask
+    driver: bridge
+
+volumes:
+  coretask-postgres-data:
+    name: coretask-postgres-data
+  coretask-redis-data:
+    name: coretask-redis-data
+  coretask-minio-data:
+    name: coretask-minio-data

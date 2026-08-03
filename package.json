@@ -1,0 +1,44 @@
+{
+  "name": "coretask",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoreTask - scalable project management and ticketing platform",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
+    "dev:local": "pnpm --parallel --filter \"./{api,web}\" dev",
+    "down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
+    "down:volumes": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v",
+    "logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f",
+    "prod:build": "docker compose -f docker-compose.yml -f docker-compose.prod.yml build",
+    "prod:up": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
+    "infra": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d coretask-postgres coretask-redis coretask-minio",
+    "packages:build": "pnpm --filter \"./packages/*\" build",
+    "build": "pnpm --recursive build",
+    "lint": "pnpm --recursive lint",
+    "lint:fix": "pnpm --recursive lint:fix",
+    "test": "pnpm --recursive test",
+    "test:e2e": "pnpm --filter @coretask/api test:e2e",
+    "test:e2e:web": "pnpm --filter @coretask/web test:e2e",
+    "typecheck": "pnpm --recursive typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:migrate": "pnpm --filter @coretask/api db:migrate",
+    "db:deploy": "pnpm --filter @coretask/api db:deploy",
+    "db:generate": "pnpm --filter @coretask/api db:generate",
+    "db:seed": "pnpm --filter @coretask/api db:seed",
+    "db:studio": "pnpm --filter @coretask/api db:studio",
+    "db:reset": "pnpm --filter @coretask/api db:reset",
+    "compose:validate": "docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet && docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "@coretask/tsconfig/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": ["src", "vite.config.ts", "playwright.config.ts", "eslint.config.mjs"],
+  "exclude": ["node_modules", "dist", "e2e"]
+}

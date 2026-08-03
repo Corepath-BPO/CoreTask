@@ -1,0 +1,10 @@
+{
+  "extends": "@coretask/tsconfig/node.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    // The base config pins `types` to ["node"]; specs need Jest's globals too.
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

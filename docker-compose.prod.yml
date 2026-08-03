@@ -1,0 +1,106 @@
+# =============================================================================
+# CoreTask — production overlay
+# =============================================================================
+#   pnpm prod:build   (docker compose -f docker-compose.yml -f docker-compose.prod.yml build)
+#   pnpm prod:up
+#
+# This is a production-*shaped* stack, not a deployment manifest: multi-stage
+# images, no source mounts, no dev tooling, non-root users, resource limits and
+# restart policies. A real deployment supplies the same environment from a
+# secret store and puts its own ingress and TLS in front of `coretask-web`.
+# =============================================================================
+
+services:
+  coretask-postgres:
+    # Not published by default — the database is reachable only on the compose
+    # network. Uncomment to attach a client from the host.
+    # ports:
+    #   - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+
+  coretask-redis:
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "512mb",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  coretask-minio:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
+  coretask-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: runtime
+    image: coretask/api:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    command: ["node", "dist/main.js"]
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1G }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  coretask-worker:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: runtime
+    image: coretask/api:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    command: ["node", "dist/worker.js"]
+    # A queue consumer has no HTTP surface; liveness is "the process is up".
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  coretask-web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      target: runtime
+      args:
+        # Baked into the bundle at build time — rebuild the image to change it.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
+        VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
+        VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
+    image: coretask/web:${IMAGE_TAG:-latest}
+    depends_on:
+      coretask-api:
+        condition: service_healthy
+    ports:
+      # The unprivileged nginx image listens on 8080 inside the container.
+      - "${WEB_HTTP_PORT:-8080}:8080"
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }

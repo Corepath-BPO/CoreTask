@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+coverage
+generated
+pnpm-lock.yaml
+playwright-report
+test-results
+api/prisma/migrations
+web/src/components/ui
+CHANGELOG.md

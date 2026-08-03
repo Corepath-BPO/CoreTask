@@ -1,0 +1,21 @@
+packages:
+  - "web"
+  - "api"
+  - "packages/*"
+
+# pnpm >= 10 blocks dependency lifecycle scripts unless they are approved here.
+# Only packages that legitimately need to compile or fetch a native binary are
+# allowed; everything else stays sandboxed.
+allowBuilds:
+  "@nestjs/core": true
+  "@prisma/client": true
+  "@prisma/engines": true
+  "@scarf/scarf": false
+  "@swc/core": true
+  "@tailwindcss/oxide": true
+  esbuild: true
+  # Optional native accelerator for msgpackr (BullMQ). The pure-JS fallback is
+  # used instead so no toolchain is needed on Windows hosts or in slim images.
+  msgpackr-extract: false
+  prisma: true
+  unrs-resolver: true

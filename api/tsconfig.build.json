@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "sourceMap": false,
+    // MUST stay false. `nest build` deletes `dist/` before compiling, but an
+    // incremental build trusts `.tsbuildinfo` and re-emits nothing, leaving an
+    // output tree with only the entry files in it.
+    "incremental": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "prisma", "**/*.spec.ts", "**/*.e2e-spec.ts"]
+}

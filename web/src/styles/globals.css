@@ -1,0 +1,220 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Tailwind v4 is CSS-first: the design tokens below *are* the config. */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Neutral, low-saturation palette in OKLCH — perceptually uniform, so the dark
+ * theme is a lightness inversion rather than a hand-tuned second palette.
+ * One accent (indigo) carries every primary action; status colours are reserved
+ * for meaning, never decoration.
+ */
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.006 285.9);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 285.9);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+
+  --primary: oklch(0.51 0.23 276.9);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.967 0.001 286.4);
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+
+  --muted: oklch(0.967 0.001 286.4);
+  --muted-foreground: oklch(0.552 0.014 285.9);
+
+  --accent: oklch(0.967 0.001 286.4);
+  --accent-foreground: oklch(0.21 0.006 285.9);
+
+  --destructive: oklch(0.577 0.245 27.3);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --success: oklch(0.596 0.145 163.2);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.769 0.163 70.1);
+  --warning-foreground: oklch(0.21 0.006 285.9);
+
+  --border: oklch(0.92 0.004 286.3);
+  --input: oklch(0.92 0.004 286.3);
+  --ring: oklch(0.51 0.23 276.9);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-accent: oklch(0.967 0.001 286.4);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-border: oklch(0.92 0.004 286.3);
+
+  --chart-1: oklch(0.51 0.23 276.9);
+  --chart-2: oklch(0.596 0.145 163.2);
+  --chart-3: oklch(0.769 0.163 70.1);
+  --chart-4: oklch(0.627 0.194 12.5);
+  --chart-5: oklch(0.585 0.146 233.4);
+}
+
+.dark {
+  --background: oklch(0.171 0.006 285.9);
+  --foreground: oklch(0.967 0.001 286.4);
+
+  --card: oklch(0.211 0.006 285.9);
+  --card-foreground: oklch(0.967 0.001 286.4);
+  --popover: oklch(0.211 0.006 285.9);
+  --popover-foreground: oklch(0.967 0.001 286.4);
+
+  --primary: oklch(0.63 0.19 277.5);
+  --primary-foreground: oklch(0.171 0.006 285.9);
+
+  --secondary: oklch(0.274 0.006 286);
+  --secondary-foreground: oklch(0.967 0.001 286.4);
+
+  --muted: oklch(0.274 0.006 286);
+  --muted-foreground: oklch(0.712 0.013 286.1);
+
+  --accent: oklch(0.274 0.006 286);
+  --accent-foreground: oklch(0.967 0.001 286.4);
+
+  --destructive: oklch(0.637 0.208 25.3);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --success: oklch(0.667 0.15 163.2);
+  --success-foreground: oklch(0.171 0.006 285.9);
+  --warning: oklch(0.828 0.152 78.8);
+  --warning-foreground: oklch(0.171 0.006 285.9);
+
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.63 0.19 277.5);
+
+  --sidebar: oklch(0.196 0.006 285.9);
+  --sidebar-foreground: oklch(0.967 0.001 286.4);
+  --sidebar-accent: oklch(0.274 0.006 286);
+  --sidebar-accent-foreground: oklch(0.967 0.001 286.4);
+  --sidebar-border: oklch(1 0 0 / 10%);
+
+  --chart-1: oklch(0.63 0.19 277.5);
+  --chart-2: oklch(0.667 0.15 163.2);
+  --chart-3: oklch(0.828 0.152 78.8);
+  --chart-4: oklch(0.712 0.17 12.5);
+  --chart-5: oklch(0.685 0.14 233.4);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+  }
+
+  /* Visible focus for keyboard users only — never a permanent outline. */
+  :focus-visible {
+    @apply outline-ring outline-2 outline-offset-2;
+  }
+
+  ::selection {
+    @apply bg-primary/20;
+  }
+
+  /* Thin, theme-aware scrollbars; the browser default is jarringly bright in dark mode. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  /* Respect the OS setting; motion is decoration, never information. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
