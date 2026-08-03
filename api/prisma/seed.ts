@@ -9,7 +9,7 @@
  *
  * Refuses to run against NODE_ENV=production.
  */
-import { TICKET_NUMBER_START } from '@coretask/contracts';
+import { formatMention, stripMentionTokens, TICKET_NUMBER_START } from '@coretask/contracts';
 import { hash } from '@node-rs/argon2';
 import {
   ActivityAction,
@@ -334,6 +334,51 @@ async function main(): Promise<void> {
       ticketCounter: Math.max(highest._max.number ?? 0, TICKET_NUMBER_START + ticketSeeds.length),
     },
   });
+
+  // ---------------------------------------------------------------------------
+  // A comment thread, including a mention
+  // ---------------------------------------------------------------------------
+  const firstTicket = await prisma.ticket.findFirst({
+    where: { workspaceId: workspace.id },
+    orderBy: { number: 'asc' },
+  });
+  const maya = teammates[0]?.user ?? owner;
+
+  // Guarded rather than upserted: a comment has no natural key, so re-running
+  // the seed must not stack up copies of the same conversation.
+  if (firstTicket && (await prisma.comment.count({ where: { workspaceId: workspace.id } })) === 0) {
+    const opening = await prisma.comment.create({
+      data: {
+        workspaceId: workspace.id,
+        authorId: maya.id,
+        ticketId: firstTicket.id,
+        body: `Reproduced on staging — it only fails when the address contains a plus sign. ${formatMention(owner.id, owner.name)} could you confirm the encoding on the login form?`,
+        mentions: { create: [{ userId: owner.id }] },
+      },
+    });
+
+    await prisma.comment.create({
+      data: {
+        workspaceId: workspace.id,
+        authorId: owner.id,
+        ticketId: firstTicket.id,
+        body: 'Confirmed — the address is being decoded twice. Fix is in review.',
+      },
+    });
+
+    await prisma.notification.create({
+      data: {
+        userId: owner.id,
+        workspaceId: workspace.id,
+        type: NotificationType.MENTIONED,
+        title: `${maya.name} mentioned you on ${firstTicket.key}`,
+        body: stripMentionTokens(opening.body),
+        entity: ActivityEntity.COMMENT,
+        entityId: opening.id,
+        actionUrl: `/tickets?ticket=${firstTicket.key}`,
+      },
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Activity + notifications

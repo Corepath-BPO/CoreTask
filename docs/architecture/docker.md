@@ -20,12 +20,12 @@ valid on its own for `docker compose config` while the overlays add `build:`.
 
 ## Images
 
-| Image                | Base                                 | Contains                                     |
-| -------------------- | ------------------------------------ | -------------------------------------------- |
-| `api/Dockerfile.dev` | `node:24-alpine`                     | Full toolchain, deps + shared packages baked |
-| `api/Dockerfile`     | `node:24-alpine` (multi-stage)       | `dist/`, production deps, Prisma client only |
-| `web/Dockerfile.dev` | `node:24-alpine`                     | Vite dev server                              |
-| `web/Dockerfile`     | `nginxinc/nginx-unprivileged:alpine` | Static bundle only — no Node.js at runtime   |
+| Image                | Base                                 | Contains                                               |
+| -------------------- | ------------------------------------ | ------------------------------------------------------ |
+| `api/Dockerfile.dev` | `node:24-alpine`                     | Full toolchain, deps installed; package `dist` mounted |
+| `api/Dockerfile`     | `node:24-alpine` (multi-stage)       | `dist/`, production deps, Prisma client only           |
+| `web/Dockerfile.dev` | `node:24-alpine`                     | Vite dev server                                        |
+| `web/Dockerfile`     | `nginxinc/nginx-unprivileged:alpine` | Static bundle only — no Node.js at runtime             |
 
 All four use the **repository root** as build context, because a workspace
 package cannot be installed without the root lockfile and `pnpm-workspace.yaml`.
@@ -52,18 +52,28 @@ Docker seeds a **named** volume from the image the first time it is used. So
 `docker compose up`, and Linux-native binaries are never written back into the
 Windows working tree.
 
-`packages/` is deliberately **not** mounted. The shared libraries are compiled
-into the image, so a container start never has to build them, and two containers
-can never race on the same `dist/` directory. The trade-off is explicit: editing
-anything under `packages/` needs a rebuild.
+Each shared package's `dist` is bind-mounted **read-only**. The containers
+therefore read whatever the host built last, and `pnpm packages:build` is enough
+to publish a change to all three services — no image rebuild, no restart.
+
+Only the build output is mounted, never `packages/*/node_modules`: on a Windows
+host that directory is full of symlinks into a pnpm store the Linux container
+cannot follow. Read-only because nothing in a container should be writing to the
+working tree.
+
+This replaced compiling the packages into the image. That was tidier in
+principle — no shared directory, no chance of two containers racing on one
+`dist/` — but the failure mode was bad out of proportion to the benefit: forget
+the rebuild and the app dies with `does not provide an export named …`, pointing
+at source that is correct on disk, with nothing connecting the error to the
+missing step.
 
 Each service has its own `node_modules` volume, so the API and web containers
 cannot corrupt each other's install.
 
 **The catch, and it bites every time it is forgotten:** Docker seeds a named
 volume from the image _only while the volume is empty_. Once it exists, a
-rebuilt image does not update it. So adding a dependency — or changing anything
-under `packages/`, whose build output lives inside that tree — needs the volume
+rebuilt image does not update it. So adding a dependency needs the volume
 dropped, not just `--build`:
 
 ```bash

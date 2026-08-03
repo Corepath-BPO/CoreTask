@@ -1,4 +1,10 @@
-import { API_PREFIX, COMMENT_MAX_LENGTH, WorkspaceRole } from '@coretask/contracts';
+import {
+  API_PREFIX,
+  COMMENT_MAX_LENGTH,
+  MAX_MENTIONS_PER_COMMENT,
+  WorkspaceRole,
+  formatMention,
+} from '@coretask/contracts';
 import request from 'supertest';
 
 import {
@@ -403,6 +409,266 @@ describe('Comments (e2e)', () => {
     it('requires authentication', async () => {
       const scope = await setupScope();
       await request(server()).get(taskThread(scope)).expect(401);
+    });
+  });
+
+  describe('mentions', () => {
+    const notificationsOf = async (scope: Scope, actor: Actor, type: string) => {
+      const inbox = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/notifications`))
+        .set('Authorization', `Bearer ${actor.token}`)
+        .expect(200);
+
+      return inbox.body.data.items.filter((item: { type: string }) => item.type === type);
+    };
+
+    it('indexes a mention and resolves it on read', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada Lovelace');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `Could ${formatMention(member.userId, 'Ada Lovelace')} take a look?`,
+      );
+
+      expect(comment.mentions).toHaveLength(1);
+      expect(comment.mentions[0]).toMatchObject({ id: member.userId, name: 'Ada Lovelace' });
+
+      const rows = await context.prisma.commentMention.findMany({
+        where: { commentId: comment.id },
+      });
+      expect(rows.map((row) => row.userId)).toEqual([member.userId]);
+    });
+
+    it('notifies a mentioned member with MENTIONED, not the generic type', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      await postComment(
+        taskThread(scope),
+        scope.owner,
+        `ping ${formatMention(member.userId, 'Ada')}`,
+      );
+
+      expect(await notificationsOf(scope, member, 'MENTIONED')).toHaveLength(1);
+      expect(await notificationsOf(scope, member, 'COMMENT_CREATED')).toHaveLength(0);
+    });
+
+    /** One comment must never arrive twice, however many ways you qualify. */
+    it('sends only the mention notification to someone who is also a watcher', async () => {
+      const scope = await setupScope();
+      const assignee = await registerUser('Ada');
+      await addMember(scope, assignee, WorkspaceRole.MEMBER);
+
+      await request(server())
+        .patch(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ assigneeId: assignee.userId })
+        .expect(200);
+
+      await postComment(
+        taskThread(scope),
+        scope.owner,
+        `${formatMention(assignee.userId, 'Ada')} any progress?`,
+      );
+
+      expect(await notificationsOf(scope, assignee, 'MENTIONED')).toHaveLength(1);
+      expect(await notificationsOf(scope, assignee, 'COMMENT_CREATED')).toHaveLength(0);
+    });
+
+    it('does not notify someone who mentions themselves', async () => {
+      const scope = await setupScope();
+
+      await postComment(
+        taskThread(scope),
+        scope.owner,
+        `note to ${formatMention(scope.owner.userId, 'me')}`,
+      );
+
+      expect(await notificationsOf(scope, scope.owner, 'MENTIONED')).toHaveLength(0);
+    });
+
+    /**
+     * The body is parsed server-side precisely so a client cannot use mentions
+     * to notify people it has no business notifying.
+     */
+    it('ignores a mention of someone outside the workspace', async () => {
+      const scope = await setupScope();
+      const stranger = await registerUser('Stranger');
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `hello ${formatMention(stranger.userId, 'Stranger')}`,
+      );
+
+      expect(comment.mentions).toHaveLength(0);
+      expect(await context.prisma.notification.count({ where: { userId: stranger.userId } })).toBe(
+        0,
+      );
+      // The text is kept as written; only the index and the fan-out drop it.
+      expect(comment.body).toContain(stranger.userId);
+    });
+
+    it('counts one mention when the same person is named twice', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      const token = formatMention(member.userId, 'Ada');
+      const comment = await postComment(taskThread(scope), scope.owner, `${token} and ${token}`);
+
+      expect(comment.mentions).toHaveLength(1);
+      expect(await notificationsOf(scope, member, 'MENTIONED')).toHaveLength(1);
+    });
+
+    it('adds a mention on edit and notifies only the new person', async () => {
+      const scope = await setupScope();
+      const first = await registerUser('Ada');
+      const second = await registerUser('Grace');
+      await addMember(scope, first, WorkspaceRole.MEMBER);
+      await addMember(scope, second, WorkspaceRole.MEMBER);
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `${formatMention(first.userId, 'Ada')} thoughts?`,
+      );
+
+      await request(server())
+        .patch(commentUrl(scope, comment.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          body: `${formatMention(first.userId, 'Ada')} ${formatMention(second.userId, 'Grace')} thoughts?`,
+        })
+        .expect(200);
+
+      // Ada was already named; fixing a comment must not ping her again.
+      expect(await notificationsOf(scope, first, 'MENTIONED')).toHaveLength(1);
+      expect(await notificationsOf(scope, second, 'MENTIONED')).toHaveLength(1);
+    });
+
+    it('removes a mention when the token is edited out', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `${formatMention(member.userId, 'Ada')} thoughts?`,
+      );
+
+      const updated = await request(server())
+        .patch(commentUrl(scope, comment.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'Never mind, worked it out.' })
+        .expect(200);
+
+      expect(updated.body.data.mentions).toHaveLength(0);
+      expect(await context.prisma.commentMention.count({ where: { commentId: comment.id } })).toBe(
+        0,
+      );
+    });
+
+    it('caps how many people one comment can mention', async () => {
+      const scope = await setupScope();
+
+      const members = await Promise.all(
+        Array.from({ length: MAX_MENTIONS_PER_COMMENT + 3 }, (_, index) =>
+          registerUser(`Member ${index}`),
+        ),
+      );
+      for (const member of members) {
+        await addMember(scope, member, WorkspaceRole.MEMBER);
+      }
+
+      const body = members.map((m, i) => formatMention(m.userId, `Member ${i}`)).join(' ');
+      const comment = await postComment(taskThread(scope), scope.owner, body);
+
+      expect(comment.mentions).toHaveLength(MAX_MENTIONS_PER_COMMENT);
+    });
+
+    it('strips tokens from the notification body, which is plain text', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      await postComment(
+        taskThread(scope),
+        scope.owner,
+        `${formatMention(member.userId, 'Ada Lovelace')} please review`,
+      );
+
+      const [notification] = await notificationsOf(scope, member, 'MENTIONED');
+      expect(notification.body).toBe('@Ada Lovelace please review');
+      expect(notification.body).not.toContain(member.userId);
+    });
+
+    it('keeps a mention readable after the member is removed from the workspace', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `${formatMention(member.userId, 'Ada')} thoughts?`,
+      );
+      expect(comment.mentions).toHaveLength(1);
+
+      await context.prisma.workspaceMember.deleteMany({
+        where: { workspaceId: scope.workspaceId, userId: member.userId },
+      });
+
+      // The row survives — membership is not what the index hangs off — and the
+      // body still carries the label for the renderer.
+      const thread = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(thread.body.data[0].body).toContain('Ada');
+    });
+
+    /**
+     * Editing an old comment that names someone since departed must still work.
+     * Rejecting the write would make the comment permanently uneditable.
+     */
+    it('still allows an edit when a named member has left', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      const token = formatMention(member.userId, 'Ada');
+      const comment = await postComment(taskThread(scope), scope.owner, `${token} thoughts?`);
+
+      await context.prisma.workspaceMember.deleteMany({
+        where: { workspaceId: scope.workspaceId, userId: member.userId },
+      });
+
+      const updated = await request(server())
+        .patch(commentUrl(scope, comment.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: `${token} thoughts? (bumping)` })
+        .expect(200);
+
+      expect(updated.body.data.mentions).toHaveLength(0);
+      expect(updated.body.data.body).toContain('bumping');
+    });
+
+    it('reports no mentions for an ordinary comment', async () => {
+      const scope = await setupScope();
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        'Plain text, no @ anywhere',
+      );
+
+      expect(comment.mentions).toEqual([]);
     });
   });
 

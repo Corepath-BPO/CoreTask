@@ -2,10 +2,13 @@ import {
   ActivityAction,
   ActivityEntity,
   CommentEntity,
+  MAX_MENTIONS_PER_COMMENT,
   NotificationType,
   ServerEvent,
   WorkspaceRole,
   hasAtLeastRole,
+  parseMentionIds,
+  stripMentionTokens,
 } from '@coretask/contracts';
 import type { Comment } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -104,16 +107,42 @@ export class CommentsService {
       throw AppException.forbidden('FORBIDDEN', 'Only the author can edit a comment.');
     }
 
+    const before = await this.prisma.commentMention.findMany({
+      where: { commentId },
+      select: { userId: true },
+    });
+    const alreadyMentioned = new Set(before.map((row) => row.userId));
+    const mentioned = await this.resolveMentions(workspaceId, dto.body);
+
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
-      // `editedAt` is what the UI reads to mark a comment "edited", so it is set
-      // here rather than derived from `updatedAt`, which any write would move.
-      data: { body: dto.body, editedAt: new Date() },
+      data: {
+        body: dto.body,
+        // `editedAt` is what the UI reads to mark a comment "edited", so it is
+        // set here rather than derived from `updatedAt`, which any write moves.
+        editedAt: new Date(),
+        // The body is the source of truth, so the index is rebuilt from it:
+        // removing a token removes the mention.
+        mentions: {
+          deleteMany: {},
+          create: mentioned.map((id) => ({ userId: id })),
+        },
+      },
       include: commentInclude,
     });
 
     const comment = toCommentDto(updated);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.COMMENT_UPDATED, comment);
+
+    // Only people the edit *added*. Fixing a typo must not re-ping everyone who
+    // was already named.
+    const newlyMentioned = mentioned.filter((id) => !alreadyMentioned.has(id));
+    if (newlyMentioned.length > 0) {
+      const parent = await this.resolveParentOf(workspaceId, existing);
+      if (parent) {
+        await this.notifyMentioned(workspaceId, userId, parent, updated, newlyMentioned);
+      }
+    }
 
     return comment;
   }
@@ -204,12 +233,15 @@ export class CommentsService {
     parent: CommentParent,
     dto: CreateCommentDto,
   ): Promise<Comment> {
+    const mentioned = await this.resolveMentions(workspaceId, dto.body);
+
     const created = await this.prisma.comment.create({
       data: {
         workspaceId,
         authorId: userId,
         body: dto.body,
         ...parent.link,
+        mentions: { create: mentioned.map((id) => ({ userId: id })) },
       },
       include: commentInclude,
     });
@@ -226,10 +258,84 @@ export class CommentsService {
 
     const comment = toCommentDto(created);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.COMMENT_CREATED, comment);
-    await this.notifyWatchers(workspaceId, userId, parent, created);
-    this.logger.log({ commentId: created.id, entity: parent.entity }, 'Comment created');
+    await this.notifyMentioned(workspaceId, userId, parent, created, mentioned);
+    await this.notifyWatchers(workspaceId, userId, parent, created, mentioned);
+    this.logger.log(
+      { commentId: created.id, entity: parent.entity, mentions: mentioned.length },
+      'Comment created',
+    );
 
     return comment;
+  }
+
+  /**
+   * Reads mentions out of the body and keeps only current workspace members.
+   *
+   * Parsing server-side is the point: a client cannot claim to have mentioned
+   * someone it did not, and so cannot use mentions to notify people at will.
+   *
+   * A token naming someone who has since left is dropped rather than rejected.
+   * Erroring would mean an old comment could no longer be edited at all, which
+   * is a worse outcome than a mention that quietly stops resolving.
+   */
+  private async resolveMentions(workspaceId: string, body: string): Promise<string[]> {
+    const ids = parseMentionIds(body).slice(0, MAX_MENTIONS_PER_COMMENT);
+    if (ids.length === 0) return [];
+
+    const members = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId, userId: { in: ids } },
+      select: { userId: true },
+    });
+
+    const memberIds = new Set(members.map((row) => row.userId));
+    return ids.filter((id) => memberIds.has(id));
+  }
+
+  /** Rebuilds the parent context for a comment that already exists. */
+  private async resolveParentOf(
+    workspaceId: string,
+    comment: PrismaComment,
+  ): Promise<CommentParent | null> {
+    if (comment.taskId) return this.resolveTask(workspaceId, comment.taskId);
+    if (comment.ticketId) return this.resolveTicket(workspaceId, comment.ticketId);
+    return null;
+  }
+
+  /**
+   * Being named is a stronger signal than being subscribed, so it gets its own
+   * notification type — and the generic thread notification is suppressed for
+   * these people, because one comment should never arrive twice.
+   */
+  private async notifyMentioned(
+    workspaceId: string,
+    actorId: string,
+    parent: CommentParent,
+    comment: PrismaComment,
+    mentioned: string[],
+  ): Promise<void> {
+    const recipients = mentioned.filter((id) => id !== actorId);
+    if (recipients.length === 0) return;
+
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { name: true },
+    });
+
+    await Promise.all(
+      recipients.map((recipient) =>
+        this.notifications.dispatch({
+          userId: recipient,
+          workspaceId,
+          type: NotificationType.MENTIONED,
+          title: `${actor?.name ?? 'Someone'} mentioned you on ${parent.label}`,
+          // Tokens are markup; a notification body is plain text.
+          body: stripMentionTokens(comment.body),
+          entity: ActivityEntity.COMMENT,
+          entityId: comment.id,
+          actionUrl: parent.actionUrl,
+        }),
+      ),
+    );
   }
 
   /**
@@ -245,6 +351,7 @@ export class CommentsService {
     actorId: string,
     parent: CommentParent,
     comment: PrismaComment,
+    mentioned: string[],
   ): Promise<void> {
     const priorAuthors = await this.prisma.comment.findMany({
       where: { workspaceId, ...parent.link, deletedAt: null, authorId: { not: actorId } },
@@ -252,9 +359,12 @@ export class CommentsService {
       distinct: ['authorId'],
     });
 
+    // Anyone named has already had the stronger `MENTIONED` notification.
+    const alreadyTold = new Set([actorId, ...mentioned]);
+
     const recipients = new Set(
       [...parent.watchers, ...priorAuthors.map((row) => row.authorId)].filter(
-        (id): id is string => typeof id === 'string' && id !== actorId,
+        (id): id is string => typeof id === 'string' && !alreadyTold.has(id),
       ),
     );
 
@@ -272,7 +382,7 @@ export class CommentsService {
           workspaceId,
           type: NotificationType.COMMENT_CREATED,
           title: `${actor?.name ?? 'Someone'} commented on ${parent.label}`,
-          body: comment.body,
+          body: stripMentionTokens(comment.body),
           entity: ActivityEntity.COMMENT,
           entityId: comment.id,
           actionUrl: parent.actionUrl,

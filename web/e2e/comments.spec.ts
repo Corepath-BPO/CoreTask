@@ -102,6 +102,78 @@ test.describe('ticket comments', () => {
   });
 });
 
+test.describe('mentions', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/tickets');
+    await page.getByRole('button', { name: /attachment upload/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('renders a seeded mention as a chip, not raw token syntax', async ({ page }) => {
+    // The seeded thread is on CORE-1001, where Maya mentions the demo owner.
+    await page.goto('/tickets');
+    await page.getByRole('button', { name: /login fails with a 500/i }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('@Demo Owner')).toBeVisible();
+    await expect(dialog.getByText('](')).toHaveCount(0);
+  });
+
+  test('offers teammates after typing @ and completes the token', async ({ page }) => {
+    const dialog = page.getByRole('dialog');
+    const box = dialog.getByLabel(/write a comment/i);
+
+    await box.fill('Ping @may');
+    const options = dialog.getByRole('listbox', { name: /mention a teammate/i });
+    await expect(options).toBeVisible();
+
+    await options.getByRole('option', { name: /maya okafor/i }).click();
+
+    // The chip is what shows; the token stays in the textarea value.
+    await expect(box).toHaveValue(/@\[Maya Okafor\]\([0-9a-f-]{36}\) $/);
+  });
+
+  test('picks with the keyboard without submitting the comment', async ({ page }) => {
+    const dialog = page.getByRole('dialog');
+    const box = dialog.getByLabel(/write a comment/i);
+
+    await box.fill('Ping @');
+    await expect(dialog.getByRole('listbox')).toBeVisible();
+
+    // Enter belongs to the picker while it is open.
+    await box.press('Enter');
+    await expect(dialog.getByRole('listbox')).toHaveCount(0);
+    await expect(box).toHaveValue(/@\[[^\]]+\]\([0-9a-f-]{36}\) $/);
+  });
+
+  test('does not open the picker on an e-mail address', async ({ page }) => {
+    const dialog = page.getByRole('dialog');
+
+    await dialog.getByLabel(/write a comment/i).fill('mail me at ada@example');
+    await expect(dialog.getByRole('listbox')).toHaveCount(0);
+  });
+
+  test('posts a mention and shows it as a chip', async ({ page }) => {
+    const dialog = page.getByRole('dialog');
+    const box = dialog.getByLabel(/write a comment/i);
+    const marker = stamp();
+
+    await box.fill('Ping @may');
+    await dialog.getByRole('option', { name: /maya okafor/i }).click();
+    await box.press('End');
+    await box.pressSequentially(`please review ${marker}`);
+    await dialog.getByRole('button', { name: /^comment$/i }).click();
+
+    const posted = dialog.getByRole('listitem').filter({ hasText: marker });
+    await expect(posted).toBeVisible();
+    await expect(posted.getByText('@Maya Okafor')).toBeVisible();
+    await expect(posted).not.toContainText('](');
+
+    await posted.getByRole('button', { name: /delete/i }).click();
+    await expect(dialog.getByText(marker)).toHaveCount(0);
+  });
+});
+
 test.describe('task comments', () => {
   test('posts on a task from My Tasks', async ({ page }) => {
     await page.goto('/my-tasks');

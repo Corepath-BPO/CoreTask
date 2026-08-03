@@ -11,9 +11,23 @@
 #     dependencies are already installed and are never written back to the
 #     Windows filesystem — no Linux-native binaries in your working tree, and no
 #     reinstall on `docker compose up`.
-#   * `packages/` is NOT mounted; the shared libraries are compiled into the
-#     image. After editing anything under `packages/`, run `pnpm dev:build`.
+#   * Each shared package's `dist` is bind-mounted **read-only**, so a host
+#     `pnpm packages:build` is visible immediately. Only the build output is
+#     mounted — never `packages/*/node_modules`, which on a Windows host holds
+#     symlinks into a store the container cannot follow.
+#
+#     Previously the whole of `packages/` lived inside the image, which meant
+#     every change there needed `pnpm dev:build` and, when that was forgotten,
+#     failed as a confusing runtime error: `does not provide an export named …`,
+#     pointing at source that was correct on disk.
 # =============================================================================
+
+# Shared build output, referenced by every service that imports it. Anchored one
+# path at a time because YAML cannot splice a sequence into another sequence.
+x-package-dist:
+  contracts: &contracts-dist ./packages/contracts/dist:/app/packages/contracts/dist:ro
+  types: &types-dist ./packages/types/dist:/app/packages/types/dist:ro
+  validation: &validation-dist ./packages/validation/dist:/app/packages/validation/dist:ro
 
 services:
   coretask-postgres:
@@ -52,6 +66,9 @@ services:
     volumes:
       - ./api:/app/api
       - coretask-api-node-modules:/app/api/node_modules
+      - *contracts-dist
+      - *types-dist
+      - *validation-dist
     healthcheck:
       test:
         [
@@ -89,6 +106,9 @@ services:
     volumes:
       - ./api:/app/api
       - coretask-worker-node-modules:/app/api/node_modules
+      - *contracts-dist
+      - *types-dist
+      - *validation-dist
 
   coretask-web:
     build:
@@ -110,6 +130,9 @@ services:
     volumes:
       - ./web:/app/web
       - coretask-web-node-modules:/app/web/node_modules
+      - *contracts-dist
+      - *types-dist
+      - *validation-dist
     healthcheck:
       test:
         [

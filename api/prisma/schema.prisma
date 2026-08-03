@@ -155,6 +155,7 @@ model User {
   reportedTickets   Ticket[]          @relation("TicketReporter")
   assignedTickets   Ticket[]          @relation("TicketAssignee")
   comments          Comment[]
+  mentionedIn       CommentMention[]
   activityLogs      ActivityLog[]
   notifications     Notification[]
 
@@ -387,15 +388,39 @@ model Comment {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  ticket    Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  task      Task?            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  ticket    Ticket?          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  mentions  CommentMention[]
 
   @@index([taskId, createdAt])
   @@index([ticketId, createdAt])
   @@index([workspaceId, createdAt])
   @@map("comments")
+}
+
+/// Who a comment mentions.
+///
+/// The mention itself lives in `Comment.body` as an `@[Name](uuid)` token, and
+/// that body is the source of truth — editing text is what adds or removes a
+/// mention. This table is the derived index over it, so "who do I notify" and
+/// (later) "what mentions me" are joins rather than a scan with a regex.
+///
+/// Deleting the user removes the row, but the token stays in the body; the API
+/// resolves what it can and the client renders the rest as plain text.
+model CommentMention {
+  commentId String   @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  /// Drives an inbox of "comments that mention me".
+  @@index([userId, createdAt])
+  @@map("comment_mentions")
 }
 
 // ---------------------------------------------------------------------------

@@ -98,6 +98,37 @@ creator, and anyone who has commented before. Replying is how you join a thread
 them is not the assignee. Recipients are a `Set`, so someone who is reporter,
 assignee and prior commenter is notified once, and the actor is always removed.
 
+### Mentions
+
+A mention lives **in the comment text**, as `@[Ada Lovelace](uuid)`, not as a
+list of ids sent alongside a plain body. The format is defined once in
+`@coretask/contracts` so the composer, the renderer and the API parser cannot
+drift apart.
+
+Storing it in the text is what makes editing honest: deleting the token deletes
+the mention, and there is no second list to fall out of sync with what the
+comment actually says. `CommentMention` is a derived index over that text,
+rebuilt on every write, so "who do I notify" and a future "what mentions me" are
+joins rather than a scan with a regex.
+
+The server parses the body itself and keeps only current workspace members. That
+is the security property: a client cannot claim to have mentioned someone it did
+not, and so cannot use mentions to notify people at will.
+
+Two edge cases decide the shape of the rest:
+
+- **A member who has left** is dropped from the index rather than rejected.
+  Erroring would make any older comment naming them permanently uneditable,
+  which is worse than a mention that quietly stops resolving. The token stays in
+  the text, so the renderer still shows the name it was written with.
+- **Editing** notifies only the people the edit _added_. Comparing against the
+  previous index is what stops a typo fix re-pinging everyone already named.
+
+Being named is a stronger signal than being subscribed, so it sends `MENTIONED`
+and suppresses the generic `COMMENT_CREATED` for those recipients — one comment
+never arrives twice. Notification bodies run through `stripMentionTokens`,
+because a notification is plain text and `@[Ada](uuid)` is markup.
+
 ### List rollups
 
 List endpoints return a `summary` in `meta` computed over the whole workspace,

@@ -259,6 +259,15 @@ export interface Comment {
   ticketId: string | null;
   /** Non-null once the body has been changed; the UI marks these "edited". */
   editedAt: string | null;
+  /**
+   * Members mentioned in `body`, resolved so the renderer can show a current
+   * name rather than whatever the label said when it was typed.
+   *
+   * Derived from the body, not supplied by the client. A token naming someone
+   * who has since left the workspace simply does not appear here — the renderer
+   * falls back to the label.
+   */
+  mentions: UserRef[];
   createdAt: string;
   updatedAt: string;
 }

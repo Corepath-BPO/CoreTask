@@ -211,8 +211,10 @@ pnpm down:volumes
   seeds a named volume from the image the first time it is used, so dependencies
   are already installed, are never reinstalled on restart, and Linux-native
   binaries never land in your Windows working tree.
-- `packages/` is **not** mounted; the shared libraries are compiled into the
-  image. After editing anything under `packages/`, run `pnpm dev:build`.
+- Each shared package's `dist` is bind-mounted **read-only**, so rebuilding one
+  on the host is visible to the containers immediately — no image rebuild. Only
+  the build output is mounted, never `packages/*/node_modules`, which on Windows
+  holds symlinks into a store the container cannot follow.
 
 ### Production-shaped stack
 
@@ -479,6 +481,8 @@ pnpm compose:validate
 - Comment threads on tasks and tickets: post, edit in place (marked "edited"),
   delete your own, manager moderation, and notifications to everyone already in
   the conversation
+- `@mentions` with a keyboard-navigable picker, stored in the comment text so
+  editing stays honest, parsed server-side so a client cannot notify at will
 - Read-only activity feed and a per-user notification inbox with unread counts
 - A dashboard driven entirely by live data — no fixtures anywhere in the app
 - Health endpoint, Swagger, structured logging with correlation ids
@@ -487,9 +491,9 @@ pnpm compose:validate
 
 ### Scaffolded, not implemented
 
-`@mentions`. `NotificationType.MENTIONED` is reserved for it, but a mention has
-to survive a read — that needs a column to store who was mentioned and a picker
-in the composer, which is its own slice rather than a corner of this one.
+Member invitations. `WorkspaceMember` and roles are fully enforced, but there is
+no endpoint that issues an invite — tests and the seed create membership rows
+directly.
 
 There are no mock fixtures left anywhere in the web app. `lib/mock/` was deleted
 when the ticket, activity and notification endpoints shipped, which was always
@@ -564,13 +568,19 @@ dependency. `pnpm dev:build` remains fine for source-only changes.
 
 ### Changes to `packages/*` are not picked up in Docker
 
-Shared packages are compiled into the dev images rather than mounted, so editing
-one needs a rebuild — and because their build output lives inside the image's
-`node_modules` tree, use the full reset:
+Their `dist` is mounted, not their source, so the containers see whatever was
+built last. Rebuild the packages:
 
 ```bash
-pnpm dev:reset
+pnpm packages:build
 ```
+
+The Vite dev server picks this up on its own; the API's watcher recompiles too.
+Nothing needs rebuilding or restarting.
+
+If a **new export** appears missing — `does not provide an export named …`,
+pointing at source that is plainly correct — that is this, and it means the
+build has not run since the export was added.
 
 ### Hot reload not firing in Docker on Windows
 

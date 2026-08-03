@@ -1,12 +1,12 @@
 import { COMMENT_MAX_LENGTH, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
-import type { Comment } from '@coretask/types';
+import type { Comment, WorkspaceMember } from '@coretask/types';
 import { MessageSquare, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
+import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatRelativeTime, initials } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 
@@ -18,6 +18,9 @@ import {
   useUpdateComment,
 } from '../hooks/use-comments';
 
+import { CommentBody } from './comment-body';
+import { MentionTextarea } from './mention-textarea';
+
 interface CommentThreadProps {
   workspaceId: string | undefined;
   parent: CommentParent | null;
@@ -27,6 +30,8 @@ interface CommentThreadProps {
 export function CommentThread({ workspaceId, parent, role }: CommentThreadProps) {
   const { data, isLoading, isError, error } = useComments(workspaceId, parent);
   const createComment = useCreateComment(workspaceId, parent);
+  const { data: memberData } = useWorkspaceMembers(workspaceId);
+  const members = memberData ?? [];
   const currentUser = useCurrentUser();
 
   const [draft, setDraft] = useState('');
@@ -82,6 +87,8 @@ export function CommentThread({ workspaceId, parent, role }: CommentThreadProps)
               comment={comment}
               workspaceId={workspaceId}
               parent={parent}
+              members={members}
+              currentUserId={currentUser?.id}
               canEdit={comment.authorId === currentUser?.id}
               canDelete={comment.authorId === currentUser?.id || canModerate}
             />
@@ -91,25 +98,20 @@ export function CommentThread({ workspaceId, parent, role }: CommentThreadProps)
 
       {canComment && (
         <div className="space-y-2">
-          <Textarea
+          <MentionTextarea
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Write a comment…"
-            aria-label="Write a comment"
-            rows={3}
+            onChange={setDraft}
+            members={members}
+            onSubmit={submit}
+            label="Write a comment"
+            placeholder="Write a comment… use @ to mention someone"
             maxLength={COMMENT_MAX_LENGTH}
             disabled={createComment.isPending}
-            onKeyDown={(event) => {
-              // Enter alone inserts a newline; the shortcut sends.
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                submit();
-              }
-            }}
           />
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              Press <kbd className="rounded border px-1 font-mono text-[10px]">Ctrl</kbd> +{' '}
+              <kbd className="rounded border px-1 font-mono text-[10px]">@</kbd> to mention ·{' '}
+              <kbd className="rounded border px-1 font-mono text-[10px]">Ctrl</kbd> +{' '}
               <kbd className="rounded border px-1 font-mono text-[10px]">Enter</kbd> to post
             </span>
             <Button
@@ -131,12 +133,16 @@ function CommentRow({
   comment,
   workspaceId,
   parent,
+  members,
+  currentUserId,
   canEdit,
   canDelete,
 }: {
   comment: Comment;
   workspaceId: string | undefined;
   parent: CommentParent | null;
+  members: WorkspaceMember[];
+  currentUserId: string | undefined;
   canEdit: boolean;
   canDelete: boolean;
 }) {
@@ -188,11 +194,12 @@ function CommentRow({
 
         {editing ? (
           <div className="space-y-2">
-            <Textarea
+            <MentionTextarea
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              aria-label="Edit comment"
-              rows={3}
+              onChange={setDraft}
+              members={members}
+              onSubmit={save}
+              label="Edit comment"
               maxLength={COMMENT_MAX_LENGTH}
               disabled={updateComment.isPending}
               autoFocus
@@ -212,9 +219,12 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <p className={cn('whitespace-pre-wrap text-sm', deleteComment.isPending && 'opacity-50')}>
-            {comment.body}
-          </p>
+          <CommentBody
+            body={comment.body}
+            mentions={comment.mentions}
+            currentUserId={currentUserId}
+            className={cn(deleteComment.isPending && 'opacity-50')}
+          />
         )}
 
         {!editing && (canEdit || canDelete) && (

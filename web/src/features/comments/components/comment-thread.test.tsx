@@ -27,6 +27,30 @@ const ME = '019fc880-0000-7000-8000-00000000aaaa';
 const SOMEONE_ELSE = '019fc880-0000-7000-8000-00000000bbbb';
 const WORKSPACE = '019fc880-0000-7000-8000-000000000000';
 
+// The composer reads the member list to offer mention suggestions.
+vi.mock('@/features/workspaces/api/workspaces.api', () => ({
+  workspacesApi: {
+    members: () =>
+      Promise.resolve([
+        {
+          id: 'm1',
+          role: 'OWNER',
+          user: { id: ME, name: 'Demo Owner', email: 'demo@coretask.dev', avatarUrl: null },
+        },
+        {
+          id: 'm2',
+          role: 'ADMIN',
+          user: {
+            id: SOMEONE_ELSE,
+            name: 'Maya Okafor',
+            email: 'maya@coretask.dev',
+            avatarUrl: null,
+          },
+        },
+      ]),
+  },
+}));
+
 function comment(overrides: Partial<Comment> = {}): Comment {
   return {
     id: '019fc880-0000-7000-8000-00000000c001',
@@ -37,6 +61,7 @@ function comment(overrides: Partial<Comment> = {}): Comment {
     taskId: '019fc880-0000-7000-8000-00000000t001',
     ticketId: null,
     editedAt: null,
+    mentions: [],
     createdAt: '2026-08-01T10:00:00.000Z',
     updatedAt: '2026-08-01T10:00:00.000Z',
     ...overrides,
