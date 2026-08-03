@@ -66,10 +66,26 @@ export async function renderWithRouter(
     component: () => <div>register</div>,
   });
 
+  // Stubs for routes that rendered components link to. `Link` resolves its href
+  // against the tree it is mounted in, so a missing route yields a link with no
+  // href and the assertion fails for the wrong reason.
+  const projectsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/projects',
+    component: () => <div>projects</div>,
+  });
+  const projectDetailRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/projects/$projectId',
+    component: () => <div>project detail</div>,
+  });
+
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
       guestRoute.addChildren([loginRoute, registerRoute]),
+      projectsRoute,
+      projectDetailRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });

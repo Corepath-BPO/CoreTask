@@ -3,7 +3,6 @@ import {
   BarChart3,
   CalendarDays,
   CircleCheckBig,
-  FolderKanban,
   Inbox,
   Settings,
   Ticket,
@@ -17,6 +16,8 @@ import { PlaceholderPage } from '@/components/common/placeholder-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
+import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
+import { ProjectsPage } from '@/features/projects/pages/projects-page';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { NotFoundPage } from './not-found-page';
@@ -90,6 +91,24 @@ const dashboardRoute = createRoute({
   component: DashboardPage,
 });
 
+const projectsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/projects',
+  component: ProjectsPage,
+});
+
+const projectDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/projects/$projectId',
+  // Params are read from the route object rather than by route-id string, so
+  // the page stays a plain prop-driven component and cannot address a route
+  // path that does not exist.
+  component: function ProjectDetailRoute() {
+    const { projectId } = projectDetailRoute.useParams();
+    return <ProjectDetailPage projectId={projectId} />;
+  },
+});
+
 /** Sidebar destinations whose API arrives in the next phase. */
 const placeholders = [
   {
@@ -105,13 +124,6 @@ const placeholders = [
     description: 'Mentions, assignments and comment replies.',
     icon: Inbox,
     plannedFor: 'Notification centre backed by the notifications module and Socket.IO.',
-  },
-  {
-    path: '/projects',
-    title: 'Projects',
-    description: 'Board, list and timeline views for every project.',
-    icon: FolderKanban,
-    plannedFor: 'Project CRUD with sections, drag-and-drop ordering and progress rollups.',
   },
   {
     path: '/teams',
@@ -167,7 +179,12 @@ const placeholderRoutes = placeholders.map((page) =>
 
 const routeTree = rootRoute.addChildren([
   guestRoute.addChildren([loginRoute, registerRoute]),
-  protectedRoute.addChildren([dashboardRoute, ...placeholderRoutes]),
+  protectedRoute.addChildren([
+    dashboardRoute,
+    projectsRoute,
+    projectDetailRoute,
+    ...placeholderRoutes,
+  ]),
 ]);
 
 export const router = createRouter({

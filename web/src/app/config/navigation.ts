@@ -42,7 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'work',
     label: 'Work',
     items: [
-      { label: 'Projects', to: '/projects', icon: FolderKanban, comingSoon: true },
+      { label: 'Projects', to: '/projects', icon: FolderKanban },
       { label: 'Teams', to: '/teams', icon: Users, comingSoon: true },
       { label: 'Tickets', to: '/tickets', icon: Ticket, comingSoon: true },
     ],

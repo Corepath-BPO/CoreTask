@@ -450,15 +450,20 @@ pnpm compose:validate
 - Rotating refresh tokens in an HTTP-only cookie, with replay detection
 - Workspace creation (creator becomes OWNER), listing, detail, update, members
 - Workspace membership guard and role enforcement
+- Project CRUD: derived keys (`PLAT`), default sections on creation, filtering,
+  search, pagination, archive and restore
+- Section CRUD with fractional reordering, drag-and-drop on the board, and task
+  reassignment instead of orphaning on delete
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
 
 ### Scaffolded, not implemented
 
-Projects, sections, tasks, tickets and comments have Prisma models, shared enums
-and types, and seeded demo rows — but **no HTTP endpoints yet**. The dashboard
-therefore renders sample content for those sections.
+Tasks, tickets and comments have Prisma models, shared enums and types, and
+seeded demo rows — but **no HTTP endpoints yet**. The dashboard therefore renders
+sample content for those sections, and board columns show their real task counts
+but no cards.
 
 Every mock value lives in exactly one file,
 [`web/src/lib/mock/dashboard.mock.ts`](web/src/lib/mock/dashboard.mock.ts),
@@ -508,12 +513,34 @@ Inside Compose, the hosts are the service names (`coretask-postgres`,
 published ports. `.env` holds the host-side values; `docker-compose.yml`
 overrides them for containers.
 
-### Changes to `packages/*` are not picked up in Docker
+### `Failed to resolve import` after adding a dependency
 
-Shared packages are baked into the dev image. Rebuild:
+Symptom, usually from Vite:
+
+```
+[plugin:vite:import-analysis] Failed to resolve import "@some/package". Does the file exist?
+```
+
+You installed on the host, but each container's `node_modules` is a **named
+volume**. Docker seeds a named volume from the image only while the volume is
+empty — so once it exists, `pnpm dev:build` alone will not update it.
 
 ```bash
-pnpm dev:build
+pnpm dev:reset
+```
+
+That stops the stack, drops the three `node_modules` volumes, rebuilds the
+images and starts again. Use it whenever you add, remove or upgrade a
+dependency. `pnpm dev:build` remains fine for source-only changes.
+
+### Changes to `packages/*` are not picked up in Docker
+
+Shared packages are compiled into the dev images rather than mounted, so editing
+one needs a rebuild — and because their build output lives inside the image's
+`node_modules` tree, use the full reset:
+
+```bash
+pnpm dev:reset
 ```
 
 ### Hot reload not firing in Docker on Windows

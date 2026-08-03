@@ -17,6 +17,8 @@ import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { SectionsModule } from './modules/sections/sections.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
@@ -60,6 +62,8 @@ import { WebsocketModule } from './websocket/websocket.module';
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,
+    ProjectsModule,
+    SectionsModule,
     ActivityLogsModule,
     NotificationsModule,
     HealthModule,

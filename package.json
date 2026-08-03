@@ -12,6 +12,7 @@
     "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
     "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
     "dev:local": "pnpm --parallel --filter \"./{api,web}\" dev",
+    "dev:reset": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down && docker volume rm -f coretask-api-node-modules coretask-web-node-modules coretask-worker-node-modules && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build",
     "down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
     "down:volumes": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v",
     "logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f",

@@ -24,8 +24,11 @@ export interface Project {
   description: string | null;
   status: ProjectStatus;
   color: string;
+  leadId: string | null;
   startDate: string | null;
   dueDate: string | null;
+  completedAt: string | null;
+  /** Non-null means archived. Authoritative; `status` mirrors it for display. */
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -34,16 +37,62 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   completedTaskCount: number;
+  sectionCount: number;
   lead: UserRef | null;
+}
+
+/** A project plus its ordered columns — what the board view loads. */
+export interface ProjectDetail extends ProjectSummary {
+  sections: Section[];
+}
+
+export interface CreateProjectPayload {
+  name: string;
+  /** Derived from the name when omitted. Unique within the workspace. */
+  key?: string;
+  description?: string;
+  status?: ProjectStatus;
+  color?: string;
+  leadId?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+}
+
+export interface UpdateProjectPayload {
+  name?: string;
+  description?: string | null;
+  status?: ProjectStatus;
+  color?: string;
+  leadId?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
 }
 
 export interface Section {
   id: string;
+  workspaceId: string;
   projectId: string;
   name: string;
+  /** Fractional; only meaningful relative to sibling sections. */
   position: number;
+  taskCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreateSectionPayload {
+  name: string;
+  /** Insert after this sibling. `null` places it first; omitted appends. */
+  afterSectionId?: string | null;
+}
+
+export interface UpdateSectionPayload {
+  name: string;
+}
+
+export interface MoveSectionPayload {
+  /** Sibling to sit after. `null` moves the section to the first position. */
+  afterSectionId: string | null;
 }
 
 export interface Task {

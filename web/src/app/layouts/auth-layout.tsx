@@ -27,6 +27,16 @@ export function AuthLayout() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,var(--color-primary)/12%,transparent_55%)]" />
 
         <div className="relative flex h-full flex-col justify-center px-16">
+          {/* The full lockup gets its one legible showing here — at this width
+              the tagline still reads, which it never would in the sidebar. */}
+          <img
+            src="/logo-full.png"
+            alt="CoreTask — plan, track, achieve"
+            width={224}
+            height={191}
+            className="mb-10 w-56 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10"
+          />
+
           <blockquote className="max-w-md space-y-6">
             <p className="text-2xl font-medium leading-snug tracking-tight">
               Every project, ticket and deadline your team is carrying — in one place, with the

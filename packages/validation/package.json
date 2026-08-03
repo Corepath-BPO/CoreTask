@@ -30,7 +30,8 @@
     "clean": "rimraf dist",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@coretask/contracts": "workspace:*",
@@ -46,6 +47,7 @@
     "rimraf": "^6.0.1",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
     "zod": "^4.1.12"
   }
 }

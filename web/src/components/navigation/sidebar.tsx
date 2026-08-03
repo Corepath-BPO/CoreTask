@@ -61,18 +61,26 @@ export function Sidebar() {
   );
 }
 
+/**
+ * The CoreTask mark, rendered as an app-icon tile.
+ *
+ * The artwork is dark navy on white with no alpha, so it needs a light backdrop
+ * to stay legible — keeping the white tile in both themes reads as deliberate
+ * (and matches how the icon appears on a home screen) rather than as a stray
+ * white box on the dark sidebar.
+ */
 export function BrandMark({ className }: { className?: string }) {
   return (
-    <span
+    <img
+      src="/logo-mark-96.png"
+      alt=""
       aria-hidden="true"
+      width={28}
+      height={28}
       className={cn(
-        'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground',
+        'size-7 shrink-0 rounded-lg bg-white object-contain ring-1 ring-black/5 dark:ring-white/10',
         className,
       )}
-    >
-      <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="3">
-        <path d="M6 12.5l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
+    />
   );
 }

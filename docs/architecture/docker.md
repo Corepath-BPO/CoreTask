@@ -54,11 +54,24 @@ Windows working tree.
 
 `packages/` is deliberately **not** mounted. The shared libraries are compiled
 into the image, so a container start never has to build them, and two containers
-can never race on the same `dist/` directory. The trade-off is explicit: after
-editing anything under `packages/`, run `pnpm dev:build`.
+can never race on the same `dist/` directory. The trade-off is explicit: editing
+anything under `packages/` needs a rebuild.
 
 Each service has its own `node_modules` volume, so the API and web containers
 cannot corrupt each other's install.
+
+**The catch, and it bites every time it is forgotten:** Docker seeds a named
+volume from the image _only while the volume is empty_. Once it exists, a
+rebuilt image does not update it. So adding a dependency — or changing anything
+under `packages/`, whose build output lives inside that tree — needs the volume
+dropped, not just `--build`:
+
+```bash
+pnpm dev:reset
+```
+
+The symptom otherwise is Vite reporting `Failed to resolve import` for a package
+that is plainly present in `package.json` and on the host.
 
 ## Start-up ordering
 
@@ -97,9 +110,16 @@ to `index.html` — otherwise the SPA fallback would make every path look health
 ## Production hardening
 
 - Multi-stage builds; the toolchain never reaches the runtime image.
-- `pnpm install --prod` prunes devDependencies, then the Prisma client is
-  regenerated (the prune rewrites `node_modules` and takes the generated output
-  with it).
+- The API image is assembled with **`pnpm deploy`**, not `pnpm install --prod`.
+  Pruning in place leaves every package in pnpm's virtual store
+  (`node_modules/.pnpm`), so typescript, jest and eslint still ship — verified by
+  inspecting the built image. `deploy` writes a fresh, self-contained tree with
+  production dependencies only and workspace packages copied in rather than
+  symlinked. The Prisma client is regenerated inside that tree afterwards,
+  because the deployed `node_modules` does not carry the builder's output.
+- The Prisma CLI is a runtime dependency so `prisma migrate deploy` can be run
+  from the shipped image. It brings TypeScript along transitively; that is the
+  known cost of keeping migrations runnable in place.
 - Non-root: the API runs as `node`; the web image uses nginx-unprivileged, which
   runs as uid 101 and listens on 8080 so no capability is needed to bind.
 - Resource limits and JSON log rotation on every application service.

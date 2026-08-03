@@ -24,6 +24,16 @@ export const ServerEvent = {
   ERROR: 'server:error',
   PONG: 'server:pong',
 
+  PROJECT_CREATED: 'project:created',
+  PROJECT_UPDATED: 'project:updated',
+  PROJECT_ARCHIVED: 'project:archived',
+  PROJECT_RESTORED: 'project:restored',
+
+  SECTION_CREATED: 'section:created',
+  SECTION_UPDATED: 'section:updated',
+  SECTION_DELETED: 'section:deleted',
+  SECTION_MOVED: 'section:moved',
+
   TASK_CREATED: 'task:created',
   TASK_UPDATED: 'task:updated',
   TASK_DELETED: 'task:deleted',

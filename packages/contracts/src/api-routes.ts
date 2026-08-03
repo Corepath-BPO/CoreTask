@@ -24,4 +24,33 @@ export const ApiRoutes = {
     update: (workspaceId: string) => `/workspaces/${workspaceId}`,
     members: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
   },
+  /**
+   * Nested under the workspace on purpose: the `:workspaceId` segment is what
+   * `WorkspaceMemberGuard` reads, so tenant isolation comes from the URL shape
+   * rather than from each handler remembering to check it.
+   */
+  projects: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/projects`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/projects`,
+    detail: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}`,
+    update: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}`,
+    archive: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}`,
+    restore: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/restore`,
+  },
+  sections: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/sections`,
+    create: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/sections`,
+    update: (workspaceId: string, projectId: string, sectionId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/sections/${sectionId}`,
+    move: (workspaceId: string, projectId: string, sectionId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/sections/${sectionId}/move`,
+    remove: (workspaceId: string, projectId: string, sectionId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/sections/${sectionId}`,
+  },
 } as const;
