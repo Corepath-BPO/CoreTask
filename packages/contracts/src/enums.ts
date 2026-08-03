@@ -162,3 +162,24 @@ export const COMMENT_ENTITIES = Object.values(CommentEntity);
 export function hasAtLeastRole(role: WorkspaceRole, required: WorkspaceRole): boolean {
   return WORKSPACE_ROLE_RANK[role] >= WORKSPACE_ROLE_RANK[required];
 }
+
+/**
+ * Whether `actor` may hand out `target` when inviting.
+ *
+ * Two rules, and both matter:
+ *
+ * - You cannot grant a role above your own. Otherwise an admin invites someone
+ *   as owner, and privilege escalation is one invitation away.
+ * - `OWNER` is never grantable. A workspace has one owner and changing that is a
+ *   transfer, not an invitation — conflating them means an owner can be added
+ *   by surprise.
+ */
+export function canGrantRole(actor: WorkspaceRole, target: WorkspaceRole): boolean {
+  if (target === WorkspaceRole.OWNER) return false;
+  return WORKSPACE_ROLE_RANK[actor] >= WORKSPACE_ROLE_RANK[target];
+}
+
+/** The roles `actor` is allowed to offer, for populating a picker. */
+export function grantableRoles(actor: WorkspaceRole): WorkspaceRole[] {
+  return WORKSPACE_ROLES.filter((role) => canGrantRole(actor, role));
+}

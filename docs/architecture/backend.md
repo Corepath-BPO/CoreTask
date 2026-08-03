@@ -39,6 +39,41 @@ Tasks and tickets are scoped to the workspace rather than nested under a project
 because both can exist without one, and both are read across projects — "my
 tasks" and the triage queue. Project is a filter, not a parent.
 
+### Invitations
+
+An invitation is addressed to an **e-mail**, not a user, because the point is to
+reach people who have not signed up. Only the SHA-256 of the token is stored —
+same reasoning as refresh tokens: the raw value exists in one e-mail link, and a
+database leak must not be replayable. Nothing can re-read a token, so "resend"
+necessarily issues a new one.
+
+Redeeming cannot live under `/workspaces/:workspaceId`. The holder is not a
+member yet, so `WorkspaceMemberGuard` would turn them away from the very route
+that would make them one; the token names the workspace instead. The preview is
+`@Public()` so the page can say _which_ workspace is inviting before offering a
+sign-in — and is deliberately thin, exposing nothing but the workspace name, the
+invited address, the role and who sent it.
+
+Three rules carry most of the weight:
+
+- **The role ceiling.** `canGrantRole` refuses anything above the inviter's own
+  rank, so privilege escalation is not one invitation away, and refuses `OWNER`
+  outright because ownership is a transfer rather than something granted by
+  surprise. The rule lives in `@coretask/contracts`, so the picker offers
+  exactly what the API accepts — but the API is the boundary.
+- **The address must match on accept.** Otherwise a forwarded e-mail hands the
+  workspace to whoever opens it, and the invitation stops being a statement
+  about _who_ was invited.
+- **One live offer per address.** `@@unique([workspaceId, email])` and an upsert
+  mean re-inviting refreshes the row, which makes "resend" and "change the role
+  before they accept" the same operation — and stops a revoked link surviving
+  next to a fresh one.
+
+Unknown, revoked, spent and expired tokens all return the same 404, so the
+endpoint cannot be used to probe for which links once existed. Accepting writes
+the membership and marks the invitation used in one transaction, so a crash
+cannot leave a consumed token that granted nothing.
+
 ### Ticket keys
 
 `Workspace.ticketCounter` is incremented **inside the ticket-creation

@@ -8,6 +8,7 @@ import {
   Settings,
   Ticket,
   Users,
+  UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -43,8 +44,9 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Work',
     items: [
       { label: 'Projects', to: '/projects', icon: FolderKanban },
-      { label: 'Teams', to: '/teams', icon: Users, comingSoon: true },
       { label: 'Tickets', to: '/tickets', icon: Ticket },
+      { label: 'Members', to: '/members', icon: Users },
+      { label: 'Teams', to: '/teams', icon: UsersRound, comingSoon: true },
     ],
   },
   {

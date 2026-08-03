@@ -98,6 +98,18 @@ export const POSITION_STEP = 1_000;
  */
 export const POSITION_MIN_GAP = 0.000_001;
 
+/**
+ * How long an invitation link stays valid.
+ *
+ * Long enough to survive a holiday, short enough that a forwarded or leaked
+ * mailbox does not grant access indefinitely.
+ */
+export const INVITATION_EXPIRY_DAYS = 7;
+/** Entropy in the invitation token, before base64url encoding. */
+export const INVITATION_TOKEN_BYTES = 32;
+/** A workspace cannot have an unbounded number of offers outstanding. */
+export const MAX_PENDING_INVITATIONS = 200;
+
 export const PAGINATION_DEFAULT_PAGE = 1;
 export const PAGINATION_DEFAULT_LIMIT = 20;
 export const PAGINATION_MAX_LIMIT = 100;

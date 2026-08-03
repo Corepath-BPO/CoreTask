@@ -87,6 +87,21 @@ export const ApiRoutes = {
     remove: (workspaceId: string, commentId: string) =>
       `/workspaces/${workspaceId}/comments/${commentId}`,
   },
+  /**
+   * Managing invitations is workspace-scoped, but *accepting* one cannot be:
+   * the person holding the link is not a member yet, so `WorkspaceMemberGuard`
+   * would turn them away from a route under `/workspaces/:workspaceId`. The
+   * token identifies the workspace instead.
+   */
+  invitations: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/invitations`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/invitations`,
+    revoke: (workspaceId: string, invitationId: string) =>
+      `/workspaces/${workspaceId}/invitations/${invitationId}`,
+    /** Readable without a session, so the sign-in page can name the workspace. */
+    preview: (token: string) => `/invitations/${token}`,
+    accept: (token: string) => `/invitations/${token}/accept`,
+  },
   activity: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
   },

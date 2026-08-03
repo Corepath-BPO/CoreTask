@@ -4,8 +4,14 @@ import type { Job } from 'bullmq';
 
 import { AppConfigService } from '../../config/app-config.service';
 import { EmailService } from '../../integrations/email/email.service';
-import { welcomeEmail } from '../../integrations/email/email.templates';
-import { EmailJob, QueueName, type WelcomeEmailJobData } from '../queue-names';
+import { invitationEmail, welcomeEmail } from '../../integrations/email/email.templates';
+import {
+  EmailJob,
+  QueueName,
+  type EmailJobData,
+  type InvitationEmailJobData,
+  type WelcomeEmailJobData,
+} from '../queue-names';
 
 /**
  * Consumer for the e-mail queue. Registered only in `WorkerModule`, so the API
@@ -22,17 +28,35 @@ export class EmailProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<WelcomeEmailJobData>): Promise<void> {
+  async process(job: Job<EmailJobData>): Promise<void> {
     switch (job.name) {
-      case EmailJob.WELCOME:
+      case EmailJob.WELCOME: {
+        const data = job.data as WelcomeEmailJobData;
         await this.email.send(
           welcomeEmail({
-            to: job.data.email,
-            name: job.data.name,
+            to: data.email,
+            name: data.name,
             webUrl: this.config.http.webUrl,
           }),
         );
         return;
+      }
+
+      case EmailJob.INVITATION: {
+        const data = job.data as InvitationEmailJobData;
+        await this.email.send(
+          invitationEmail({
+            to: data.email,
+            token: data.token,
+            workspaceName: data.workspaceName,
+            invitedByName: data.invitedByName,
+            role: data.role,
+            expiresAt: data.expiresAt,
+            webUrl: this.config.http.webUrl,
+          }),
+        );
+        return;
+      }
       default:
         // Unknown names are dropped rather than retried forever — they mean a
         // producer was deployed ahead of this worker.

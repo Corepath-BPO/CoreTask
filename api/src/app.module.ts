@@ -17,6 +17,7 @@ import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { HealthModule } from './modules/health/health.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { SectionsModule } from './modules/sections/sections.module';
@@ -65,6 +66,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,
+    InvitationsModule,
     ProjectsModule,
     SectionsModule,
     TasksModule,

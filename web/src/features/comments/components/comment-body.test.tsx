@@ -3,7 +3,9 @@ import type { UserRef } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { CommentBody, segmentCommentBody } from './comment-body';
+import { segmentCommentBody } from '../lib/segment-comment-body';
+
+import { CommentBody } from './comment-body';
 
 const ADA = '019fc880-0000-7000-8000-00000000aaaa';
 const GRACE = '019fc880-0000-7000-8000-00000000bbbb';

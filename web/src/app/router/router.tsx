@@ -8,6 +8,8 @@ import { PlaceholderPage } from '@/components/common/placeholder-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
+import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
+import { MembersPage } from '@/features/members/pages/members-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
@@ -39,23 +41,28 @@ const guestRoute = createRoute({
   },
 });
 
+/** Only same-site paths: an absolute URL here would be an open redirect. */
+const validateRedirect = (search: Record<string, unknown>): { redirect?: string } => {
+  const target = search['redirect'];
+  return typeof target === 'string' && target.startsWith('/') && !target.startsWith('//')
+    ? { redirect: target }
+    : {};
+};
+
 const loginRoute = createRoute({
   getParentRoute: () => guestRoute,
   path: '/login',
   component: LoginPage,
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
-    const target = search['redirect'];
-    // Only same-site paths: an absolute URL here would be an open redirect.
-    return typeof target === 'string' && target.startsWith('/') && !target.startsWith('//')
-      ? { redirect: target }
-      : {};
-  },
+  validateSearch: validateRedirect,
 });
 
 const registerRoute = createRoute({
   getParentRoute: () => guestRoute,
   path: '/register',
   component: RegisterPage,
+  // Shares the login rule so an invitation can send someone straight to signup
+  // and still land them back on the invitation afterwards.
+  validateSearch: validateRedirect,
 });
 
 /**
@@ -101,6 +108,26 @@ const ticketsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/tickets',
   component: TicketsPage,
+});
+
+const membersRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/members',
+  component: MembersPage,
+});
+
+/**
+ * Hangs off the root rather than either gate: `guestRoute` would bounce a
+ * signed-in user away from the invitation they were sent, and `protectedRoute`
+ * would bounce the far more common case — someone with no account at all.
+ */
+const acceptInvitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/invitations/$token',
+  component: function AcceptInvitationRoute() {
+    const { token } = acceptInvitationRoute.useParams();
+    return <AcceptInvitationPage token={token} />;
+  },
 });
 
 const projectDetailRoute = createRoute({
@@ -171,12 +198,14 @@ const placeholderRoutes = placeholders.map((page) =>
 
 const routeTree = rootRoute.addChildren([
   guestRoute.addChildren([loginRoute, registerRoute]),
+  acceptInvitationRoute,
   protectedRoute.addChildren([
     dashboardRoute,
     projectsRoute,
     projectDetailRoute,
     myTasksRoute,
     ticketsRoute,
+    membersRoute,
     ...placeholderRoutes,
   ]),
 ]);

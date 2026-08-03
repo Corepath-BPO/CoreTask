@@ -33,7 +33,10 @@ export const queryKeys = {
     detail: (workspaceId: string) => [...queryKeys.workspaces.all, 'detail', workspaceId] as const,
     members: (workspaceId: string) =>
       [...queryKeys.workspaces.all, 'members', workspaceId] as const,
+    invitations: (workspaceId: string) =>
+      [...queryKeys.workspaces.all, 'invitations', workspaceId] as const,
   },
+  invitationPreview: (token: string) => ['invitation-preview', token] as const,
   projects: {
     /** Scoped by workspace so switching tenants cannot serve a stale list. */
     all: (workspaceId: string) => ['projects', workspaceId] as const,

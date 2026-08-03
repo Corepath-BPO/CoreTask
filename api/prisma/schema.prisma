@@ -156,6 +156,7 @@ model User {
   assignedTickets   Ticket[]          @relation("TicketAssignee")
   comments          Comment[]
   mentionedIn       CommentMention[]
+  sentInvitations   WorkspaceInvitation[] @relation("InvitationSentBy")
   activityLogs      ActivityLog[]
   notifications     Notification[]
 
@@ -212,8 +213,9 @@ model Workspace {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  createdBy     User              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy     User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members       WorkspaceMember[]
+  invitations   WorkspaceInvitation[]
   projects      Project[]
   sections      Section[]
   tasks         Task[]
@@ -245,6 +247,40 @@ model WorkspaceMember {
   @@index([userId])
   @@index([workspaceId, role])
   @@map("workspace_members")
+}
+
+/// A pending offer of membership, addressed to an e-mail rather than a user —
+/// the point is to invite people who have not signed up yet.
+///
+/// Only the SHA-256 of the token is stored, for the same reason as refresh
+/// tokens: the raw value goes out in one e-mail link and a database leak must
+/// not be replayable. There is no way to re-read a token, so "resend" issues a
+/// new one.
+///
+/// Unique per workspace and e-mail: re-inviting the same address refreshes this
+/// row rather than stacking up offers, which also makes "resend" and "change the
+/// role before they accept" the same operation.
+model WorkspaceInvitation {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  workspaceId String        @db.Uuid
+  /// Lower-cased on write so the unique constraint is case-insensitive.
+  email       String        @db.VarChar(254)
+  role        WorkspaceRole @default(MEMBER)
+  tokenHash   String        @unique
+  invitedById String?       @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation("InvitationSentBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, email])
+  @@index([email])
+  @@index([workspaceId, acceptedAt])
+  @@map("workspace_invitations")
 }
 
 // ---------------------------------------------------------------------------
