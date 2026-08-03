@@ -61,6 +61,43 @@ resolution, so a ticket closed without passing through `RESOLVED` still gets a
 resolution timestamp; otherwise time-to-resolve reporting would silently miss it.
 Reopening clears both.
 
+### Comments
+
+A comment hangs off a task _or_ a ticket, modelled as two nullable foreign keys
+rather than a `(entityType, entityId)` pair. That keeps real referential
+integrity and lets the parent's delete cascade do its job; the cost is that
+"which parent" is a branch in one place, `CommentsService.resolveTask` /
+`resolveTicket`, rather than a lookup table.
+
+Routes follow the same split as the model:
+
+| Route                                   | Why                                             |
+| --------------------------------------- | ----------------------------------------------- |
+| `…/tasks/:taskId/comments`              | Reading and posting is what a thread is         |
+| `…/tickets/:idOrKey/comments`           | Same, and keys work here too                    |
+| `…/comments/:commentId` (PATCH, DELETE) | A comment id is unique; the parent adds nothing |
+
+Both parents are resolved through `TasksService.requireTask` and
+`TicketsService.requireTicket`, which are workspace-scoped. That is what stops a
+comment being attached to — or read from — another tenant's work, without the
+rule being restated per route.
+
+Permissions are deliberately asymmetric. **Editing is author-only**, including
+for owners: rewriting what someone else said is not a moderation power.
+**Deleting** is author-or-`MANAGER`, and a manager deleting someone else's
+comment writes an activity line naming who did it. Authors deleting their own do
+not, because that is not an event anyone needs to audit.
+
+Deletion is soft. Activity entries point at the comment row, and a dangling
+reference in an audit trail is worse than a row nothing renders. Every endpoint
+treats a soft-deleted comment as absent, including edit, which 404s.
+
+Notifications go to everyone already involved: the assignee, the reporter or
+creator, and anyone who has commented before. Replying is how you join a thread
+— without that last group a two-person conversation goes silent for whichever of
+them is not the assignee. Recipients are a `Set`, so someone who is reporter,
+assignee and prior commenter is notified once, and the actor is always removed.
+
 ### List rollups
 
 List endpoints return a `summary` in `meta` computed over the whole workspace,

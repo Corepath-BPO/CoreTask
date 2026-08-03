@@ -70,6 +70,23 @@ export const ApiRoutes = {
     update: (workspaceId: string, idOrKey: string) =>
       `/workspaces/${workspaceId}/tickets/${idOrKey}`,
   },
+  /**
+   * Reading and posting are nested under the thing being discussed, because
+   * that is what a thread is. Editing and deleting are not: a comment id is
+   * unique on its own, and making the client remember which parent a comment
+   * came from just to edit it buys nothing.
+   */
+  comments: {
+    forTask: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/comments`,
+    /** Accepts a UUID or a human key such as `CORE-1001`. */
+    forTicket: (workspaceId: string, idOrKey: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}/comments`,
+    update: (workspaceId: string, commentId: string) =>
+      `/workspaces/${workspaceId}/comments/${commentId}`,
+    remove: (workspaceId: string, commentId: string) =>
+      `/workspaces/${workspaceId}/comments/${commentId}`,
+  },
   activity: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
   },

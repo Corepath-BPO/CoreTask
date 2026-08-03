@@ -252,10 +252,21 @@ export interface Comment {
   id: string;
   workspaceId: string;
   body: string;
-  author: UserRef;
+  /** Null when the author's account has since been removed. */
+  author: UserRef | null;
+  authorId: string;
   taskId: string | null;
   ticketId: string | null;
+  /** Non-null once the body has been changed; the UI marks these "edited". */
   editedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreateCommentPayload {
+  body: string;
+}
+
+export interface UpdateCommentPayload {
+  body: string;
 }

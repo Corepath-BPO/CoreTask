@@ -453,7 +453,12 @@ export class TasksService {
     }
   }
 
-  private async requireTask(workspaceId: string, taskId: string): Promise<PrismaTask> {
+  /**
+   * Public so other modules can resolve a task without reimplementing the
+   * workspace scoping — `CommentsService` uses it to attach a thread to a task
+   * it has proven the caller can see.
+   */
+  async requireTask(workspaceId: string, taskId: string): Promise<PrismaTask> {
     const task = await this.prisma.task.findFirst({ where: { id: taskId, workspaceId } });
 
     if (!task) {

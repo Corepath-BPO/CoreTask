@@ -59,6 +59,12 @@ export const queryKeys = {
     detail: (workspaceId: string, idOrKey: string) =>
       [...queryKeys.tickets.all(workspaceId), 'detail', idOrKey] as const,
   },
+  comments: {
+    all: (workspaceId: string) => ['comments', workspaceId] as const,
+    /** `parentKind` keeps a task and a ticket with the same id from colliding. */
+    thread: (workspaceId: string, parentKind: string, parentId: string) =>
+      [...queryKeys.comments.all(workspaceId), parentKind, parentId] as const,
+  },
   activity: {
     all: (workspaceId: string) => ['activity', workspaceId] as const,
   },

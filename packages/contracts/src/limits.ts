@@ -53,7 +53,11 @@ export const DEFAULT_SECTION_NAMES: readonly string[] = [
 export const MAX_SECTIONS_PER_PROJECT = 50;
 
 export const DESCRIPTION_MAX_LENGTH = 10_000;
+
+export const COMMENT_MIN_LENGTH = 1;
 export const COMMENT_MAX_LENGTH = 20_000;
+/** A thread loads in one request up to this many; beyond it, paging kicks in. */
+export const COMMENT_PAGE_LIMIT = 50;
 
 export const TASK_TITLE_MIN_LENGTH = 1;
 export const TASK_TITLE_MAX_LENGTH = 500;

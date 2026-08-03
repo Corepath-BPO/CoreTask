@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CommentThread } from '@/features/comments/components/comment-thread';
 import { useProjects } from '@/features/projects/hooks/use-projects';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import {
@@ -298,6 +299,16 @@ function TicketDetailBody({
           Your role in this workspace is read-only for tickets.
         </p>
       )}
+
+      <Separator />
+
+      {/* Keyed by the ticket's UUID rather than its key: both address the same
+          thread, and mixing them would cache it twice. */}
+      <CommentThread
+        workspaceId={workspaceId}
+        parent={{ kind: 'ticket', id: ticket.id }}
+        role={role}
+      />
     </>
   );
 }

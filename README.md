@@ -476,6 +476,9 @@ pnpm compose:validate
   dialog, filters by person/status/type/priority, search that matches a pasted
   key exactly and otherwise the title, and `resolvedAt`/`closedAt` derived from
   status rather than settable
+- Comment threads on tasks and tickets: post, edit in place (marked "edited"),
+  delete your own, manager moderation, and notifications to everyone already in
+  the conversation
 - Read-only activity feed and a per-user notification inbox with unread counts
 - A dashboard driven entirely by live data — no fixtures anywhere in the app
 - Health endpoint, Swagger, structured logging with correlation ids
@@ -484,8 +487,9 @@ pnpm compose:validate
 
 ### Scaffolded, not implemented
 
-Comments have a Prisma model, shared enums and types, but **no HTTP endpoints
-yet**.
+`@mentions`. `NotificationType.MENTIONED` is reserved for it, but a mention has
+to survive a read — that needs a column to store who was mentioned and a picker
+in the composer, which is its own slice rather than a corner of this one.
 
 There are no mock fixtures left anywhere in the web app. `lib/mock/` was deleted
 when the ticket, activity and notification endpoints shipped, which was always

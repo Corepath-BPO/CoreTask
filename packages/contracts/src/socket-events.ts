@@ -44,6 +44,8 @@ export const ServerEvent = {
   TICKET_UPDATED: 'ticket:updated',
 
   COMMENT_CREATED: 'comment:created',
+  COMMENT_UPDATED: 'comment:updated',
+  COMMENT_DELETED: 'comment:deleted',
 
   NOTIFICATION_CREATED: 'notification:created',
 

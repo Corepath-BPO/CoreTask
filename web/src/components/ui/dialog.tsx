@@ -45,6 +45,11 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           'fixed left-1/2 top-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border bg-background p-6 shadow-lg duration-200 sm:max-w-lg',
+          // Content taller than the screen has to scroll inside the dialog.
+          // Centring alone pushes the overflow off both ends, where nothing can
+          // reach it — on a phone that hid the comment composer entirely.
+          // `dvh` rather than `vh` so mobile browser chrome is accounted for.
+          'max-h-[calc(100dvh-2rem)] overflow-y-auto',
           'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
           className,
         )}

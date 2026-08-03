@@ -326,7 +326,12 @@ export class TicketsService {
     return UUID_PATTERN.test(idOrKey) ? { id: idOrKey } : { key: idOrKey.toUpperCase() };
   }
 
-  private async requireTicket(workspaceId: string, idOrKey: string): Promise<PrismaTicket> {
+  /**
+   * Public for the same reason as `TasksService.requireTask`, and it carries the
+   * id-or-key resolution with it, so `/tickets/CORE-1001/comments` works without
+   * that rule being duplicated.
+   */
+  async requireTicket(workspaceId: string, idOrKey: string): Promise<PrismaTicket> {
     const ticket = await this.prisma.ticket.findFirst({
       where: { workspaceId, ...this.identify(idOrKey) },
     });

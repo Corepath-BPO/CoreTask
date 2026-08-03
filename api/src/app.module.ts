@@ -15,6 +15,7 @@ import { StorageModule } from './integrations/storage/storage.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CommentsModule } from './modules/comments/comments.module';
 import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -68,6 +69,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     SectionsModule,
     TasksModule,
     TicketsModule,
+    CommentsModule,
     ActivityLogsModule,
     NotificationsModule,
     HealthModule,
