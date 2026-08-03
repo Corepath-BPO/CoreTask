@@ -41,6 +41,22 @@ export const ApiRoutes = {
     restore: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/restore`,
   },
+  /**
+   * Workspace-scoped rather than nested under a project: a task may have no
+   * project at all, and "my tasks" spans every project in the workspace.
+   * Project and section are filters on the list instead of path segments.
+   */
+  tasks: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/tasks`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/tasks`,
+    detail: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
+    update: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
+    move: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/move`,
+    archive: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
+    restore: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/restore`,
+  },
   sections: {
     list: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/sections`,

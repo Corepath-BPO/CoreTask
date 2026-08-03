@@ -1,13 +1,5 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import {
-  BarChart3,
-  CalendarDays,
-  CircleCheckBig,
-  Inbox,
-  Settings,
-  Ticket,
-  Users,
-} from 'lucide-react';
+import { BarChart3, CalendarDays, Inbox, Settings, Ticket, Users } from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -18,6 +10,7 @@ import { RegisterPage } from '@/features/auth/pages/register-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
+import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { NotFoundPage } from './not-found-page';
@@ -97,6 +90,12 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
+const myTasksRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/my-tasks',
+  component: MyTasksPage,
+});
+
 const projectDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/projects/$projectId',
@@ -111,13 +110,6 @@ const projectDetailRoute = createRoute({
 
 /** Sidebar destinations whose API arrives in the next phase. */
 const placeholders = [
-  {
-    path: '/my-tasks',
-    title: 'My Tasks',
-    description: 'Everything assigned to you across every project.',
-    icon: CircleCheckBig,
-    plannedFor: 'Personal task list with filters, grouping and inline editing.',
-  },
   {
     path: '/inbox',
     title: 'Inbox',
@@ -183,6 +175,7 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     projectsRoute,
     projectDetailRoute,
+    myTasksRoute,
     ...placeholderRoutes,
   ]),
 ]);

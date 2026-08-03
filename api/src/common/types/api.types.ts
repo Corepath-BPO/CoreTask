@@ -27,9 +27,14 @@ export interface RequestWithUser extends Request {
  * The response interceptor recognises it and lifts `meta` into the envelope
  * instead of nesting it inside `data`.
  */
-export class PaginatedResult<TItem> {
+export class PaginatedResult<TItem, TMeta extends PaginationMeta = PaginationMeta> {
   constructor(
     readonly items: TItem[],
-    readonly meta: PaginationMeta,
+    /**
+     * Endpoints may widen this with extra rollups — the interceptor passes it
+     * through untouched, so a list can ship its own summary without inventing a
+     * second response shape.
+     */
+    readonly meta: TMeta,
   ) {}
 }

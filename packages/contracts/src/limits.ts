@@ -54,7 +54,19 @@ export const MAX_SECTIONS_PER_PROJECT = 50;
 
 export const DESCRIPTION_MAX_LENGTH = 10_000;
 export const COMMENT_MAX_LENGTH = 20_000;
+
+export const TASK_TITLE_MIN_LENGTH = 1;
 export const TASK_TITLE_MAX_LENGTH = 500;
+/** Guards against a typo in a time field turning into a nonsense estimate. */
+export const TASK_MAX_ESTIMATED_MINUTES = 60 * 24 * 365;
+/**
+ * Ceiling on how many tasks the board loads per project in one request.
+ *
+ * A board is a direct-manipulation surface, not a report — beyond this the list
+ * views and filters are the right tool, and the client shows how many were
+ * withheld rather than silently truncating.
+ */
+export const BOARD_TASK_LIMIT = 500;
 
 /**
  * Gap between adjacent `position` values when a list is (re)numbered.

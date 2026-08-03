@@ -8,6 +8,8 @@ import type {
   TicketType,
 } from '@coretask/contracts';
 
+import type { PaginationMeta } from './api.js';
+
 /** Minimal user projection embedded in list responses. */
 export interface UserRef {
   id: string;
@@ -105,14 +107,76 @@ export interface Task {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  /** Fractional; only meaningful relative to siblings in the same section. */
   position: number;
   startDate: string | null;
   dueDate: string | null;
   completedAt: string | null;
+  /** Non-null means archived. */
+  archivedAt: string | null;
   estimatedMinutes: number | null;
+  assigneeId: string | null;
   assignee: UserRef | null;
+  createdById: string;
+  subtaskCount: number;
+  completedSubtaskCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A task plus the context a detail panel needs. */
+export interface TaskDetail extends Task {
+  subtasks: Task[];
+  project: { id: string; name: string; key: string; color: string } | null;
+  section: { id: string; name: string } | null;
+  createdBy: UserRef | null;
+}
+
+export interface CreateTaskPayload {
+  title: string;
+  description?: string;
+  projectId?: string | null;
+  sectionId?: string | null;
+  parentTaskId?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assigneeId?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  estimatedMinutes?: number | null;
+  /** Insert after this sibling. `null` places it first; omitted appends. */
+  afterTaskId?: string | null;
+}
+
+export interface UpdateTaskPayload {
+  title?: string;
+  description?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assigneeId?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  estimatedMinutes?: number | null;
+}
+
+export interface MoveTaskPayload {
+  /** Destination column. `null` detaches the task from any section. */
+  sectionId: string | null;
+  /** Sibling to sit after within that column. `null` moves it to the top. */
+  afterTaskId: string | null;
+}
+
+/** Rollup returned alongside a task list, computed over the whole filter. */
+export interface TaskListSummary {
+  total: number;
+  completed: number;
+  overdue: number;
+  unassigned: number;
+}
+
+/** Pagination meta widened with the task rollup. */
+export interface TaskListMeta extends PaginationMeta {
+  summary: TaskListSummary;
 }
 
 export interface Ticket {

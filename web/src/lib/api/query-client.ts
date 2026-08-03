@@ -42,4 +42,13 @@ export const queryKeys = {
     detail: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'detail', projectId] as const,
   },
+  tasks: {
+    all: (workspaceId: string) => ['tasks', workspaceId] as const,
+    list: (workspaceId: string, filters: Record<string, unknown>) =>
+      [...queryKeys.tasks.all(workspaceId), 'list', filters] as const,
+    board: (workspaceId: string, projectId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'board', projectId] as const,
+    detail: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'detail', taskId] as const,
+  },
 } as const;

@@ -1,29 +1,21 @@
 /**
  * ============================================================================
- * TEMPORARY DASHBOARD FIXTURES — DELETE THIS FILE WHEN THE ENDPOINTS LAND
+ * TEMPORARY DASHBOARD FIXTURES — DELETE THIS FILE WHEN TICKETS LAND
  * ============================================================================
  *
- * The foundation phase ships authentication and workspaces; tasks, tickets,
- * projects and activity have Prisma models and a seed but no HTTP surface yet.
+ * What remains here is only what still has no HTTP surface: tickets and the
+ * activity feed. Tasks, projects and workspaces are all live — their fixtures
+ * were deleted when their endpoints shipped, which is the intended lifecycle
+ * for this file.
  *
- * Every mock value in the app lives here, and only `features/dashboard`
- * imports it. Removing the placeholder is therefore a two-step change:
- *
- *   1. Point the dashboard hooks at the real endpoints.
- *   2. Delete this file — nothing else references it.
+ * Only `features/dashboard` and the top bar's unread badge import it, so
+ * removing the rest is: point those two at the real endpoints, delete the file.
  *
  * The shapes mirror `@coretask/types` on purpose, so swapping the data source
  * is a change of origin, not of structure.
  * ============================================================================
  */
-import {
-  TaskPriority,
-  TaskStatus,
-  TicketPriority,
-  TicketStatus,
-  TicketType,
-  type ProjectStatus,
-} from '@coretask/contracts';
+import { TicketPriority, TicketStatus, TicketType } from '@coretask/contracts';
 
 export const IS_MOCK_DATA = true;
 
@@ -36,82 +28,11 @@ export interface MockSummary {
   hint: string;
 }
 
-export const TASK_SUMMARY: MockSummary[] = [
-  { label: 'Assigned to you', value: 12, delta: 2, hint: '4 due this week' },
-  { label: 'In progress', value: 5, delta: -1, hint: 'Across 2 projects' },
-  { label: 'Completed (7d)', value: 23, delta: 8, hint: 'Team total' },
-  { label: 'Overdue', value: 2, delta: -3, hint: 'Needs attention' },
-];
-
 export const TICKET_SUMMARY: MockSummary[] = [
   { label: 'Open tickets', value: 18, delta: 3, hint: '6 unassigned' },
   { label: 'Urgent', value: 2, delta: 0, hint: 'SLA at risk' },
   { label: 'Resolved (7d)', value: 31, delta: 12, hint: 'Median 1.4 days' },
   { label: 'Awaiting reply', value: 7, delta: -2, hint: 'From reporters' },
-];
-
-export interface MockTask {
-  id: string;
-  title: string;
-  project: string;
-  projectColor: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  dueDate: string;
-  assignee: { name: string; avatarUrl: string | null };
-}
-
-export const ASSIGNED_TASKS: MockTask[] = [
-  {
-    id: 'tsk-1',
-    title: 'Wire the dashboard summary endpoints',
-    project: 'Platform Foundation',
-    projectColor: '#6366F1',
-    status: TaskStatus.IN_PROGRESS,
-    priority: TaskPriority.HIGH,
-    dueDate: daysFromNow(2),
-    assignee: { name: 'Demo Owner', avatarUrl: null },
-  },
-  {
-    id: 'tsk-2',
-    title: 'Board view drag-and-drop with dnd-kit',
-    project: 'Platform Foundation',
-    projectColor: '#6366F1',
-    status: TaskStatus.IN_PROGRESS,
-    priority: TaskPriority.MEDIUM,
-    dueDate: daysFromNow(9),
-    assignee: { name: 'Jonas Feld', avatarUrl: null },
-  },
-  {
-    id: 'tsk-3',
-    title: 'Design the workspace switcher',
-    project: 'Platform Foundation',
-    projectColor: '#6366F1',
-    status: TaskStatus.TODO,
-    priority: TaskPriority.MEDIUM,
-    dueDate: daysFromNow(6),
-    assignee: { name: 'Maya Okafor', avatarUrl: null },
-  },
-  {
-    id: 'tsk-4',
-    title: 'Audit-log viewer for workspace admins',
-    project: 'Platform Foundation',
-    projectColor: '#6366F1',
-    status: TaskStatus.IN_REVIEW,
-    priority: TaskPriority.LOW,
-    dueDate: daysFromNow(4),
-    assignee: { name: 'Priya Raman', avatarUrl: null },
-  },
-  {
-    id: 'tsk-5',
-    title: 'Rotate storage credentials for MinIO',
-    project: 'Infrastructure',
-    projectColor: '#0EA5E9',
-    status: TaskStatus.BLOCKED,
-    priority: TaskPriority.CRITICAL,
-    dueDate: daysFromNow(-1),
-    assignee: { name: 'Demo Owner', avatarUrl: null },
-  },
 ];
 
 export interface MockTicket {
@@ -168,54 +89,6 @@ export const RECENT_TICKETS: MockTicket[] = [
   },
 ];
 
-export interface MockProject {
-  id: string;
-  name: string;
-  key: string;
-  color: string;
-  status: ProjectStatus;
-  completed: number;
-  total: number;
-  dueDate: string;
-  members: string[];
-}
-
-export const PROJECT_PROGRESS: MockProject[] = [
-  {
-    id: 'prj-1',
-    name: 'Platform Foundation',
-    key: 'PLAT',
-    color: '#6366F1',
-    status: 'ACTIVE',
-    completed: 14,
-    total: 22,
-    dueDate: daysFromNow(30),
-    members: ['Demo Owner', 'Maya Okafor', 'Jonas Feld', 'Priya Raman'],
-  },
-  {
-    id: 'prj-2',
-    name: 'Infrastructure',
-    key: 'INFRA',
-    color: '#0EA5E9',
-    status: 'ACTIVE',
-    completed: 9,
-    total: 12,
-    dueDate: daysFromNow(12),
-    members: ['Demo Owner', 'Jonas Feld'],
-  },
-  {
-    id: 'prj-3',
-    name: 'Customer Onboarding',
-    key: 'ONB',
-    color: '#10B981',
-    status: 'PLANNING',
-    completed: 2,
-    total: 18,
-    dueDate: daysFromNow(58),
-    members: ['Maya Okafor', 'Priya Raman'],
-  },
-];
-
 export interface MockActivity {
   id: string;
   actor: string;
@@ -261,28 +134,6 @@ export const RECENT_ACTIVITY: MockActivity[] = [
     createdAt: hoursAgo(30),
   },
 ];
-
-export interface MockDeadline {
-  id: string;
-  title: string;
-  kind: 'task' | 'ticket' | 'project';
-  dueDate: string;
-}
-
-export const UPCOMING_DEADLINES: MockDeadline[] = [
-  { id: 'dl-1', title: 'Rotate storage credentials', kind: 'task', dueDate: daysFromNow(-1) },
-  { id: 'dl-2', title: 'Wire dashboard endpoints', kind: 'task', dueDate: daysFromNow(2) },
-  { id: 'dl-3', title: 'CORE-1003 attachment timeout', kind: 'ticket', dueDate: daysFromNow(3) },
-  { id: 'dl-4', title: 'Audit-log viewer review', kind: 'task', dueDate: daysFromNow(4) },
-  { id: 'dl-5', title: 'Infrastructure milestone', kind: 'project', dueDate: daysFromNow(12) },
-];
-
-function daysFromNow(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  date.setHours(17, 0, 0, 0);
-  return date.toISOString();
-}
 
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 3_600_000).toISOString();

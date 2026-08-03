@@ -1,7 +1,8 @@
-import { useSortable } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { Section } from '@coretask/types';
-import { GripVertical, ListTodo, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import type { Section, Task } from '@coretask/types';
+import { GripVertical, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -13,26 +14,50 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { TaskCard } from '@/features/tasks/components/task-card';
+import { TaskComposer } from '@/features/tasks/components/task-composer';
 import { cn } from '@/lib/utils';
+
+/**
+ * Droppable id for a column body, so an empty column is still a drop target.
+ * The board reads `over.data.current.type` rather than parsing this back.
+ */
+const columnDroppableId = (sectionId: string) => `column:${sectionId}`;
 
 interface SectionColumnProps {
   section: Section;
+  tasks: Task[];
   canEdit: boolean;
   canDelete: boolean;
   onRename: (sectionId: string, name: string) => void;
   onRequestDelete: (section: Section) => void;
+  onCreateTask: (sectionId: string, title: string) => void;
+  onOpenTask: (taskId: string) => void;
+  creatingTask?: boolean;
 }
 
 export function SectionColumn({
   section,
+  tasks,
   canEdit,
   canDelete,
   onRename,
   onRequestDelete,
+  onCreateTask,
+  onOpenTask,
+  creatingTask = false,
 }: SectionColumnProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
     disabled: !canEdit,
+    data: { type: 'section' },
+  });
+
+  // Separate droppable for the body: without it, dropping a task into an empty
+  // column has nothing to register against.
+  const { setNodeRef: setBodyRef, isOver } = useDroppable({
+    id: columnDroppableId(section.id),
+    data: { type: 'column', sectionId: section.id },
   });
 
   const [editing, setEditing] = useState(false);
@@ -45,9 +70,8 @@ export function SectionColumn({
 
   /**
    * Seeds the draft as editing begins rather than syncing it from props in an
-   * effect. The draft only exists while the input is open, so there is nothing
-   * to keep in sync — and a rename arriving from elsewhere cannot clobber what
-   * the user is currently typing.
+   * effect: the draft only exists while the input is open, so a rename arriving
+   * from elsewhere cannot clobber what the user is typing.
    */
   const startEditing = () => {
     setDraft(section.name);
@@ -67,15 +91,17 @@ export function SectionColumn({
   };
 
   return (
-    <div
+    <section
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
+      aria-label={section.name}
       className={cn(
-        'flex w-72 shrink-0 flex-col rounded-xl border bg-muted/30',
+        'flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30',
         isDragging && 'z-10 opacity-80 shadow-lg',
+        isOver && 'ring-2 ring-primary/40',
       )}
     >
-      <div className="flex items-center gap-1 border-b px-3 py-2.5">
+      <header className="flex items-center gap-1 border-b px-3 py-2.5">
         {canEdit && (
           <button
             type="button"
@@ -121,7 +147,7 @@ export function SectionColumn({
         )}
 
         <Badge variant="muted" className="shrink-0 tabular-nums">
-          {section.taskCount}
+          {tasks.length}
         </Badge>
 
         {canDelete && (
@@ -143,18 +169,33 @@ export function SectionColumn({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+      </header>
+
+      <div ref={setBodyRef} className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto p-2">
+        <SortableContext
+          items={tasks.map((task) => task.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {tasks.map((task) => (
+            <TaskCard key={task.id} task={task} onOpen={onOpenTask} draggable={canEdit} />
+          ))}
+        </SortableContext>
+
+        {tasks.length === 0 && (
+          <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+            {canEdit ? 'Drop a task here, or add one below' : 'No tasks'}
+          </p>
+        )}
       </div>
 
-      {/* Tasks arrive in the next phase; the column still shows its real count. */}
-      <div className="flex min-h-40 flex-1 flex-col items-center justify-center gap-1.5 p-4 text-center">
-        <ListTodo className="size-5 text-muted-foreground/60" aria-hidden="true" />
-        <p className="text-xs text-muted-foreground">
-          {section.taskCount === 0
-            ? 'No tasks yet'
-            : `${section.taskCount} task${section.taskCount === 1 ? '' : 's'}`}
-        </p>
-        <p className="text-[11px] text-muted-foreground/70">Task cards arrive in the next phase</p>
-      </div>
-    </div>
+      {canEdit && (
+        <footer className="border-t p-2">
+          <TaskComposer
+            pending={creatingTask}
+            onCreate={(title) => onCreateTask(section.id, title)}
+          />
+        </footer>
+      )}
+    </section>
   );
 }

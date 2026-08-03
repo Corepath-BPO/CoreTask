@@ -36,6 +36,8 @@ export const ServerEvent = {
 
   TASK_CREATED: 'task:created',
   TASK_UPDATED: 'task:updated',
+  TASK_MOVED: 'task:moved',
+  TASK_ARCHIVED: 'task:archived',
   TASK_DELETED: 'task:deleted',
 
   TICKET_CREATED: 'ticket:created',

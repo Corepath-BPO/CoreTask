@@ -13,6 +13,7 @@ service (business logic), DTOs (validated request/response shapes).
 | `workspace-members` | Membership resolution, role checks, `WorkspaceMemberGuard`         |
 | `projects`          | Project CRUD, key derivation, archive/restore, default sections    |
 | `sections`          | Board columns: CRUD plus fractional reordering                     |
+| `tasks`             | Task CRUD, filtering, cross-section moves, subtasks, archive       |
 | `activity-logs`     | Append-only audit trail                                            |
 | `notifications`     | In-app notification persistence                                    |
 | `health`            | Liveness plus PostgreSQL/Redis dependency checks                   |
@@ -23,11 +24,12 @@ Reads are open to any member, including GUEST. Mutations escalate:
 
 | Action                                                  | Minimum role |
 | ------------------------------------------------------- | ------------ |
-| List or read projects and sections                      | member       |
+| List or read projects, sections and tasks               | member       |
 | Create/edit a project; add, rename or reorder a section | `MEMBER`     |
-| Archive/restore a project; delete a section             | `MANAGER`    |
+| Create, edit or move a task                             | `MEMBER`     |
+| Archive/restore a project or task; delete a section     | `MANAGER`    |
 
-### Nested routing
+### Routing shape
 
 Projects and sections are mounted under `workspaces/:workspaceId/…` so
 `WorkspaceMemberGuard` reads the tenant from the URL rather than each handler
@@ -35,6 +37,21 @@ remembering to check it. Section routes nest one level further under
 `projects/:projectId`, and the service verifies the section really belongs to
 that project instead of trusting the path — otherwise a section id from a
 sibling project would resolve through a URL claiming otherwise.
+
+Tasks sit directly under the workspace rather than under a project: a task may
+have no project at all, and "my tasks" spans every project. Project and section
+are filters on the list instead of path segments.
+
+### Task placement
+
+Editing fields and changing position are deliberately separate endpoints —
+`PATCH /tasks/:id` never touches `sectionId` or ordering, so a field edit cannot
+reshuffle someone else's board. `PATCH /tasks/:id/move` owns placement and
+positions relative to a sibling in the _destination_ column.
+
+`completedAt` is derived from `status` in both directions rather than being
+settable, so the two can never disagree about whether a task is done. Subtasks
+nest exactly one level; a deeper tree is rejected because nothing renders it.
 
 ### Ordering
 
@@ -46,13 +63,13 @@ when a gap shrinks past what double precision can distinguish.
 
 ## Reserved for the next phase
 
-`tasks`, `tickets` and `comments` have Prisma models, enums and shared types in
-place but no HTTP surface yet. The directories exist so the layout is stable;
-they contain no placeholder code.
+`tickets` and `comments` have Prisma models, enums and shared types in place but
+no HTTP surface yet. The directories exist so the layout is stable; they contain
+no placeholder code.
 
 When adding one:
 
-1. Model and migration in `prisma/schema.prisma` (already done for these three).
+1. Model and migration in `prisma/schema.prisma` (already done for both).
 2. Shared types in `packages/types`, enums in `packages/contracts`.
 3. `<name>.service.ts` — every query filtered by `workspaceId`.
 4. `<name>.controller.ts` — `@UseGuards(WorkspaceMemberGuard)` on any route with

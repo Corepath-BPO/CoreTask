@@ -1,21 +1,23 @@
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
-  closestCenter,
+  closestCorners,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
-import { MAX_SECTIONS_PER_PROJECT } from '@coretask/contracts';
-import type { Section } from '@coretask/types';
+import { BOARD_TASK_LIMIT, MAX_SECTIONS_PER_PROJECT } from '@coretask/contracts';
+import type { Section, Task } from '@coretask/types';
 import { Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   AlertDialog,
@@ -27,9 +29,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { buttonVariants } from '@/components/ui/button';
+import { TaskCardPreview } from '@/features/tasks/components/task-card';
+import { groupTasksBySection, useCreateTask, useMoveTask } from '@/features/tasks/hooks/use-tasks';
+import { resolveTaskDrop, type TaskDropTarget } from '@/features/tasks/lib/resolve-task-drop';
 import { cn } from '@/lib/utils';
 
 import {
@@ -46,46 +50,92 @@ interface SectionBoardProps {
   workspaceId: string | undefined;
   projectId: string;
   sections: Section[];
+  tasks: Task[];
+  totalTaskCount: number;
   canEdit: boolean;
   canDelete: boolean;
+  onOpenTask: (taskId: string) => void;
 }
 
 export function SectionBoard({
   workspaceId,
   projectId,
   sections,
+  tasks,
+  totalTaskCount,
   canEdit,
   canDelete,
+  onOpenTask,
 }: SectionBoardProps) {
   const createSection = useCreateSection(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveSection = useMoveSection(workspaceId, projectId);
   const deleteSection = useDeleteSection(workspaceId, projectId);
+  const createTask = useCreateTask(workspaceId);
+  const moveTask = useMoveTask(workspaceId, projectId);
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<Section | null>(null);
+  const [dragging, setDragging] = useState<Task | null>(null);
+
+  const groups = useMemo(
+    () =>
+      groupTasksBySection(
+        tasks,
+        sections.map((section) => section.id),
+      ),
+    [tasks, sections],
+  );
 
   const sensors = useSensors(
-    // A small activation distance keeps a click on the rename button from being
-    // swallowed as the start of a drag.
+    // A small activation distance keeps a click on a card or the rename button
+    // from being swallowed as the start of a drag.
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const handleDragStart = (event: DragStartEvent) => {
+    if (event.active.data.current?.['type'] !== 'task') return;
+    setDragging(tasks.find((task) => task.id === event.active.id) ?? null);
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
+    setDragging(null);
+
     const { active, over } = event;
     if (!over) return;
 
-    // The index-to-anchor conversion lives in a pure, unit-tested helper: it is
-    // an off-by-one that only misbehaves when dragging in one direction.
-    const plan = resolveDropPlan(sections, String(active.id), String(over.id));
+    // One DndContext drives both levels, so the payload says which is moving.
+    const activeType = active.data.current?.['type'];
+
+    if (activeType === 'section') {
+      const plan = resolveDropPlan(sections, String(active.id), String(over.id));
+      if (!plan) return;
+
+      moveSection.mutate({
+        sectionId: String(active.id),
+        afterSectionId: plan.afterSectionId,
+        optimistic: plan.reordered,
+      });
+      return;
+    }
+
+    if (activeType !== 'task') return;
+
+    const overData = over.data.current;
+    const target: TaskDropTarget =
+      overData?.['type'] === 'column'
+        ? { id: String(over.id), type: 'column', sectionId: String(overData['sectionId']) }
+        : { id: String(over.id), type: 'task' };
+
+    const plan = resolveTaskDrop(groups, String(active.id), target);
     if (!plan) return;
 
-    moveSection.mutate({
-      sectionId: String(active.id),
-      afterSectionId: plan.afterSectionId,
-      optimistic: plan.reordered,
+    moveTask.mutate({
+      taskId: String(active.id),
+      payload: { sectionId: plan.sectionId, afterTaskId: plan.afterTaskId },
+      groups: plan.groups,
     });
   };
 
@@ -102,11 +152,20 @@ export function SectionBoard({
   };
 
   const atLimit = sections.length >= MAX_SECTIONS_PER_PROJECT;
+  const withheld = Math.max(0, totalTaskCount - tasks.length);
 
   return (
     <>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <div className="flex gap-4 overflow-x-auto pb-4">
+      <DndContext
+        sensors={sensors}
+        // closestCorners handles mixed vertical/horizontal lists far better than
+        // closestCenter, which tends to pick the wrong column mid-drag.
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDragging(null)}
+      >
+        <div className="flex items-start gap-4 overflow-x-auto pb-4">
           <SortableContext
             items={sections.map((section) => section.id)}
             strategy={horizontalListSortingStrategy}
@@ -115,10 +174,14 @@ export function SectionBoard({
               <SectionColumn
                 key={section.id}
                 section={section}
+                tasks={groups[section.id] ?? []}
                 canEdit={canEdit}
                 canDelete={canDelete}
+                creatingTask={createTask.isPending}
                 onRename={(sectionId, name) => renameSection.mutate({ sectionId, name })}
                 onRequestDelete={setPendingDelete}
+                onOpenTask={onOpenTask}
+                onCreateTask={(sectionId, title) => createTask.mutate({ title, sectionId })}
               />
             ))}
           </SortableContext>
@@ -161,7 +224,20 @@ export function SectionBoard({
             </div>
           )}
         </div>
+
+        {/* Follows the cursor across columns; without it the card would be
+            clipped by the column's own overflow. */}
+        <DragOverlay dropAnimation={null}>
+          {dragging ? <TaskCardPreview task={dragging} /> : null}
+        </DragOverlay>
       </DndContext>
+
+      {withheld > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Showing the first {BOARD_TASK_LIMIT} tasks · {withheld} more not displayed. Use My Tasks
+          or the filters to reach them.
+        </p>
+      )}
 
       <AlertDialog
         open={pendingDelete !== null}

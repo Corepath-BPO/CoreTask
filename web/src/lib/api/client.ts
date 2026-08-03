@@ -128,11 +128,15 @@ export const apiClient = {
     return data.data;
   },
 
-  async getPaginated<T>(
+  /**
+   * `TMeta` widens the envelope's `meta` for endpoints that ship extra rollups
+   * alongside the page information — the tasks list returns a summary there.
+   */
+  async getPaginated<T, TMeta extends PaginationMeta = PaginationMeta>(
     url: string,
     config?: AxiosRequestConfig,
-  ): Promise<{ items: T[]; meta: PaginationMeta }> {
-    const { data } = await http.get<ApiPaginatedResponse<T>>(url, config);
+  ): Promise<{ items: T[]; meta: TMeta }> {
+    const { data } = await http.get<ApiPaginatedResponse<T> & { meta: TMeta }>(url, config);
     return { items: data.data, meta: data.meta };
   },
 

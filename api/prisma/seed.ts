@@ -184,8 +184,10 @@ async function main(): Promise<void> {
     },
   ];
 
+  const createdTasks = new Map<string, string>();
+
   for (const [index, seed] of taskSeeds.entries()) {
-    await upsertTask({
+    const task = await upsertTask({
       workspaceId: workspace.id,
       projectId: project.id,
       sectionId: seed.section.id,
@@ -197,6 +199,46 @@ async function main(): Promise<void> {
       createdById: owner.id,
       dueDate: daysFromNow(seed.dueInDays),
       completedAt: seed.completed ? daysFromNow(-2) : null,
+    });
+
+    createdTasks.set(seed.title, task.id);
+  }
+
+  // A couple of subtasks so the board shows a real progress rollup rather than
+  // every card reading 0/0.
+  const subtaskSeeds = [
+    {
+      parent: 'Wire the dashboard summary endpoints',
+      title: 'Design the response shape',
+      done: true,
+    },
+    { parent: 'Wire the dashboard summary endpoints', title: 'Add the rollup query', done: true },
+    { parent: 'Wire the dashboard summary endpoints', title: 'Swap the fixtures out', done: false },
+    { parent: 'Board view drag-and-drop with dnd-kit', title: 'Resolve drop targets', done: true },
+    {
+      parent: 'Board view drag-and-drop with dnd-kit',
+      title: 'Optimistic reordering',
+      done: false,
+    },
+  ];
+
+  for (const [index, seed] of subtaskSeeds.entries()) {
+    const parentId = createdTasks.get(seed.parent);
+    if (!parentId) continue;
+
+    await upsertTask({
+      workspaceId: workspace.id,
+      projectId: project.id,
+      sectionId: null,
+      parentTaskId: parentId,
+      title: seed.title,
+      status: seed.done ? TaskStatus.DONE : TaskStatus.TODO,
+      priority: TaskPriority.NONE,
+      position: index * 1000,
+      assigneeId: owner.id,
+      createdById: owner.id,
+      dueDate: daysFromNow(3 + index),
+      completedAt: seed.done ? daysFromNow(-1) : null,
     });
   }
 
@@ -378,7 +420,8 @@ async function upsertSection(
 async function upsertTask(input: {
   workspaceId: string;
   projectId: string;
-  sectionId: string;
+  sectionId: string | null;
+  parentTaskId?: string;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;

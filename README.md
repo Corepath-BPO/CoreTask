@@ -454,21 +454,28 @@ pnpm compose:validate
   search, pagination, archive and restore
 - Section CRUD with fractional reordering, drag-and-drop on the board, and task
   reassignment instead of orphaning on delete
+- Task CRUD: board cards, drag between and within columns, inline composer,
+  detail panel with one level of subtasks, assignee/priority/status/due date,
+  archive and restore
+- My Tasks with filters and a rollup computed over the whole filter
+- A dashboard driven by live task and project data
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
 
 ### Scaffolded, not implemented
 
-Tasks, tickets and comments have Prisma models, shared enums and types, and
-seeded demo rows — but **no HTTP endpoints yet**. The dashboard therefore renders
-sample content for those sections, and board columns show their real task counts
-but no cards.
+Tickets and comments have Prisma models, shared enums and types, and seeded demo
+rows — but **no HTTP endpoints yet**. The dashboard therefore still renders
+sample content for the ticket summary, recent tickets and the activity feed;
+everything else on it is live.
 
-Every mock value lives in exactly one file,
+Every remaining mock value lives in exactly one file,
 [`web/src/lib/mock/dashboard.mock.ts`](web/src/lib/mock/dashboard.mock.ts),
-imported only by the dashboard feature. Replacing it is a two-step change: point
-the dashboard hooks at the real endpoints, then delete the file.
+imported only by the dashboard feature and the top bar's unread badge. The task
+and project fixtures were deleted when their endpoints shipped, which is the
+intended lifecycle for that file — replacing the rest is the same two steps:
+point the hooks at the real endpoints, then delete what is left.
 
 Sidebar destinations without an API render an honest placeholder rather than a
 dead link.

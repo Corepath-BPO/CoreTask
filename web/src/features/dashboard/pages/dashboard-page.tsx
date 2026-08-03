@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { Activity, CalendarClock, CircleCheckBig, FolderKanban, Ticket } from 'lucide-react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -24,15 +25,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import {
-  ASSIGNED_TASKS,
-  PROJECT_PROGRESS,
-  RECENT_ACTIVITY,
-  RECENT_TICKETS,
-  TASK_SUMMARY,
-  TICKET_SUMMARY,
-  UPCOMING_DEADLINES,
-} from '@/lib/mock/dashboard.mock';
+import { RECENT_ACTIVITY, RECENT_TICKETS, TICKET_SUMMARY } from '@/lib/mock/dashboard.mock';
 import {
   cn,
   daysUntil,
@@ -43,11 +36,16 @@ import {
 } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 
+import { useDashboardData } from '../hooks/use-dashboard';
+
 export function DashboardPage() {
   const user = useCurrentUser();
-  const { workspace, isLoading } = useActiveWorkspace();
+  const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
+  const { taskTiles, assignedTasks, upcomingTasks, projects, isLoading } = useDashboardData(
+    workspace?.id,
+  );
 
-  if (isLoading) return <DashboardSkeleton />;
+  if (workspaceLoading || isLoading) return <DashboardSkeleton />;
 
   if (!workspace) {
     return (
@@ -73,10 +71,10 @@ export function DashboardPage() {
         }
       />
 
-      {/* Placeholder data notice — removed together with the mock module. */}
+      {/* Only the ticket and activity sections are still placeholder data —
+          both are removed with the endpoints that replace them. */}
       <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-        Tasks, tickets, projects and activity below use sample content. Authentication and
-        workspaces are live against the API.
+        Tickets and the activity feed below use sample content. Everything else is live.
       </div>
 
       <section aria-labelledby="tasks-heading" className="space-y-3">
@@ -84,14 +82,13 @@ export function DashboardPage() {
           Tasks
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {TASK_SUMMARY.map((stat) => (
+          {taskTiles.map((tile) => (
             <StatCard
-              key={stat.label}
-              label={stat.label}
-              value={stat.value}
-              delta={stat.delta}
-              hint={stat.hint}
-              invertDelta={stat.label === 'Overdue'}
+              key={tile.label}
+              label={tile.label}
+              value={tile.value}
+              hint={tile.hint}
+              invertDelta={tile.invert ?? false}
             />
           ))}
         </div>
@@ -118,56 +115,57 @@ export function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Assigned work</CardTitle>
-            <CardDescription>Tasks waiting on you and your team</CardDescription>
+            <CardTitle>Assigned to you</CardTitle>
+            <CardDescription>Open work waiting on you</CardDescription>
             <CardAction>
-              <Button variant="ghost" size="sm" disabled>
-                View all
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/my-tasks">View all</Link>
               </Button>
             </CardAction>
           </CardHeader>
           <CardContent className="px-0 pt-0">
-            <ul className="divide-y">
-              {ASSIGNED_TASKS.map((task) => {
-                const overdue = daysUntil(task.dueDate) < 0;
+            {assignedTasks.length === 0 ? (
+              <p className="px-5 py-6 text-center text-sm text-muted-foreground">
+                Nothing assigned to you right now.
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {assignedTasks.map((task) => {
+                  const overdue = task.dueDate !== null && daysUntil(task.dueDate) < 0;
 
-                return (
-                  <li
-                    key={task.id}
-                    className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: task.projectColor }}
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{task.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">{task.project}</p>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-2">
-                      <TaskPriorityBadge priority={task.priority} />
-                      <TaskStatusBadge status={task.status} />
-                      <span
-                        className={cn(
-                          'w-20 text-right text-xs tabular-nums',
-                          overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                  return (
+                    <li
+                      key={task.id}
+                      className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{task.title}</p>
+                        {task.subtaskCount > 0 && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {task.completedSubtaskCount}/{task.subtaskCount} subtasks
+                          </p>
                         )}
-                      >
-                        {formatDueDate(task.dueDate)}
-                      </span>
-                      <Avatar className="size-6">
-                        <AvatarFallback className="text-[10px]">
-                          {initials(task.assignee.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        <TaskPriorityBadge priority={task.priority} />
+                        <TaskStatusBadge status={task.status} />
+                        {task.dueDate && (
+                          <span
+                            className={cn(
+                              'w-20 text-right text-xs tabular-nums',
+                              overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                            )}
+                          >
+                            {formatDueDate(task.dueDate)}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </CardContent>
         </Card>
 
@@ -177,32 +175,39 @@ export function DashboardPage() {
             <CardDescription>Next two weeks</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
-            {UPCOMING_DEADLINES.map((deadline) => {
-              const overdue = daysUntil(deadline.dueDate) < 0;
+            {upcomingTasks.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No deadlines in the next two weeks.
+              </p>
+            ) : (
+              upcomingTasks.map((task) => {
+                const overdue = task.dueDate !== null && daysUntil(task.dueDate) < 0;
 
-              return (
-                <div key={deadline.id} className="flex items-start gap-3">
-                  <CalendarClock
-                    className={cn(
-                      'mt-0.5 size-4 shrink-0',
-                      overdue ? 'text-destructive' : 'text-muted-foreground',
-                    )}
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{deadline.title}</p>
-                    <p
+                return (
+                  <div key={task.id} className="flex items-start gap-3">
+                    <CalendarClock
                       className={cn(
-                        'text-xs',
-                        overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                        'mt-0.5 size-4 shrink-0',
+                        overdue ? 'text-destructive' : 'text-muted-foreground',
                       )}
-                    >
-                      {formatDueDate(deadline.dueDate)} · {deadline.kind}
-                    </p>
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{task.title}</p>
+                      <p
+                        className={cn(
+                          'text-xs',
+                          overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                        )}
+                      >
+                        {task.dueDate ? formatDueDate(task.dueDate) : 'No due date'}
+                        {task.assignee ? ` · ${task.assignee.name}` : ' · unassigned'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </CardContent>
         </Card>
       </div>
@@ -212,52 +217,67 @@ export function DashboardPage() {
           <CardHeader>
             <CardTitle>Project progress</CardTitle>
             <CardDescription>Completion across active projects</CardDescription>
+            <CardAction>
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/projects">View all</Link>
+              </Button>
+            </CardAction>
           </CardHeader>
           <CardContent className="space-y-5 pt-0">
-            {PROJECT_PROGRESS.map((project) => {
-              const percent = percentage(project.completed, project.total);
+            {projects.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No projects yet.{' '}
+                <Link to="/projects" className="underline underline-offset-4">
+                  Create one
+                </Link>
+                .
+              </p>
+            ) : (
+              projects.map((project) => {
+                const percent = percentage(project.completedTaskCount, project.taskCount);
 
-              return (
-                <div key={project.id} className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      className="size-2.5 shrink-0 rounded-sm"
-                      style={{ backgroundColor: project.color }}
-                    />
-                    <span className="text-sm font-medium">{project.name}</span>
-                    <Badge variant="muted" className="font-mono text-[10px]">
-                      {project.key}
-                    </Badge>
-                    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                      {project.completed}/{project.total} · {percent}%
-                    </span>
-                  </div>
-
-                  <Progress
-                    value={percent}
-                    aria-label={`${project.name} is ${percent} percent complete`}
-                  />
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex -space-x-1.5">
-                      {project.members.slice(0, 4).map((member) => (
-                        <Avatar
-                          key={member}
-                          className="size-5 ring-2 ring-background"
-                          title={member}
-                        >
-                          <AvatarFallback className="text-[9px]">{initials(member)}</AvatarFallback>
-                        </Avatar>
-                      ))}
+                return (
+                  <div key={project.id} className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-2.5 shrink-0 rounded-sm"
+                        style={{ backgroundColor: project.color }}
+                      />
+                      <Link
+                        to="/projects/$projectId"
+                        params={{ projectId: project.id }}
+                        className="text-sm font-medium hover:underline"
+                      >
+                        {project.name}
+                      </Link>
+                      <Badge variant="muted" className="font-mono text-[10px]">
+                        {project.key}
+                      </Badge>
+                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                        {project.completedTaskCount}/{project.taskCount} · {percent}%
+                      </span>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      Due {formatDueDate(project.dueDate)}
-                    </span>
+
+                    <Progress
+                      value={percent}
+                      aria-label={`${project.name} is ${percent} percent complete`}
+                    />
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {project.sectionCount} sections
+                      </span>
+                      {project.dueDate && (
+                        <span className="text-xs text-muted-foreground">
+                          Due {formatDueDate(project.dueDate)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </CardContent>
         </Card>
 

@@ -34,7 +34,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'workspace',
     items: [
       { label: 'Home', to: '/', icon: Home },
-      { label: 'My Tasks', to: '/my-tasks', icon: CircleCheckBig, comingSoon: true },
+      { label: 'My Tasks', to: '/my-tasks', icon: CircleCheckBig },
       { label: 'Inbox', to: '/inbox', icon: Inbox, comingSoon: true },
     ],
   },
