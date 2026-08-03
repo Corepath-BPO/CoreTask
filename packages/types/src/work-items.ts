@@ -183,7 +183,9 @@ export interface Ticket {
   id: string;
   workspaceId: string;
   projectId: string | null;
-  /** Human-readable key, e.g. `CORE-1001`. */
+  /** Monotonic per workspace; the numeric half of `key`. */
+  number: number;
+  /** Human-readable key, e.g. `CORE-1001`. Stable for the ticket's lifetime. */
   key: string;
   title: string;
   description: string | null;
@@ -191,13 +193,59 @@ export interface Ticket {
   status: TicketStatus;
   priority: TicketPriority;
   severity: TicketSeverity;
+  reporterId: string | null;
   reporter: UserRef | null;
+  assigneeId: string | null;
   assignee: UserRef | null;
   dueDate: string | null;
+  /** Derived from `status`; never set directly. */
   resolvedAt: string | null;
   closedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A ticket plus the context a detail panel needs. */
+export interface TicketDetail extends Ticket {
+  project: { id: string; name: string; key: string; color: string } | null;
+}
+
+export interface CreateTicketPayload {
+  title: string;
+  description?: string;
+  projectId?: string | null;
+  type?: TicketType;
+  status?: TicketStatus;
+  priority?: TicketPriority;
+  severity?: TicketSeverity;
+  assigneeId?: string | null;
+  dueDate?: string | null;
+}
+
+export interface UpdateTicketPayload {
+  title?: string;
+  description?: string | null;
+  projectId?: string | null;
+  type?: TicketType;
+  status?: TicketStatus;
+  priority?: TicketPriority;
+  severity?: TicketSeverity;
+  assigneeId?: string | null;
+  dueDate?: string | null;
+}
+
+/** Rollup returned alongside a ticket list, computed over the whole filter. */
+export interface TicketListSummary {
+  total: number;
+  open: number;
+  urgent: number;
+  unassigned: number;
+  resolved: number;
+  overdue: number;
+}
+
+export interface TicketListMeta extends PaginationMeta {
+  summary: TicketListSummary;
 }
 
 export interface Comment {

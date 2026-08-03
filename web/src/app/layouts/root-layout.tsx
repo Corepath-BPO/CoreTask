@@ -1,21 +1,12 @@
 import { Outlet } from '@tanstack/react-router';
 
-import { FullPageLoader } from '@/components/feedback/loading';
-import { useAuthStatus } from '@/stores/auth.store';
-
 /**
  * Outermost route component.
  *
- * Holds rendering until the session-restore call settles: routing before that
- * would bounce an authenticated user to /login on every reload.
+ * Waiting for the session restore is `AppRouter`'s job, not this one's — by the
+ * time any route component renders, routing has already been decided.
  */
 export function RootLayout() {
-  const status = useAuthStatus();
-
-  if (status === 'restoring') {
-    return <FullPageLoader />;
-  }
-
   return (
     <>
       <a

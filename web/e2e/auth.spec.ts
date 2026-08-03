@@ -28,8 +28,8 @@ test.describe('authentication', () => {
 
   test('rejects bad credentials with the server message', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email').fill(DEMO_EMAIL);
-    await page.getByLabel('Password').fill('DefinitelyWrong!1');
+    await page.getByRole('textbox', { name: 'Email', exact: true }).fill(DEMO_EMAIL);
+    await page.getByRole('textbox', { name: 'Password', exact: true }).fill('DefinitelyWrong!1');
     await page.getByRole('button', { name: /^sign in$/i }).click();
 
     await expect(page.getByRole('alert').filter({ hasText: /incorrect/i })).toBeVisible();
@@ -37,8 +37,8 @@ test.describe('authentication', () => {
 
   test('signs in, lands on the dashboard, and survives a reload', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email').fill(DEMO_EMAIL);
-    await page.getByLabel('Password').fill(DEMO_PASSWORD);
+    await page.getByRole('textbox', { name: 'Email', exact: true }).fill(DEMO_EMAIL);
+    await page.getByRole('textbox', { name: 'Password', exact: true }).fill(DEMO_PASSWORD);
     await page.getByRole('button', { name: /^sign in$/i }).click();
 
     await expect(page).toHaveURL('/');
@@ -57,7 +57,7 @@ test.describe('authentication', () => {
 
   test('password visibility toggle reveals and hides the value', async ({ page }) => {
     await page.goto('/login');
-    const password = page.getByLabel('Password');
+    const password = page.getByRole('textbox', { name: 'Password', exact: true });
     await password.fill('CoreTask!2024');
 
     await expect(password).toHaveAttribute('type', 'password');
@@ -69,8 +69,8 @@ test.describe('authentication', () => {
 
   test('signing out returns to login and blocks the dashboard', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email').fill(DEMO_EMAIL);
-    await page.getByLabel('Password').fill(DEMO_PASSWORD);
+    await page.getByRole('textbox', { name: 'Email', exact: true }).fill(DEMO_EMAIL);
+    await page.getByRole('textbox', { name: 'Password', exact: true }).fill(DEMO_PASSWORD);
     await page.getByRole('button', { name: /^sign in$/i }).click();
     await expect(page).toHaveURL('/');
 

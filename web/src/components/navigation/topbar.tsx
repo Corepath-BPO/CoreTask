@@ -1,14 +1,13 @@
-import { Bell, Plus, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CreateWorkspaceDialog } from '@/features/workspaces/components/create-workspace-dialog';
-import { UNREAD_NOTIFICATIONS } from '@/lib/mock/dashboard.mock';
 
 import { MobileNav } from './mobile-nav';
+import { NotificationMenu } from './notification-menu';
 import { UserMenu } from './user-menu';
 
 /**
@@ -66,28 +65,7 @@ export function Topbar() {
           <TooltipContent>Create a workspace</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative"
-              onClick={() => toast('Notification centre is coming in the next phase')}
-              aria-label={`Notifications (${UNREAD_NOTIFICATIONS} unread)`}
-            >
-              <Bell />
-              {UNREAD_NOTIFICATIONS > 0 && (
-                <Badge
-                  variant="destructive"
-                  className="absolute -right-0.5 -top-0.5 size-4 justify-center rounded-full p-0 text-[10px] leading-none"
-                >
-                  {UNREAD_NOTIFICATIONS}
-                </Badge>
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Notifications</TooltipContent>
-        </Tooltip>
+        <NotificationMenu />
 
         <UserMenu />
       </div>

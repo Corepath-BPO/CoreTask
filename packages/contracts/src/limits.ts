@@ -68,6 +68,19 @@ export const TASK_MAX_ESTIMATED_MINUTES = 60 * 24 * 365;
  */
 export const BOARD_TASK_LIMIT = 500;
 
+export const TICKET_TITLE_MIN_LENGTH = 1;
+export const TICKET_TITLE_MAX_LENGTH = 500;
+/** `CORE-1001` — the workspace prefix, a hyphen, then the per-workspace number. */
+export const TICKET_KEY_PATTERN = /^[A-Z][A-Z0-9]{1,7}-\d+$/;
+/** Ticket numbering starts above this, so the first key is `PREFIX-1001`. */
+export const TICKET_NUMBER_START = 1000;
+
+/** How many entries the dashboard's activity feed and inbox request. */
+export const ACTIVITY_FEED_LIMIT = 20;
+export const ACTIVITY_FEED_MAX_LIMIT = 100;
+export const NOTIFICATION_FEED_LIMIT = 30;
+export const NOTIFICATION_FEED_MAX_LIMIT = 100;
+
 /**
  * Gap between adjacent `position` values when a list is (re)numbered.
  *

@@ -2,6 +2,7 @@ import type { AuthSession, AuthUser } from '@coretask/types';
 import { create } from 'zustand';
 
 import { setAccessToken } from '@/lib/api/client';
+import { forgetSessionHint, markSessionStarted } from '@/lib/api/session-hint';
 
 export type AuthStatus = 'restoring' | 'authenticated' | 'anonymous';
 
@@ -28,6 +29,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
   setSession: (session) => {
     setAccessToken(session.accessToken);
+    // Not the session itself — just a note that a refresh cookie is worth trying
+    // on the next boot. See `lib/api/session-hint`.
+    markSessionStarted();
     set({ status: 'authenticated', user: session.user });
   },
 
@@ -35,6 +39,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
   clear: () => {
     setAccessToken(null);
+    // Back to "unknown" rather than "signed out": this also fires on a stray
+    // 401 from anywhere in the app, which does not prove the refresh cookie is
+    // gone. The next load retries instead of stranding a live session.
+    forgetSessionHint();
     set({ status: 'anonymous', user: null });
   },
 

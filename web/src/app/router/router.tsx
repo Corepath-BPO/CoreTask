@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { BarChart3, CalendarDays, Inbox, Settings, Ticket, Users } from 'lucide-react';
+import { BarChart3, CalendarDays, Inbox, Settings, Users } from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -11,6 +11,7 @@ import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
+import { TicketsPage } from '@/features/tickets/pages/tickets-page';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { NotFoundPage } from './not-found-page';
@@ -96,6 +97,12 @@ const myTasksRoute = createRoute({
   component: MyTasksPage,
 });
 
+const ticketsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/tickets',
+  component: TicketsPage,
+});
+
 const projectDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/projects/$projectId',
@@ -123,13 +130,6 @@ const placeholders = [
     description: 'Groups of people inside this workspace.',
     icon: Users,
     plannedFor: 'Team membership, per-team projects and default assignees.',
-  },
-  {
-    path: '/tickets',
-    title: 'Tickets',
-    description: 'Bug reports, requests and incidents.',
-    icon: Ticket,
-    plannedFor: 'Ticket queue with CORE-#### keys, triage workflow and SLA tracking.',
   },
   {
     path: '/calendar',
@@ -176,6 +176,7 @@ const routeTree = rootRoute.addChildren([
     projectsRoute,
     projectDetailRoute,
     myTasksRoute,
+    ticketsRoute,
     ...placeholderRoutes,
   ]),
 ]);

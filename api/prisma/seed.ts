@@ -9,6 +9,7 @@
  *
  * Refuses to run against NODE_ENV=production.
  */
+import { TICKET_NUMBER_START } from '@coretask/contracts';
 import { hash } from '@node-rs/argon2';
 import {
   ActivityAction,
@@ -314,11 +315,24 @@ async function main(): Promise<void> {
     });
   }
 
-  // Keep the counter ahead of the seeded keys so the first real ticket is
-  // CORE-1006 rather than a duplicate.
+  /*
+   * Keep the counter ahead of every existing key, not just the seeded ones.
+   *
+   * The seed re-runs on each container start, and it only upserts its own five
+   * tickets — anything reported since is left alone. Setting the counter to a
+   * fixed 1005 therefore walked it *backwards* past those rows, and the next
+   * report collided with a key that already existed.
+   */
+  const highest = await prisma.ticket.aggregate({
+    where: { workspaceId: workspace.id },
+    _max: { number: true },
+  });
+
   await prisma.workspace.update({
     where: { id: workspace.id },
-    data: { ticketCounter: 1000 + ticketSeeds.length },
+    data: {
+      ticketCounter: Math.max(highest._max.number ?? 0, TICKET_NUMBER_START + ticketSeeds.length),
+    },
   });
 
   // ---------------------------------------------------------------------------

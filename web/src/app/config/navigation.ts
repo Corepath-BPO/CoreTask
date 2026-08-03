@@ -44,7 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Projects', to: '/projects', icon: FolderKanban },
       { label: 'Teams', to: '/teams', icon: Users, comingSoon: true },
-      { label: 'Tickets', to: '/tickets', icon: Ticket, comingSoon: true },
+      { label: 'Tickets', to: '/tickets', icon: Ticket },
     ],
   },
   {

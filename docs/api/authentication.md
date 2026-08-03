@@ -157,12 +157,44 @@ requires to be paired with HTTPS.
 
 ## Rate limiting
 
-`AUTH_RATE_LIMIT_MAX` requests per `RATE_LIMIT_TTL` seconds per IP on the auth
-controller (default 10/60s), against `RATE_LIMIT_MAX` (default 120/60s)
-elsewhere. Exceeding it returns `429 RATE_LIMIT_EXCEEDED`.
+Two ceilings, and which one applies depends on whether the endpoint accepts a
+password:
+
+| Endpoint                                    | Limit                 | Default |
+| ------------------------------------------- | --------------------- | ------- |
+| `/auth/login`, `/auth/register`             | `AUTH_RATE_LIMIT_MAX` | 10/60s  |
+| `/auth/refresh`, `/auth/logout`, `/auth/me` | `RATE_LIMIT_MAX`      | 120/60s |
+| Everything else                             | `RATE_LIMIT_MAX`      | 120/60s |
+
+Exceeding either returns `429 RATE_LIMIT_EXCEEDED`.
+
+The strict ceiling exists to slow password guessing, so it belongs only where a
+password is submitted. `/auth/refresh` authenticates with an HTTP-only cookie an
+attacker cannot read, and a replayed token already revokes its whole family, so
+guess-rate limiting buys nothing there — while costing real users a lot: every
+tab calls `/auth/refresh` on load, so a handful of open tabs or reloads used to
+trip the strict limit and sign the user out of a perfectly valid session.
+
+Running the browser e2e suite signs in far more often in a minute than a person
+would. Raise `AUTH_RATE_LIMIT_MAX` (100 is plenty) for that run, or the suite
+throttles itself.
 
 The store is in-memory, so the limit is per API instance. Moving it to Redis is
 the next step before running more than one replica.
+
+## Session restore on page load
+
+The access token is held in memory only, so a reload starts with nothing and the
+app exchanges the refresh cookie for a new one. Two details matter:
+
+- **Routing waits for that exchange.** `AppRouter` holds the router mount while
+  the restore is in flight. The protected route's `beforeLoad` reads the auth
+  store synchronously and does not re-run when the store later settles, so
+  mounting first would bounce a signed-in user to `/login` and leave them there.
+- **A hint avoids a pointless request.** `lib/api/session-hint` records whether
+  this browser is known signed-out, so anonymous visits skip a call that could
+  only ever 401. Absent means _unknown_, and unknown still tries — treating it as
+  signed out would strand every session that predates the marker.
 
 ## Not yet implemented
 

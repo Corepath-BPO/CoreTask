@@ -28,6 +28,46 @@ Rules that shape the code:
 - **Modules stay focused** and import what they need explicitly. The only global
   modules are configuration, Prisma, Redis, jobs and the websocket gateway.
 
+## Workspace-scoped resources
+
+Projects, sections, tasks and tickets all mount under
+`workspaces/:workspaceId/...` behind `WorkspaceMemberGuard`. Reads are open to
+any member; `MEMBER` creates and edits; `MANAGER` archives, because archiving
+hides work from everyone.
+
+Tasks and tickets are scoped to the workspace rather than nested under a project
+because both can exist without one, and both are read across projects — "my
+tasks" and the triage queue. Project is a filter, not a parent.
+
+### Ticket keys
+
+`Workspace.ticketCounter` is incremented **inside the ticket-creation
+transaction**. The `UPDATE ... increment` takes a row lock on the workspace, so
+concurrent reporters serialise there instead of both reading the same counter and
+racing to insert the same key. That is what makes numbering gapless and
+collision-free; `@@unique([workspaceId, number])` is the backstop, not the
+mechanism.
+
+The counter must never move backwards. The dev seed re-runs on every container
+start and used to reset it to a fixed value, walking it behind tickets reported
+since — the next report then collided with an existing key. It now takes the
+maximum of the seeded count and the highest existing number.
+
+### Derived timestamps
+
+`resolvedAt` and `closedAt` are computed from `status`, never accepted from the
+client — the same pattern as `completedAt` on tasks and projects. Closing implies
+resolution, so a ticket closed without passing through `RESOLVED` still gets a
+resolution timestamp; otherwise time-to-resolve reporting would silently miss it.
+Reopening clears both.
+
+### List rollups
+
+List endpoints return a `summary` in `meta` computed over the whole workspace,
+not the returned page and not the caller's status filter. The tiles answer "how
+is the queue doing?", which must not change shape because someone filtered the
+list below them to one status.
+
 ## Configuration
 
 `config/env.schema.ts` is a Zod schema covering every variable. `getEnv()` parses

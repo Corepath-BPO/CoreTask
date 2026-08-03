@@ -380,7 +380,21 @@ pnpm dev
 pnpm test:e2e:web
 ```
 
-Playwright drives a real browser against the running stack.
+Playwright drives real Chromium and mobile-viewport browsers against the running
+stack, in desktop and Pixel 7 viewports.
+
+Two constraints shape how it authenticates, and both are worth knowing before
+adding specs:
+
+- `/auth/login` is rate-limited at a credential-guessing pace, so the suite signs
+  in **once per worker** rather than once per test (`web/e2e/fixtures.ts`).
+- Refresh tokens rotate, and replaying a spent one revokes the session family.
+  That rules out Playwright's usual `storageState` trick — the first test would
+  rotate the saved token and every later one would look like an attacker. Sharing
+  a live browser context per worker keeps rotation in step instead.
+
+Even so, the suite signs in more often in a minute than a person would. Set
+`AUTH_RATE_LIMIT_MAX=100` in `.env` and restart the API before a full run.
 
 ### Coverage
 
@@ -458,24 +472,28 @@ pnpm compose:validate
   detail panel with one level of subtasks, assignee/priority/status/due date,
   archive and restore
 - My Tasks with filters and a rollup computed over the whole filter
-- A dashboard driven by live task and project data
+- Ticket queue: server-allocated `CORE-1001` keys, triage from the detail
+  dialog, filters by person/status/type/priority, search that matches a pasted
+  key exactly and otherwise the title, and `resolvedAt`/`closedAt` derived from
+  status rather than settable
+- Read-only activity feed and a per-user notification inbox with unread counts
+- A dashboard driven entirely by live data — no fixtures anywhere in the app
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
 
 ### Scaffolded, not implemented
 
-Tickets and comments have Prisma models, shared enums and types, and seeded demo
-rows — but **no HTTP endpoints yet**. The dashboard therefore still renders
-sample content for the ticket summary, recent tickets and the activity feed;
-everything else on it is live.
+Comments have a Prisma model, shared enums and types, but **no HTTP endpoints
+yet**.
 
-Every remaining mock value lives in exactly one file,
-[`web/src/lib/mock/dashboard.mock.ts`](web/src/lib/mock/dashboard.mock.ts),
-imported only by the dashboard feature and the top bar's unread badge. The task
-and project fixtures were deleted when their endpoints shipped, which is the
-intended lifecycle for that file — replacing the rest is the same two steps:
-point the hooks at the real endpoints, then delete what is left.
+There are no mock fixtures left anywhere in the web app. `lib/mock/` was deleted
+when the ticket, activity and notification endpoints shipped, which was always
+the intended lifecycle for it.
+
+Tickets have no delete endpoint, by design: `CLOSED` is the terminal state, and
+the record of what was reported and what happened to it is the point of a ticket
+system. The `Ticket` model has no `archivedAt` to match.
 
 Sidebar destinations without an API render an honest placeholder rather than a
 dead link.
@@ -552,9 +570,16 @@ pnpm dev:reset
 
 ### Hot reload not firing in Docker on Windows
 
-Bind mounts from a Windows host do not deliver filesystem events to the Linux
-container. The web container sets `CHOKIDAR_USEPOLLING=true` for this reason. If
-you added a service, set the same variable on it.
+Bind mounts from a Windows or macOS host do not deliver filesystem events to the
+Linux container, so every watcher has to poll. Both are already configured:
+
+- **web** — `CHOKIDAR_USEPOLLING=true`, read by `server.watch.usePolling` in
+  `web/vite.config.ts`.
+- **api / worker** — `TSC_WATCHFILE` and `TSC_WATCHDIRECTORY`, which is what
+  `nest start --watch` compiles through.
+
+Without these the container keeps serving the code it was built with and says
+nothing about it. If you add a service, give it the matching variable.
 
 ### `ERR_PNPM_IGNORED_BUILDS`
 

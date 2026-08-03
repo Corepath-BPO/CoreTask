@@ -25,7 +25,6 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { RECENT_ACTIVITY, RECENT_TICKETS, TICKET_SUMMARY } from '@/lib/mock/dashboard.mock';
 import {
   cn,
   daysUntil,
@@ -41,9 +40,16 @@ import { useDashboardData } from '../hooks/use-dashboard';
 export function DashboardPage() {
   const user = useCurrentUser();
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
-  const { taskTiles, assignedTasks, upcomingTasks, projects, isLoading } = useDashboardData(
-    workspace?.id,
-  );
+  const {
+    taskTiles,
+    ticketTiles,
+    assignedTasks,
+    upcomingTasks,
+    projects,
+    recentTickets,
+    recentActivity,
+    isLoading,
+  } = useDashboardData(workspace?.id);
 
   if (workspaceLoading || isLoading) return <DashboardSkeleton />;
 
@@ -71,12 +77,6 @@ export function DashboardPage() {
         }
       />
 
-      {/* Only the ticket and activity sections are still placeholder data —
-          both are removed with the endpoints that replace them. */}
-      <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-        Tickets and the activity feed below use sample content. Everything else is live.
-      </div>
-
       <section aria-labelledby="tasks-heading" className="space-y-3">
         <h2 id="tasks-heading" className="text-sm font-semibold">
           Tasks
@@ -99,14 +99,13 @@ export function DashboardPage() {
           Tickets
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {TICKET_SUMMARY.map((stat) => (
+          {ticketTiles.map((tile) => (
             <StatCard
-              key={stat.label}
-              label={stat.label}
-              value={stat.value}
-              delta={stat.delta}
-              hint={stat.hint}
-              invertDelta={stat.label === 'Urgent' || stat.label === 'Awaiting reply'}
+              key={tile.label}
+              label={tile.label}
+              value={tile.value}
+              hint={tile.hint}
+              invertDelta={tile.invert ?? false}
             />
           ))}
         </div>
@@ -289,23 +288,28 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
-            {RECENT_ACTIVITY.map((item) => (
-              <div key={item.id} className="flex gap-2.5">
-                <Avatar className="mt-0.5 size-6 shrink-0">
-                  <AvatarFallback className="text-[10px]">{initials(item.actor)}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm leading-snug">
-                    <span className="font-medium">{item.actor}</span>{' '}
-                    <span className="text-muted-foreground">{item.action}</span>{' '}
-                    <span>{item.target}</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatRelativeTime(item.createdAt)}
-                  </p>
+            {recentActivity.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Nothing has happened here yet.
+              </p>
+            ) : (
+              recentActivity.map((item) => (
+                <div key={item.id} className="flex gap-2.5">
+                  <Avatar className="mt-0.5 size-6 shrink-0">
+                    {/* A null actor is system activity: jobs and automations. */}
+                    <AvatarFallback className="text-[10px]">
+                      {item.actor ? initials(item.actor.name) : '••'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm leading-snug">{item.summary}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.actor?.name ?? 'CoreTask'} · {formatRelativeTime(item.createdAt)}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
@@ -317,30 +321,46 @@ export function DashboardPage() {
             Recent tickets
           </CardTitle>
           <CardDescription>Latest reports across the workspace</CardDescription>
+          <CardAction>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/tickets">View all</Link>
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent className="px-0 pt-0">
-          <ul className="divide-y">
-            {RECENT_TICKETS.map((ticket) => (
-              <li
-                key={ticket.id}
-                className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
-              >
-                <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
-                  {ticket.key}
-                </Badge>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{ticket.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {ticket.reporter} · {formatRelativeTime(ticket.updatedAt)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <TicketPriorityBadge priority={ticket.priority} />
-                  <TicketStatusBadge status={ticket.status} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          {recentTickets.length === 0 ? (
+            <p className="px-5 py-6 text-center text-sm text-muted-foreground">
+              No open tickets.{' '}
+              <Link to="/tickets" className="underline underline-offset-4">
+                Report one
+              </Link>
+              .
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {recentTickets.map((ticket) => (
+                <li
+                  key={ticket.id}
+                  className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
+                >
+                  <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                    {ticket.key}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{ticket.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {ticket.reporter?.name ?? 'Unknown reporter'} ·{' '}
+                      {formatRelativeTime(ticket.updatedAt)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <TicketPriorityBadge priority={ticket.priority} />
+                    <TicketStatusBadge status={ticket.status} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
 

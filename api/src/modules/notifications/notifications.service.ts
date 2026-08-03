@@ -1,4 +1,9 @@
-import type { ActivityEntity, NotificationType } from '@coretask/contracts';
+import {
+  NOTIFICATION_FEED_LIMIT,
+  type ActivityEntity,
+  type NotificationType,
+} from '@coretask/contracts';
+import type { NotificationEntry, NotificationFeed } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
 import type { Notification } from '@prisma/client';
 
@@ -35,33 +40,70 @@ export class NotificationsService {
     });
   }
 
-  listForUser(userId: string, options: { workspaceId?: string; limit?: number } = {}) {
-    return this.prisma.notification.findMany({
-      where: {
-        userId,
-        ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: options.limit ?? 30,
-    });
+  /**
+   * One user's inbox for a workspace.
+   *
+   * `unreadCount` is counted rather than derived from `items`, so the badge stays
+   * correct once the backlog is longer than the page.
+   */
+  async feed(
+    userId: string,
+    workspaceId: string,
+    limit = NOTIFICATION_FEED_LIMIT,
+  ): Promise<NotificationFeed> {
+    const where = { userId, workspaceId };
+
+    const [items, unreadCount] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.notification.count({ where: { ...where, readAt: null } }),
+    ]);
+
+    return { items: items.map(toNotificationEntry), unreadCount };
   }
 
-  countUnread(userId: string, workspaceId?: string): Promise<number> {
-    return this.prisma.notification.count({
-      where: {
-        userId,
-        readAt: null,
-        ...(workspaceId ? { workspaceId } : {}),
-      },
-    });
-  }
-
-  /** Scoped by `userId` so one user can never mark another's notification read. */
-  async markRead(userId: string, notificationIds: string[]): Promise<number> {
+  /**
+   * Scoped by `userId` so one user can never mark another's notification read.
+   * Omitting `notificationIds` clears the whole workspace inbox.
+   */
+  async markRead(
+    userId: string,
+    workspaceId: string,
+    notificationIds?: string[],
+  ): Promise<{ updated: number; unreadCount: number }> {
     const { count } = await this.prisma.notification.updateMany({
-      where: { userId, id: { in: notificationIds }, readAt: null },
+      where: {
+        userId,
+        workspaceId,
+        readAt: null,
+        ...(notificationIds?.length ? { id: { in: notificationIds } } : {}),
+      },
       data: { readAt: new Date() },
     });
-    return count;
+
+    const unreadCount = await this.prisma.notification.count({
+      where: { userId, workspaceId, readAt: null },
+    });
+
+    return { updated: count, unreadCount };
   }
+}
+
+function toNotificationEntry(notification: Notification): NotificationEntry {
+  return {
+    id: notification.id,
+    userId: notification.userId,
+    workspaceId: notification.workspaceId,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body,
+    entity: notification.entity,
+    entityId: notification.entityId,
+    actionUrl: notification.actionUrl,
+    readAt: notification.readAt?.toISOString() ?? null,
+    createdAt: notification.createdAt.toISOString(),
+  };
 }

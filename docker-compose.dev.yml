@@ -40,6 +40,12 @@ services:
       # Seeds the demo workspace on first boot. The seed upserts by natural key,
       # so repeated starts are a no-op rather than a duplicate.
       RUN_SEED: "${RUN_SEED:-true}"
+      # `nest start --watch` compiles through the TypeScript watch API, which
+      # relies on inotify — and inotify events do not cross a bind mount from a
+      # Windows or macOS host. Without these the container silently keeps serving
+      # the code it was built with. Same reason as CHOKIDAR_USEPOLLING below.
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: DynamicPriorityPolling
     ports:
       - "${API_PORT:-3000}:3000"
       - "9229:9229"
@@ -77,6 +83,9 @@ services:
       NODE_ENV: development
       RUN_MIGRATIONS: "false"
       RUN_SEED: "false"
+      # The worker runs the same watch compiler; see the API service above.
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: DynamicPriorityPolling
     volumes:
       - ./api:/app/api
       - coretask-worker-node-modules:/app/api/node_modules

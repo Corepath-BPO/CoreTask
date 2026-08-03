@@ -57,6 +57,26 @@ export const ApiRoutes = {
     restore: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/restore`,
   },
+  /**
+   * Like tasks, workspace-scoped: a ticket may have no project, and the queue
+   * is read across the whole workspace.
+   */
+  tickets: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/tickets`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/tickets`,
+    /** Accepts a UUID or a human key such as `CORE-1001`. */
+    detail: (workspaceId: string, idOrKey: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}`,
+    update: (workspaceId: string, idOrKey: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}`,
+  },
+  activity: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
+  },
+  notifications: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/notifications`,
+    markRead: (workspaceId: string) => `/workspaces/${workspaceId}/notifications/read`,
+  },
   sections: {
     list: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/sections`,

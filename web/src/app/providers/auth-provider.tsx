@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { authApi } from '@/features/auth/api/auth.api';
 import { setUnauthenticatedHandler } from '@/lib/api/client';
 import { queryClient } from '@/lib/api/query-client';
+import { markSignedOut, shouldAttemptRestore } from '@/lib/api/session-hint';
 import { useAuthStore } from '@/stores/auth.store';
 
 /**
@@ -31,10 +32,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (restored.current) return;
     restored.current = true;
 
+    // This browser is known to be signed out, so there is no cookie to
+    // exchange. Skipping avoids a guaranteed 401 on every anonymous page load.
+    // Anything less certain than "known signed out" still tries.
+    if (!shouldAttemptRestore()) {
+      markAnonymous();
+      return;
+    }
+
     void authApi
       .refresh()
       .then(setSession)
-      .catch(() => markAnonymous());
+      .catch(() => {
+        // The cookie really is unusable, so record it and stop asking.
+        markSignedOut();
+        markAnonymous();
+      });
   }, [setSession, markAnonymous]);
 
   // Any request that comes back irrecoverably unauthenticated drops the session.

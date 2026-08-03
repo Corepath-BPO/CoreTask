@@ -39,6 +39,8 @@ playwright-report/
 test-results/
 blob-report/
 .playwright/
+# Playwright's saved sign-in state — contains a live refresh-token cookie.
+e2e/.auth/
 
 # ---------------------------------------------------------------------------
 # Docker volumes / local data

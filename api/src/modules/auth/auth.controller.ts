@@ -13,7 +13,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { buildClearCookieOptions, buildRefreshCookieOptions } from '../../common/utils/cookie.util';
 import { AppConfigService } from '../../config/app-config.service';
-import { AUTH_THROTTLE } from '../../config/throttle.config';
+import { AUTH_THROTTLE, SESSION_THROTTLE } from '../../config/throttle.config';
 
 import { AuthService, type AuthResult } from './auth.service';
 import { AuthSessionDto, AuthUserDto, LogoutResultDto } from './dto/auth-response.dto';
@@ -68,6 +68,9 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  // No credentials are submitted here, so the guess-rate limiter does not apply.
+  // Every tab refreshes on load; the strict ceiling signed people out instead.
+  @Throttle(SESSION_THROTTLE)
   @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
   @ApiOperation({
     summary: 'Rotate the refresh token and mint a new access token',
@@ -88,6 +91,7 @@ export class AuthController {
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @Throttle(SESSION_THROTTLE)
   @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
   @ApiOperation({
     summary: 'End the current session',
@@ -104,6 +108,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @Throttle(SESSION_THROTTLE)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Return the authenticated user' })
   @ApiEnvelopeResponse(AuthUserDto)

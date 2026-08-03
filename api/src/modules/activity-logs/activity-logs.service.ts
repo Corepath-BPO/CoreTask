@@ -1,4 +1,5 @@
-import type { ActivityAction, ActivityEntity } from '@coretask/contracts';
+import { ACTIVITY_FEED_LIMIT, type ActivityAction, type ActivityEntity } from '@coretask/contracts';
+import type { ActivityEntry } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
@@ -49,8 +50,8 @@ export class ActivityLogsService {
   }
 
   /** Most recent activity in a workspace, newest first. */
-  listRecent(workspaceId: string, limit = 20) {
-    return this.prisma.activityLog.findMany({
+  async listFeed(workspaceId: string, limit = ACTIVITY_FEED_LIMIT): Promise<ActivityEntry[]> {
+    const entries = await this.prisma.activityLog.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -58,5 +59,16 @@ export class ActivityLogsService {
         actor: { select: { id: true, name: true, email: true, avatarUrl: true } },
       },
     });
+
+    return entries.map((entry) => ({
+      id: entry.id,
+      workspaceId: entry.workspaceId,
+      action: entry.action,
+      entity: entry.entity,
+      entityId: entry.entityId,
+      summary: entry.summary,
+      actor: entry.actor,
+      createdAt: entry.createdAt.toISOString(),
+    }));
   }
 }

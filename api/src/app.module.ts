@@ -20,6 +20,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ProjectsModule } from './modules/projects/projects.module';
 import { SectionsModule } from './modules/sections/sections.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
@@ -66,6 +67,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     ProjectsModule,
     SectionsModule,
     TasksModule,
+    TicketsModule,
     ActivityLogsModule,
     NotificationsModule,
     HealthModule,

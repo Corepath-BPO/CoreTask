@@ -5,6 +5,7 @@ import { useCallback } from 'react';
 import { toast } from 'sonner';
 
 import { queryClient } from '@/lib/api/query-client';
+import { markSignedOut } from '@/lib/api/session-hint';
 import { useAuthStore } from '@/stores/auth.store';
 import { useWorkspaceStore } from '@/stores/workspace.store';
 
@@ -39,6 +40,8 @@ export function useAuth() {
     // the client must still end up signed out rather than stuck.
     onSettled: async () => {
       clear();
+      // Deliberate sign-out, so the next load can skip the restore entirely.
+      markSignedOut();
       setActiveWorkspaceId(null);
       queryClient.clear();
       await navigate({ to: '/login', replace: true });

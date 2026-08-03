@@ -51,4 +51,18 @@ export const queryKeys = {
     detail: (workspaceId: string, taskId: string) =>
       [...queryKeys.tasks.all(workspaceId), 'detail', taskId] as const,
   },
+  tickets: {
+    all: (workspaceId: string) => ['tickets', workspaceId] as const,
+    list: (workspaceId: string, filters: Record<string, unknown>) =>
+      [...queryKeys.tickets.all(workspaceId), 'list', filters] as const,
+    /** Keyed by whatever the caller holds — a UUID or a key like `CORE-1001`. */
+    detail: (workspaceId: string, idOrKey: string) =>
+      [...queryKeys.tickets.all(workspaceId), 'detail', idOrKey] as const,
+  },
+  activity: {
+    all: (workspaceId: string) => ['activity', workspaceId] as const,
+  },
+  notifications: {
+    all: (workspaceId: string) => ['notifications', workspaceId] as const,
+  },
 } as const;
