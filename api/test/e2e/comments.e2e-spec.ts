@@ -577,13 +577,17 @@ describe('Comments (e2e)', () => {
     it('caps how many people one comment can mention', async () => {
       const scope = await setupScope();
 
-      const members = await Promise.all(
-        Array.from({ length: MAX_MENTIONS_PER_COMMENT + 3 }, (_, index) =>
-          registerUser(`Member ${index}`),
-        ),
-      );
-      for (const member of members) {
+      /*
+       * Registered one at a time, not with `Promise.all`. Registration hashes
+       * with Argon2id, which is deliberately memory-hard, so a dozen at once
+       * saturates the container and the socket resets — the test then fails
+       * with ECONNRESET for a reason that has nothing to do with mentions.
+       */
+      const members = [];
+      for (let index = 0; index < MAX_MENTIONS_PER_COMMENT + 3; index += 1) {
+        const member = await registerUser(`Member ${index}`);
         await addMember(scope, member, WorkspaceRole.MEMBER);
+        members.push(member);
       }
 
       const body = members.map((m, i) => formatMention(m.userId, `Member ${i}`)).join(' ');
