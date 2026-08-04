@@ -478,6 +478,8 @@ pnpm compose:validate
   dialog, filters by person/status/type/priority, search that matches a pasted
   key exactly and otherwise the title, and `resolvedAt`/`closedAt` derived from
   status rather than settable
+- Member management: role changes and removal bounded by rank, leaving a
+  workspace, ownership transfer, and open work unassigned when someone goes
 - Member invitations by e-mail: hashed single-use links that expire in a week,
   a members page with pending offers and revoke, and an accept page that works
   for people who do not have an account yet
@@ -494,9 +496,9 @@ pnpm compose:validate
 
 ### Scaffolded, not implemented
 
-Member _management_ after the fact: changing someone's role, and removing them.
-Invitations create membership; nothing yet edits or ends it, so the only way out
-of a workspace is a database row.
+Teams — groups of people inside a workspace, with their own projects and default
+assignees. `WorkspaceMember` carries a single flat role, which is enough to
+decide permissions but cannot express "the platform team".
 
 There are no mock fixtures left anywhere in the web app. `lib/mock/` was deleted
 when the ticket, activity and notification endpoints shipped, which was always

@@ -25,6 +25,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
+import { MembersModule } from './modules/members/members.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { RedisModule } from './redis/redis.module';
 import { WebsocketModule } from './websocket/websocket.module';
@@ -66,6 +67,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,
+    MembersModule,
     InvitationsModule,
     ProjectsModule,
     SectionsModule,

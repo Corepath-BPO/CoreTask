@@ -69,6 +69,67 @@ test.describe('members', () => {
   });
 });
 
+test.describe('managing members', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/members');
+  });
+
+  test('offers a role picker for people the owner outranks', async ({ page }) => {
+    await expect(page.getByLabel('Role for Jonas Feld')).toBeVisible();
+    await expect(page.getByLabel('Role for Maya Okafor')).toBeVisible();
+  });
+
+  /** Nobody outranks the owner, so their role is shown but not editable. */
+  test('shows the owner’s role as a badge, not a control', async ({ page }) => {
+    await expect(page.getByLabel('Role for Demo Owner')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Actions for Demo Owner' })).toHaveCount(0);
+  });
+
+  test('never offers Owner among the assignable roles', async ({ page }) => {
+    await page.getByLabel('Role for Jonas Feld').click();
+
+    await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'Owner' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  });
+
+  test('changes a role and puts it back', async ({ page }) => {
+    const picker = page.getByLabel('Role for Jonas Feld');
+
+    await picker.click();
+    await page.getByRole('option', { name: 'Manager' }).click();
+    await expect(picker).toContainText('Manager');
+
+    await page.reload();
+    await expect(page.getByLabel('Role for Jonas Feld')).toContainText('Manager');
+
+    await page.getByLabel('Role for Jonas Feld').click();
+    await page.getByRole('option', { name: 'Member' }).click();
+    await expect(page.getByLabel('Role for Jonas Feld')).toContainText('Member');
+  });
+
+  /** Removal is destructive and quiet afterwards, so it must be confirmed. */
+  test('asks before removing, and can be dismissed', async ({ page }) => {
+    await page.getByRole('button', { name: 'Actions for Jonas Feld' }).click();
+    await page.getByRole('menuitem', { name: /remove from workspace/i }).click();
+
+    await expect(page.getByRole('alertdialog')).toContainText(/unassigned/i);
+
+    await page.getByRole('button', { name: /cancel/i }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    // Still there, because nothing was confirmed.
+    await expect(page.getByLabel('Role for Jonas Feld')).toBeVisible();
+  });
+
+  test('warns what transferring ownership costs', async ({ page }) => {
+    await page.getByRole('button', { name: 'Actions for Maya Okafor' }).click();
+    await page.getByRole('menuitem', { name: /make owner/i }).click();
+
+    await expect(page.getByRole('alertdialog')).toContainText(/you become an administrator/i);
+    await page.getByRole('button', { name: /cancel/i }).click();
+  });
+});
+
 test.describe('accepting an invitation', () => {
   test('tells an anonymous visitor an unusable link is dead', async ({ browser }) => {
     // A fresh context, because this page is for people with no session at all.

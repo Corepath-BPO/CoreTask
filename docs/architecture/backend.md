@@ -39,6 +39,43 @@ Tasks and tickets are scoped to the workspace rather than nested under a project
 because both can exist without one, and both are read across projects — "my
 tasks" and the triage queue. Project is a filter, not a parent.
 
+### Managing members
+
+Reading the roster is open to any member — you cannot collaborate with people
+you cannot see. Changing it is not, and the rules live in `MembersService`
+rather than in a role decorator, because every one of them depends on the
+_target's_ current role as well as the caller's, which a decorator cannot know.
+
+`canManageMember` is **strictly greater**, not "at least". That single choice
+does three jobs at once: peers cannot demote or eject one another (otherwise two
+admins race to remove each other and whoever clicks first keeps the workspace),
+nobody can act on themselves, and the owner is untouchable — all without a
+special case for any of them.
+
+Ownership is the exception that shapes the rest. It can never be assigned
+through a role change, only through `transfer-ownership`, which is owner-only
+and demotes the outgoing owner to `ADMIN` rather than removing them — dropping
+someone out of a workspace they built, with no undo, is not a reasonable
+consequence of handing over a title. Both writes share a transaction, so the
+workspace never has two owners or none. The owner also cannot be removed or
+leave, because a workspace with no owner has nobody left who could transfer it.
+
+**Removal unassigns their open work.** Assignment points at a `User`, not a
+`WorkspaceMember`, so nothing in the schema clears it — the board would go on
+showing work assigned to someone who can no longer open it. The unassignment
+shares the transaction with the deletion so the two can never disagree. Only
+_open_ work: a finished task records who did it, and rewriting that would
+falsify history, which is also why comments and reported tickets stay.
+
+Access ends immediately rather than at the next token expiry, because
+`WorkspaceMemberGuard` resolves membership per request.
+
+`MembersService` is deliberately a separate module from `WorkspaceMembersService`.
+The latter backs the guard that every workspace route depends on; folding these
+operations into it would make the guard's module pull in activity logging and
+notifications, and since the notifications module is itself guarded, that closes
+a dependency cycle.
+
 ### Invitations
 
 An invitation is addressed to an **e-mail**, not a user, because the point is to

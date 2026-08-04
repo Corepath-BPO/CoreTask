@@ -24,6 +24,16 @@ export const ApiRoutes = {
     update: (workspaceId: string) => `/workspaces/${workspaceId}`,
     members: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
   },
+  members: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
+    updateRole: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/members/${memberId}`,
+    /** Also the "leave" path, when the member being removed is the caller. */
+    remove: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/members/${memberId}`,
+    transferOwnership: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/members/${memberId}/transfer-ownership`,
+  },
   /**
    * Nested under the workspace on purpose: the `:workspaceId` segment is what
    * `WorkspaceMemberGuard` reads, so tenant isolation comes from the URL shape

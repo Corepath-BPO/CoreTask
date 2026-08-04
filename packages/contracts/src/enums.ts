@@ -183,3 +183,16 @@ export function canGrantRole(actor: WorkspaceRole, target: WorkspaceRole): boole
 export function grantableRoles(actor: WorkspaceRole): WorkspaceRole[] {
   return WORKSPACE_ROLES.filter((role) => canGrantRole(actor, role));
 }
+
+/**
+ * Whether `actor` may change or remove a member currently holding `target`.
+ *
+ * Strictly greater, not "at least": peers must not be able to demote or eject
+ * one another, or two admins can race to remove each other and whoever clicks
+ * first wins the workspace. It also rules out acting on yourself, which is what
+ * keeps a lone owner from demoting themselves into a workspace nobody owns —
+ * leaving and transferring ownership are separate, deliberate actions.
+ */
+export function canManageMember(actor: WorkspaceRole, target: WorkspaceRole): boolean {
+  return WORKSPACE_ROLE_RANK[actor] > WORKSPACE_ROLE_RANK[target];
+}

@@ -1,5 +1,5 @@
 import { WorkspaceRole } from '@coretask/contracts';
-import type { WorkspaceMember, WorkspaceSummary } from '@coretask/types';
+import type { WorkspaceSummary } from '@coretask/types';
 import {
   Body,
   Controller,
@@ -19,9 +19,8 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
-import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
 
-import { WorkspaceMemberDto, WorkspaceSummaryDto } from './dto/workspace-response.dto';
+import { WorkspaceSummaryDto } from './dto/workspace-response.dto';
 import { CreateWorkspaceDto, UpdateWorkspaceDto } from './dto/workspace.dto';
 import { WorkspacesService } from './workspaces.service';
 
@@ -29,10 +28,7 @@ import { WorkspacesService } from './workspaces.service';
 @ApiBearerAuth()
 @Controller('workspaces')
 export class WorkspacesController {
-  constructor(
-    private readonly workspaces: WorkspacesService,
-    private readonly members: WorkspaceMembersService,
-  ) {}
+  constructor(private readonly workspaces: WorkspacesService) {}
 
   @Get()
   @ApiOperation({
@@ -88,15 +84,7 @@ export class WorkspacesController {
     return this.workspaces.update(workspaceId, userId, dto);
   }
 
-  @Get(':workspaceId/members')
-  @UseGuards(WorkspaceMemberGuard)
-  @ApiOperation({ summary: 'List workspace members' })
-  @ApiParam({ name: 'workspaceId', format: 'uuid' })
-  @ApiEnvelopeResponse(WorkspaceMemberDto, { isArray: true })
-  @ApiErrorResponseDoc(403, 'The caller is not a member of this workspace')
-  listMembers(
-    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-  ): Promise<WorkspaceMember[]> {
-    return this.members.listMembers(workspaceId);
-  }
+  // `GET :workspaceId/members` moved to `MembersController` when roles became
+  // editable — the path is unchanged, but reading and changing the roster now
+  // live together.
 }

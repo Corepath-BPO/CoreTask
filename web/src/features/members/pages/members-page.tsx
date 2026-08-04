@@ -1,11 +1,22 @@
 import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import type { WorkspaceInvitation, WorkspaceMember } from '@coretask/types';
+import { useNavigate } from '@tanstack/react-router';
 import { MailPlus, Users, X } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/common/page-header';
 import { EmptyState } from '@/components/feedback/empty-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,11 +25,15 @@ import {
   useActiveWorkspace,
   useWorkspaceMembers,
 } from '@/features/workspaces/hooks/use-workspaces';
-import { formatDate, formatRelativeTime, humanizeEnum, initials } from '@/lib/utils';
+import { queryClient, queryKeys } from '@/lib/api/query-client';
+import { formatRelativeTime, humanizeEnum } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
+import { useWorkspaceStore } from '@/stores/workspace.store';
 
 import { InviteMemberDialog } from '../components/invite-member-dialog';
+import { MemberRow } from '../components/member-row';
 import { useInvitations, useRevokeInvitation } from '../hooks/use-invitations';
+import { useLeaveWorkspace } from '../hooks/use-members';
 
 export function MembersPage() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
@@ -37,6 +52,27 @@ export function MembersPage() {
   );
 
   const [inviting, setInviting] = useState(false);
+  const [leaving, setLeaving] = useState<WorkspaceMember | null>(null);
+
+  const leaveWorkspace = useLeaveWorkspace(workspaceId);
+  const navigate = useNavigate();
+  const setActiveWorkspaceId = useWorkspaceStore((state) => state.setActiveWorkspaceId);
+
+  const confirmLeave = () => {
+    if (!leaving) return;
+
+    leaveWorkspace.mutate(leaving.id, {
+      onSuccess: async () => {
+        setLeaving(null);
+        // Nothing here is readable any more, so clear the selection and let the
+        // workspace switcher pick whatever is left.
+        setActiveWorkspaceId(null);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
+        await navigate({ to: '/' });
+        toast.success('You left the workspace');
+      },
+    });
+  };
 
   if (workspaceLoading) return <MembersSkeleton />;
 
@@ -86,7 +122,10 @@ export function MembersPage() {
                 <MemberRow
                   key={member.id}
                   member={member}
+                  workspaceId={workspaceId}
+                  actorRole={role}
                   isSelf={member.user.id === currentUser?.id}
+                  onLeave={setLeaving}
                 />
               ))}
             </ul>
@@ -134,35 +173,25 @@ export function MembersPage() {
         workspaceId={workspaceId}
         actorRole={role}
       />
+
+      {/* Leaving is handled here rather than in the row: it navigates away, and
+          the row it belongs to stops existing the moment it succeeds. */}
+      <AlertDialog open={leaving !== null} onOpenChange={(open) => !open && setLeaving(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave {workspace.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You lose access immediately, and your open tasks and tickets are unassigned. You will
+              need a fresh invitation to come back.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmLeave}>Leave</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  );
-}
-
-function MemberRow({ member, isSelf }: { member: WorkspaceMember; isSelf: boolean }) {
-  return (
-    <li className="flex flex-wrap items-center gap-3 px-5 py-3">
-      <Avatar className="size-8 shrink-0">
-        {member.user.avatarUrl && <AvatarImage src={member.user.avatarUrl} alt="" />}
-        <AvatarFallback className="text-[11px]">{initials(member.user.name)}</AvatarFallback>
-      </Avatar>
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">
-          {member.user.name}
-          {isSelf && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
-        </p>
-        <p className="truncate text-xs text-muted-foreground">{member.user.email}</p>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="hidden text-xs text-muted-foreground sm:inline">
-          Joined {formatDate(member.joinedAt)}
-        </span>
-        <Badge variant={member.role === WorkspaceRole.OWNER ? 'default' : 'secondary'}>
-          {humanizeEnum(member.role)}
-        </Badge>
-      </div>
-    </li>
   );
 }
 

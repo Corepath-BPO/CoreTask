@@ -79,6 +79,18 @@ export interface CreateInvitationPayload {
   role: WorkspaceRole;
 }
 
+export interface UpdateMemberRolePayload {
+  role: WorkspaceRole;
+}
+
+/** What removing a member did, beyond ending their access. */
+export interface RemoveMemberResult {
+  removed: true;
+  /** Open tasks that were unassigned, because the assignee can no longer see them. */
+  tasksUnassigned: number;
+  ticketsUnassigned: number;
+}
+
 export interface AcceptInvitationResult {
   workspaceId: string;
   workspaceSlug: string;

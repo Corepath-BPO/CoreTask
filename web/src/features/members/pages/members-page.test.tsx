@@ -1,6 +1,6 @@
 import { WorkspaceRole } from '@coretask/contracts';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +14,9 @@ const ME = '019fc880-0000-7000-8000-00000000aaaa';
 const listInvitations = vi.fn();
 const createInvitation = vi.fn();
 const revokeInvitation = vi.fn();
+const updateRole = vi.fn();
+const removeMember = vi.fn();
+const transferOwnership = vi.fn();
 
 let activeRole: WorkspaceRole = WorkspaceRole.OWNER;
 
@@ -24,6 +27,15 @@ vi.mock('../api/invitations.api', () => ({
     revoke: (...args: unknown[]) => revokeInvitation(...args),
     preview: vi.fn(),
     accept: vi.fn(),
+  },
+}));
+
+vi.mock('../api/members.api', () => ({
+  membersApi: {
+    list: vi.fn(),
+    updateRole: (...args: unknown[]) => updateRole(...args),
+    remove: (...args: unknown[]) => removeMember(...args),
+    transferOwnership: (...args: unknown[]) => transferOwnership(...args),
   },
 }));
 
@@ -84,6 +96,9 @@ describe('MembersPage', () => {
     listInvitations.mockReset();
     createInvitation.mockReset();
     revokeInvitation.mockReset();
+    updateRole.mockReset();
+    removeMember.mockReset();
+    transferOwnership.mockReset();
     activeRole = WorkspaceRole.OWNER;
 
     listInvitations.mockResolvedValue([]);
@@ -170,7 +185,8 @@ describe('MembersPage', () => {
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /invite/i }));
-    await user.click(screen.getByLabelText(/role/i));
+    // Scoped to the dialog: member rows carry their own "Role for …" pickers.
+    await user.click(within(screen.getByRole('dialog')).getByLabelText(/role/i));
 
     expect(await screen.findByRole('option', { name: 'Admin' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Owner' })).not.toBeInTheDocument();
@@ -185,6 +201,123 @@ describe('MembersPage', () => {
     await user.click(await screen.findByRole('button', { name: /revoke the invitation/i }));
 
     await waitFor(() => expect(revokeInvitation).toHaveBeenCalledWith(WORKSPACE, 'inv-1'));
+  });
+
+  describe('managing members', () => {
+    it('offers a role picker for someone below you', async () => {
+      renderPage();
+      expect(await screen.findByLabelText(/role for jonas feld/i)).toBeInTheDocument();
+    });
+
+    /** Strictly-greater: the owner outranks everyone, so nobody outranks them. */
+    it('shows the owner as a badge, not something editable', async () => {
+      renderPage();
+
+      await screen.findByText('Jonas Feld');
+      expect(screen.queryByLabelText(/role for demo owner/i)).not.toBeInTheDocument();
+      expect(screen.getByText('Owner')).toBeInTheDocument();
+    });
+
+    it('offers nothing at all to a plain member', async () => {
+      activeRole = WorkspaceRole.MEMBER;
+      renderPage();
+
+      await screen.findByText('Jonas Feld');
+      expect(screen.queryByLabelText(/role for/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /actions for jonas/i })).not.toBeInTheDocument();
+    });
+
+    it('changes a role through the picker', async () => {
+      const user = userEvent.setup();
+      updateRole.mockResolvedValue({
+        id: 'm2',
+        workspaceId: WORKSPACE,
+        role: WorkspaceRole.MANAGER,
+        joinedAt: '2026-02-01T00:00:00.000Z',
+        user: { id: 'u2', name: 'Jonas Feld', email: 'jonas@coretask.dev', avatarUrl: null },
+      });
+
+      renderPage();
+      await user.click(await screen.findByLabelText(/role for jonas feld/i));
+      await user.click(await screen.findByRole('option', { name: 'Manager' }));
+
+      await waitFor(() => expect(updateRole).toHaveBeenCalledTimes(1));
+      expect(updateRole.mock.calls[0]?.[2]).toEqual({ role: WorkspaceRole.MANAGER });
+    });
+
+    /** Removing someone is destructive and silent afterwards; it gets a prompt. */
+    it('asks before removing, and says what else it will do', async () => {
+      const user = userEvent.setup();
+      removeMember.mockResolvedValue({ removed: true, tasksUnassigned: 2, ticketsUnassigned: 0 });
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /remove from workspace/i }));
+
+      expect(await screen.findByText(/unassigned/i)).toBeInTheDocument();
+      expect(removeMember).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: /^remove$/i }));
+      await waitFor(() => expect(removeMember).toHaveBeenCalledWith(WORKSPACE, 'm2'));
+    });
+
+    it('lets the prompt be dismissed without removing anyone', async () => {
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /remove from workspace/i }));
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+      expect(removeMember).not.toHaveBeenCalled();
+    });
+
+    it('offers ownership transfer only to the owner', async () => {
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
+      expect(await screen.findByRole('menuitem', { name: /make owner/i })).toBeInTheDocument();
+    });
+
+    it('does not offer ownership transfer to an admin', async () => {
+      const user = userEvent.setup();
+      activeRole = WorkspaceRole.ADMIN;
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
+
+      await screen.findByRole('menuitem', { name: /remove from workspace/i });
+      expect(screen.queryByRole('menuitem', { name: /make owner/i })).not.toBeInTheDocument();
+    });
+
+    it('transfers ownership after confirming', async () => {
+      const user = userEvent.setup();
+      transferOwnership.mockResolvedValue({
+        id: 'm2',
+        workspaceId: WORKSPACE,
+        role: WorkspaceRole.OWNER,
+        joinedAt: '2026-02-01T00:00:00.000Z',
+        user: { id: 'u2', name: 'Jonas Feld', email: 'jonas@coretask.dev', avatarUrl: null },
+      });
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /make owner/i }));
+      await user.click(screen.getByRole('button', { name: /transfer ownership/i }));
+
+      await waitFor(() => expect(transferOwnership).toHaveBeenCalledWith(WORKSPACE, 'm2'));
+    });
+
+    /** The owner has no way out until they hand the workspace on. */
+    it('never offers the owner a way to leave', async () => {
+      renderPage();
+
+      await screen.findByText('Jonas Feld');
+      expect(
+        screen.queryByRole('button', { name: /actions for demo owner/i }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it('marks an expired invitation rather than hiding it', async () => {
