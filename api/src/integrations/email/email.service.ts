@@ -3,6 +3,8 @@ import { createTransport, type Transporter } from 'nodemailer';
 
 import { AppConfigService } from '../../config/app-config.service';
 
+import { MicrosoftGraphTransport } from './microsoft-graph.transport';
+
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -15,21 +17,33 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: Transporter | null = null;
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly graph: MicrosoftGraphTransport,
+  ) {}
 
   /**
-   * Sends a message through SMTP, or logs it when no SMTP host is configured.
+   * Sends a message through whichever transport is configured.
    *
-   * The log transport keeps local development free of a mail container while
-   * still exercising the full queue -> processor -> integration path.
+   * Microsoft Graph wins over SMTP when both are present: it is the deliberate,
+   * explicitly-credentialed choice, whereas SMTP settings are easy to leave
+   * pointing at a local catcher by accident. With neither, the log transport
+   * writes the rendered message out — which keeps local development free of a
+   * mail container while still exercising the whole
+   * queue → processor → template → integration path.
    */
   async send(message: EmailMessage): Promise<void> {
+    if (this.config.microsoftGraph.enabled) {
+      await this.graph.send(message);
+      return;
+    }
+
     const { from, enabled } = this.config.smtp;
 
     if (!enabled) {
       this.logger.log(
         { to: message.to, subject: message.subject, body: message.text },
-        'E-mail suppressed (SMTP_HOST is not configured)',
+        'E-mail suppressed (no MICROSOFT_GRAPH_* or SMTP_HOST configured)',
       );
       return;
     }

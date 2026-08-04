@@ -115,4 +115,36 @@ export class AppConfigService {
       enabled: Boolean(this.env.SMTP_HOST),
     } as const;
   }
+
+  /**
+   * Microsoft Graph mail settings.
+   *
+   * `enabled` needs only one check because the schema refuses a partial
+   * configuration outright, so any one value present means all of them are.
+   */
+  get microsoftGraph() {
+    return {
+      tenantId: this.env.MICROSOFT_GRAPH_TENANT_ID,
+      clientId: this.env.MICROSOFT_GRAPH_CLIENT_ID,
+      clientSecret: this.env.MICROSOFT_GRAPH_CLIENT_SECRET,
+      baseUrl: normalizeGraphBaseUrl(this.env.MICROSOFT_GRAPH_BASE_URL),
+      /** The mailbox mail is sent as. Must exist in the tenant. */
+      fromAddress: this.env.MAIL_FROM_ADDRESS,
+      timeoutMs: this.env.MAIL_CONNECTION_TIMEOUT_MS,
+      enabled: Boolean(this.env.MICROSOFT_GRAPH_TENANT_ID),
+    } as const;
+  }
+}
+
+/**
+ * Accepts `MICROSOFT_GRAPH_BASE_URL` with or without the API version.
+ *
+ * Both `https://graph.microsoft.com` and `https://graph.microsoft.com/v1.0` are
+ * things people reasonably put in a `.env`, and the difference between them is a
+ * 404 at the first send rather than anything visible at boot. Normalising here
+ * means the transport can concatenate paths without thinking about it.
+ */
+export function normalizeGraphBaseUrl(value: string): string {
+  const trimmed = value.replace(/\/+$/, '');
+  return /\/(v\d+(\.\d+)?|beta)$/i.test(trimmed) ? trimmed : `${trimmed}/v1.0`;
 }

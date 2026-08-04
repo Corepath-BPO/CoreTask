@@ -143,6 +143,14 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
+      # No defaults for the credentials: an empty value selects the log
+      # transport, which is the right outcome for anyone who has not set them.
+      MICROSOFT_GRAPH_TENANT_ID: ${MICROSOFT_GRAPH_TENANT_ID:-}
+      MICROSOFT_GRAPH_CLIENT_ID: ${MICROSOFT_GRAPH_CLIENT_ID:-}
+      MICROSOFT_GRAPH_CLIENT_SECRET: ${MICROSOFT_GRAPH_CLIENT_SECRET:-}
+      MICROSOFT_GRAPH_BASE_URL: "${MICROSOFT_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}"
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_CONNECTION_TIMEOUT_MS: ${MAIL_CONNECTION_TIMEOUT_MS:-15000}
     networks: [coretask]
 
   # ---------------------------------------------------------------------------
@@ -179,6 +187,14 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
+      # The worker is what actually drains the e-mail queue, so these matter
+      # more here than on the API — without them invitations are only logged.
+      MICROSOFT_GRAPH_TENANT_ID: ${MICROSOFT_GRAPH_TENANT_ID:-}
+      MICROSOFT_GRAPH_CLIENT_ID: ${MICROSOFT_GRAPH_CLIENT_ID:-}
+      MICROSOFT_GRAPH_CLIENT_SECRET: ${MICROSOFT_GRAPH_CLIENT_SECRET:-}
+      MICROSOFT_GRAPH_BASE_URL: "${MICROSOFT_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}"
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_CONNECTION_TIMEOUT_MS: ${MAIL_CONNECTION_TIMEOUT_MS:-15000}
       # Migrations are the API container's job; two processes racing
       # `migrate deploy` on start would deadlock on the advisory lock.
       RUN_MIGRATIONS: "false"

@@ -78,8 +78,45 @@ export const envSchema = z
     SMTP_PASSWORD: optionalString,
     SMTP_SECURE: booleanFlag(false),
     SMTP_FROM: z.string().min(1).default('CoreTask <no-reply@coretask.local>'),
+
+    /*
+     * Microsoft Graph, used in preference to SMTP when all four values are set.
+     * Client-credentials flow against an app registration holding the
+     * application permission `Mail.Send`; mail is sent as MAIL_FROM_ADDRESS,
+     * which must be a real mailbox in the tenant.
+     */
+    MICROSOFT_GRAPH_TENANT_ID: optionalString,
+    MICROSOFT_GRAPH_CLIENT_ID: optionalString,
+    MICROSOFT_GRAPH_CLIENT_SECRET: optionalString,
+    MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
+    MAIL_FROM_ADDRESS: optionalString,
+    MAIL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
   })
   .superRefine((env, ctx) => {
+    /*
+     * All or nothing, in every environment. A half-configured Graph would fall
+     * back to the log transport and look like it was working — nobody notices
+     * invitations are not being delivered until someone complains they never
+     * got one. Failing at boot is the only honest outcome.
+     */
+    const graphKeys = [
+      'MICROSOFT_GRAPH_TENANT_ID',
+      'MICROSOFT_GRAPH_CLIENT_ID',
+      'MICROSOFT_GRAPH_CLIENT_SECRET',
+      'MAIL_FROM_ADDRESS',
+    ] as const;
+    const provided = graphKeys.filter((key) => env[key]);
+
+    if (provided.length > 0 && provided.length < graphKeys.length) {
+      for (const key of graphKeys.filter((candidate) => !env[candidate])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Required when any other Microsoft Graph mail setting is present.',
+        });
+      }
+    }
+
     if (env.NODE_ENV !== 'production') return;
 
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {

@@ -111,6 +111,45 @@ endpoint cannot be used to probe for which links once existed. Accepting writes
 the membership and marks the invitation used in one transaction, so a crash
 cannot leave a consumed token that granted nothing.
 
+### Outbound e-mail
+
+Three transports, chosen in this order by `EmailService`:
+
+1. **Microsoft Graph**, when the `MICROSOFT_GRAPH_*` block is configured
+2. **SMTP**, when `SMTP_HOST` is set
+3. The **log transport**, which writes the rendered message out
+
+Graph wins over SMTP deliberately. It is the explicitly-credentialed choice,
+whereas SMTP settings are easy to leave pointing at a local catcher by accident.
+The log transport is not a stub: it keeps local development free of a mail
+container while still exercising the whole
+queue → processor → template → integration path, so the only untested link is
+the socket.
+
+The Graph transport is written against `fetch` rather than
+`@microsoft/microsoft-graph-client` plus MSAL. It needs exactly two calls —
+fetch a token, post a message — and two SDKs to make them would be more surface
+area than the code they replace. It uses the client-credentials flow, so the app
+registration needs the **application** permission `Mail.Send` with admin consent;
+the delegated permission of the same name cannot work, because a queue worker has
+no signed-in user.
+
+Three details are load-bearing:
+
+- **Partial configuration fails at boot.** If any `MICROSOFT_GRAPH_*` value is
+  present, all of them must be. A half-configured Graph would silently fall back
+  to the log transport and look like it was delivering mail — nobody notices
+  until someone says they never got an invitation.
+- **`MICROSOFT_GRAPH_BASE_URL` is normalised.** Both `https://graph.microsoft.com`
+  and `.../v1.0` appear in Microsoft's own documentation, and picking the wrong
+  one is a 404 at the first send rather than anything visible at startup.
+- **Every request has a timeout.** `fetch` has none of its own, and a send that
+  hangs would occupy a BullMQ worker slot until the process restarts.
+
+A 401 discards the cached token, so a rejected credential is not replayed on the
+next attempt. Sending happens on the queue, so a transient Graph failure is
+retried by BullMQ rather than failing the HTTP request that triggered it.
+
 ### Teams
 
 A team groups people; it does not authorise them. `WorkspaceMember.role` still
