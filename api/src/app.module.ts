@@ -17,9 +17,11 @@ import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
+import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ProjectViewsModule } from './modules/project-views/project-views.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { SectionsModule } from './modules/sections/sections.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -73,6 +75,8 @@ import { WebsocketModule } from './websocket/websocket.module';
     InvitationsModule,
     TeamsModule,
     ProjectsModule,
+    ProjectViewsModule,
+    CustomFieldsModule,
     SectionsModule,
     TasksModule,
     TicketsModule,
