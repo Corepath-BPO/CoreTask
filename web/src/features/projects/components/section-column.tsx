@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TaskCard } from '@/features/tasks/components/task-card';
 import { TaskComposer } from '@/features/tasks/components/task-composer';
+import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
 import { cn } from '@/lib/utils';
 
 /**
@@ -102,6 +103,14 @@ export function SectionColumn({
       )}
     >
       <header className="flex items-center gap-1 border-b px-3 py-2.5">
+        {/* What runs when a task lands here. Placed in the header because that
+            is where someone asks the question. */}
+        <SectionAutomationPopover
+          projectId={section.projectId}
+          sectionId={section.id}
+          sectionName={section.name}
+        />
+
         {canEdit && (
           <button
             type="button"

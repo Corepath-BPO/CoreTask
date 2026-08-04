@@ -11,6 +11,7 @@ import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
+import { AutomationsPage } from '@/features/automations/pages/automations-page';
 import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectListPage } from '@/features/projects/pages/project-list-page';
@@ -237,8 +238,21 @@ const projectOverviewRoute = createRoute({
 });
 
 /** Tabs whose implementation lands in a later milestone. */
+const projectAutomationsRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/automations',
+  component: AutomationsPage,
+  // `sectionId` arrives from a section's lightning popover so the builder opens
+  // already scoped, rather than asking again for what the click already said.
+  validateSearch: (search: Record<string, unknown>): { sectionId?: string; new?: boolean } => ({
+    ...(typeof search['sectionId'] === 'string' && UUID_PATTERN.test(search['sectionId'])
+      ? { sectionId: search['sectionId'] }
+      : {}),
+    ...(search['new'] === true || search['new'] === 'true' ? { new: true } : {}),
+  }),
+});
+
 const projectPlaceholderRoutes = [
-  { segment: 'automations', title: 'Automations', plannedFor: 'Rule builder and execution history.' },
   { segment: 'activity', title: 'Activity', plannedFor: 'This project’s slice of the activity feed.' },
   { segment: 'settings', title: 'Settings', plannedFor: 'Statuses, fields and project preferences.' },
 ].map((tab) =>
@@ -307,6 +321,7 @@ const routeTree = rootRoute.addChildren([
       projectOverviewRoute,
       projectListRoute,
       projectBoardRoute,
+      projectAutomationsRoute,
       ...projectPlaceholderRoutes,
     ]),
     myTasksRoute,

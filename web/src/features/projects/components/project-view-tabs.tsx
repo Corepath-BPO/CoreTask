@@ -24,7 +24,7 @@ const TABS: ProjectTab[] = [
   { label: 'Overview', segment: 'overview', icon: LayoutDashboard },
   { label: 'List', segment: 'list', icon: List },
   { label: 'Board', segment: 'board', icon: SquareKanban },
-  { label: 'Automations', segment: 'automations', icon: Zap, comingSoon: true },
+  { label: 'Automations', segment: 'automations', icon: Zap },
   { label: 'Activity', segment: 'activity', icon: Activity, comingSoon: true },
   { label: 'Settings', segment: 'settings', icon: Settings, comingSoon: true },
 ];

@@ -71,11 +71,16 @@ test.describe('project views', () => {
     await expect(menu.getByRole('menuitem', { name: 'Section' })).toBeVisible();
   });
 
+  /**
+   * Activity, not Automations — Automations became real in milestone 7, and a
+   * test asserting it is still a placeholder would pass only for as long as
+   * nobody built it.
+   */
   test('unbuilt tabs say so rather than faking a screen', async ({ page }) => {
     await openProject(page);
-    await page.getByRole('tab', { name: /automations/i }).click();
+    await page.getByRole('tab', { name: /activity/i }).click();
 
-    await expect(page).toHaveURL(/\/automations$/);
+    await expect(page).toHaveURL(/\/activity$/);
     await expect(page.getByText(/not built yet/i)).toBeVisible();
   });
 });
