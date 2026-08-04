@@ -387,7 +387,9 @@ export class TicketsService {
       body: ticket.title,
       entity: ActivityEntity.TICKET,
       entityId: ticket.id,
-      actionUrl: `/tickets/${ticket.key}`,
+      // Query param rather than a path segment: there is no ticket detail
+      // route, the queue page opens the dialog from this instead.
+      actionUrl: `/tickets?ticket=${ticket.key}`,
     });
   }
 }

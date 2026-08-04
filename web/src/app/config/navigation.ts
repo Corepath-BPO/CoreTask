@@ -16,7 +16,13 @@ export interface NavItem {
   label: string;
   to: string;
   icon: LucideIcon;
-  /** Rendered as a "Soon" chip; the route resolves to a placeholder page. */
+  /**
+   * Rendered as a "Soon" chip. Must agree with the router: the route for a
+   * `comingSoon` item resolves to a placeholder, and one without it must
+   * resolve to a real page. `navigation.test.ts` asserts the two stay in step,
+   * because they drifted once already — Teams and Inbox both shipped while the
+   * sidebar went on advertising them as unbuilt.
+   */
   comingSoon?: boolean;
 }
 
@@ -36,7 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Home', to: '/', icon: Home },
       { label: 'My Tasks', to: '/my-tasks', icon: CircleCheckBig },
-      { label: 'Inbox', to: '/inbox', icon: Inbox, comingSoon: true },
+      { label: 'Inbox', to: '/inbox', icon: Inbox },
     ],
   },
   {
@@ -46,7 +52,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Projects', to: '/projects', icon: FolderKanban },
       { label: 'Tickets', to: '/tickets', icon: Ticket },
       { label: 'Members', to: '/members', icon: Users },
-      { label: 'Teams', to: '/teams', icon: UsersRound, comingSoon: true },
+      { label: 'Teams', to: '/teams', icon: UsersRound },
     ],
   },
   {

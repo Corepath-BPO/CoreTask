@@ -8,6 +8,7 @@ import {
 } from '@coretask/contracts';
 import type { Ticket } from '@coretask/types';
 import { Plus, Search, Ticket as TicketIcon } from 'lucide-react';
+import { useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -49,6 +50,9 @@ import {
 
 const PAGE_SIZE = 25;
 
+/** Human ticket key, e.g. `CORE-1001`. */
+const TICKET_KEY_PATTERN = /^[A-Z]{2,8}-\d+$/i;
+
 export function TicketsPage() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
   const workspaceId = workspace?.id;
@@ -60,7 +64,28 @@ export function TicketsPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [openTicket, setOpenTicket] = useState<string | null>(null);
+  /*
+   * Notifications and shared links arrive as `/tickets?ticket=CORE-1001`. The
+   * detail dialog already accepts a key as well as an id, so the human key goes
+   * straight through.
+   *
+   * Validated here rather than trusting the route's `validateSearch`, because
+   * `useSearch({ strict: false })` returns the raw parameters — junk would
+   * otherwise open a dialog that can only report "not found".
+   */
+  const routeSearch: Partial<{ ticket: string }> = useSearch({ strict: false });
+  const linkedTicket =
+    routeSearch.ticket && TICKET_KEY_PATTERN.test(routeSearch.ticket)
+      ? routeSearch.ticket
+      : null;
+
+  /*
+   * Seeded from the link rather than synchronised with it. Arriving on a deep
+   * link is an entry condition, not an ongoing relationship: syncing it in an
+   * effect would reopen the dialog every time the user closed it, and would
+   * make closing require a navigation.
+   */
+  const [openTicket, setOpenTicket] = useState<string | null>(linkedTicket);
   const [reporting, setReporting] = useState(false);
 
   useEffect(() => {

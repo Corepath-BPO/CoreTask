@@ -121,12 +121,24 @@ const myTasksRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/my-tasks',
   component: MyTasksPage,
+  // Notifications link here with `?task=`, so the entry opens the thing it is
+  // about rather than dropping the reader on a list to find it themselves.
+  validateSearch: (search: Record<string, unknown>): { task?: string } => {
+    const task = search['task'];
+    return typeof task === 'string' && UUID_PATTERN.test(task) ? { task } : {};
+  },
 });
 
 const ticketsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/tickets',
   component: TicketsPage,
+  // Same as My Tasks, but keyed by the human ticket key — that is what appears
+  // in the notification and what somebody would paste to a colleague.
+  validateSearch: (search: Record<string, unknown>): { ticket?: string } => {
+    const ticket = search['ticket'];
+    return typeof ticket === 'string' && /^[A-Z]{2,8}-\d+$/i.test(ticket) ? { ticket } : {};
+  },
 });
 
 const inboxRoute = createRoute({

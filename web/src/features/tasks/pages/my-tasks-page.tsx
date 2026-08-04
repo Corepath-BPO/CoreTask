@@ -1,6 +1,7 @@
 import { TASK_PRIORITIES, TASK_STATUSES, TaskStatus, WorkspaceRole } from '@coretask/contracts';
 import type { Task } from '@coretask/types';
 import { CircleCheckBig, Search } from 'lucide-react';
+import { useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -28,6 +29,9 @@ import { useTasks } from '../hooks/use-tasks';
 
 const ALL = '__all__';
 const OPEN_ONLY = '__open__';
+/** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const PAGE_SIZE = 25;
 
 export function MyTasksPage() {
@@ -40,7 +44,19 @@ export function MyTasksPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  /*
+   * Notifications link here as `/my-tasks?task=<id>`. Without this the link
+   * lands on a list and leaves the reader to find the task it was about, which
+   * is most of the notification's value gone.
+   *
+   * Seeded into state rather than synchronised with the URL: arriving on a deep
+   * link is an entry condition, not an ongoing relationship. An effect that kept
+   * them in step would reopen the dialog every time the user closed it.
+   */
+  const routeSearch: Partial<{ task: string }> = useSearch({ strict: false });
+  const linkedTask = routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
+
+  const [openTaskId, setOpenTaskId] = useState<string | null>(linkedTask);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
