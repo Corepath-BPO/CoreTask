@@ -61,8 +61,11 @@ test.describe('members', () => {
 
   /** The picker must not offer a role the API would refuse. */
   test('never offers Owner as an invitable role', async ({ page }) => {
+    const dialog = page.getByRole('dialog');
+
     await page.getByRole('button', { name: /^invite$/i }).click();
-    await page.getByLabel(/role/i).click();
+    // Scoped to the dialog: member rows carry their own "Role for …" pickers.
+    await dialog.getByLabel(/role/i).click();
 
     await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Owner' })).toHaveCount(0);
