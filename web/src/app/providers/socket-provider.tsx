@@ -58,10 +58,39 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['notifications'] });
     };
 
+    /*
+     * Any task change refreshes every representation of it.
+     *
+     * The Board and the List read the same tasks through different queries, so
+     * moving a card on one left the other showing the old arrangement until
+     * something else happened to refetch. Automations make that worse: a rule
+     * reassigns a task seconds after the move, and nothing on screen knows.
+     *
+     * Both prefixes are invalidated because the two views do not share a key —
+     * `tasks` backs the board, `project-views` backs the list. Only active
+     * queries refetch, so whichever view is closed costs nothing.
+     */
+    const onTaskChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['project-views'] });
+      // A move or a status change alters the project's completed count, which
+      // the header and Overview both show.
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    };
+
+    const TASK_EVENTS = [
+      ServerEvent.TASK_CREATED,
+      ServerEvent.TASK_UPDATED,
+      ServerEvent.TASK_MOVED,
+      ServerEvent.TASK_ARCHIVED,
+    ];
+
     socket.on(ServerEvent.NOTIFICATION_CREATED, onNotification);
+    for (const event of TASK_EVENTS) socket.on(event, onTaskChanged);
 
     return () => {
       socket.off(ServerEvent.NOTIFICATION_CREATED, onNotification);
+      for (const event of TASK_EVENTS) socket.off(event, onTaskChanged);
     };
   }, [isAuthenticated]);
 

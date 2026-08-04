@@ -1,4 +1,6 @@
 import {
+  ActivityAction,
+  ActivityEntity,
   AutomationAction,
   AutomationExecutionStatus,
   AutomationNodeType,
@@ -116,7 +118,7 @@ export class AutomationRunnerService {
   }
 
   private async runRule(
-    rule: { id: string; workspaceId: string; projectId: string; nodes: AutomationNode[] },
+    rule: { id: string; name: string; workspaceId: string; projectId: string; nodes: AutomationNode[] },
     event: AutomationEvent,
   ): Promise<boolean> {
     const started = Date.now();
@@ -203,6 +205,38 @@ export class AutomationRunnerService {
 
     await this.finish(execution.id, status, started, {});
     await this.bumpRule(rule.id, status, failures > 0);
+
+    /*
+     * The activity feed has to say a rule did this.
+     *
+     * Otherwise a task changes assignee with nothing in its history explaining
+     * why, and the only honest reading is that a colleague did it. Naming the
+     * rule is what makes an automated change accountable rather than spooky.
+     *
+     * Written after the actions rather than per action: the feed is a summary
+     * for people, and the per-action detail already lives in the execution log
+     * for anyone debugging.
+     */
+    if (actions.length > failures) {
+      await this.prisma.activityLog.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          // Attributed to whoever caused the trigger, because the change is a
+          // consequence of what they did. The summary says a rule performed it.
+          actorId: event.actorId ?? null,
+          action: ActivityAction.UPDATED,
+          entity: ActivityEntity.TASK,
+          entityId: task.id,
+          summary: `Automation "${rule.name}" updated "${task.title}"`,
+          metadata: {
+            ruleId: rule.id,
+            executionId: execution.id,
+            actions: actions.length,
+            failures,
+          },
+        },
+      });
+    }
 
     return true;
   }
