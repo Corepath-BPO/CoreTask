@@ -10,6 +10,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Task as PrismaTask } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import {
+  compileFilters,
+  compileSorts,
+  type CustomFieldMap,
+} from '../project-views/lib/query-compiler';
 import { PaginatedResult } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
 import { planPlacement, type OrderedItem } from '../../common/utils/position.util';
@@ -26,6 +31,18 @@ import {
   toTaskDto,
   type TaskWithRelations,
 } from './task.mapper';
+
+/**
+ * What a view asks for. Declared here rather than imported from the controller,
+ * so the read path does not depend on the shape of an HTTP request.
+ */
+export interface ViewQuery {
+  page: number;
+  limit: number;
+  search?: string;
+  filters?: { field: string; operator: never; value?: never }[];
+  sorts?: { field: string; direction: never }[];
+}
 
 @Injectable()
 export class TasksService {
@@ -53,6 +70,60 @@ export class TasksService {
         // Board order first (section, then position); createdAt breaks ties so
         // paging stays stable if two positions ever collide.
         orderBy: [{ sectionId: 'asc' }, { position: 'asc' }, { createdAt: 'asc' }],
+        ...toSkipTake(query),
+      }),
+    ]);
+
+    const [summary, completed] = await Promise.all([
+      this.summarize(where, total),
+      this.completedSubtaskCounts(tasks.map((task) => task.id)),
+    ]);
+
+    return new PaginatedResult(
+      tasks.map((task) => toTaskDto(task, completed.get(task.id) ?? 0)),
+      { ...buildPaginationMeta(query, total), summary },
+    );
+  }
+
+  /**
+   * The task list behind a project view: filtered, sorted and grouped.
+   *
+   * Lives here rather than in the views module so there is exactly one task
+   * read path — the same include, the same DTO, the same subtask counts. A view
+   * decides *which* tasks and in *what order*; it does not get its own idea of
+   * what a task is.
+   *
+   * Filtering happens in PostgreSQL, never in the client. A project with ten
+   * thousand tasks must not ship all of them so the browser can hide most.
+   */
+  async listForView(
+    workspaceId: string,
+    projectId: string,
+    query: ViewQuery,
+    customFields: CustomFieldMap,
+  ): Promise<PaginatedResult<Task, TaskListMeta>> {
+    const conditions = compileFilters(query.filters ?? [], customFields);
+
+    const where: Prisma.TaskWhereInput = {
+      workspaceId,
+      projectId,
+      archivedAt: null,
+      // Subtasks belong under their parent, not as sibling rows in a list.
+      parentTaskId: null,
+      ...(query.search
+        ? { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }
+        : {}),
+      // AND rather than spreading: two conditions on the same field would
+      // otherwise overwrite each other and silently drop a filter.
+      ...(conditions.length > 0 ? { AND: conditions } : {}),
+    };
+
+    const [total, tasks] = await Promise.all([
+      this.prisma.task.count({ where }),
+      this.prisma.task.findMany({
+        where,
+        include: taskInclude,
+        orderBy: compileSorts(query.sorts ?? []),
         ...toSkipTake(query),
       }),
     ]);

@@ -18,6 +18,7 @@ import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
+import { DefinitionsModule } from './modules/definitions/definitions.module';
 import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -77,6 +78,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     ProjectsModule,
     ProjectViewsModule,
     CustomFieldsModule,
+    DefinitionsModule,
     SectionsModule,
     TasksModule,
     TicketsModule,
