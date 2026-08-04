@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { BarChart3, CalendarDays, Inbox, Settings } from 'lucide-react';
+import { BarChart3, CalendarDays, Settings } from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -8,6 +8,7 @@ import { PlaceholderPage } from '@/components/common/placeholder-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
+import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
@@ -128,6 +129,12 @@ const ticketsRoute = createRoute({
   component: TicketsPage,
 });
 
+const inboxRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/inbox',
+  component: InboxPage,
+});
+
 const membersRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/members',
@@ -168,13 +175,6 @@ const projectDetailRoute = createRoute({
 
 /** Sidebar destinations whose API arrives in the next phase. */
 const placeholders = [
-  {
-    path: '/inbox',
-    title: 'Inbox',
-    description: 'Mentions, assignments and comment replies.',
-    icon: Inbox,
-    plannedFor: 'Notification centre backed by the notifications module and Socket.IO.',
-  },
   {
     path: '/calendar',
     title: 'Calendar',
@@ -222,6 +222,7 @@ const routeTree = rootRoute.addChildren([
     projectDetailRoute,
     myTasksRoute,
     ticketsRoute,
+    inboxRoute,
     membersRoute,
     teamsRoute,
     ...placeholderRoutes,

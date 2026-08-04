@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { getAccessToken } from '@/lib/api/client';
+import { queryClient } from '@/lib/api/query-client';
 import {
   connectSocket,
   disconnectSocket,
@@ -39,6 +40,22 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     const onNotification = (payload: NotificationPayload) => {
       toast(payload.title, { description: payload.body ?? undefined });
+
+      /*
+       * A toast is not the inbox. Without this the bell badge and an open Inbox
+       * page keep showing the count from the last fetch, and the notification
+       * that just arrived is nowhere except a toast that disappears.
+       *
+       * Invalidated by the bare prefix, which covers every workspace's key and
+       * both the dropdown's and the inbox's. That is not as broad as it looks:
+       * TanStack refetches only *active* queries, so this touches what is on
+       * screen and nothing else.
+       *
+       * Safe against the refetch loop that caused the earlier 429 storm,
+       * because this fires on a socket event rather than on render — no amount
+       * of re-rendering can trigger it.
+       */
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] });
     };
 
     socket.on(ServerEvent.NOTIFICATION_CREATED, onNotification);

@@ -32,5 +32,14 @@ export interface NotificationEntry {
 
 export interface NotificationFeed {
   items: NotificationEntry[];
+  /** Counts the whole workspace, not the returned page — it drives the badge. */
   unreadCount: number;
+  /**
+   * Pass back as `cursor` for the next page; null when there is nothing more.
+   *
+   * A cursor rather than a page number because the inbox grows at the top: with
+   * offsets, one notification arriving between requests shifts everything down
+   * and the reader sees an entry twice.
+   */
+  nextCursor: string | null;
 }

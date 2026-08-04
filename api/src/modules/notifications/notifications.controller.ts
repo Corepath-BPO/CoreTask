@@ -46,7 +46,8 @@ export class NotificationsController {
   @Get()
   @ApiOperation({
     summary: 'The caller’s notifications for this workspace',
-    description: 'Newest first. `unreadCount` covers the workspace, not just the returned page.',
+    description:
+      'Newest first, cursor-paged. Filterable by read state and type. `unreadCount` covers the whole workspace, not just the returned page.',
   })
   @ApiEnvelopeResponse(NotificationFeedDto)
   list(
@@ -54,7 +55,28 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
     @Query() query: NotificationQueryDto,
   ): Promise<NotificationFeed> {
-    return this.notifications.feed(userId, workspaceId, query.limit);
+    return this.notifications.feed(userId, workspaceId, {
+      limit: query.limit,
+      ...(query.unreadOnly === undefined ? {} : { unreadOnly: query.unreadOnly }),
+      ...(query.types ? { types: query.types } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
+    });
+  }
+
+  @Post(':notificationId/unread')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Put one notification back in the unread pile',
+    description: 'Undo for a misclick, or a way to leave something for later.',
+  })
+  @ApiParam({ name: 'notificationId', format: 'uuid' })
+  @ApiEnvelopeResponse(MarkNotificationsReadResultDto)
+  markUnread(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('notificationId', ParseUUIDPipe) notificationId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    return this.notifications.markUnread(userId, workspaceId, notificationId);
   }
 
   @Post('read')

@@ -3,10 +3,21 @@ import {
   NOTIFICATION_FEED_LIMIT,
   NOTIFICATION_FEED_MAX_LIMIT,
   NOTIFICATION_TYPES,
+  NotificationType,
 } from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class NotificationQueryDto {
   @ApiPropertyOptional({
@@ -20,6 +31,40 @@ export class NotificationQueryDto {
   @Min(1)
   @Max(NOTIFICATION_FEED_MAX_LIMIT)
   limit: number = NOTIFICATION_FEED_LIMIT;
+
+  @ApiPropertyOptional({
+    description: 'Only entries that have not been read.',
+    example: true,
+  })
+  @IsOptional()
+  // A query string carries strings, so `?unreadOnly=false` would otherwise be
+  // the truthy string "false" and quietly invert the filter.
+  @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
+  @IsBoolean()
+  unreadOnly?: boolean;
+
+  @ApiPropertyOptional({
+    isArray: true,
+    enum: NOTIFICATION_TYPES,
+    description: 'Repeatable. Omit for every type.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    // `?type=A` arrives as a string and `?type=A&type=B` as an array; the
+    // handler should not have to care which.
+    typeof value === 'string' ? [value] : value,
+  )
+  @IsArray()
+  @IsEnum(NotificationType, { each: true })
+  types?: NotificationType[];
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'The `nextCursor` from the previous page.',
+  })
+  @IsOptional()
+  @IsUUID()
+  cursor?: string;
 }
 
 export class MarkNotificationsReadDto {

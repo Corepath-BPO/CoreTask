@@ -89,6 +89,11 @@ export async function renderWithRouter(
     path: '/projects/$projectId',
     component: () => <div>project detail</div>,
   });
+  const inboxRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/inbox',
+    component,
+  });
   // Signup and sign-in both navigate here when they arrive from an invitation.
   // Without the route the navigation silently does nothing, which would hide
   // exactly the bug worth testing for.
@@ -105,6 +110,7 @@ export async function renderWithRouter(
       projectsRoute,
       projectDetailRoute,
       acceptInvitationRoute,
+      inboxRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });

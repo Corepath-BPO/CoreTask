@@ -441,3 +441,39 @@ second S3 client, pointed at the address the client will actually connect to,
 does the signing. Against real S3 the two addresses are the same and the second
 client is never created. The e2e suite overrides it back to the internal name,
 because there the test process *is* the browser.
+
+## The inbox
+
+Notifications were written before there was anywhere to read them: the module
+recorded and dispatched, and the only surface was a bell dropdown holding eight
+entries. The feed took a limit and nothing else, which is right for a dropdown
+and not enough for a page.
+
+Reading is scoped by the caller's id as well as the workspace, and the route
+carries no user id to tamper with. Membership of a workspace is never enough to
+read another member's inbox; the same scoping makes marking someone else's
+notification read a no-op that changes nothing rather than an error that reveals
+the entry exists.
+
+Paging is by cursor, not offset. The inbox grows at the top, so with an offset
+one notification arriving between requests shifts every row down and the reader
+sees an entry twice. The cursor is the row id rather than `createdAt`: ids are
+UUID v7 so they sort identically, and unlike a timestamp they are unique — two
+notifications written in the same millisecond would otherwise make the cursor
+ambiguous.
+
+`unreadCount` counts the whole workspace on every page and ignores the filters.
+It drives a badge, and a badge that changed when you switched tabs would be
+describing the tab rather than the inbox.
+
+`unreadOnly` is transformed explicitly rather than cast. A query string carries
+strings, so `?unreadOnly=false` is the truthy string `"false"`, and a naive cast
+inverts the filter: the "All" tab silently shows only unread. There is a test
+for exactly that.
+
+Live updates come from the existing gateway. `NotificationDispatcher` already
+emitted to the recipient's own socket room, and the client already listened —
+but only to raise a toast, so the bell and an open inbox kept showing the last
+fetched count. The listener now also invalidates the notification queries.
+Invalidating on a socket event cannot loop the way a render-driven refetch can,
+which is what caused the earlier 429 storm.

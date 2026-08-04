@@ -146,6 +146,8 @@ export const ApiRoutes = {
   notifications: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/notifications`,
     markRead: (workspaceId: string) => `/workspaces/${workspaceId}/notifications/read`,
+    markUnread: (workspaceId: string, notificationId: string) =>
+      `/workspaces/${workspaceId}/notifications/${notificationId}/unread`,
   },
   sections: {
     list: (workspaceId: string, projectId: string) =>

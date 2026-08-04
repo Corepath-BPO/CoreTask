@@ -49,20 +49,38 @@ export class NotificationsService {
   async feed(
     userId: string,
     workspaceId: string,
-    limit = NOTIFICATION_FEED_LIMIT,
+    options: FeedOptions = {},
   ): Promise<NotificationFeed> {
-    const where = { userId, workspaceId };
+    const limit = options.limit ?? NOTIFICATION_FEED_LIMIT;
 
-    const [items, unreadCount] = await Promise.all([
+    // Scoped by `userId` before anything else. An inbox is one person's, and
+    // membership of the workspace must never be enough to read someone else's.
+    const where = {
+      userId,
+      workspaceId,
+      ...(options.unreadOnly ? { readAt: null } : {}),
+      ...(options.types?.length ? { type: { in: options.types } } : {}),
+    };
+
+    const [rows, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
+        // Ordered by id, not createdAt: ids are UUID v7 so they sort the same
+        // way, and unlike a timestamp they are unique — two notifications
+        // written in the same millisecond would otherwise make the cursor
+        // ambiguous and skip or repeat one.
+        orderBy: { id: 'desc' },
+        ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+        // One extra row answers "is there more?" without a second count.
+        take: limit + 1,
       }),
-      this.prisma.notification.count({ where: { ...where, readAt: null } }),
+      this.prisma.notification.count({ where: { userId, workspaceId, readAt: null } }),
     ]);
 
-    return { items: items.map(toNotificationEntry), unreadCount };
+    const items = rows.slice(0, limit);
+    const nextCursor = rows.length > limit ? (items.at(-1)?.id ?? null) : null;
+
+    return { items: items.map(toNotificationEntry), unreadCount, nextCursor };
   }
 
   /**
@@ -84,12 +102,40 @@ export class NotificationsService {
       data: { readAt: new Date() },
     });
 
-    const unreadCount = await this.prisma.notification.count({
-      where: { userId, workspaceId, readAt: null },
+    return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
+  }
+
+  /**
+   * Puts one notification back in the unread pile.
+   *
+   * Undo for a misclick, and a way to leave something for later. Deliberately
+   * one at a time: "mark everything unread" has no honest use, and would let a
+   * misplaced click resurrect an inbox somebody had finished with.
+   */
+  async markUnread(
+    userId: string,
+    workspaceId: string,
+    notificationId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { id: notificationId, userId, workspaceId, readAt: { not: null } },
+      data: { readAt: null },
     });
 
-    return { updated: count, unreadCount };
+    return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
   }
+
+  private countUnread(userId: string, workspaceId: string): Promise<number> {
+    return this.prisma.notification.count({ where: { userId, workspaceId, readAt: null } });
+  }
+}
+
+/** Filters and paging for one page of the inbox. */
+export interface FeedOptions {
+  limit?: number;
+  unreadOnly?: boolean;
+  types?: NotificationType[];
+  cursor?: string;
 }
 
 function toNotificationEntry(notification: Notification): NotificationEntry {
