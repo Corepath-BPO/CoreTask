@@ -106,7 +106,10 @@ export function AcceptInvitationPage({ token }: { token: string }) {
                   </Link>
                 </Button>
                 <Button asChild variant="outline">
-                  <Link to="/register" search={{ redirect: redirectTo }}>
+                  {/* The address goes with them: an invitation can only be
+                      accepted by the account it was sent to, so signing up with
+                      a different one produces an account that cannot accept it. */}
+                  <Link to="/register" search={{ redirect: redirectTo, email: invitation.email }}>
                     Create an account
                   </Link>
                 </Button>

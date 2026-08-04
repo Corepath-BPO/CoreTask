@@ -63,7 +63,13 @@ export async function renderWithRouter(
   const registerRoute = createRoute({
     getParentRoute: () => guestRoute,
     path: '/register',
-    component: () => <div>register</div>,
+    component,
+    // Mirrors the real route. `email` carries the invited address so signup can
+    // prefill it; `redirect` brings the new account back to the invitation.
+    validateSearch: (search: Record<string, unknown>): { redirect?: string; email?: string } => ({
+      ...(typeof search['redirect'] === 'string' ? { redirect: search['redirect'] } : {}),
+      ...(typeof search['email'] === 'string' ? { email: search['email'] } : {}),
+    }),
   });
 
   // Stubs for routes that rendered components link to. `Link` resolves its href
@@ -83,6 +89,14 @@ export async function renderWithRouter(
     path: '/projects/$projectId',
     component: () => <div>project detail</div>,
   });
+  // Signup and sign-in both navigate here when they arrive from an invitation.
+  // Without the route the navigation silently does nothing, which would hide
+  // exactly the bug worth testing for.
+  const acceptInvitationRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/invitations/$token',
+    component: () => <div>accept invitation</div>,
+  });
 
   const router = createRouter({
     routeTree: rootRoute.addChildren([
@@ -90,6 +104,7 @@ export async function renderWithRouter(
       guestRoute.addChildren([loginRoute, registerRoute]),
       projectsRoute,
       projectDetailRoute,
+      acceptInvitationRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });

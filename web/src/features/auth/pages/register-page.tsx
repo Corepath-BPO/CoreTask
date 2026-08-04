@@ -1,7 +1,7 @@
 import { PASSWORD_MIN_LENGTH } from '@coretask/contracts';
 import { registerFormSchema, type RegisterFormInput } from '@coretask/validation';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 
 import { FormError } from '@/components/feedback/form-error';
@@ -18,13 +18,31 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const { register: registerUser } = useAuth();
 
+  /*
+   * Both of these arrive when someone reaches signup from an invitation.
+   *
+   * `redirect` takes them back to the invitation once the account exists —
+   * without it they finish on the dashboard and the invitation is silently
+   * abandoned. `email` prefills the invited address, because an invitation can
+   * only be accepted by the account it was addressed to, so registering a
+   * different one strands them with an account they cannot use to accept.
+   */
+  const search: Partial<{ redirect: string; email: string }> = useSearch({ strict: false });
+  const invitedEmail = search.email ?? '';
+
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormInput>({
     resolver: zodResolver(registerFormSchema),
-    defaultValues: { name: '', email: '', password: '', confirmPassword: '', acceptTerms: false },
+    defaultValues: {
+      name: '',
+      email: invitedEmail,
+      password: '',
+      confirmPassword: '',
+      acceptTerms: false,
+    },
     mode: 'onSubmit',
   });
 
@@ -34,7 +52,7 @@ export function RegisterPage() {
       email: values.email,
       password: values.password,
     });
-    await navigate({ to: '/', replace: true });
+    await navigate({ to: search.redirect ?? '/', replace: true });
   });
 
   const submitError =

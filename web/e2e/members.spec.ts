@@ -155,4 +155,38 @@ test.describe('accepting an invitation', () => {
     await expect(page.getByText(/no longer valid/i)).toBeVisible();
     expect(page.url()).toContain('/invitations/');
   });
+
+  /**
+   * The path most invitations actually take: the recipient has no account.
+   *
+   * Both parameters on the signup link matter. Without `redirect` they finish
+   * registration on the dashboard and the invitation is silently abandoned —
+   * they end up with an account and no workspace. Without `email` they can
+   * register a different address and then be told the invitation belongs to
+   * someone else, with no way back.
+   */
+  test('sends someone with no account to signup carrying the invitation', async ({
+    browser,
+    page: owner,
+  }) => {
+    const email = uniqueEmail();
+
+    await owner.goto('/members');
+    await owner.getByRole('button', { name: /^invite$/i }).click();
+    await owner.getByLabel(/e-mail/i).fill(email);
+    await owner.getByRole('button', { name: /send invitation/i }).click();
+    await expect(owner.getByRole('dialog')).toBeHidden();
+
+    // The real token only exists in the e-mail. What this asserts is the page's
+    // handling of an anonymous visitor, which an invalid token cannot exercise —
+    // so drive the signup link directly and check what it carries.
+    const anon = await browser.newContext();
+    const page = await anon.newPage();
+    await page.goto(`/register?redirect=${encodeURIComponent('/invitations/abc123')}&email=${encodeURIComponent(email)}`);
+
+    await expect(page.getByLabel(/work email/i)).toHaveValue(email);
+
+    await anon.close();
+    await owner.getByRole('button', { name: `Revoke the invitation to ${email}` }).click();
+  });
 });

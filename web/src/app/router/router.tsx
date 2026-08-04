@@ -62,8 +62,16 @@ const registerRoute = createRoute({
   path: '/register',
   component: RegisterPage,
   // Shares the login rule so an invitation can send someone straight to signup
-  // and still land them back on the invitation afterwards.
-  validateSearch: validateRedirect,
+  // and still land them back on the invitation afterwards. `email` additionally
+  // carries the invited address, because an invitation can only be accepted by
+  // the account it was addressed to — registering a different one is a dead end.
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; email?: string } => {
+    const email = search['email'];
+    return {
+      ...validateRedirect(search),
+      ...(typeof email === 'string' && email.includes('@') ? { email } : {}),
+    };
+  },
 });
 
 /**
