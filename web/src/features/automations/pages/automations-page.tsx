@@ -5,8 +5,8 @@ import {
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
-import { useParams } from '@tanstack/react-router';
-import { Copy, MoreHorizontal, Pause, Play, Trash2, Upload, Zap } from 'lucide-react';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { Copy, MoreHorizontal, Pause, Play, Plus, Trash2, Upload, Zap } from 'lucide-react';
 import { useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
@@ -30,12 +30,16 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
+import { useFieldMetadata } from '@/features/projects/hooks/use-project-views';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { formatRelativeTime } from '@/lib/utils';
+import { toast } from 'sonner';
 
 import type { AutomationRule } from '../api/automations.api';
+import { RuleBuilder, type RuleDraft } from '../components/rule-builder';
 import {
   useAutomations,
+  useCreateRule,
   useDuplicateRule,
   useEnableRule,
   usePauseRule,
@@ -66,6 +70,63 @@ export function AutomationsPage() {
 
   const [pendingRemove, setPendingRemove] = useState<AutomationRule | null>(null);
 
+  /*
+   * The builder is a mode of this route, not a separate page.
+   *
+   * `?new=true` opens it, and `?sectionId=` prefills the trigger — which is
+   * what makes the section popover's "Add rule" arrive already scoped instead
+   * of asking again for what the click already said.
+   */
+  const search: Partial<{ sectionId: string; new: boolean }> = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const { data: metadata } = useFieldMetadata(workspaceId, projectId);
+  const createRule = useCreateRule(workspaceId, projectId);
+
+  const [draft, setDraft] = useState<RuleDraft>(() => ({
+    name: '',
+    triggerType: search.sectionId ? 'TASK_MOVED_TO_SECTION' : '',
+    triggerConfig: search.sectionId ? { sectionId: search.sectionId } : {},
+    nodes: [],
+  }));
+
+  const closeBuilder = () =>
+    void navigate({ to: '/projects/$projectId/automations', params: { projectId }, search: {} });
+
+  const saveDraft = async () => {
+    const created = await createRule.mutateAsync({
+      name: draft.name.trim() || 'Untitled rule',
+      triggerType: draft.triggerType,
+      triggerConfig: draft.triggerConfig,
+      nodes: [
+        { nodeType: 'TRIGGER', subtype: draft.triggerType, configuration: draft.triggerConfig },
+        ...draft.nodes,
+      ],
+    });
+    toast.success('Draft saved.');
+    return created;
+  };
+
+  if (search.new) {
+    return (
+      <RuleBuilder
+        draft={draft}
+        metadata={metadata}
+        saving={createRule.isPending}
+        publishing={publish.isPending}
+        onChange={setDraft}
+        onSaveDraft={() => void saveDraft().then(closeBuilder)}
+        // Saved first, then published: publishing validates a stored rule, so
+        // there has to be one before it can be checked.
+        onPublish={() =>
+          void saveDraft().then((created) => {
+            publish.mutate(created.id, { onSuccess: closeBuilder });
+          })
+        }
+        onClose={closeBuilder}
+      />
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -82,12 +143,46 @@ export function AutomationsPage() {
         icon={Zap}
         title="No automations yet"
         description="Rules react to what happens on this project — a task moving into a section, a status changing — and act without anyone remembering to."
+        action={
+          canManage ? (
+            <Button
+              onClick={() =>
+                void navigate({
+                  to: '/projects/$projectId/automations',
+                  params: { projectId },
+                  search: { new: true },
+                })
+              }
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              New rule
+            </Button>
+          ) : undefined
+        }
       />
     );
   }
 
   return (
     <div className="space-y-3">
+      {canManage && (
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            onClick={() =>
+              void navigate({
+                to: '/projects/$projectId/automations',
+                params: { projectId },
+                search: { new: true },
+              })
+            }
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            New rule
+          </Button>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
