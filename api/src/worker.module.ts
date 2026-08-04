@@ -7,7 +7,9 @@ import { buildLoggerOptions } from './config/logger.config';
 import { PrismaModule } from './database/prisma.module';
 import { EmailModule } from './integrations/email/email.module';
 import { EmailProcessor } from './jobs/email/email.processor';
+import { MaintenanceProcessor } from './jobs/maintenance/maintenance.processor';
 import { JobsModule } from './jobs/jobs.module';
+import { AttachmentSweeperModule } from './modules/attachments/attachment-sweeper.module';
 import { RedisModule } from './redis/redis.module';
 
 /**
@@ -28,7 +30,8 @@ import { RedisModule } from './redis/redis.module';
     RedisModule,
     JobsModule,
     EmailModule,
+    AttachmentSweeperModule,
   ],
-  providers: [EmailProcessor],
+  providers: [EmailProcessor, MaintenanceProcessor],
 })
 export class WorkerModule {}

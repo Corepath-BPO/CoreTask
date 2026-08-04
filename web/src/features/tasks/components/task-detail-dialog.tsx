@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { AttachmentPanel } from '@/features/attachments/components/attachment-panel';
 import { CommentThread } from '@/features/comments/components/comment-thread';
 import { useProject } from '@/features/projects/hooks/use-projects';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
@@ -398,6 +399,14 @@ function TaskDetailBody({ task, workspaceId, role, onClose }: TaskDetailBodyProp
           </Button>
         )}
       </footer>
+
+      <Separator />
+
+      <AttachmentPanel
+        workspaceId={workspaceId}
+        parent={{ kind: 'task', id: task.id }}
+        canManageAny={hasAtLeastRole(role, WorkspaceRole.MANAGER)}
+      />
 
       <Separator />
 

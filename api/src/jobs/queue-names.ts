@@ -6,8 +6,15 @@
  */
 export const QueueName = {
   EMAIL: 'coretask.email',
+  MAINTENANCE: 'coretask.maintenance',
 } as const;
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
+
+export const MaintenanceJob = {
+  /** Removes uploads that were started and never finished. */
+  SWEEP_ABANDONED_UPLOADS: 'sweep-abandoned-uploads',
+} as const;
+export type MaintenanceJob = (typeof MaintenanceJob)[keyof typeof MaintenanceJob];
 
 export const EmailJob = {
   WELCOME: 'welcome',

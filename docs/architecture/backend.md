@@ -400,3 +400,44 @@ between specs can never reach development data.
 `test/unit/enum-parity.spec.ts` asserts that the enums in `@coretask/contracts`
 still match Prisma's. The shared package cannot import Prisma, so the enums are
 declared twice; this test is what stops them diverging.
+
+## Attachments
+
+Files go straight from the browser to object storage and never through the API,
+so request memory and timeouts stay bounded whatever the file size. The cost is
+that the upload happens somewhere the API cannot watch, which shapes everything
+else here.
+
+Three steps. `POST /attachments` declares a file and returns a short-lived
+presigned PUT; the browser PUTs the bytes to storage; `POST
+/attachments/:id/confirm` reads the stored object back and only then does the
+attachment become visible. Rows sit at `PENDING` until confirmed and are never
+listed or served, so an abandoned upload is invisible rather than a broken link.
+A worker job sweeps them hourly.
+
+**Confirm is the security boundary, not a formality.** A presigned PUT has no
+way to express a size limit — S3 and MinIO simply cannot — so a URL issued for
+a 2 KB image will accept a gigabyte. This was verified against MinIO rather than
+assumed. Re-reading the object is what makes the recorded size true; a mismatch
+deletes the bytes rather than leaving them to the sweeper.
+
+Content type *is* enforceable, but only if it is signed. By default the AWS SDK
+signs `host` alone and `ContentType` degrades to a suggestion: a URL signed for
+`image/png` accepted `text/html` and stored it as such. Naming it in
+`signableHeaders` puts it in `SignedHeaders`, and the swap now fails with a 403
+at storage.
+
+Downloads are presigned GETs that always set `Content-Disposition: attachment`.
+`image/svg+xml` is an accepted upload type and an SVG can carry script, so
+rendering one inline would be stored XSS on the storage origin. Setting the
+disposition at signing time means it cannot be dropped by whatever wrote the
+object.
+
+`STORAGE_PUBLIC_ENDPOINT` exists because SigV4 signs the Host header. In Docker
+the API reaches storage at `coretask-minio:9000`, a name that resolves only on
+the compose network, so a URL signed with it is useless to a browser — and the
+hostname cannot be patched in afterwards without invalidating the signature. A
+second S3 client, pointed at the address the client will actually connect to,
+does the signing. Against real S3 the two addresses are the same and the second
+client is never created. The e2e suite overrides it back to the internal name,
+because there the test process *is* the browser.

@@ -1,6 +1,7 @@
 import {
   ACTIVITY_ACTIONS,
   ACTIVITY_ENTITIES,
+  ATTACHMENT_STATUSES,
   NOTIFICATION_TYPES,
   PROJECT_STATUSES,
   TASK_PRIORITIES,
@@ -8,6 +9,7 @@ import {
   TICKET_PRIORITIES,
   TICKET_SEVERITIES,
   TICKET_STATUSES,
+  TICKET_TYPES,
   WORKSPACE_ROLES,
 } from '@coretask/contracts';
 import { $Enums } from '@prisma/client';
@@ -19,25 +21,34 @@ import { $Enums } from '@prisma/client';
  * silently producing a value the client cannot render.
  */
 describe('shared enums match the Prisma schema', () => {
-  const cases: [string, readonly string[], Record<string, string>][] = [
-    ['WorkspaceRole', WORKSPACE_ROLES, $Enums.WorkspaceRole],
-    ['ProjectStatus', PROJECT_STATUSES, $Enums.ProjectStatus],
-    ['TaskPriority', TASK_PRIORITIES, $Enums.TaskPriority],
-    ['TaskStatus', TASK_STATUSES, $Enums.TaskStatus],
-    [
-      'TicketType',
-      ['BUG', 'FEATURE', 'SUPPORT', 'QUESTION', 'MAINTENANCE', 'INCIDENT'],
-      $Enums.TicketType,
-    ],
-    ['TicketPriority', TICKET_PRIORITIES, $Enums.TicketPriority],
-    ['TicketSeverity', TICKET_SEVERITIES, $Enums.TicketSeverity],
-    ['TicketStatus', TICKET_STATUSES, $Enums.TicketStatus],
-    ['NotificationType', NOTIFICATION_TYPES, $Enums.NotificationType],
-    ['ActivityAction', ACTIVITY_ACTIONS, $Enums.ActivityAction],
-    ['ActivityEntity', ACTIVITY_ENTITIES, $Enums.ActivityEntity],
+  const cases: [keyof typeof $Enums, readonly string[]][] = [
+    ['WorkspaceRole', WORKSPACE_ROLES],
+    ['ProjectStatus', PROJECT_STATUSES],
+    ['TaskPriority', TASK_PRIORITIES],
+    ['TaskStatus', TASK_STATUSES],
+    ['TicketType', TICKET_TYPES],
+    ['TicketPriority', TICKET_PRIORITIES],
+    ['TicketSeverity', TICKET_SEVERITIES],
+    ['TicketStatus', TICKET_STATUSES],
+    ['NotificationType', NOTIFICATION_TYPES],
+    ['ActivityAction', ACTIVITY_ACTIONS],
+    ['ActivityEntity', ACTIVITY_ENTITIES],
+    ['AttachmentStatus', ATTACHMENT_STATUSES],
   ];
 
-  it.each(cases)('%s has identical members on both sides', (_name, shared, prismaEnum) => {
+  it.each(cases)('%s has identical members on both sides', (name, shared) => {
+    const prismaEnum = $Enums[name] as unknown as Record<string, string>;
     expect([...shared].sort()).toEqual(Object.values(prismaEnum).sort());
+  });
+
+  /*
+   * The list above is written by hand, so on its own it only catches a new
+   * *value* on an enum it already knows about — a whole new enum would simply
+   * not be checked. This closes that: every enum Prisma generates must appear
+   * above, so adding one to the schema and forgetting the shared package fails
+   * here rather than at the point some client cannot render it.
+   */
+  it('covers every enum in the schema, so a new one cannot slip past', () => {
+    expect(cases.map(([name]) => name).sort()).toEqual(Object.keys($Enums).sort());
   });
 });

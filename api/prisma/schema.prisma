@@ -116,6 +116,11 @@ enum ActivityAction {
   MEMBER_ROLE_CHANGED
 }
 
+enum AttachmentStatus {
+  PENDING
+  READY
+}
+
 enum ActivityEntity {
   WORKSPACE
   WORKSPACE_MEMBER
@@ -125,6 +130,7 @@ enum ActivityEntity {
   TICKET
   COMMENT
   TEAM
+  ATTACHMENT
   USER
 }
 
@@ -148,14 +154,15 @@ model User {
 
   refreshTokens     RefreshToken[]
   memberships       WorkspaceMember[]
-  invitedMembers    WorkspaceMember[] @relation("MemberInvitedBy")
-  createdWorkspaces Workspace[]       @relation("WorkspaceCreatedBy")
-  ledProjects       Project[]         @relation("ProjectLead")
-  createdTasks      Task[]            @relation("TaskCreatedBy")
-  assignedTasks     Task[]            @relation("TaskAssignee")
-  reportedTickets   Ticket[]          @relation("TicketReporter")
-  assignedTickets   Ticket[]          @relation("TicketAssignee")
+  invitedMembers    WorkspaceMember[]     @relation("MemberInvitedBy")
+  createdWorkspaces Workspace[]           @relation("WorkspaceCreatedBy")
+  ledProjects       Project[]             @relation("ProjectLead")
+  createdTasks      Task[]                @relation("TaskCreatedBy")
+  assignedTasks     Task[]                @relation("TaskAssignee")
+  reportedTickets   Ticket[]              @relation("TicketReporter")
+  assignedTickets   Ticket[]              @relation("TicketAssignee")
   comments          Comment[]
+  attachments       Attachment[]
   mentionedIn       CommentMention[]
   sentInvitations   WorkspaceInvitation[] @relation("InvitationSentBy")
   teamMemberships   TeamMember[]
@@ -225,6 +232,7 @@ model Workspace {
   tasks         Task[]
   tickets       Ticket[]
   comments      Comment[]
+  attachments   Attachment[]
   activityLogs  ActivityLog[]
   notifications Notification[]
 
@@ -420,14 +428,15 @@ model Task {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project    Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  section    Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  parentTask Task?     @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks   Task[]    @relation("TaskSubtasks")
-  assignee   User?     @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdBy  User      @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  comments   Comment[]
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section     Section?     @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  parentTask  Task?        @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks    Task[]       @relation("TaskSubtasks")
+  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy   User         @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  comments    Comment[]
+  attachments Attachment[]
 
   @@index([workspaceId, status])
   @@index([projectId, sectionId, position])
@@ -459,11 +468,12 @@ model Ticket {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  reporter  User?     @relation("TicketReporter", fields: [reporterId], references: [id], onDelete: SetNull)
-  assignee  User?     @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  comments  Comment[]
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reporter    User?        @relation("TicketReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  assignee    User?        @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  comments    Comment[]
+  attachments Attachment[]
 
   @@unique([workspaceId, number])
   @@unique([workspaceId, key])
@@ -520,6 +530,47 @@ model CommentMention {
   /// Drives an inbox of "comments that mention me".
   @@index([userId, createdAt])
   @@map("comment_mentions")
+}
+
+/// A file held in object storage and pointed at from a task or a ticket.
+///
+/// The row and the object are written in two steps, because the bytes go
+/// straight from the browser to the bucket and never through the API. `PENDING`
+/// means a presigned URL was issued; `READY` means the upload was confirmed and
+/// the stored object inspected. Only `READY` rows are ever shown or served, so
+/// an abandoned upload is invisible rather than a broken link.
+model Attachment {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  workspaceId String           @db.Uuid
+  /// Nullable so removing a person does not delete files the team still needs.
+  /// Deliberately unlike `Comment.author`, which cascades: a comment is that
+  /// person's words, whereas a file is workspace property they happened to add.
+  uploaderId  String?          @db.Uuid
+  taskId      String?          @db.Uuid
+  ticketId    String?          @db.Uuid
+  /// As supplied by the uploader, for display and for the download filename.
+  /// Never used to build the storage key.
+  filename    String           @db.VarChar(255)
+  mimeType    String           @db.VarChar(160)
+  /// Declared on create, overwritten at confirm with what storage actually
+  /// holds — the client uploads directly, so its claim is not evidence.
+  sizeBytes   Int
+  objectKey   String           @unique
+  status      AttachmentStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  uploader  User?     @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  ticket    Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([ticketId, createdAt])
+  @@index([workspaceId, createdAt])
+  /// Drives the sweep for uploads that were started and never finished.
+  @@index([status, createdAt])
+  @@map("attachments")
 }
 
 // ---------------------------------------------------------------------------

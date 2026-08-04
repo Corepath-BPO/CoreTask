@@ -14,6 +14,7 @@ import { NotificationsIntegrationModule } from './integrations/notifications/not
 import { StorageModule } from './integrations/storage/storage.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { HealthModule } from './modules/health/health.module';
@@ -76,6 +77,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     TasksModule,
     TicketsModule,
     CommentsModule,
+    AttachmentsModule,
     ActivityLogsModule,
     NotificationsModule,
     HealthModule,

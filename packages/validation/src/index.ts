@@ -1,3 +1,4 @@
+export * from './attachment.js';
 export * from './auth.js';
 export * from './comment.js';
 export * from './common.js';

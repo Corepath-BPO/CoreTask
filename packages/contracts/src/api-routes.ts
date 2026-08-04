@@ -97,6 +97,23 @@ export const ApiRoutes = {
    * unique on its own, and making the client remember which parent a comment
    * came from just to edit it buys nothing.
    */
+  attachments: {
+    /** Declares a file and returns somewhere to PUT it. */
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/attachments`,
+    /** Called once the bytes have landed; the API then verifies them. */
+    confirm: (workspaceId: string, attachmentId: string) =>
+      `/workspaces/${workspaceId}/attachments/${attachmentId}/confirm`,
+    forTask: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/attachments`,
+    /** Accepts a UUID or a human key such as `CORE-1001`. */
+    forTicket: (workspaceId: string, idOrKey: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}/attachments`,
+    download: (workspaceId: string, attachmentId: string) =>
+      `/workspaces/${workspaceId}/attachments/${attachmentId}/download`,
+    remove: (workspaceId: string, attachmentId: string) =>
+      `/workspaces/${workspaceId}/attachments/${attachmentId}`,
+  },
+
   comments: {
     forTask: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/comments`,

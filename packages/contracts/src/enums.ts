@@ -147,10 +147,25 @@ export const ActivityEntity = {
   TICKET: 'TICKET',
   COMMENT: 'COMMENT',
   TEAM: 'TEAM',
+  ATTACHMENT: 'ATTACHMENT',
   USER: 'USER',
 } as const;
 export type ActivityEntity = (typeof ActivityEntity)[keyof typeof ActivityEntity];
 export const ACTIVITY_ENTITIES = Object.values(ActivityEntity);
+
+/**
+ * Whether an upload has been confirmed.
+ *
+ * The bytes go straight from the browser to object storage, so a row exists
+ * before the file does. `PENDING` is that gap; `READY` means the stored object
+ * was inspected and matches what it claims to be. Only `READY` is ever shown.
+ */
+export const AttachmentStatus = {
+  PENDING: 'PENDING',
+  READY: 'READY',
+} as const;
+export type AttachmentStatus = (typeof AttachmentStatus)[keyof typeof AttachmentStatus];
+export const ATTACHMENT_STATUSES = Object.values(AttachmentStatus);
 
 export const CommentEntity = {
   TASK: 'TASK',

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AttachmentPanel } from '@/features/attachments/components/attachment-panel';
 import { CommentThread } from '@/features/comments/components/comment-thread';
 import { useProjects } from '@/features/projects/hooks/use-projects';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
@@ -299,6 +300,15 @@ function TicketDetailBody({
           Your role in this workspace is read-only for tickets.
         </p>
       )}
+
+      <Separator />
+
+      {/* Keyed by UUID rather than key, for the same reason as the thread. */}
+      <AttachmentPanel
+        workspaceId={workspaceId}
+        parent={{ kind: 'ticket', id: ticket.id }}
+        canManageAny={hasAtLeastRole(role, WorkspaceRole.MANAGER)}
+      />
 
       <Separator />
 

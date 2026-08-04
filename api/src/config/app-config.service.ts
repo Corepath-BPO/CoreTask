@@ -94,6 +94,8 @@ export class AppConfigService {
   get storage() {
     return {
       endpoint: this.env.STORAGE_ENDPOINT,
+      /** Falls back to the internal endpoint when they are the same host. */
+      publicEndpoint: this.env.STORAGE_PUBLIC_ENDPOINT || this.env.STORAGE_ENDPOINT,
       region: this.env.STORAGE_REGION,
       bucket: this.env.STORAGE_BUCKET,
       accessKey: this.env.STORAGE_ACCESS_KEY,

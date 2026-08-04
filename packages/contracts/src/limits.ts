@@ -125,6 +125,21 @@ export const REQUEST_ID_HEADER = 'x-request-id';
 /** Name of the HTTP-only cookie carrying the rotating refresh token. */
 export const REFRESH_TOKEN_COOKIE = 'coretask_rt';
 
+/** How long a presigned upload or download URL stays valid. */
+export const UPLOAD_URL_TTL_SECONDS = 300;
+export const DOWNLOAD_URL_TTL_SECONDS = 300;
+
+/**
+ * How long an unconfirmed upload is left alone before the sweeper removes it.
+ *
+ * Comfortably longer than the URL's own lifetime, so a slow upload that is still
+ * legitimately in flight is never swept out from under itself.
+ */
+export const PENDING_UPLOAD_TTL_MINUTES = 60;
+
+export const MAX_ATTACHMENTS_PER_ITEM = 25;
+export const FILENAME_MAX_LENGTH = 255;
+
 /** Upload guardrails enforced by the storage integration. */
 export const ALLOWED_UPLOAD_MIME_TYPES: readonly string[] = [
   'image/png',
