@@ -28,6 +28,7 @@ import type { CreateInvitationDto } from './dto/invitation.dto';
 
 const invitationInclude = {
   invitedBy: { select: { id: true, name: true, email: true, avatarUrl: true } },
+  team: { select: { id: true, name: true, color: true } },
 } satisfies Prisma.WorkspaceInvitationInclude;
 
 type InvitationWithInviter = Prisma.WorkspaceInvitationGetPayload<{
@@ -71,6 +72,7 @@ export class InvitationsService {
 
     await this.assertNotAlreadyAMember(workspaceId, email);
     await this.assertCapacity(workspaceId);
+    await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const token = randomBytes(INVITATION_TOKEN_BYTES).toString('base64url');
     const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 86_400_000);
@@ -83,12 +85,16 @@ export class InvitationsService {
         role: dto.role,
         tokenHash: hashToken(token),
         invitedById: actorId,
+        teamId: dto.teamId ?? null,
         expiresAt,
       },
       update: {
         role: dto.role,
         tokenHash: hashToken(token),
         invitedById: actorId,
+        // Re-inviting replaces the team outright, including clearing it: the
+        // new offer is the whole intent, not a patch on the previous one.
+        teamId: dto.teamId ?? null,
         expiresAt,
         // Reinstates an offer that was revoked or already taken up, which is
         // what makes re-inviting a removed member work.
@@ -109,6 +115,7 @@ export class InvitationsService {
       workspaceName: workspace.name,
       invitedByName: invitation.invitedBy?.name ?? 'A teammate',
       role: dto.role,
+      teamName: invitation.team?.name ?? null,
       expiresAt: expiresAt.toISOString(),
     });
 
@@ -186,11 +193,23 @@ export class InvitationsService {
         })
       : null;
 
+    // Name only. The role is already exposed here for the same reason — it is
+    // material to deciding whether to accept — but a roster or a member count
+    // would tell the holder of a link things about the workspace's people that
+    // they have no business knowing until they are in it.
+    const team = invitation.teamId
+      ? await this.prisma.team.findUnique({
+          where: { id: invitation.teamId },
+          select: { name: true },
+        })
+      : null;
+
     return {
       workspaceName: workspace.name,
       email: invitation.email,
       role: invitation.role,
       invitedByName: invitedBy?.name ?? null,
+      teamName: team?.name ?? null,
       expiresAt: invitation.expiresAt.toISOString(),
     };
   }
@@ -232,6 +251,33 @@ export class InvitationsService {
             invitedById: invitation.invitedById,
           },
         });
+      }
+
+      /*
+       * The team joins in the same transaction as the workspace membership.
+       * Doing it afterwards would leave a window where someone is in the
+       * workspace but not the team they were invited to, and a failure there
+       * would strand them with no way to reach it — the invitation is already
+       * spent by then.
+       *
+       * `teamId` is re-checked against the workspace rather than trusted from
+       * when the invitation was written: a team can be deleted between sending
+       * and accepting, and `SetNull` handles that, but re-reading costs nothing
+       * and keeps the guarantee local to where it matters.
+       */
+      if (invitation.teamId) {
+        const team = await tx.team.findFirst({
+          where: { id: invitation.teamId, workspaceId: invitation.workspaceId },
+          select: { id: true },
+        });
+
+        if (team) {
+          await tx.teamMember.upsert({
+            where: { teamId_userId: { teamId: team.id, userId } },
+            create: { teamId: team.id, userId },
+            update: {},
+          });
+        }
       }
 
       // Marked used inside the same transaction as the membership, so a crash
@@ -326,6 +372,29 @@ export class InvitationsService {
     }
   }
 
+  /**
+   * The team must belong to this workspace.
+   *
+   * `teamId` arrives from the client, and the foreign key alone would accept a
+   * valid team id from another workspace — which would put the new member on a
+   * team their workspace cannot see, and leak its name through the preview.
+   */
+  private async assertTeamInWorkspace(
+    workspaceId: string,
+    teamId: string | null | undefined,
+  ): Promise<void> {
+    if (!teamId) return;
+
+    const team = await this.prisma.team.findFirst({
+      where: { id: teamId, workspaceId },
+      select: { id: true },
+    });
+
+    if (!team) {
+      throw AppException.badRequest('BAD_REQUEST', 'That team does not belong to this workspace.');
+    }
+  }
+
   private async assertCapacity(workspaceId: string): Promise<void> {
     const pending = await this.prisma.workspaceInvitation.count({
       where: { workspaceId, acceptedAt: null, revokedAt: null },
@@ -356,6 +425,7 @@ function toInvitationDto(invitation: InvitationWithInviter): WorkspaceInvitation
     email: invitation.email,
     role: invitation.role,
     invitedBy: invitation.invitedBy,
+    team: invitation.team,
     expiresAt: invitation.expiresAt.toISOString(),
     expired: invitation.expiresAt.getTime() <= Date.now(),
     createdAt: invitation.createdAt.toISOString(),

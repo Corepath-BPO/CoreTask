@@ -51,6 +51,7 @@ export class EmailProcessor extends WorkerHost {
             workspaceName: data.workspaceName,
             invitedByName: data.invitedByName,
             role: data.role,
+            teamName: data.teamName,
             expiresAt: data.expiresAt,
             webUrl: this.config.http.webUrl,
           }),

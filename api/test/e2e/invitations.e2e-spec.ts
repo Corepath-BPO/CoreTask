@@ -288,13 +288,33 @@ describe('Invitations (e2e)', () => {
         .get(url(`/invitations/${token}`))
         .expect(200);
 
+      /*
+       * An exhaustive list, so widening the preview has to be a deliberate edit
+       * here rather than something that slips out with a new field on the model.
+       * `teamName` is the only addition since: a name, on the same footing as
+       * the role — material to deciding whether to accept, and saying nothing
+       * about the workspace's people.
+       */
       expect(Object.keys(response.body.data).sort()).toEqual([
         'email',
         'expiresAt',
         'invitedByName',
         'role',
+        'teamName',
         'workspaceName',
       ]);
+    });
+
+    it('reports no team when the invitation named none', async () => {
+      const scope = await setupScope();
+      const invitation = await invite(scope, 'ada@example.com');
+      const token = await setToken(invitation.id, 'no-team-token');
+
+      const response = await request(server())
+        .get(url(`/invitations/${token}`))
+        .expect(200);
+
+      expect(response.body.data.teamName).toBeNull();
     });
 
     it('404s an unknown token', async () => {

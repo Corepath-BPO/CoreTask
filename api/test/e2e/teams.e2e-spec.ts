@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { API_PREFIX, TaskStatus, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
 
@@ -26,6 +28,9 @@ describe('Teams (e2e)', () => {
 
   const server = () => context.app.getHttpServer();
   const url = (path: string) => `${API_PREFIX}${path}`;
+
+  /** Mirrors the service's own hashing, so a chosen token resolves for real. */
+  const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
   interface Actor {
     token: string;
@@ -352,6 +357,117 @@ describe('Teams (e2e)', () => {
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0].key).toBe('OWN');
       expect(response.body.data[0].team.name).toBe('Platform');
+    });
+  });
+
+  /*
+   * An invitation may name a team, so somebody arrives already on the one they
+   * were hired for rather than needing a second, separate action nobody
+   * remembers to take.
+   */
+  describe('joining a team by invitation', () => {
+    const invite = (scope: Scope, body: Record<string, unknown>) =>
+      request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/invitations`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ role: WorkspaceRole.MEMBER, ...body });
+
+    it('refuses a team from another workspace', async () => {
+      const scope = await setupScope();
+      const other = await setupScope();
+      const foreignTeam = await seedTeam(other);
+
+      await invite(scope, { email: uniqueEmail(), teamId: foreignTeam }).expect(400);
+    });
+
+    it('records the team on the invitation and reports it back', async () => {
+      const scope = await setupScope();
+      const teamId = await seedTeam(scope);
+
+      const response = await invite(scope, { email: uniqueEmail(), teamId }).expect(201);
+
+      expect(response.body.data.team).toMatchObject({ id: teamId, name: 'Platform' });
+    });
+
+    it('puts the accepting member straight onto the team', async () => {
+      const scope = await setupScope();
+      const teamId = await seedTeam(scope);
+      const invitee = await registerUser('Invitee');
+
+      const created = await invite(scope, { email: invitee.email, teamId }).expect(201);
+
+      // Re-point the stored hash at a token this test knows, which is the only
+      // way to reach the accept endpoint without reading the outgoing e-mail.
+      const token = `e2e-${Date.now()}`;
+      await context.prisma.workspaceInvitation.update({
+        where: { id: created.body.data.id as string },
+        data: { tokenHash: sha256(token) },
+      });
+
+      await request(server())
+        .post(url(`/invitations/${token}/accept`))
+        .set('Authorization', `Bearer ${invitee.token}`)
+        .expect(200);
+
+      const team = await request(server())
+        .get(`${teamsUrl(scope)}/${teamId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(team.body.data.members.map((m: { email: string }) => m.email)).toContain(
+        invitee.email,
+      );
+    });
+
+    it('still joins the workspace when the team was deleted in the meantime', async () => {
+      const scope = await setupScope();
+      const teamId = await seedTeam(scope);
+      const invitee = await registerUser('Invitee');
+
+      const created = await invite(scope, { email: invitee.email, teamId }).expect(201);
+      const token = `e2e-${Date.now()}`;
+      await context.prisma.workspaceInvitation.update({
+        where: { id: created.body.data.id as string },
+        data: { tokenHash: sha256(token) },
+      });
+
+      // Losing the team must not invalidate the offer: the workspace membership
+      // is the part that matters, and the team was only ever a convenience.
+      await request(server())
+        .delete(`${teamsUrl(scope)}/${teamId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(204);
+
+      const accepted = await request(server())
+        .post(url(`/invitations/${token}/accept`))
+        .set('Authorization', `Bearer ${invitee.token}`)
+        .expect(200);
+
+      expect(accepted.body.data.workspaceId).toBe(scope.workspaceId);
+    });
+
+    it('names the team in the anonymous preview, and nothing more about it', async () => {
+      const scope = await setupScope();
+      const teamId = await seedTeam(scope);
+
+      const created = await invite(scope, { email: uniqueEmail(), teamId }).expect(201);
+      const token = `e2e-${Date.now()}`;
+      await context.prisma.workspaceInvitation.update({
+        where: { id: created.body.data.id as string },
+        data: { tokenHash: sha256(token) },
+      });
+
+      const preview = await request(server()).get(url(`/invitations/${token}`)).expect(200);
+
+      expect(preview.body.data.teamName).toBe('Platform');
+      expect(Object.keys(preview.body.data).sort()).toEqual([
+        'email',
+        'expiresAt',
+        'invitedByName',
+        'role',
+        'teamName',
+        'workspaceName',
+      ]);
     });
   });
 

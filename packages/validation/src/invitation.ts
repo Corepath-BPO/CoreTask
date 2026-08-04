@@ -23,5 +23,7 @@ export const invitationRoleSchema = z.enum(
 export const createInvitationSchema = z.object({
   email: invitationEmailSchema,
   role: invitationRoleSchema,
+  /** `''` is what an untouched picker sends, and means "no team". */
+  teamId: z.union([z.literal(''), z.uuid()]).optional(),
 });
 export type CreateInvitationInput = z.input<typeof createInvitationSchema>;

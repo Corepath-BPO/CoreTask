@@ -89,7 +89,15 @@ export function AcceptInvitationPage({ token }: { token: string }) {
           <CardDescription>
             {invitation.invitedByName ?? 'Someone'} invited{' '}
             <span className="font-medium text-foreground">{invitation.email}</span> to join as a{' '}
-            {humanizeEnum(invitation.role).toLowerCase()}.
+            {humanizeEnum(invitation.role).toLowerCase()}
+            {invitation.teamName ? (
+              <>
+                {' '}
+                on the{' '}
+                <span className="font-medium text-foreground">{invitation.teamName}</span> team
+              </>
+            ) : null}
+            .
           </CardDescription>
         </CardHeader>
 

@@ -40,6 +40,7 @@ export function invitationEmail(params: {
   workspaceName: string;
   invitedByName: string;
   role: string;
+  teamName?: string | null;
   expiresAt: string;
   webUrl: string;
 }): EmailMessage {
@@ -47,11 +48,16 @@ export function invitationEmail(params: {
   const expires = new Date(params.expiresAt).toUTCString();
   const role = params.role.toLowerCase();
 
+  // Named in the message rather than only on the accept page: joining a team is
+  // part of what is being offered, and somebody deciding whether to accept
+  // should not have to click through to find out.
+  const onTeam = params.teamName ? ` on the ${params.teamName} team` : '';
+
   return {
     to: params.to,
     subject: `${params.invitedByName} invited you to ${params.workspaceName} on CoreTask`,
     text: [
-      `${params.invitedByName} has invited you to join the "${params.workspaceName}" workspace on CoreTask as a ${role}.`,
+      `${params.invitedByName} has invited you to join the "${params.workspaceName}" workspace on CoreTask as a ${role}${onTeam}.`,
       '',
       'Accept the invitation:',
       link,
@@ -61,7 +67,7 @@ export function invitationEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: [
-      `<p>${escapeHtml(params.invitedByName)} has invited you to join the <strong>${escapeHtml(params.workspaceName)}</strong> workspace on CoreTask as a ${escapeHtml(role)}.</p>`,
+      `<p>${escapeHtml(params.invitedByName)} has invited you to join the <strong>${escapeHtml(params.workspaceName)}</strong> workspace on CoreTask as a ${escapeHtml(role)}${escapeHtml(onTeam)}.</p>`,
       `<p><a href="${escapeHtml(link)}">Accept the invitation</a></p>`,
       `<p>This link expires on ${escapeHtml(expires)}. If you were not expecting it, you can ignore this e-mail.</p>`,
       '<p>— The CoreTask team</p>',

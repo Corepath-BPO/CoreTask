@@ -24,10 +24,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useTeams } from '@/features/teams/hooks/use-teams';
 import { ApiError } from '@/lib/api/api-error';
 import { humanizeEnum } from '@/lib/utils';
 
 import { useInviteMember } from '../hooks/use-invitations';
+
+/** Radix `Select` treats `''` as "no value", so absence needs a real token. */
+const NO_TEAM = 'none';
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -44,6 +48,7 @@ export function InviteMemberDialog({
   actorRole,
 }: InviteMemberDialogProps) {
   const invite = useInviteMember(workspaceId);
+  const { data: teams } = useTeams(workspaceId);
 
   // The same rule the API enforces, so the picker never offers a role the
   // server would reject. The API remains the boundary; this is just courtesy.
@@ -57,13 +62,13 @@ export function InviteMemberDialog({
     formState: { errors, isSubmitting },
   } = useForm<CreateInvitationInput>({
     resolver: zodResolver(createInvitationSchema),
-    defaultValues: { email: '', role: WorkspaceRole.MEMBER },
+    defaultValues: { email: '', role: WorkspaceRole.MEMBER, teamId: '' },
   });
 
   useEffect(() => {
     if (!open) return;
 
-    reset({ email: '', role: WorkspaceRole.MEMBER });
+    reset({ email: '', role: WorkspaceRole.MEMBER, teamId: '' });
     invite.reset();
     // The mutation object is stable; including it would clear the error the
     // moment it is set.
@@ -72,7 +77,11 @@ export function InviteMemberDialog({
 
   const onSubmit = handleSubmit((values) => {
     invite.mutate(
-      { email: values.email, role: values.role as WorkspaceRole },
+      {
+        email: values.email,
+        role: values.role as WorkspaceRole,
+        ...(values.teamId ? { teamId: values.teamId } : {}),
+      },
       { onSuccess: () => onOpenChange(false) },
     );
   });
@@ -131,6 +140,39 @@ export function InviteMemberDialog({
               )}
             />
           </Field>
+
+          {(teams ?? []).length > 0 && (
+            <Field
+              label="Team"
+              htmlFor="invite-team"
+              error={errors.teamId?.message}
+              hint="Optional — they join it on accepting"
+            >
+              <Controller
+                control={control}
+                name="teamId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value || NO_TEAM}
+                    onValueChange={(value) => field.onChange(value === NO_TEAM ? '' : value)}
+                    disabled={busy}
+                  >
+                    <SelectTrigger id="invite-team" className="w-full">
+                      <SelectValue placeholder="No team" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_TEAM}>No team</SelectItem>
+                      {(teams ?? []).map((team) => (
+                        <SelectItem key={team.id} value={team.id}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+          )}
 
           <DialogFooter>
             <Button

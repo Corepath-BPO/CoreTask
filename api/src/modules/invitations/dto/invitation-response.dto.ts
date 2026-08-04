@@ -15,6 +15,17 @@ export class InvitationInviterDto {
   avatarUrl!: string | null;
 }
 
+export class InvitationTeamDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Platform' })
+  name!: string;
+
+  @ApiProperty({ example: '#6366F1' })
+  color!: string;
+}
+
 /** Note the absence of a token: it exists in the e-mail link and nowhere else. */
 export class WorkspaceInvitationDto {
   @ApiProperty({ format: 'uuid' })
@@ -31,6 +42,13 @@ export class WorkspaceInvitationDto {
 
   @ApiProperty({ type: InvitationInviterDto, nullable: true })
   invitedBy!: InvitationInviterDto | null;
+
+  @ApiProperty({
+    type: InvitationTeamDto,
+    nullable: true,
+    description: 'Team they join on acceptance, if the invitation named one.',
+  })
+  team!: InvitationTeamDto | null;
 
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;
@@ -57,6 +75,13 @@ export class WorkspaceInvitationPreviewDto {
 
   @ApiProperty({ nullable: true, example: 'Demo Owner' })
   invitedByName!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    example: 'Platform',
+    description: 'Name only — nothing about the team’s people is exposed here.',
+  })
+  teamName!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;

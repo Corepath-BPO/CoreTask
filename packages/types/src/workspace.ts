@@ -52,6 +52,8 @@ export interface WorkspaceInvitation {
     email: string;
     avatarUrl: string | null;
   } | null;
+  /** Team they join on acceptance, if the invitation named one. */
+  team: { id: string; name: string; color: string } | null;
   expiresAt: string;
   /** True once `expiresAt` has passed; the API decides, not the client's clock. */
   expired: boolean;
@@ -71,12 +73,16 @@ export interface WorkspaceInvitationPreview {
   email: string;
   role: WorkspaceRole;
   invitedByName: string | null;
+  /** Name only — enough to say what they are joining, nothing about its people. */
+  teamName: string | null;
   expiresAt: string;
 }
 
 export interface CreateInvitationPayload {
   email: string;
   role: WorkspaceRole;
+  /** Optional. Must be a team in the same workspace. */
+  teamId?: string | null;
 }
 
 export interface UpdateMemberRolePayload {

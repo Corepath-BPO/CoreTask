@@ -111,6 +111,22 @@ endpoint cannot be used to probe for which links once existed. Accepting writes
 the membership and marks the invitation used in one transaction, so a crash
 cannot leave a consumed token that granted nothing.
 
+An invitation may also name a **team**, so somebody arrives already on the one
+they were hired for instead of needing a second action nobody remembers to take.
+The team joins inside that same transaction — doing it afterwards would leave a
+window where they are in the workspace but not the team, and a failure there
+would strand them, because the invitation is spent by then. `teamId` is
+`SetNull`: deleting a team must not invalidate a live invitation, since the
+workspace membership is the part that matters. Acceptance re-checks the team
+against the workspace rather than trusting what was written when the invitation
+was sent.
+
+The preview gained exactly one field, `teamName`. A name sits on the same footing
+as the role — material to deciding whether to accept, and silent about the
+workspace's people. `invitations.e2e-spec.ts` asserts the preview's key set
+exhaustively, so widening it further has to be a deliberate edit rather than
+something that leaks out with the next field on the model.
+
 ### Outbound e-mail
 
 Three transports, chosen in this order by `EmailService`:

@@ -32,6 +32,8 @@ export interface InvitationEmailJobData {
   workspaceName: string;
   invitedByName: string;
   role: string;
+  /** Null when the invitation names no team. */
+  teamName: string | null;
   expiresAt: string;
 }
 

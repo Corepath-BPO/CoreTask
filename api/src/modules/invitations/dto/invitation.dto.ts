@@ -1,7 +1,7 @@
 import { EMAIL_MAX_LENGTH, WORKSPACE_ROLES, WorkspaceRole } from '@coretask/contracts';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, MaxLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsUUID, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateInvitationDto {
   @ApiProperty({ example: 'ada@example.com', maxLength: EMAIL_MAX_LENGTH })
@@ -21,4 +21,19 @@ export class CreateInvitationDto {
   })
   @IsEnum(WorkspaceRole)
   role!: WorkspaceRole;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Team to join on acceptance. Must belong to this workspace. Omit for no team.',
+  })
+  @IsOptional()
+  // An untouched picker sends '', which means "no team" rather than a bad uuid.
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  teamId?: string | null;
 }

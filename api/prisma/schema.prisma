@@ -272,6 +272,11 @@ model WorkspaceInvitation {
   role        WorkspaceRole @default(MEMBER)
   tokenHash   String        @unique
   invitedById String?       @db.Uuid
+  /// Team to join on acceptance. Optional — most invitations name no team.
+  /// `SetNull` on purpose: deleting a team must not invalidate a live
+  /// invitation, because the workspace membership is the part that matters and
+  /// the team was only ever a convenience.
+  teamId      String?       @db.Uuid
   expiresAt   DateTime
   acceptedAt  DateTime?
   revokedAt   DateTime?
@@ -280,10 +285,12 @@ model WorkspaceInvitation {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invitedBy User?     @relation("InvitationSentBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, email])
   @@index([email])
   @@index([workspaceId, acceptedAt])
+  @@index([teamId])
   @@map("workspace_invitations")
 }
 
@@ -345,10 +352,11 @@ model Team {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lead      User?        @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
-  members   TeamMember[]
-  projects  Project[]
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead        User?                 @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
+  members     TeamMember[]
+  projects    Project[]
+  invitations WorkspaceInvitation[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])

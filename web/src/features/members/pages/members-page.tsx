@@ -215,6 +215,16 @@ function InvitationRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        {invitation.team && (
+          <Badge variant="outline" className="gap-1">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full"
+              style={{ backgroundColor: invitation.team.color }}
+            />
+            {invitation.team.name}
+          </Badge>
+        )}
         <Badge variant={invitation.expired ? 'muted' : 'secondary'}>
           {humanizeEnum(invitation.role)}
         </Badge>
