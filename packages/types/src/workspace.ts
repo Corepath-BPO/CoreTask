@@ -89,6 +89,8 @@ export interface RemoveMemberResult {
   /** Open tasks that were unassigned, because the assignee can no longer see them. */
   tasksUnassigned: number;
   ticketsUnassigned: number;
+  /** Teams in this workspace the person was dropped from. */
+  teamsLeft: number;
 }
 
 export interface AcceptInvitationResult {

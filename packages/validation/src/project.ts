@@ -87,6 +87,8 @@ export const projectFormSchema = z
     description: z.string().trim().max(DESCRIPTION_MAX_LENGTH),
     status: projectStatusSchema,
     color: projectColorSchema,
+    /** `''` means "no team" — a native select cannot hold null. */
+    teamId: z.string(),
     startDate: z.string().trim(),
     dueDate: z.string().trim(),
   })

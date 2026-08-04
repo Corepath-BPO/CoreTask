@@ -26,10 +26,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useTeams } from '@/features/teams/hooks/use-teams';
 import { ApiError } from '@/lib/api/api-error';
 import { cn, humanizeEnum } from '@/lib/utils';
 
 import { useCreateProject, useUpdateProject } from '../hooks/use-projects';
+
+/** Radix `Select` treats `''` as "no value", so absence needs a real token. */
+const NO_TEAM = 'none';
 
 interface ProjectFormDialogProps {
   open: boolean;
@@ -45,6 +49,7 @@ const EMPTY: ProjectFormInput = {
   description: '',
   status: ProjectStatus.PLANNING,
   color: PROJECT_COLORS[0] as string,
+  teamId: '',
   startDate: '',
   dueDate: '',
 };
@@ -62,6 +67,7 @@ export function ProjectFormDialog({
   const createProject = useCreateProject(workspaceId);
   const updateProject = useUpdateProject(workspaceId);
   const mutation = isEdit ? updateProject : createProject;
+  const { data: teams } = useTeams(workspaceId);
 
   const {
     register,
@@ -86,6 +92,7 @@ export function ProjectFormDialog({
             description: project.description ?? '',
             status: project.status,
             color: project.color,
+            teamId: project.teamId ?? '',
             startDate: toDateInput(project.startDate),
             dueDate: toDateInput(project.dueDate),
           }
@@ -110,6 +117,7 @@ export function ProjectFormDialog({
           description: values.description || null,
           status: values.status as ProjectSummary['status'],
           color: values.color,
+          teamId: values.teamId || null,
           startDate: values.startDate || null,
           dueDate: values.dueDate || null,
         },
@@ -121,6 +129,7 @@ export function ProjectFormDialog({
         ...(values.description ? { description: values.description } : {}),
         status: values.status as ProjectSummary['status'],
         color: values.color,
+        ...(values.teamId ? { teamId: values.teamId } : {}),
         ...(values.startDate ? { startDate: values.startDate } : {}),
         ...(values.dueDate ? { dueDate: values.dueDate } : {}),
       });
@@ -254,6 +263,37 @@ export function ProjectFormDialog({
               />
             </Field>
           </div>
+
+          <Field
+            label="Team"
+            htmlFor="project-team"
+            error={errors.teamId?.message}
+            hint="Optional — who owns this project"
+          >
+            <Controller
+              control={control}
+              name="teamId"
+              render={({ field }) => (
+                <Select
+                  value={field.value || NO_TEAM}
+                  onValueChange={(value) => field.onChange(value === NO_TEAM ? '' : value)}
+                  disabled={busy}
+                >
+                  <SelectTrigger id="project-team" className="w-full">
+                    <SelectValue placeholder="No team" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_TEAM}>No team</SelectItem>
+                    {(teams ?? []).map((team) => (
+                      <SelectItem key={team.id} value={team.id}>
+                        {team.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Start date" htmlFor="project-start" error={errors.startDate?.message}>

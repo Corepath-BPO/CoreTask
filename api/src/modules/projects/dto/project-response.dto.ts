@@ -19,6 +19,17 @@ export class ProjectLeadDto {
   avatarUrl!: string | null;
 }
 
+export class ProjectTeamRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Platform' })
+  name!: string;
+
+  @ApiProperty({ example: '#6366F1' })
+  color!: string;
+}
+
 export class ProjectSummaryDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -46,6 +57,12 @@ export class ProjectSummaryDto {
 
   @ApiProperty({ type: ProjectLeadDto, nullable: true })
   lead!: ProjectLeadDto | null;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  teamId!: string | null;
+
+  @ApiProperty({ type: ProjectTeamRefDto, nullable: true })
+  team!: ProjectTeamRefDto | null;
 
   @ApiProperty({ format: 'date-time', nullable: true })
   startDate!: string | null;

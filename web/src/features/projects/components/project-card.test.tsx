@@ -15,6 +15,8 @@ const baseProject: ProjectSummary = {
   color: '#6366F1',
   leadId: null,
   lead: null,
+  teamId: null,
+  team: null,
   startDate: null,
   dueDate: null,
   completedAt: null,

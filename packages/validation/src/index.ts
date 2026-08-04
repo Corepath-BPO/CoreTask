@@ -5,5 +5,6 @@ export * from './invitation.js';
 export * from './project.js';
 export * from './section.js';
 export * from './task.js';
+export * from './team.js';
 export * from './ticket.js';
 export * from './workspace.js';

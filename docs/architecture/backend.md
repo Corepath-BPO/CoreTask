@@ -111,6 +111,39 @@ endpoint cannot be used to probe for which links once existed. Accepting writes
 the membership and marks the invitation used in one transaction, so a crash
 cannot leave a consumed token that granted nothing.
 
+### Teams
+
+A team groups people; it does not authorise them. `WorkspaceMember.role` still
+decides everything, and the two are kept apart so that moving somebody between
+teams cannot quietly change what they can see.
+
+The exception is a team's own administration, and it is the reason `leadId`
+exists at all: **editing a team and changing its roster is open to ADMIN and
+above, _or_ to that team's lead**. That rule cannot be expressed with
+`@RequireWorkspaceRole`, because a decorator does not know which team is being
+addressed — so it lives in `TeamsService.assertCanManage` while creating and
+deleting stay on the decorator at ADMIN. A lead may run a team but not dissolve
+one.
+
+Membership is validated against the workspace on the way in: a team is always a
+subset of its workspace, and without the check a roster could carry people with
+no access to anything the team works on. Adding someone twice is an upsert rather
+than a conflict — the second add expresses the same intent as the first.
+
+Two invariants are maintained rather than left to the schema:
+
+- Appointing a lead adds them to the team, on both create and update. A lead who
+  is not in their own team is a strange thing to have to repair by hand.
+- Removing the lead from the roster clears `leadId`, and so does removing them
+  from the workspace. Neither can leave the two records disagreeing.
+
+Deleting a team is a real delete, not an archive: a grouping holds no history.
+`Project.teamId` is `SetNull`, so projects outlive the team that owned them.
+`ProjectsService` validates `teamId` against the workspace for the same reason
+membership is validated — the foreign key alone would accept a valid team id
+belonging to someone else's workspace, leaking its name and colour through the
+project badge.
+
 ### Ticket keys
 
 `Workspace.ticketCounter` is incremented **inside the ticket-creation

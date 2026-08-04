@@ -483,6 +483,9 @@ pnpm compose:validate
 - Member invitations by e-mail: hashed single-use links that expire in a week,
   a members page with pending offers and revoke, and an accept page that works
   for people who do not have an account yet
+- Teams: named groups inside a workspace with a colour, an optional lead, a
+  roster drawn from the workspace, and an optional owning team on each project
+  with a filter to match. Deliberately *not* a permission boundary — see below
 - Comment threads on tasks and tickets: post, edit in place (marked "edited"),
   delete your own, manager moderation, and notifications to everyone already in
   the conversation
@@ -493,12 +496,24 @@ pnpm compose:validate
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
+- Real outbound e-mail through Microsoft Graph, with SMTP and a log transport as
+  the other two options — see [Outbound e-mail](docs/architecture/backend.md)
+
+### Design notes
+
+A team is an *organisational* grouping, not a permission boundary.
+`WorkspaceMember.role` still decides everything anyone is allowed to do; a team
+answers "who works on this together". Keeping the two apart is what stops moving
+somebody between teams from silently changing what they can see — the classic
+mess that follows from conflating them.
+
+The one place a team does confer authority is its own management: editing a team
+and changing its roster is open to workspace administrators *or* that team's
+lead. Creating and deleting teams stays ADMIN-only — a lead may run a team but
+not dissolve one. Deleting a team is a real delete; its projects survive with no
+team attached, because losing a grouping must never take work with it.
 
 ### Scaffolded, not implemented
-
-Teams — groups of people inside a workspace, with their own projects and default
-assignees. `WorkspaceMember` carries a single flat role, which is enough to
-decide permissions but cannot express "the platform team".
 
 There are no mock fixtures left anywhere in the web app. `lib/mock/` was deleted
 when the ticket, activity and notification endpoints shipped, which was always

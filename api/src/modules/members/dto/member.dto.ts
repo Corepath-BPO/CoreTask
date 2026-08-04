@@ -25,4 +25,7 @@ export class RemoveMemberResultDto {
 
   @ApiProperty({ example: 1 })
   ticketsUnassigned!: number;
+
+  @ApiProperty({ example: 2, description: 'Teams in this workspace they were dropped from.' })
+  teamsLeft!: number;
 }

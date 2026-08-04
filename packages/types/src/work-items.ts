@@ -27,6 +27,8 @@ export interface Project {
   status: ProjectStatus;
   color: string;
   leadId: string | null;
+  /** The team that owns this project, or null when it belongs to nobody in particular. */
+  teamId: string | null;
   startDate: string | null;
   dueDate: string | null;
   completedAt: string | null;
@@ -41,6 +43,14 @@ export interface ProjectSummary extends Project {
   completedTaskCount: number;
   sectionCount: number;
   lead: UserRef | null;
+  team: ProjectTeamRef | null;
+}
+
+/** Just enough of a team to render a badge without loading the whole thing. */
+export interface ProjectTeamRef {
+  id: string;
+  name: string;
+  color: string;
 }
 
 /** A project plus its ordered columns — what the board view loads. */
@@ -56,6 +66,7 @@ export interface CreateProjectPayload {
   status?: ProjectStatus;
   color?: string;
   leadId?: string | null;
+  teamId?: string | null;
   startDate?: string | null;
   dueDate?: string | null;
 }
@@ -66,6 +77,7 @@ export interface UpdateProjectPayload {
   status?: ProjectStatus;
   color?: string;
   leadId?: string | null;
+  teamId?: string | null;
   startDate?: string | null;
   dueDate?: string | null;
 }

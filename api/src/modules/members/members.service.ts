@@ -147,9 +147,30 @@ export class MembersService {
         data: { assigneeId: null },
       });
 
+      /*
+       * Team membership has the same shape of problem: `TeamMember.userId`
+       * cascades on *user* deletion, and this is not one. Left alone the person
+       * would keep appearing on team rosters in a workspace they no longer
+       * belong to. Scoped to this workspace's teams — their teams elsewhere are
+       * none of this removal's business.
+       */
+      const teams = await tx.teamMember.deleteMany({
+        where: { userId: target.userId, team: { workspaceId } },
+      });
+
+      // A lead who is no longer in the workspace is not leading anything.
+      await tx.team.updateMany({
+        where: { workspaceId, leadId: target.userId },
+        data: { leadId: null },
+      });
+
       await tx.workspaceMember.delete({ where: { id: memberId } });
 
-      return { tasksUnassigned: tasks.count, ticketsUnassigned: tickets.count };
+      return {
+        tasksUnassigned: tasks.count,
+        ticketsUnassigned: tickets.count,
+        teamsLeft: teams.count,
+      };
     });
 
     await this.activity.record({

@@ -73,6 +73,10 @@ export async function renderWithRouter(
     getParentRoute: () => rootRoute,
     path: '/projects',
     component: () => <div>projects</div>,
+    // Mirrors the real route: team cards link here with `?teamId=`, and without
+    // this the parameter would be stripped from the resolved href.
+    validateSearch: (search: Record<string, unknown>): { teamId?: string } =>
+      typeof search['teamId'] === 'string' ? { teamId: search['teamId'] } : {},
   });
   const projectDetailRoute = createRoute({
     getParentRoute: () => rootRoute,

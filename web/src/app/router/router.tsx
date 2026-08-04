@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { BarChart3, CalendarDays, Inbox, Settings, Users } from 'lucide-react';
+import { BarChart3, CalendarDays, Inbox, Settings } from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -13,6 +13,7 @@ import { MembersPage } from '@/features/members/pages/members-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
+import { TeamsPage } from '@/features/teams/pages/teams-page';
 import { TicketsPage } from '@/features/tickets/pages/tickets-page';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -92,10 +93,19 @@ const dashboardRoute = createRoute({
   component: DashboardPage,
 });
 
+/** UUID-shaped only, so a hand-edited URL cannot push junk into a query key. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const projectsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/projects',
   component: ProjectsPage,
+  // In the URL rather than component state so "3 projects" on a team card is a
+  // link people can share and go back to.
+  validateSearch: (search: Record<string, unknown>): { teamId?: string } => {
+    const teamId = search['teamId'];
+    return typeof teamId === 'string' && UUID_PATTERN.test(teamId) ? { teamId } : {};
+  },
 });
 
 const myTasksRoute = createRoute({
@@ -114,6 +124,12 @@ const membersRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/members',
   component: MembersPage,
+});
+
+const teamsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/teams',
+  component: TeamsPage,
 });
 
 /**
@@ -150,13 +166,6 @@ const placeholders = [
     description: 'Mentions, assignments and comment replies.',
     icon: Inbox,
     plannedFor: 'Notification centre backed by the notifications module and Socket.IO.',
-  },
-  {
-    path: '/teams',
-    title: 'Teams',
-    description: 'Groups of people inside this workspace.',
-    icon: Users,
-    plannedFor: 'Team membership, per-team projects and default assignees.',
   },
   {
     path: '/calendar',
@@ -206,6 +215,7 @@ const routeTree = rootRoute.addChildren([
     myTasksRoute,
     ticketsRoute,
     membersRoute,
+    teamsRoute,
     ...placeholderRoutes,
   ]),
 ]);

@@ -83,6 +83,29 @@ actually issues:
 | `tickets`           | `[workspaceId, status]`, `[assigneeId, status]` | ticket queue                          |
 | `activity_logs`     | `[workspaceId, createdAt DESC]`                 | activity feed                         |
 | `notifications`     | `[userId, readAt]`                              | unread badge                          |
+| `teams`             | `[workspaceId, name]` (unique)                  | team list, duplicate-name rejection   |
+| `team_members`      | `userId`                                        | dropping someone from every team      |
+| `projects`          | `[workspaceId, teamId]`                         | the team filter on the project list   |
+
+## Teams
+
+`Team` is an organisational grouping, **not** a permission boundary.
+`WorkspaceMember.role` remains the only thing that decides what anyone may do.
+Keeping them separate is what stops moving someone between teams from silently
+changing what they can see.
+
+Two consequences fall out of `TeamMember` pointing at a _user_ rather than a
+_membership_:
+
+- Removing someone from a workspace has to delete their `TeamMember` rows for
+  that workspace's teams explicitly — the cascade only fires on user deletion.
+  `MembersService.remove` does it in the same transaction as the removal, next to
+  the assignee unassignment, which has the identical shape of problem.
+- `Team.leadId` is `onDelete: SetNull`, and the same removal clears it, so a
+  roster can never list someone who has left.
+
+`Project.teamId` is nullable with `onDelete: SetNull`: deleting a team must never
+take projects with it.
 
 ## Ordering
 
@@ -121,9 +144,13 @@ throwaway experiments — it would let the deployed schema drift from the histor
 the development container can run it on every boot without duplicating anything.
 It refuses to run when `NODE_ENV=production`.
 
-It creates one demo user plus three teammates, one workspace, one project with
-four default sections, six tasks, five tickets (`CORE-1001`…`CORE-1005`), seed
-activity and one notification.
+It creates one demo user plus three teammates, one workspace, two teams
+(`Platform`, `Support`), one project with four default sections, six tasks, five
+tickets (`CORE-1001`…`CORE-1005`), seed activity and one notification.
+
+Team rosters are added to, never pruned, on a re-run: the seed is run against
+databases people have been clicking around in, and silently ejecting somebody
+they added would be a surprising thing for a seed to do.
 
 ## Extensions
 

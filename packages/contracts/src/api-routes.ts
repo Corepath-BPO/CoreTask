@@ -24,6 +24,17 @@ export const ApiRoutes = {
     update: (workspaceId: string) => `/workspaces/${workspaceId}`,
     members: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
   },
+  teams: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/teams`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/teams`,
+    detail: (workspaceId: string, teamId: string) => `/workspaces/${workspaceId}/teams/${teamId}`,
+    update: (workspaceId: string, teamId: string) => `/workspaces/${workspaceId}/teams/${teamId}`,
+    remove: (workspaceId: string, teamId: string) => `/workspaces/${workspaceId}/teams/${teamId}`,
+    addMember: (workspaceId: string, teamId: string) =>
+      `/workspaces/${workspaceId}/teams/${teamId}/members`,
+    removeMember: (workspaceId: string, teamId: string, userId: string) =>
+      `/workspaces/${workspaceId}/teams/${teamId}/members/${userId}`,
+  },
   members: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
     updateRole: (workspaceId: string, memberId: string) =>

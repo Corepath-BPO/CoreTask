@@ -107,6 +107,16 @@ export function ProjectCard({
             {project.key}
           </Badge>
           <ProjectStatusBadge status={project.status} />
+          {project.team && (
+            <Badge variant="outline" className="gap-1">
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full"
+                style={{ backgroundColor: project.team.color }}
+              />
+              {project.team.name}
+            </Badge>
+          )}
           {archived && <Badge variant="muted">Archived</Badge>}
         </div>
 

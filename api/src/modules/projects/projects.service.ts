@@ -27,6 +27,7 @@ const LEAD_SELECT = { id: true, name: true, email: true, avatarUrl: true } as co
 
 const PROJECT_INCLUDE = {
   lead: { select: LEAD_SELECT },
+  team: { select: { id: true, name: true, color: true } },
   _count: { select: { sections: true, tasks: true } },
 } satisfies Prisma.ProjectInclude;
 
@@ -50,6 +51,7 @@ export class ProjectsService {
       workspaceId,
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.teamId ? { teamId: query.teamId } : {}),
       ...(query.search
         ? {
             OR: [
@@ -106,6 +108,7 @@ export class ProjectsService {
 
   async create(workspaceId: string, userId: string, dto: CreateProjectDto): Promise<ProjectDetail> {
     await this.assertLeadIsMember(workspaceId, dto.leadId);
+    await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const key = await this.resolveKey(workspaceId, dto.key ?? deriveProjectKey(dto.name));
 
@@ -119,6 +122,7 @@ export class ProjectsService {
           status: dto.status ?? ProjectStatus.PLANNING,
           ...(dto.color ? { color: dto.color } : {}),
           leadId: dto.leadId ?? null,
+          teamId: dto.teamId ?? null,
           startDate: toDate(dto.startDate),
           dueDate: toDate(dto.dueDate),
         },
@@ -164,6 +168,7 @@ export class ProjectsService {
   ): Promise<ProjectSummary> {
     const existing = await this.requireProject(workspaceId, projectId);
     await this.assertLeadIsMember(workspaceId, dto.leadId);
+    await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const data: Prisma.ProjectUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -173,6 +178,9 @@ export class ProjectsService {
     if (dto.dueDate !== undefined) data.dueDate = toDate(dto.dueDate);
     if (dto.leadId !== undefined) {
       data.lead = dto.leadId ? { connect: { id: dto.leadId } } : { disconnect: true };
+    }
+    if (dto.teamId !== undefined) {
+      data.team = dto.teamId ? { connect: { id: dto.teamId } } : { disconnect: true };
     }
 
     if (dto.status !== undefined) {
@@ -332,6 +340,29 @@ export class ProjectsService {
     }
   }
 
+  /**
+   * The team must live in this workspace.
+   *
+   * `teamId` arrives from the client, and the foreign key alone would happily
+   * accept a valid team id belonging to somebody else's workspace — which would
+   * leak its name and colour into this one through the project badge.
+   */
+  private async assertTeamInWorkspace(
+    workspaceId: string,
+    teamId: string | null | undefined,
+  ): Promise<void> {
+    if (!teamId) return;
+
+    const team = await this.prisma.team.findFirst({
+      where: { id: teamId, workspaceId },
+      select: { id: true },
+    });
+
+    if (!team) {
+      throw AppException.badRequest('BAD_REQUEST', 'That team does not belong to this workspace.');
+    }
+  }
+
   /** Appends `2`, `3`, … until the key is free inside this workspace. */
   private async resolveKey(workspaceId: string, base: string): Promise<string> {
     const normalized = base.toUpperCase().slice(0, PROJECT_KEY_MAX_LENGTH);
@@ -362,6 +393,8 @@ export class ProjectsService {
       color: project.color,
       leadId: project.leadId,
       lead: project.lead,
+      teamId: project.teamId,
+      team: project.team,
       startDate: project.startDate?.toISOString() ?? null,
       dueDate: project.dueDate?.toISOString() ?? null,
       completedAt: project.completedAt?.toISOString() ?? null,

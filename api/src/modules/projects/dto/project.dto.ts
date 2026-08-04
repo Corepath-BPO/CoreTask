@@ -93,6 +93,17 @@ export class CreateProjectDto {
   @IsUUID()
   leadId?: string | null;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'Must be a team in this workspace.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  teamId?: string | null;
+
   @ApiPropertyOptional({ format: 'date-time', nullable: true })
   @IsOptional()
   @emptyToNull()
@@ -146,6 +157,17 @@ export class UpdateProjectDto {
   @IsUUID()
   leadId?: string | null;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'Null hands the project back to no team.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  teamId?: string | null;
+
   @ApiPropertyOptional({ format: 'date-time', nullable: true })
   @IsOptional()
   @emptyToNull()
@@ -166,6 +188,11 @@ export class ProjectListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(ProjectStatus)
   status?: ProjectStatus;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Only projects owned by this team.' })
+  @IsOptional()
+  @IsUUID()
+  teamId?: string;
 
   @ApiPropertyOptional({ default: false, description: 'Include archived projects.' })
   @IsOptional()

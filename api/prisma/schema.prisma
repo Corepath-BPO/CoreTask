@@ -124,6 +124,7 @@ enum ActivityEntity {
   TASK
   TICKET
   COMMENT
+  TEAM
   USER
 }
 
@@ -157,6 +158,8 @@ model User {
   comments          Comment[]
   mentionedIn       CommentMention[]
   sentInvitations   WorkspaceInvitation[] @relation("InvitationSentBy")
+  teamMemberships   TeamMember[]
+  ledTeams          Team[]                @relation("TeamLead")
   activityLogs      ActivityLog[]
   notifications     Notification[]
 
@@ -216,6 +219,7 @@ model Workspace {
   createdBy     User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members       WorkspaceMember[]
   invitations   WorkspaceInvitation[]
+  teams         Team[]
   projects      Project[]
   sections      Section[]
   tasks         Task[]
@@ -304,8 +308,13 @@ model Project {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
+  /// Which team owns this project. Optional: plenty of work belongs to the
+  /// workspace at large, and a project outlives the team that started it.
+  teamId String? @db.Uuid
+
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead      User?     @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
   sections  Section[]
   tasks     Task[]
   tickets   Ticket[]
@@ -314,7 +323,53 @@ model Project {
   @@index([workspaceId, status])
   @@index([workspaceId, archivedAt])
   @@index([leadId])
+  @@index([workspaceId, teamId])
   @@map("projects")
+}
+
+/// A named group of people inside a workspace.
+///
+/// Deliberately *not* a permission boundary: `WorkspaceMember.role` still decides
+/// what anyone may do. A team answers "who works on this together", which is an
+/// organisational question, and conflating the two produces the classic mess
+/// where moving someone between teams silently changes what they can see.
+model Team {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String   @db.VarChar(80)
+  description String?
+  color       String   @default("#6366F1") @db.VarChar(9)
+  /// Who runs the team. Nullable because a team can outlast the person leading
+  /// it, and the workspace's admins can always step in.
+  leadId      String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      User?        @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
+  members   TeamMember[]
+  projects  Project[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([leadId])
+  @@map("teams")
+}
+
+/// Membership of a team. Always a subset of the workspace's members — the API
+/// refuses to add anyone who is not already in the workspace, and drops these
+/// rows when someone leaves it.
+model TeamMember {
+  teamId  String   @db.Uuid
+  userId  String   @db.Uuid
+  addedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
 }
 
 model Section {

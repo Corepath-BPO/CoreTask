@@ -100,11 +100,34 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------------
+  // Teams
+  // ---------------------------------------------------------------------------
+  const [admin, engineer, supporter] = teammates.map((teammate) => teammate.user);
+
+  const platformTeam = await upsertTeam(workspace.id, {
+    name: 'Platform',
+    description: 'Authentication, workspaces and the shared shell.',
+    color: '#6366F1',
+    leadId: admin?.id ?? owner.id,
+    memberIds: [owner.id, admin?.id, engineer?.id],
+  });
+
+  await upsertTeam(workspace.id, {
+    name: 'Support',
+    description: 'Triages incoming tickets and keeps customers unblocked.',
+    color: '#0EA5E9',
+    leadId: supporter?.id ?? owner.id,
+    memberIds: [supporter?.id],
+  });
+
+  // ---------------------------------------------------------------------------
   // Project + sections
   // ---------------------------------------------------------------------------
   const project = await prisma.project.upsert({
     where: { workspaceId_key: { workspaceId: workspace.id, key: PROJECT_KEY } },
-    update: { name: 'Platform Foundation' },
+    // `teamId` is re-applied on update so an existing demo database picks the
+    // association up too, rather than only fresh installs showing it.
+    update: { name: 'Platform Foundation', teamId: platformTeam.id },
     create: {
       workspaceId: workspace.id,
       name: 'Platform Foundation',
@@ -113,6 +136,7 @@ async function main(): Promise<void> {
       status: ProjectStatus.ACTIVE,
       color: '#6366F1',
       leadId: owner.id,
+      teamId: platformTeam.id,
       startDate: daysFromNow(-21),
       dueDate: daysFromNow(30),
     },
@@ -457,6 +481,45 @@ function upsertMembership(
     update: { role },
     create: { workspaceId, userId, role, invitedById: invitedById ?? null },
   });
+}
+
+/**
+ * Creates or refreshes a demo team and its roster.
+ *
+ * Membership is added, never pruned: the seed is re-run against databases people
+ * have been clicking around in, and silently ejecting someone they added would
+ * be a surprising thing for a seed to do.
+ */
+async function upsertTeam(
+  workspaceId: string,
+  team: {
+    name: string;
+    description: string;
+    color: string;
+    leadId: string;
+    memberIds: (string | undefined)[];
+  },
+) {
+  const record = await prisma.team.upsert({
+    where: { workspaceId_name: { workspaceId, name: team.name } },
+    update: { description: team.description, color: team.color, leadId: team.leadId },
+    create: {
+      workspaceId,
+      name: team.name,
+      description: team.description,
+      color: team.color,
+      leadId: team.leadId,
+    },
+  });
+
+  const userIds = [...new Set([team.leadId, ...team.memberIds].filter(Boolean))] as string[];
+
+  await prisma.teamMember.createMany({
+    data: userIds.map((userId) => ({ teamId: record.id, userId })),
+    skipDuplicates: true,
+  });
+
+  return record;
 }
 
 /**

@@ -40,6 +40,11 @@ export const PROJECT_COLORS: readonly string[] = [
   '#14B8A6',
 ];
 
+export const TEAM_NAME_MIN_LENGTH = 2;
+export const TEAM_NAME_MAX_LENGTH = 80;
+/** A workspace cannot have an unbounded number of groupings. */
+export const MAX_TEAMS_PER_WORKSPACE = 100;
+
 export const SECTION_NAME_MIN_LENGTH = 1;
 export const SECTION_NAME_MAX_LENGTH = 120;
 /** Created with every new project so a board is usable immediately. */

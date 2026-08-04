@@ -146,6 +146,7 @@ export const ActivityEntity = {
   TASK: 'TASK',
   TICKET: 'TICKET',
   COMMENT: 'COMMENT',
+  TEAM: 'TEAM',
   USER: 'USER',
 } as const;
 export type ActivityEntity = (typeof ActivityEntity)[keyof typeof ActivityEntity];

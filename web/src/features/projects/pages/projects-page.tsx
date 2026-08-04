@@ -1,5 +1,6 @@
 import { PROJECT_STATUSES, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import type { ProjectSummary } from '@coretask/types';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { FolderKanban, Plus, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -16,6 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { humanizeEnum } from '@/lib/utils';
 
@@ -24,11 +26,18 @@ import { ProjectFormDialog } from '../components/project-form-dialog';
 import { useArchiveProject, useProjects } from '../hooks/use-projects';
 
 const ALL_STATUSES = '__all__';
+const ALL_TEAMS = '__all__';
 const PAGE_SIZE = 12;
 
 export function ProjectsPage() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
   const workspaceId = workspace?.id;
+
+  // The team filter lives in the URL, not in state: team cards link straight
+  // here, and a shared link has to arrive filtered.
+  const { teamId } = useSearch({ from: '/protected/projects' });
+  const navigate = useNavigate();
+  const { data: teams } = useTeams(workspaceId);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -60,15 +69,24 @@ export function ProjectsPage() {
   const onStatusChange = applyFilter(setStatus);
   const onArchivedChange = applyFilter(setIncludeArchived);
 
+  const onTeamChange = applyFilter((value: string) => {
+    void navigate({
+      to: '/projects',
+      search: value === ALL_TEAMS ? {} : { teamId: value },
+      replace: true,
+    });
+  });
+
   const params = useMemo(
     () => ({
       page,
       limit: PAGE_SIZE,
       ...(status !== ALL_STATUSES ? { status } : {}),
+      ...(teamId ? { teamId } : {}),
       ...(includeArchived ? { includeArchived: true } : {}),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
     }),
-    [page, status, includeArchived, debouncedSearch],
+    [page, status, teamId, includeArchived, debouncedSearch],
   );
 
   const { data, isLoading, isError, error } = useProjects(workspaceId, params);
@@ -80,7 +98,8 @@ export function ProjectsPage() {
 
   const projects = data?.items ?? [];
   const meta = data?.meta;
-  const filtered = debouncedSearch !== '' || status !== ALL_STATUSES || includeArchived;
+  const filtered =
+    debouncedSearch !== '' || status !== ALL_STATUSES || includeArchived || Boolean(teamId);
 
   const openCreate = () => {
     setEditing(null);
@@ -149,6 +168,22 @@ export function ProjectsPage() {
           </SelectContent>
         </Select>
 
+        {(teams ?? []).length > 0 && (
+          <Select value={teamId ?? ALL_TEAMS} onValueChange={onTeamChange}>
+            <SelectTrigger aria-label="Filter by team" className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_TEAMS}>All teams</SelectItem>
+              {(teams ?? []).map((team) => (
+                <SelectItem key={team.id} value={team.id}>
+                  {team.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input
             type="checkbox"
@@ -187,6 +222,7 @@ export function ProjectsPage() {
                   onSearchChange('');
                   onStatusChange(ALL_STATUSES);
                   onArchivedChange(false);
+                  onTeamChange(ALL_TEAMS);
                 }}
               >
                 Clear filters
