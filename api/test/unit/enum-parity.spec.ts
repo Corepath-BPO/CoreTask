@@ -2,8 +2,12 @@ import {
   ACTIVITY_ACTIONS,
   ACTIVITY_ENTITIES,
   ATTACHMENT_STATUSES,
+  CUSTOM_FIELD_TYPES,
   NOTIFICATION_TYPES,
+  PROJECT_VIEW_SCOPES,
+  PROJECT_VIEW_TYPES,
   PROJECT_STATUSES,
+  STATUS_CATEGORIES,
   TASK_PRIORITIES,
   TASK_STATUSES,
   TICKET_PRIORITIES,
@@ -34,6 +38,10 @@ describe('shared enums match the Prisma schema', () => {
     ['ActivityAction', ACTIVITY_ACTIONS],
     ['ActivityEntity', ACTIVITY_ENTITIES],
     ['AttachmentStatus', ATTACHMENT_STATUSES],
+    ['StatusCategory', STATUS_CATEGORIES],
+    ['CustomFieldType', CUSTOM_FIELD_TYPES],
+    ['ProjectViewType', PROJECT_VIEW_TYPES],
+    ['ProjectViewScope', PROJECT_VIEW_SCOPES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

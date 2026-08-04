@@ -143,3 +143,49 @@ export const AUTOMATION_STATE_COLOR = {
   PARTIALLY_FAILED: 'orange',
   DISABLED: 'slate',
 } as const satisfies Record<string, ColorToken>;
+
+/** Custom field types implemented today. Future types are added here first. */
+export const CustomFieldType = {
+  TEXT: 'TEXT',
+  NUMBER: 'NUMBER',
+  DATE: 'DATE',
+  CHECKBOX: 'CHECKBOX',
+  SINGLE_SELECT: 'SINGLE_SELECT',
+  MULTI_SELECT: 'MULTI_SELECT',
+  PEOPLE: 'PEOPLE',
+  URL: 'URL',
+  EMAIL: 'EMAIL',
+} as const;
+export type CustomFieldType = (typeof CustomFieldType)[keyof typeof CustomFieldType];
+export const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
+
+/** Field types that carry `CustomFieldOption` rows. */
+export const SELECT_FIELD_TYPES: readonly CustomFieldType[] = [
+  CustomFieldType.SINGLE_SELECT,
+  CustomFieldType.MULTI_SELECT,
+];
+
+export const ProjectViewType = {
+  LIST: 'LIST',
+  BOARD: 'BOARD',
+  CALENDAR: 'CALENDAR',
+  TIMELINE: 'TIMELINE',
+  DASHBOARD: 'DASHBOARD',
+} as const;
+export type ProjectViewType = (typeof ProjectViewType)[keyof typeof ProjectViewType];
+export const PROJECT_VIEW_TYPES = Object.values(ProjectViewType);
+
+/** View types with a real implementation; the rest are future-ready. */
+export const IMPLEMENTED_VIEW_TYPES: readonly ProjectViewType[] = [
+  ProjectViewType.LIST,
+  ProjectViewType.BOARD,
+];
+
+export const ProjectViewScope = {
+  /** Visible to every project member. */
+  PROJECT: 'PROJECT',
+  /** Visible only to its owner. */
+  PERSONAL: 'PERSONAL',
+} as const;
+export type ProjectViewScope = (typeof ProjectViewScope)[keyof typeof ProjectViewScope];
+export const PROJECT_VIEW_SCOPES = Object.values(ProjectViewScope);

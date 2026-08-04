@@ -152,23 +152,27 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  refreshTokens     RefreshToken[]
-  memberships       WorkspaceMember[]
-  invitedMembers    WorkspaceMember[]     @relation("MemberInvitedBy")
-  createdWorkspaces Workspace[]           @relation("WorkspaceCreatedBy")
-  ledProjects       Project[]             @relation("ProjectLead")
-  createdTasks      Task[]                @relation("TaskCreatedBy")
-  assignedTasks     Task[]                @relation("TaskAssignee")
-  reportedTickets   Ticket[]              @relation("TicketReporter")
-  assignedTickets   Ticket[]              @relation("TicketAssignee")
-  comments          Comment[]
-  attachments       Attachment[]
-  mentionedIn       CommentMention[]
-  sentInvitations   WorkspaceInvitation[] @relation("InvitationSentBy")
-  teamMemberships   TeamMember[]
-  ledTeams          Team[]                @relation("TeamLead")
-  activityLogs      ActivityLog[]
-  notifications     Notification[]
+  refreshTokens      RefreshToken[]
+  memberships        WorkspaceMember[]
+  invitedMembers     WorkspaceMember[]      @relation("MemberInvitedBy")
+  createdWorkspaces  Workspace[]            @relation("WorkspaceCreatedBy")
+  ledProjects        Project[]              @relation("ProjectLead")
+  createdTasks       Task[]                 @relation("TaskCreatedBy")
+  assignedTasks      Task[]                 @relation("TaskAssignee")
+  reportedTickets    Ticket[]               @relation("TicketReporter")
+  assignedTickets    Ticket[]               @relation("TicketAssignee")
+  comments           Comment[]
+  attachments        Attachment[]
+  mentionedIn        CommentMention[]
+  sentInvitations    WorkspaceInvitation[]  @relation("InvitationSentBy")
+  teamMemberships    TeamMember[]
+  ledTeams           Team[]                 @relation("TeamLead")
+  activityLogs       ActivityLog[]
+  notifications      Notification[]
+  createdFields      CustomField[]          @relation("CustomFieldCreatedBy")
+  updatedFieldValues TaskCustomFieldValue[] @relation("CustomFieldValueUpdatedBy")
+  ownedViews         ProjectView[]          @relation("ProjectViewOwner")
+  createdViews       ProjectView[]          @relation("ProjectViewCreatedBy")
 
   @@index([isActive])
   @@map("users")
@@ -235,6 +239,10 @@ model Workspace {
   attachments   Attachment[]
   activityLogs  ActivityLog[]
   notifications Notification[]
+  statuses      StatusDefinition[]
+  priorities    PriorityDefinition[]
+  customFields  CustomField[]
+  projectViews  ProjectView[]
 
   @@index([createdById])
   @@index([archivedAt])
@@ -327,12 +335,15 @@ model Project {
   /// workspace at large, and a project outlives the team that started it.
   teamId String? @db.Uuid
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lead      User?     @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
-  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  sections  Section[]
-  tasks     Task[]
-  tickets   Ticket[]
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead         User?              @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  team         Team?              @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  sections     Section[]
+  tasks        Task[]
+  tickets      Ticket[]
+  statuses     StatusDefinition[]
+  customFields CustomField[]
+  views        ProjectView[]
 
   @@unique([workspaceId, key])
   @@index([workspaceId, status])
@@ -389,18 +400,25 @@ model TeamMember {
 }
 
 model Section {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  workspaceId String   @db.Uuid
-  projectId   String   @db.Uuid
-  name        String   @db.VarChar(120)
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workspaceId     String   @db.Uuid
+  projectId       String   @db.Uuid
+  name            String   @db.VarChar(120)
   /// Fractional ordering: inserting between two rows only rewrites one row.
-  position    Float    @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  position        Float    @default(0)
+  /// Optional status applied when a task is moved into this section.
+  ///
+  /// Null by default, and deliberately so: a section is a workflow column and a
+  /// status is task state, and coupling them silently is how "move a card" turns
+  /// into an unexplained status change. Opting in makes the coupling a choice.
+  defaultStatusId String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  tasks     Task[]
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  defaultStatus StatusDefinition? @relation(fields: [defaultStatusId], references: [id], onDelete: SetNull)
 
   @@index([projectId, position])
   @@index([workspaceId])
@@ -408,36 +426,47 @@ model Section {
 }
 
 model Task {
-  id               String       @id @default(uuid(7)) @db.Uuid
-  workspaceId      String       @db.Uuid
-  projectId        String?      @db.Uuid
-  sectionId        String?      @db.Uuid
-  parentTaskId     String?      @db.Uuid
-  title            String       @db.VarChar(500)
-  description      String?
-  status           TaskStatus   @default(TODO)
-  priority         TaskPriority @default(NONE)
-  position         Float        @default(0)
-  assigneeId       String?      @db.Uuid
-  createdById      String       @db.Uuid
-  startDate        DateTime?
-  dueDate          DateTime?
-  completedAt      DateTime?
-  estimatedMinutes Int?
-  archivedAt       DateTime?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id                   String       @id @default(uuid(7)) @db.Uuid
+  workspaceId          String       @db.Uuid
+  projectId            String?      @db.Uuid
+  sectionId            String?      @db.Uuid
+  parentTaskId         String?      @db.Uuid
+  title                String       @db.VarChar(500)
+  description          String?
+  /// Legacy enum. Still authoritative until the definition backfill is
+  /// verified in production; the FKs below shadow it in the meantime. See
+  /// docs/database/project-view-migration.md for the cut-over.
+  status               TaskStatus   @default(TODO)
+  priority             TaskPriority @default(NONE)
+  /// Set by the backfill, and by every write once definitions are live.
+  statusDefinitionId   String?      @db.Uuid
+  priorityDefinitionId String?      @db.Uuid
+  position             Float        @default(0)
+  assigneeId           String?      @db.Uuid
+  createdById          String       @db.Uuid
+  startDate            DateTime?
+  dueDate              DateTime?
+  completedAt          DateTime?
+  estimatedMinutes     Int?
+  archivedAt           DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  section     Section?     @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  parentTask  Task?        @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks    Task[]       @relation("TaskSubtasks")
-  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdBy   User         @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  comments    Comment[]
-  attachments Attachment[]
+  workspace          Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section            Section?               @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  parentTask         Task?                  @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks           Task[]                 @relation("TaskSubtasks")
+  assignee           User?                  @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy          User                   @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  comments           Comment[]
+  attachments        Attachment[]
+  statusDefinition   StatusDefinition?      @relation(fields: [statusDefinitionId], references: [id], onDelete: SetNull)
+  priorityDefinition PriorityDefinition?    @relation(fields: [priorityDefinitionId], references: [id], onDelete: SetNull)
+  customFieldValues  TaskCustomFieldValue[]
 
+  @@index([statusDefinitionId])
+  @@index([priorityDefinitionId])
   @@index([workspaceId, status])
   @@index([projectId, sectionId, position])
   @@index([assigneeId, status])
@@ -622,4 +651,240 @@ model Notification {
   @@index([userId, createdAt(sort: Desc)])
   @@index([workspaceId])
   @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Project configuration: statuses, priorities, custom fields, saved views
+// ---------------------------------------------------------------------------
+
+/// Semantic meaning of a status, preserved when a workspace renames it.
+///
+/// The name is for people; the category is what code counts. Renaming
+/// "In Progress" to "Working" must not stop it registering as active work on a
+/// dashboard, which is exactly what happens when rollups match on names.
+enum StatusCategory {
+  NOT_STARTED
+  ACTIVE
+  BLOCKED
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+/// A workspace- or project-defined task status.
+///
+/// `projectId` is nullable on purpose. A task may have no project at all, so
+/// there has to be a workspace-level set for those to point at; a project that
+/// wants its own vocabulary defines its own and overrides.
+///
+/// This does NOT replace `Task.status` yet. The enum column stays authoritative
+/// until the backfill is verified — see docs/database/project-view-migration.md.
+model StatusDefinition {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  workspaceId String         @db.Uuid
+  /// Null means the workspace-wide default set.
+  projectId   String?        @db.Uuid
+  name        String         @db.VarChar(60)
+  /// Stable machine name, used by the backfill to map legacy enum values.
+  slug        String         @db.VarChar(60)
+  category    StatusCategory
+  colorToken  String         @default("gray") @db.VarChar(20)
+  customColor String?        @db.VarChar(9)
+  icon        String?        @db.VarChar(40)
+  position    Float          @default(0)
+  /// The status a new task gets when none is chosen.
+  isDefault   Boolean        @default(false)
+  isArchived  Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+  sections  Section[]
+
+  @@unique([workspaceId, projectId, slug])
+  @@index([projectId, position])
+  @@index([workspaceId, category])
+  @@map("status_definitions")
+}
+
+/// A workspace-defined task priority.
+///
+/// Workspace-scoped rather than per-project: "High" meaning different things in
+/// two projects makes cross-project views incoherent.
+model PriorityDefinition {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String   @db.VarChar(60)
+  slug        String   @db.VarChar(60)
+  /// Sort key and the basis of every comparison, so renaming or reordering
+  /// never changes what "higher priority" means.
+  level       Int
+  colorToken  String   @default("gray") @db.VarChar(20)
+  customColor String?  @db.VarChar(9)
+  icon        String?  @db.VarChar(40)
+  position    Float    @default(0)
+  isDefault   Boolean  @default(false)
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, position])
+  @@map("priority_definitions")
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  CHECKBOX
+  SINGLE_SELECT
+  MULTI_SELECT
+  PEOPLE
+  URL
+  EMAIL
+}
+
+/// A user-defined field on a project's tasks.
+model CustomField {
+  id          String          @id @default(uuid(7)) @db.Uuid
+  workspaceId String          @db.Uuid
+  projectId   String          @db.Uuid
+  name        String          @db.VarChar(80)
+  description String?
+  type        CustomFieldType
+  isRequired  Boolean         @default(false)
+  isArchived  Boolean         @default(false)
+  position    Float           @default(0)
+  /// Type-specific configuration. Validated per type in the service rather than
+  /// trusted as arbitrary JSON.
+  settings    Json            @default("{}")
+  createdById String?         @db.Uuid
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspace Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User?                  @relation("CustomFieldCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  options   CustomFieldOption[]
+  values    TaskCustomFieldValue[]
+
+  @@unique([projectId, name])
+  @@index([projectId, position])
+  @@map("custom_fields")
+}
+
+/// One choice on a single- or multi-select field.
+model CustomFieldOption {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  customFieldId String   @db.Uuid
+  label         String   @db.VarChar(80)
+  colorToken    String   @default("gray") @db.VarChar(20)
+  customColor   String?  @db.VarChar(9)
+  position      Float    @default(0)
+  /// Archived rather than deleted, so a task still holding this option keeps a
+  /// value that can be rendered instead of a dangling id.
+  isArchived    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@index([customFieldId, position])
+  @@map("custom_field_options")
+}
+
+/// One task's value for one custom field.
+///
+/// Typed columns rather than a single JSON blob. The List view has to filter,
+/// sort and group by custom fields server-side — large projects must not be
+/// filtered in the browser — and a JSON blob is opaque to an index. One
+/// nullable column per storage class keeps every value queryable while staying
+/// one row per (task, field).
+///
+/// `optionIds` and `userIds` are arrays so single- and multi-select share one
+/// shape; a single-select simply holds at most one.
+model TaskCustomFieldValue {
+  taskId        String    @db.Uuid
+  customFieldId String    @db.Uuid
+  textValue     String?
+  numberValue   Decimal?  @db.Decimal(20, 6)
+  dateValue     DateTime?
+  booleanValue  Boolean?
+  optionIds     String[]  @db.Uuid
+  userIds       String[]  @db.Uuid
+  updatedById   String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  task        Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+  updatedBy   User?       @relation("CustomFieldValueUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  /// One value per task per field — the composite key is the constraint.
+  @@id([taskId, customFieldId])
+  @@index([customFieldId])
+  @@index([customFieldId, textValue])
+  @@index([customFieldId, numberValue])
+  @@index([customFieldId, dateValue])
+  @@map("task_custom_field_values")
+}
+
+enum ProjectViewType {
+  LIST
+  BOARD
+  CALENDAR
+  TIMELINE
+  DASHBOARD
+}
+
+/// Who a saved view belongs to.
+enum ProjectViewScope {
+  /// Visible to every project member.
+  PROJECT
+  /// Visible only to its owner.
+  PERSONAL
+}
+
+/// A saved way of looking at a project's tasks.
+///
+/// A view is presentation, never a copy of task data: List and Board read the
+/// same tasks through the same API, and deleting a view loses an arrangement
+/// rather than any work.
+model ProjectView {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  workspaceId String           @db.Uuid
+  projectId   String           @db.Uuid
+  name        String           @db.VarChar(80)
+  type        ProjectViewType
+  scope       ProjectViewScope @default(PROJECT)
+  /// Required for PERSONAL, null for PROJECT.
+  ownerUserId String?          @db.Uuid
+  isDefault   Boolean          @default(false)
+  isFavorite  Boolean          @default(false)
+  position    Float            @default(0)
+  /// Columns, widths, pinning, density, grouping, filters and sorts.
+  ///
+  /// One validated JSON document rather than four child tables: it is read and
+  /// written whole and never queried by its contents, so splitting it would
+  /// turn every view load into a set of joins for no gain. The service
+  /// validates it against a Zod schema on write, so it is not free-form.
+  settings    Json             @default("{}")
+  createdById String?          @db.Uuid
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner     User?     @relation("ProjectViewOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ProjectViewCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, type])
+  @@index([projectId, ownerUserId])
+  @@map("project_views")
 }
