@@ -68,6 +68,15 @@ export const queryKeys = {
     detail: (workspaceId: string, idOrKey: string) =>
       [...queryKeys.tickets.all(workspaceId), 'detail', idOrKey] as const,
   },
+  projectViews: {
+    all: (workspaceId: string, projectId: string) =>
+      ['project-views', workspaceId, projectId] as const,
+    metadata: (workspaceId: string, projectId: string) =>
+      ['project-views', workspaceId, projectId, 'metadata'] as const,
+    /** Prefix only — the filter and page are appended by the caller. */
+    tasks: (workspaceId: string, projectId: string) =>
+      ['project-views', workspaceId, projectId, 'tasks'] as const,
+  },
   attachments: {
     all: (workspaceId: string) => ['attachments', workspaceId] as const,
     /** `parentKind` keeps a task and a ticket with the same id from colliding. */

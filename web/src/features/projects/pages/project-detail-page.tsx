@@ -1,5 +1,5 @@
 import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
-import { Link } from '@tanstack/react-router';
+import { Link, Outlet } from '@tanstack/react-router';
 import { Archive, ArchiveRestore, ArrowLeft, FolderKanban, Pencil } from 'lucide-react';
 import { useState } from 'react';
 
@@ -12,14 +12,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
-import { useBoardTasks } from '@/features/tasks/hooks/use-tasks';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { ApiError } from '@/lib/api/api-error';
 import { cn, daysUntil, formatDate, initials, percentage } from '@/lib/utils';
 
 import { ProjectFormDialog } from '../components/project-form-dialog';
 import { ProjectStatusBadge } from '../components/project-status-badge';
-import { SectionBoard } from '../components/section-board';
+import { ProjectViewTabs } from '../components/project-view-tabs';
 import { useArchiveProject, useProject } from '../hooks/use-projects';
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
@@ -27,12 +26,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const workspaceId = workspace?.id;
 
   const { data: project, isLoading, isError, error } = useProject(workspaceId, projectId);
-  const {
-    data: boardTasks,
-    isError: tasksFailed,
-    error: tasksError,
-    refetch: refetchTasks,
-  } = useBoardTasks(workspaceId, projectId);
   const archiveProject = useArchiveProject(workspaceId);
   const [editOpen, setEditOpen] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -162,55 +155,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         </Card>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold">Board</h2>
-          {canEdit && (
-            <p className="text-xs text-muted-foreground">
-              Drag a column by its handle to reorder · click a name to rename
-            </p>
-          )}
-        </div>
+      <ProjectViewTabs projectId={project.id} />
 
-        {/*
-          Without this the board renders as "no tasks" whenever the task query
-          fails — an empty board and a broken board look identical, and the
-          empty one invites someone to re-create work that already exists.
-        */}
-        {tasksFailed && (
-          <Card className="border-destructive/40">
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-              <p className="text-sm text-destructive">
-                {tasksError instanceof Error
-                  ? `Could not load tasks: ${tasksError.message}`
-                  : 'Could not load tasks for this board.'}
-              </p>
-              <Button variant="outline" size="sm" onClick={() => void refetchTasks()}>
-                Retry
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {project.sections.length === 0 ? (
-          <EmptyState
-            icon={FolderKanban}
-            title="No sections yet"
-            description="Add a section to start shaping this board."
-          />
-        ) : (
-          <SectionBoard
-            workspaceId={workspaceId}
-            projectId={project.id}
-            sections={project.sections}
-            tasks={boardTasks?.items ?? []}
-            totalTaskCount={boardTasks?.meta.summary.total ?? 0}
-            canEdit={canEdit && !archived}
-            canDelete={canManage && !archived}
-            onOpenTask={setOpenTaskId}
-          />
-        )}
-      </div>
+      {/*
+        Each tab renders here. The board is one representation of the project,
+        not the project itself — which is why it lives on its own route rather
+        than being the page.
+      */}
+      <Outlet />
 
       <ProjectFormDialog
         open={editOpen}

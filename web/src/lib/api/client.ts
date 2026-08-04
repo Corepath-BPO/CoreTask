@@ -140,6 +140,26 @@ export const apiClient = {
     return { items: data.data, meta: data.meta };
   },
 
+  /**
+   * A paginated read that has to be a POST.
+   *
+   * The view query sends a filter set, which is a nested structure — encoding
+   * one into a query string means inventing a serialisation both ends must
+   * agree on. The response envelope is identical to `getPaginated`.
+   */
+  async postPaginated<T, TMeta extends PaginationMeta = PaginationMeta>(
+    url: string,
+    body?: unknown,
+    config?: AxiosRequestConfig,
+  ): Promise<{ items: T[]; meta: TMeta }> {
+    const { data } = await http.post<ApiPaginatedResponse<T> & { meta: TMeta }>(
+      url,
+      body ?? {},
+      config,
+    );
+    return { items: data.data, meta: data.meta };
+  },
+
   async post<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {
     const { data } = await http.post<ApiSuccessResponse<T>>(url, body ?? {}, config);
     return data.data;

@@ -11,7 +11,10 @@ import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
+import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
+import { ProjectListPage } from '@/features/projects/pages/project-list-page';
+import { ProjectOverviewPage } from '@/features/projects/pages/project-overview-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { TeamsPage } from '@/features/teams/pages/teams-page';
@@ -173,6 +176,13 @@ const acceptInvitationRoute = createRoute({
   },
 });
 
+/**
+ * The project shell: header, tabs and an outlet.
+ *
+ * A project is not a board. The board is one representation of it, which is why
+ * each view is a route rather than a piece of component state — the choice then
+ * survives a refresh, works with back and forward, and can be shared.
+ */
 const projectDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/projects/$projectId',
@@ -184,6 +194,67 @@ const projectDetailRoute = createRoute({
     return <ProjectDetailPage projectId={projectId} />;
   },
 });
+
+/**
+ * Bare `/projects/:id` sends the reader to the board.
+ *
+ * A redirect rather than rendering the board here, so there is one canonical
+ * URL per view and an existing bookmark still lands somewhere real.
+ */
+const projectIndexRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/',
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: '/projects/$projectId/board',
+      params: params as { projectId: string },
+    });
+  },
+});
+
+const projectBoardRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/board',
+  component: function ProjectBoardRoute() {
+    const { projectId } = projectDetailRoute.useParams();
+    return <ProjectBoardPage projectId={projectId} />;
+  },
+});
+
+const projectListRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/list',
+  component: function ProjectListRoute() {
+    const { projectId } = projectDetailRoute.useParams();
+    return <ProjectListPage projectId={projectId} />;
+  },
+});
+
+const projectOverviewRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/overview',
+  component: ProjectOverviewPage,
+});
+
+/** Tabs whose implementation lands in a later milestone. */
+const projectPlaceholderRoutes = [
+  { segment: 'automations', title: 'Automations', plannedFor: 'Rule builder and execution history.' },
+  { segment: 'activity', title: 'Activity', plannedFor: 'This project’s slice of the activity feed.' },
+  { segment: 'settings', title: 'Settings', plannedFor: 'Statuses, fields and project preferences.' },
+].map((tab) =>
+  createRoute({
+    getParentRoute: () => projectDetailRoute,
+    path: `/${tab.segment}`,
+    component: () => (
+      <PlaceholderPage
+        title={tab.title}
+        description="Not built yet."
+        icon={Settings}
+        plannedFor={tab.plannedFor}
+      />
+    ),
+  }),
+);
 
 /** Sidebar destinations whose API arrives in the next phase. */
 const placeholders = [
@@ -231,7 +302,13 @@ const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     dashboardRoute,
     projectsRoute,
-    projectDetailRoute,
+    projectDetailRoute.addChildren([
+      projectIndexRoute,
+      projectOverviewRoute,
+      projectListRoute,
+      projectBoardRoute,
+      ...projectPlaceholderRoutes,
+    ]),
     myTasksRoute,
     ticketsRoute,
     inboxRoute,

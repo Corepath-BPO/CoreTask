@@ -1,0 +1,97 @@
+import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
+import { FolderKanban } from 'lucide-react';
+import { useState } from 'react';
+
+import { EmptyState } from '@/components/feedback/empty-state';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
+import { useBoardTasks } from '@/features/tasks/hooks/use-tasks';
+import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
+
+import { SectionBoard } from '../components/section-board';
+import { useProject } from '../hooks/use-projects';
+
+/**
+ * The Board tab — the Kanban that used to be the whole project page.
+ *
+ * Lifted onto its own route unchanged, so the drag-and-drop, section renaming
+ * and inline task creation all behave exactly as before.
+ */
+export function ProjectBoardPage({ projectId }: { projectId: string }) {
+  const { workspace } = useActiveWorkspace();
+  const workspaceId = workspace?.id;
+
+  const { data: project, isLoading } = useProject(workspaceId, projectId);
+  const {
+    data: boardTasks,
+    isError: tasksFailed,
+    error: tasksError,
+    refetch: refetchTasks,
+  } = useBoardTasks(workspaceId, projectId);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+
+  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  const canEdit = hasAtLeastRole(role, WorkspaceRole.MEMBER);
+  const canManage = hasAtLeastRole(role, WorkspaceRole.MANAGER);
+  const archived = Boolean(project?.archivedAt);
+
+  if (isLoading || !project) return <Skeleton className="h-64 w-full" />;
+
+  return (
+    <div className="space-y-3">
+      {canEdit && (
+        <p className="text-xs text-muted-foreground">
+          Drag a column by its handle to reorder · click a name to rename
+        </p>
+      )}
+
+      {/*
+        Without this the board renders as "no tasks" whenever the task query
+        fails — an empty board and a broken board look identical, and the empty
+        one invites someone to re-create work that already exists.
+      */}
+      {tasksFailed && (
+        <Card className="border-destructive/40">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <p className="text-sm text-destructive">
+              {tasksError instanceof Error
+                ? `Could not load tasks: ${tasksError.message}`
+                : 'Could not load tasks for this board.'}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => void refetchTasks()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {project.sections.length === 0 ? (
+        <EmptyState
+          icon={FolderKanban}
+          title="No sections yet"
+          description="Add a section to start shaping this board."
+        />
+      ) : (
+        <SectionBoard
+          workspaceId={workspaceId}
+          projectId={project.id}
+          sections={project.sections}
+          tasks={boardTasks?.items ?? []}
+          totalTaskCount={boardTasks?.meta.summary.total ?? 0}
+          canEdit={canEdit && !archived}
+          canDelete={canManage && !archived}
+          onOpenTask={setOpenTaskId}
+        />
+      )}
+
+      <TaskDetailDialog
+        workspaceId={workspaceId}
+        taskId={openTaskId}
+        role={role}
+        onClose={() => setOpenTaskId(null)}
+      />
+    </div>
+  );
+}
