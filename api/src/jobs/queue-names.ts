@@ -7,8 +7,15 @@
 export const QueueName = {
   EMAIL: 'coretask.email',
   MAINTENANCE: 'coretask.maintenance',
+  AUTOMATION: 'coretask.automation',
 } as const;
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
+
+export const AutomationJob = {
+  /** A domain event that may match one or more rules. */
+  EVENT: 'automation-event',
+} as const;
+export type AutomationJob = (typeof AutomationJob)[keyof typeof AutomationJob];
 
 export const MaintenanceJob = {
   /** Removes uploads that were started and never finished. */

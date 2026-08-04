@@ -173,6 +173,7 @@ model User {
   updatedFieldValues TaskCustomFieldValue[] @relation("CustomFieldValueUpdatedBy")
   ownedViews         ProjectView[]          @relation("ProjectViewOwner")
   createdViews       ProjectView[]          @relation("ProjectViewCreatedBy")
+  createdAutomations AutomationRule[]       @relation("AutomationCreatedBy")
 
   @@index([isActive])
   @@map("users")
@@ -227,22 +228,24 @@ model Workspace {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  createdBy     User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  members       WorkspaceMember[]
-  invitations   WorkspaceInvitation[]
-  teams         Team[]
-  projects      Project[]
-  sections      Section[]
-  tasks         Task[]
-  tickets       Ticket[]
-  comments      Comment[]
-  attachments   Attachment[]
-  activityLogs  ActivityLog[]
-  notifications Notification[]
-  statuses      StatusDefinition[]
-  priorities    PriorityDefinition[]
-  customFields  CustomField[]
-  projectViews  ProjectView[]
+  createdBy            User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  members              WorkspaceMember[]
+  invitations          WorkspaceInvitation[]
+  teams                Team[]
+  projects             Project[]
+  sections             Section[]
+  tasks                Task[]
+  tickets              Ticket[]
+  comments             Comment[]
+  attachments          Attachment[]
+  activityLogs         ActivityLog[]
+  notifications        Notification[]
+  statuses             StatusDefinition[]
+  priorities           PriorityDefinition[]
+  customFields         CustomField[]
+  projectViews         ProjectView[]
+  automationRules      AutomationRule[]
+  automationExecutions AutomationExecution[]
 
   @@index([createdById])
   @@index([archivedAt])
@@ -344,6 +347,7 @@ model Project {
   statuses     StatusDefinition[]
   customFields CustomField[]
   views        ProjectView[]
+  automations  AutomationRule[]
 
   @@unique([workspaceId, key])
   @@index([workspaceId, status])
@@ -887,4 +891,163 @@ model ProjectView {
   @@index([projectId, type])
   @@index([projectId, ownerUserId])
   @@map("project_views")
+}
+
+// ---------------------------------------------------------------------------
+// Automation
+// ---------------------------------------------------------------------------
+
+enum AutomationRuleStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  DISABLED
+  ARCHIVED
+}
+
+enum AutomationNodeType {
+  TRIGGER
+  CONDITION
+  ACTION
+  BRANCH
+  DELAY
+}
+
+enum AutomationExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIALLY_FAILED
+  /// Stopped before running: a loop guard, a depth limit, or a rule that was
+  /// paused between the event firing and the job being picked up.
+  SKIPPED
+}
+
+/// A workflow rule on a project.
+///
+/// Only `ACTIVE` rules run. Everything else — draft, paused, disabled, archived
+/// — is a rule that exists but does nothing, which is what makes pausing a
+/// misbehaving rule safe and instant.
+model AutomationRule {
+  id            String               @id @default(uuid(7)) @db.Uuid
+  workspaceId   String               @db.Uuid
+  projectId     String               @db.Uuid
+  name          String               @db.VarChar(120)
+  description   String?
+  status        AutomationRuleStatus @default(DRAFT)
+  /// Denormalised from the trigger node so matching an event is one indexed
+  /// query rather than a join through every rule's nodes.
+  triggerType   String               @db.VarChar(60)
+  /// Trigger scoping — the section id for TASK_MOVED_TO_SECTION, and so on.
+  triggerConfig Json                 @default("{}")
+  version       Int                  @default(1)
+  createdById   String?              @db.Uuid
+  publishedAt   DateTime?
+  lastRunAt     DateTime?
+  lastRunStatus String?              @db.VarChar(30)
+  runCount      Int                  @default(0)
+  failureCount  Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy  User?                 @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  nodes      AutomationNode[]
+  executions AutomationExecution[]
+
+  /// The matcher's query: active rules for a project on a given trigger.
+  @@index([projectId, status, triggerType])
+  @@index([workspaceId, status])
+  @@map("automation_rules")
+}
+
+/// One step in a rule.
+///
+/// A node tree rather than separate Trigger/Condition/Action tables. The two
+/// models cannot coexist without one of them being a lie, and a tree is what a
+/// visual builder edits — branches need a parent and an ordinal, which normalised
+/// tables would have to reinvent anyway.
+model AutomationNode {
+  id            String             @id @default(uuid(7)) @db.Uuid
+  ruleId        String             @db.Uuid
+  nodeType      AutomationNodeType
+  /// The specific trigger, condition or action, e.g. `ASSIGN_USER`.
+  subtype       String             @db.VarChar(60)
+  configuration Json               @default("{}")
+  positionX     Float              @default(0)
+  positionY     Float              @default(0)
+  parentNodeId  String?            @db.Uuid
+  /// Which arm of a branch this hangs off.
+  branchKey     String?            @db.VarChar(40)
+  position      Float              @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  rule       AutomationRule   @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  parentNode AutomationNode?  @relation("NodeChildren", fields: [parentNodeId], references: [id], onDelete: Cascade)
+  children   AutomationNode[] @relation("NodeChildren")
+
+  @@index([ruleId, position])
+  @@index([parentNodeId])
+  @@map("automation_nodes")
+}
+
+/// One run of one rule.
+model AutomationExecution {
+  id            String                    @id @default(uuid(7)) @db.Uuid
+  workspaceId   String                    @db.Uuid
+  projectId     String                    @db.Uuid
+  ruleId        String                    @db.Uuid
+  status        AutomationExecutionStatus @default(RUNNING)
+  triggerType   String                    @db.VarChar(60)
+  /// What the run was about — usually a task.
+  entityType    String?                   @db.VarChar(40)
+  entityId      String?                   @db.Uuid
+  /// Who or what caused the triggering change. Null when a rule caused it.
+  actorId       String?                   @db.Uuid
+  /// Shared by every execution descended from one original user action, which
+  /// is what makes a loop detectable rather than merely suspected.
+  correlationId String                    @db.Uuid
+  /// How many rules deep this is. The original action is 0.
+  depth         Int                       @default(0)
+  /// Set when conditions did not match, so a no-op is distinguishable from a
+  /// failure in the history.
+  skippedReason String?                   @db.VarChar(200)
+  error         String?
+  durationMs    Int?
+  startedAt     DateTime                  @default(now())
+  finishedAt    DateTime?
+
+  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule      AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  logs      AutomationExecutionLog[]
+
+  @@index([ruleId, startedAt])
+  @@index([projectId, status])
+  @@index([correlationId])
+  @@map("automation_executions")
+}
+
+/// One action attempt inside an execution.
+///
+/// Before and after values are recorded per action rather than per run: a rule
+/// with four actions where the third failed is only diagnosable if each is
+/// accounted for separately.
+model AutomationExecutionLog {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  executionId String   @db.Uuid
+  nodeId      String?  @db.Uuid
+  nodeType    String   @db.VarChar(30)
+  subtype     String   @db.VarChar(60)
+  succeeded   Boolean
+  message     String?  @db.VarChar(500)
+  beforeValue Json?
+  afterValue  Json?
+  createdAt   DateTime @default(now())
+
+  execution AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@map("automation_execution_logs")
 }

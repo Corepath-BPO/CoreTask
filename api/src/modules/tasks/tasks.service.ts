@@ -1,6 +1,7 @@
 import {
   ActivityAction,
   ActivityEntity,
+  AutomationTrigger,
   NotificationType,
   ServerEvent,
   TaskStatus,
@@ -10,6 +11,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Task as PrismaTask } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import {
   compileFilters,
   compileSorts,
@@ -52,6 +54,7 @@ export class TasksService {
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
     private readonly realtime: RealtimeGateway,
+    private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
   ) {}
 
@@ -279,6 +282,31 @@ export class TasksService {
 
     const task = await this.withSubtaskRollup(updated);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, task);
+
+    /*
+     * Announced after the write has landed, never before: a rule must react to
+     * what is true, not to what is about to be attempted. Fire-and-forget,
+     * because an automation failing to enqueue must not fail the edit.
+     */
+    if (updated.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: updated.projectId,
+        trigger:
+          existing.status !== updated.status
+            ? AutomationTrigger.TASK_STATUS_CHANGED
+            : existing.priority !== updated.priority
+              ? AutomationTrigger.TASK_PRIORITY_CHANGED
+              : existing.assigneeId !== updated.assigneeId && updated.assigneeId
+                ? AutomationTrigger.TASK_ASSIGNED
+                : AutomationTrigger.TASK_UPDATED,
+        entityType: 'TASK',
+        entityId: updated.id,
+        actorId: userId,
+        before: { status: existing.status, priority: existing.priority, assigneeId: existing.assigneeId },
+        after: { status: updated.status, priority: updated.priority, assigneeId: updated.assigneeId },
+      });
+    }
     await this.notifyAssignment(workspaceId, userId, updated, existing.assigneeId);
 
     return task;
@@ -332,6 +360,20 @@ export class TasksService {
     }
 
     const task = await this.withSubtaskRollup(updated);
+
+    if (updated.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: updated.projectId,
+        trigger: AutomationTrigger.TASK_MOVED_TO_SECTION,
+        entityType: 'TASK',
+        entityId: updated.id,
+        actorId: userId,
+        before: { sectionId: existing.sectionId },
+        after: { sectionId: updated.sectionId },
+      });
+    }
+
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_MOVED, {
       task,
       fromSectionId: existing.sectionId,
