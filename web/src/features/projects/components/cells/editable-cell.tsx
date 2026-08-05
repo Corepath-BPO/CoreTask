@@ -30,7 +30,7 @@ export function CellButton({
       onClick={onOpen}
       aria-label={ariaLabel}
       className={cn(
-        'block w-full truncate rounded px-1 py-0.5 text-left text-sm',
+        'block w-full cursor-pointer truncate rounded px-1 py-0.5 text-left text-sm',
         'hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
         className,
       )}

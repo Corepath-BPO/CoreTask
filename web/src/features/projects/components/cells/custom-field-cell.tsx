@@ -56,7 +56,7 @@ export function CustomFieldCell({
           disabled={!canEdit}
           onChange={(event) => onSave({ checkbox: event.target.checked })}
           aria-label={label}
-          className="size-4 rounded border-input accent-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          className="size-4 cursor-pointer rounded border-input accent-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
         />
       );
 
@@ -333,7 +333,7 @@ function MultiSelectCell({
                   isOn ? selected.filter((id) => id !== option.id) : [...selected, option.id],
                 )
               }
-              className={cn('rounded', isOn && 'ring-1 ring-ring')}
+              className={cn('cursor-pointer rounded', isOn && 'ring-1 ring-ring')}
             >
               <SemanticBadge
                 color={{ colorToken: option.colorToken, customColor: option.customColor }}
@@ -347,7 +347,7 @@ function MultiSelectCell({
         <button
           type="button"
           onClick={editor.cancel}
-          className="rounded px-1.5 text-xs text-muted-foreground hover:bg-muted"
+          className="cursor-pointer rounded px-1.5 text-xs text-muted-foreground hover:bg-muted"
         >
           Done
         </button>

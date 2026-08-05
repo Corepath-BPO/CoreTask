@@ -1,15 +1,10 @@
 import { SystemField } from '@coretask/contracts';
-import type {
-  ProjectFieldMetadata,
-  Task,
-  TaskCustomFieldValue,
-  ViewColumn,
-} from '@coretask/types';
+import type { ProjectFieldMetadata, Task, TaskCustomFieldValue, ViewColumn } from '@coretask/types';
 
 /** A task as this view receives it — the task plus its field values. */
 type TaskRow = Task & { customFieldValues?: TaskCustomFieldValue[] };
 import { ChevronDown, ChevronRight, Search, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
@@ -18,13 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useUpdateTask } from '@/features/tasks/hooks/use-tasks';
 import { cn, formatDate } from '@/lib/utils';
 
-import {
-  useFieldMetadata,
-  useSetCustomFieldValue,
-  useViewTasks,
-} from '../hooks/use-project-views';
-import { groupBySection } from '../lib/group-by-section';
+import { useFieldMetadata, useSetCustomFieldValue, useViewTasks } from '../hooks/use-project-views';
+import { useRenameSection } from '../hooks/use-projects';
+import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { CustomFieldCell } from './cells/custom-field-cell';
+import { useCellEditor } from './cells/use-cell-editor';
 import {
   AssigneeCell,
   DueDateCell,
@@ -75,6 +68,7 @@ export function ProjectListView({
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
   const updateTask = useUpdateTask(workspaceId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
+  const renameSection = useRenameSection(workspaceId, projectId);
 
   /*
    * Horizontal scroll is tracked so the frozen column can grow a shadow only
@@ -86,6 +80,56 @@ export function ProjectListView({
   const tasks = useMemo(() => data?.items ?? [], [data]);
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
+
+  // Holds the cards to a common width so the shared scroll container spans the
+  // widest of them rather than each card stopping at its own content.
+  const totalWidth = useMemo(
+    () => columns.reduce((sum, column) => sum + columnWidth(column), 0),
+    [columns],
+  );
+
+  /*
+   * The grid is its own scrolling pane, sized to reach the bottom of the
+   * window.
+   *
+   * Letting the page scroll instead put the horizontal scrollbar at the bottom
+   * of the *content*, so seeing the right-hand columns of a long project meant
+   * first scrolling past every task to find the bar. Anchored here, the bar is
+   * always on screen and the column header can stay stuck to the top.
+   *
+   * The height is written straight to the node rather than held in state: this
+   * runs on every resize, and a state update per resize frame re-renders the
+   * whole grid for a number that only ever lands in one style property.
+   *
+   * A callback ref, not an effect watching some stand-in for "the pane exists
+   * yet". Field metadata is cached for a minute, so arriving from another page
+   * renders the section list before the tasks finish loading — any dependency
+   * derived from the data has already settled by the time the pane mounts, and
+   * the effect never runs again to size it. A callback ref fires on the one
+   * event that actually matters, which is the node appearing.
+   */
+  const paneRef = useCallback((pane: HTMLDivElement | null) => {
+    if (!pane) return;
+
+    const fit = () => {
+      const { top } = pane.getBoundingClientRect();
+      // A floor, so a short window leaves something usable rather than a sliver.
+      pane.style.maxHeight = `${Math.max(240, window.innerHeight - top - 16)}px`;
+    };
+
+    fit();
+    window.addEventListener('resize', fit);
+
+    // The pane's top moves when anything above it changes height — the search
+    // row wrapping on a narrow window, for instance.
+    const observer = new ResizeObserver(fit);
+    observer.observe(document.body);
+
+    return () => {
+      window.removeEventListener('resize', fit);
+      observer.disconnect();
+    };
+  }, []);
 
   const toggle = (sectionId: string) =>
     setCollapsed((previous) => {
@@ -155,116 +199,267 @@ export function ProjectListView({
           }
         />
       ) : (
-        // The table scrolls inside its own container rather than the page, so
-        // a wide column set never pushes the whole layout sideways.
+        /*
+         * One scroll container around every card, not one per card.
+         *
+         * Cards that scrolled independently would drift out of step the moment
+         * anyone moved sideways, so the columns would only line up until they
+         * were used. A single container also keeps one scrollbar and one
+         * `scrolled` flag driving the frozen column's shadow.
+         */
         <div
+          ref={paneRef}
           onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}
-          className="overflow-x-auto rounded-lg border border-border"
+          className="overflow-auto rounded-lg"
         >
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40 text-left">
-                {columns.map((column) => (
-                  <th
-                    key={column.field}
-                    scope="col"
-                    className={cn(
-                      'px-3 py-2 text-xs font-medium text-muted-foreground',
-                      // The task name is what a reader scans, so it stays put
-                      // while the rest scrolls.
-                      column.field === SystemField.TITLE &&
-                        'sticky left-0 z-20 min-w-[240px] bg-muted/40',
-                      column.field === SystemField.TITLE &&
-                        scrolled &&
-                        'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
-                    )}
-                    style={column.width ? { width: column.width } : undefined}
-                  >
-                    {columnLabel(column.field, metadata)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+          <div className="space-y-3 pb-1" style={{ minWidth: totalWidth }}>
+            {/*
+             * The column header sits above the cards rather than repeating
+             * inside each one: the columns are a property of the view, not of
+             * any one section, and repeating them turns a long project into a
+             * page of headers.
+             *
+             * Sticky to the top of the pane, because a header that scrolls away
+             * leaves you reading unlabelled columns.
+             */}
+            {/* Wrapped in a box with the cards' border, made transparent: the
+                header has to sit in the same geometry as the tables it labels,
+                or every column is off by the card's one-pixel border. */}
+            <div className="sticky top-0 z-30 rounded-lg border border-transparent bg-background">
+              <table className="w-full table-fixed text-sm">
+                <ColumnWidths columns={columns} />
+                <thead>
+                  <tr className="text-left">
+                    {columns.map((column) => (
+                      <th
+                        key={column.field}
+                        scope="col"
+                        className={cn(
+                          'px-3 pb-1 text-xs font-medium text-muted-foreground',
+                          // The task name is what a reader scans, so it stays put
+                          // while the rest scrolls.
+                          column.field === SystemField.TITLE && 'sticky left-0 z-20 bg-background',
+                          column.field === SystemField.TITLE &&
+                            scrolled &&
+                            'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+                        )}
+                      >
+                        {columnLabel(column.field, metadata)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+              </table>
+            </div>
 
             {groups.map((group) => (
-              <tbody key={group.id}>
-                <tr className="border-b border-border bg-muted/20">
-                  <th
-                    scope="colgroup"
-                    colSpan={columns.length}
-                    className="px-3 py-1.5 text-left"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggle(group.id)}
-                      aria-expanded={!collapsed.has(group.id)}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground"
-                    >
-                      {collapsed.has(group.id) ? (
-                        <ChevronRight className="size-3.5" aria-hidden="true" />
-                      ) : (
-                        <ChevronDown className="size-3.5" aria-hidden="true" />
+              /*
+               * No `overflow-hidden` on the card, tempting as it is for the
+               * rounded corners: an overflow ancestor between a sticky cell and
+               * the scroll container silently stops the cell sticking, and the
+               * frozen column would scroll away with everything else.
+               */
+              <section
+                key={group.id}
+                aria-label={group.name}
+                className="rounded-lg border border-border bg-card shadow-sm"
+              >
+                <h3 className="border-b border-border px-3 py-2">
+                  {/* Sticky so a section's name stays readable once the table
+                      has been scrolled sideways past it. */}
+                  <span className="sticky left-3 flex w-fit items-center gap-1.5">
+                    <SectionHeader
+                      group={group}
+                      collapsed={collapsed.has(group.id)}
+                      canEdit={canEdit}
+                      onToggle={() => toggle(group.id)}
+                      onRename={(name) => renameSection.mutate({ sectionId: group.id, name })}
+                    />
+                  </span>
+                </h3>
+
+                {!collapsed.has(group.id) && (
+                  <table className="w-full table-fixed text-sm">
+                    <ColumnWidths columns={columns} />
+                    <tbody>
+                      {group.tasks.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={columns.length}
+                            className="px-3 py-3 text-xs italic text-muted-foreground"
+                          >
+                            <span className="sticky left-3">No tasks in this section</span>
+                          </td>
+                        </tr>
                       )}
-                      {group.name}
-                      <span className="font-normal text-muted-foreground">
-                        {group.tasks.length}
-                      </span>
-                    </button>
-                  </th>
-                </tr>
 
-                {!collapsed.has(group.id) && group.tasks.length === 0 && (
-                  <tr className="border-b border-border last:border-0">
-                    <td
-                      colSpan={columns.length}
-                      className="px-3 py-2 text-xs italic text-muted-foreground"
-                    >
-                      No tasks in this section
-                    </td>
-                  </tr>
-                )}
-
-                {!collapsed.has(group.id) &&
-                  group.tasks.map((task) => (
-                    <tr
-                      key={task.id}
-                      className="group border-b border-border last:border-0 hover:bg-muted/30"
-                    >
-                      {columns.map((column) => (
-                        <td
-                          key={column.field}
-                          className={cn(
-                            'px-3 py-2 align-middle',
-                            column.field === SystemField.TITLE &&
-                              'sticky left-0 z-10 bg-background',
-                            column.field === SystemField.TITLE &&
-                              scrolled &&
-                              'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
-                          )}
+                      {group.tasks.map((task) => (
+                        <tr
+                          key={task.id}
+                          className="group border-b border-border last:border-0 hover:bg-muted/30"
                         >
-                          <Cell
-                            task={task}
-                            field={column.field}
-                            metadata={metadata}
-                            canEdit={canEdit}
-                            onOpen={() => onOpenTask(task.id)}
-                            onSaveTask={(payload) =>
-                              updateTask.mutate({ taskId: task.id, payload: payload as never })
-                            }
-                            onSaveField={(fieldId, payload) =>
-                              setFieldValue.mutate({ taskId: task.id, fieldId, value: payload })
-                            }
-                          />
-                        </td>
+                          {columns.map((column) => (
+                            <td
+                              key={column.field}
+                              className={cn(
+                                'px-3 py-2 align-middle',
+                                column.field === SystemField.TITLE && 'sticky left-0 z-10 bg-card',
+                                column.field === SystemField.TITLE &&
+                                  scrolled &&
+                                  'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+                              )}
+                            >
+                              <Cell
+                                task={task}
+                                field={column.field}
+                                metadata={metadata}
+                                canEdit={canEdit}
+                                onOpen={() => onOpenTask(task.id)}
+                                onSaveTask={(payload) =>
+                                  updateTask.mutate({
+                                    taskId: task.id,
+                                    payload: payload as never,
+                                  })
+                                }
+                                onSaveField={(fieldId, payload) =>
+                                  setFieldValue.mutate({
+                                    taskId: task.id,
+                                    fieldId,
+                                    value: payload,
+                                  })
+                                }
+                              />
+                            </td>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-              </tbody>
+                    </tbody>
+                  </table>
+                )}
+              </section>
             ))}
-          </table>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A section's name, collapse control and task count.
+ *
+ * Clicking the name edits it, the way it does in the board — the chevron is a
+ * separate control so collapsing and renaming never fight over the same click.
+ * The synthetic "No section" group is not a real section, so it has no name to
+ * rename and gets plain text.
+ */
+function SectionHeader({
+  group,
+  collapsed,
+  canEdit,
+  onToggle,
+  onRename,
+}: {
+  group: Group;
+  collapsed: boolean;
+  canEdit: boolean;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+}) {
+  const isRealSection = group.id !== ORPHAN_GROUP_ID;
+
+  const editor = useCellEditor(group.name, (name) => {
+    const trimmed = name.trim();
+    // A nameless section cannot be told apart from its neighbours, so an empty
+    // name reverts rather than saving.
+    if (trimmed) onRename(trimmed);
+  });
+
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editor.editing) inputRef.current?.select();
+  }, [editor.editing]);
+
+  const count = (
+    <span className="rounded-full bg-muted px-1.5 text-xs font-normal text-muted-foreground">
+      {group.tasks.length}
+    </span>
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${group.name}`}
+        className="cursor-pointer rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+      >
+        {collapsed ? (
+          <ChevronRight className="size-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="size-4" aria-hidden="true" />
+        )}
+      </button>
+
+      {editor.editing ? (
+        <Input
+          ref={inputRef}
+          value={editor.draft}
+          onChange={(event) => editor.setDraft(event.target.value)}
+          onBlur={editor.commit}
+          onKeyDown={editor.onKeyDown}
+          aria-label={`Rename ${group.name}`}
+          className="h-7 w-48 text-sm font-semibold"
+        />
+      ) : canEdit && isRealSection ? (
+        <button
+          type="button"
+          onClick={editor.open}
+          aria-label={`Rename ${group.name}`}
+          className="cursor-pointer rounded px-1 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        >
+          {group.name}
+        </button>
+      ) : (
+        <span className="px-1 text-sm font-semibold text-foreground">{group.name}</span>
+      )}
+
+      {count}
+    </>
+  );
+}
+
+/*
+ * Splitting sections into separate tables means each one would otherwise size
+ * its own columns from its own content, so a card holding short titles would
+ * not line up with the card above it. Every table declares the same widths and
+ * `table-fixed`, which makes the stack read as one grid.
+ */
+const DEFAULT_COLUMN_WIDTH = 150;
+
+const COLUMN_WIDTHS: Record<string, number> = {
+  [SystemField.TITLE]: 300,
+  [SystemField.ASSIGNEE]: 170,
+  [SystemField.STATUS]: 140,
+  [SystemField.PRIORITY]: 130,
+  [SystemField.DUE_DATE]: 130,
+  [SystemField.START_DATE]: 130,
+  [SystemField.ESTIMATE]: 120,
+};
+
+function columnWidth(column: ViewColumn): number {
+  return column.width ?? COLUMN_WIDTHS[column.field] ?? DEFAULT_COLUMN_WIDTH;
+}
+
+function ColumnWidths({ columns }: { columns: ViewColumn[] }) {
+  return (
+    <colgroup>
+      {columns.map((column) => (
+        <col key={column.field} style={{ width: columnWidth(column) }} />
+      ))}
+    </colgroup>
   );
 }
 
@@ -292,7 +487,13 @@ function Cell({
   onSaveTask: (payload: Record<string, unknown>) => void;
   onSaveField: (fieldId: string, payload: Record<string, unknown>) => void;
 }) {
-  const shared = { task, metadata, canEdit, onSave: onSaveTask, onOpenTask: onOpen };
+  const shared = {
+    task,
+    metadata,
+    canEdit,
+    onSave: onSaveTask,
+    onOpenTask: onOpen,
+  };
 
   switch (field) {
     case SystemField.TITLE:

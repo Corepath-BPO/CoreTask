@@ -69,7 +69,7 @@ export function TitleCell({ task, canEdit, onSave, onOpenTask }: CellProps) {
         onClick={onOpenTask}
         aria-label={`Open "${task.title}"`}
         className={cn(
-          'min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-sm font-medium',
+          'min-w-0 flex-1 cursor-pointer truncate rounded px-1 py-0.5 text-left text-sm font-medium',
           'hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
           task.status === TaskStatus.DONE && 'text-muted-foreground line-through',
         )}
@@ -84,7 +84,7 @@ export function TitleCell({ task, canEdit, onSave, onOpenTask }: CellProps) {
           aria-label={`Rename "${task.title}"`}
           // Revealed on hover or focus so the row stays quiet at rest, but
           // never hidden from the keyboard.
-          className="shrink-0 rounded px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
+          className="shrink-0 cursor-pointer rounded px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
         >
           ✎
         </button>

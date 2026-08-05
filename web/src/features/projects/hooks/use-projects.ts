@@ -119,10 +119,20 @@ export function useRenameSection(workspaceId: string | undefined, projectId: str
   return useMutation({
     mutationFn: ({ sectionId, name }: { sectionId: string; name: string }) =>
       sectionsApi.update(workspaceId as string, projectId, sectionId, { name }),
-    onSuccess: (section) => {
+    onSuccess: async (section) => {
       patchSections(workspaceId as string, projectId, (sections) =>
         sections.map((existing) => (existing.id === section.id ? section : existing)),
       );
+
+      /*
+       * The List view reads section names from field metadata, not from the
+       * sections query patched above — and that query is cached for a minute.
+       * Without this, renaming a section from the List view left the old name
+       * on screen until the cache went stale.
+       */
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projectViews.metadata(workspaceId as string, projectId),
+      });
     },
     onError: (error) => reportError(error, 'Could not rename the section.'),
   });

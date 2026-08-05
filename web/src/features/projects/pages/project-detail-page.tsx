@@ -8,7 +8,6 @@ import { EmptyState } from '@/components/feedback/empty-state';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
@@ -69,7 +68,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const overdue = project.dueDate !== null && !archived && daysUntil(project.dueDate) < 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <BackLink />
 
       <PageHeader
@@ -98,10 +97,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/*
+        One strip rather than three stat cards and a separate badge row.
+
+        All of this sits above every tab, so its height came out of whatever the
+        tab was showing — on the List and Board views that was most of the screen
+        spent on summary above the grid people actually came to use. Nothing is
+        dropped; it is one line instead of four, and the space goes to content.
+      */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-card px-4 py-2">
         <span
           aria-hidden="true"
-          className="size-3 rounded-sm"
+          className="size-3 shrink-0 rounded-sm"
           style={{ backgroundColor: project.color }}
         />
         <Badge variant="outline" className="font-mono text-[10px]">
@@ -110,7 +117,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         <ProjectStatusBadge status={project.status} />
         {archived && <Badge variant="muted">Archived</Badge>}
         {project.lead && (
-          <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <Avatar className="size-5">
               {project.lead.avatarUrl && <AvatarImage src={project.lead.avatarUrl} alt="" />}
               <AvatarFallback className="text-[9px]">{initials(project.lead.name)}</AvatarFallback>
@@ -118,41 +125,34 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             {project.lead.name}
           </span>
         )}
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="space-y-1.5 py-4">
-            <p className="text-xs font-medium text-muted-foreground">Progress</p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-semibold tabular-nums">{progress}%</span>
-              <span className="text-xs text-muted-foreground">
-                {project.completedTaskCount}/{project.taskCount} tasks
-              </span>
-            </div>
-            <Progress value={progress} aria-label={`${progress}% complete`} />
-          </CardContent>
-        </Card>
+        <span aria-hidden="true" className="h-4 w-px bg-border" />
 
-        <Card>
-          <CardContent className="space-y-1 py-4">
-            <p className="text-xs font-medium text-muted-foreground">Sections</p>
-            <p className="text-2xl font-semibold tabular-nums">{project.sections.length}</p>
-            <p className="text-xs text-muted-foreground">Columns on this board</p>
-          </CardContent>
-        </Card>
+        <div className="flex min-w-48 flex-1 items-center gap-2">
+          <span className="text-xs text-muted-foreground">Progress</span>
+          <Progress value={progress} className="h-1.5 flex-1" aria-label={`${progress}% complete`} />
+          <span className="text-xs font-semibold tabular-nums">{progress}%</span>
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            {project.completedTaskCount}/{project.taskCount} tasks
+          </span>
+        </div>
 
-        <Card>
-          <CardContent className="space-y-1 py-4">
-            <p className="text-xs font-medium text-muted-foreground">Timeline</p>
-            <p className={cn('text-sm font-medium', overdue && 'text-destructive')}>
-              {project.dueDate ? `Due ${formatDate(project.dueDate)}` : 'No due date'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {project.startDate ? `Started ${formatDate(project.startDate)}` : 'No start date'}
-            </p>
-          </CardContent>
-        </Card>
+        <span className="whitespace-nowrap text-xs text-muted-foreground">
+          <span className="font-semibold tabular-nums text-foreground">
+            {project.sections.length}
+          </span>{' '}
+          sections
+        </span>
+
+        <span
+          className={cn(
+            'whitespace-nowrap text-xs text-muted-foreground',
+            overdue && 'font-medium text-destructive',
+          )}
+        >
+          {project.dueDate ? `Due ${formatDate(project.dueDate)}` : 'No due date'}
+          {project.startDate ? ` · Started ${formatDate(project.startDate)}` : ''}
+        </span>
       </div>
 
       <ProjectViewTabs projectId={project.id} />

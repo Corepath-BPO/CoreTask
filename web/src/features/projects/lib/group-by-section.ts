@@ -1,5 +1,13 @@
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
 
+/**
+ * The synthetic group holding tasks whose section was removed.
+ *
+ * Exported because it is not a real section id: callers have to know not to
+ * offer section-level actions like renaming on it.
+ */
+export const ORPHAN_GROUP_ID = '__none__';
+
 export interface Group {
   id: string;
   name: string;
@@ -21,7 +29,7 @@ export function groupBySection(
   const bySection = new Map<string, Task[]>();
 
   for (const task of tasks) {
-    const key = task.sectionId ?? '__none__';
+    const key = task.sectionId ?? ORPHAN_GROUP_ID;
     const bucket = bySection.get(key);
     if (bucket) bucket.push(task);
     else bySection.set(key, [task]);
@@ -40,9 +48,9 @@ export function groupBySection(
     tasks: bySection.get(section.id) ?? [],
   }));
 
-  const orphans = bySection.get('__none__');
+  const orphans = bySection.get(ORPHAN_GROUP_ID);
   if (orphans?.length) {
-    groups.push({ id: '__none__', name: 'No section', tasks: orphans });
+    groups.push({ id: ORPHAN_GROUP_ID, name: 'No section', tasks: orphans });
   }
 
   return groups;
