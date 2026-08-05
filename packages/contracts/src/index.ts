@@ -7,3 +7,4 @@ export * from './limits.js';
 export * from './mentions.js';
 export * from './query.js';
 export * from './socket-events.js';
+export * from './work-item-types.js';

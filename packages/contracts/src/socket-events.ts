@@ -43,6 +43,21 @@ export const ServerEvent = {
   TICKET_CREATED: 'ticket:created',
   TICKET_UPDATED: 'ticket:updated',
 
+  /*
+   * Work items: what a project holds, whatever backs it.
+   *
+   * These name the domain change, never the screen that caused it — there is
+   * deliberately no `board:` or `list:` event, because both views react to the
+   * same fact and an event per screen makes them drift apart again.
+   *
+   * The task:* and ticket:* events above still fire unchanged, so existing
+   * listeners keep working while callers move across.
+   */
+  WORK_ITEM_CREATED: 'work-item:created',
+  WORK_ITEM_UPDATED: 'work-item:updated',
+  WORK_ITEM_MOVED: 'work-item:moved',
+  WORK_ITEM_DELETED: 'work-item:deleted',
+
   COMMENT_CREATED: 'comment:created',
   COMMENT_UPDATED: 'comment:updated',
   COMMENT_DELETED: 'comment:deleted',

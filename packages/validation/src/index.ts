@@ -10,4 +10,5 @@ export * from './section.js';
 export * from './task.js';
 export * from './team.js';
 export * from './ticket.js';
+export * from './work-item.js';
 export * from './workspace.js';

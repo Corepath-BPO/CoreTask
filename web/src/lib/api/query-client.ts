@@ -68,6 +68,23 @@ export const queryKeys = {
     detail: (workspaceId: string, idOrKey: string) =>
       [...queryKeys.tickets.all(workspaceId), 'detail', idOrKey] as const,
   },
+  /*
+   * One family for the project's work items, read by List and Board alike.
+   *
+   * Both views previously kept their own cache of the same rows under unrelated
+   * keys — `tasks.board` and `projectViews.tasks` — so invalidating one left the
+   * other showing yesterday's answer. A single prefix means one invalidation
+   * reaches every drawing of the data.
+   */
+  workItems: {
+    all: (workspaceId: string, projectId: string) =>
+      ['work-items', workspaceId, projectId] as const,
+    /** Prefix only; the query shape is appended by the caller. */
+    list: (workspaceId: string, projectId: string, query: Record<string, unknown>) =>
+      [...queryKeys.workItems.all(workspaceId, projectId), 'list', query] as const,
+    detail: (workspaceId: string, projectId: string, workItemId: string) =>
+      [...queryKeys.workItems.all(workspaceId, projectId), 'detail', workItemId] as const,
+  },
   projectViews: {
     all: (workspaceId: string, projectId: string) =>
       ['project-views', workspaceId, projectId] as const,
