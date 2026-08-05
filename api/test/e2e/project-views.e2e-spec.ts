@@ -1,0 +1,468 @@
+import { API_PREFIX, WorkspaceRole } from '@coretask/contracts';
+import request from 'supertest';
+
+import {
+  closeTestContext,
+  createTestContext,
+  uniqueEmail,
+  VALID_PASSWORD,
+  type TestContext,
+} from './test-app';
+
+/**
+ * Saved views and custom fields.
+ *
+ * The isolation cases carry the most weight here: a personal view is one
+ * person's, and a custom field belongs to one project. Both are the kind of
+ * boundary that looks fine until someone crosses it.
+ */
+describe('Project views and custom fields (e2e)', () => {
+  let context: TestContext;
+
+  beforeAll(async () => {
+    context = await createTestContext();
+  });
+
+  beforeEach(async () => {
+    await context.prisma.truncateAllTables();
+  });
+
+  afterAll(async () => {
+    await closeTestContext(context);
+  });
+
+  const server = () => context.app.getHttpServer();
+  const url = (path: string) => `${API_PREFIX}${path}`;
+
+  interface Actor {
+    token: string;
+    userId: string;
+  }
+
+  interface Scope {
+    owner: Actor;
+    member: Actor;
+    workspaceId: string;
+    projectId: string;
+    taskId: string;
+  }
+
+  const registerUser = async (name = 'Test User'): Promise<Actor> => {
+    const response = await request(server())
+      .post(url('/auth/register'))
+      .send({ name, email: uniqueEmail(), password: VALID_PASSWORD })
+      .expect(201);
+
+    return {
+      token: response.body.data.accessToken as string,
+      userId: response.body.data.user.id as string,
+    };
+  };
+
+  const setupScope = async (): Promise<Scope> => {
+    const owner = await registerUser('Owner');
+    const member = await registerUser('Member');
+
+    const workspace = await request(server())
+      .post(url('/workspaces'))
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ name: 'Acme Product' })
+      .expect(201);
+    const workspaceId = workspace.body.data.id as string;
+
+    await context.prisma.workspaceMember.create({
+      data: { workspaceId, userId: member.userId, role: WorkspaceRole.MEMBER },
+    });
+
+    const project = await request(server())
+      .post(url(`/workspaces/${workspaceId}/projects`))
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ name: 'Platform Foundation' })
+      .expect(201);
+
+    const task = await request(server())
+      .post(url(`/workspaces/${workspaceId}/tasks`))
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ title: 'A task', sectionId: project.body.data.sections[0].id })
+      .expect(201);
+
+    return {
+      owner,
+      member,
+      workspaceId,
+      projectId: project.body.data.id as string,
+      taskId: task.body.data.id as string,
+    };
+  };
+
+  const viewsUrl = (scope: Scope) =>
+    url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/views`);
+  const fieldsUrl = (scope: Scope) =>
+    url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/custom-fields`);
+
+  // -------------------------------------------------------------------------
+  describe('views', () => {
+    it('creates the List and Board defaults on first read', async () => {
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.data.map((view: { type: string }) => view.type).sort()).toEqual([
+        'BOARD',
+        'LIST',
+      ]);
+    });
+
+    it('does not create them twice', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const second = await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(second.body.data).toHaveLength(2);
+    });
+
+    it('creates and updates a view', async () => {
+      const scope = await setupScope();
+
+      const created = await request(server())
+        .post(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'By assignee', type: 'LIST' })
+        .expect(201);
+
+      const updated = await request(server())
+        .patch(`${viewsUrl(scope)}/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Renamed' })
+        .expect(200);
+
+      expect(updated.body.data.name).toBe('Renamed');
+    });
+
+    /*
+     * A personal view is one person's. Returned as 404 rather than 403 because
+     * confirming it exists is already more than a stranger should learn.
+     */
+    it('hides a personal view from everyone else', async () => {
+      const scope = await setupScope();
+
+      const personal = await request(server())
+        .post(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Mine', type: 'LIST', scope: 'PERSONAL' })
+        .expect(201);
+
+      const theirList = await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(200);
+
+      expect(
+        theirList.body.data.some((view: { id: string }) => view.id === personal.body.data.id),
+      ).toBe(false);
+
+      await request(server())
+        .get(`${viewsUrl(scope)}/${personal.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(404);
+    });
+
+    it('shows a shared view to every project member', async () => {
+      const scope = await setupScope();
+
+      const shared = await request(server())
+        .post(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Everyone', type: 'LIST' })
+        .expect(201);
+
+      const theirs = await request(server())
+        .get(`${viewsUrl(scope)}/${shared.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(200);
+
+      expect(theirs.body.data.name).toBe('Everyone');
+    });
+
+    it('refuses a view from another workspace', async () => {
+      const scope = await setupScope();
+      const other = await setupScope();
+
+      const theirs = await request(server())
+        .post(viewsUrl(other))
+        .set('Authorization', `Bearer ${other.owner.token}`)
+        .send({ name: 'Theirs', type: 'LIST' })
+        .expect(201);
+
+      await request(server())
+        .get(`${viewsUrl(scope)}/${theirs.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+
+    /*
+     * Two states with no correct answer: a project with no default has nowhere
+     * to land, and a personal view cannot be everyone's default.
+     */
+    it('refuses to delete the default until another takes over', async () => {
+      const scope = await setupScope();
+
+      const views = await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const list = views.body.data.find((view: { type: string }) => view.type === 'LIST');
+
+      await request(server())
+        .delete(`${viewsUrl(scope)}/${list.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
+    });
+
+    it('refuses to make a personal view the default', async () => {
+      const scope = await setupScope();
+
+      const personal = await request(server())
+        .post(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Mine', type: 'LIST', scope: 'PERSONAL' })
+        .expect(201);
+
+      await request(server())
+        .post(`${viewsUrl(scope)}/${personal.body.data.id}/set-default`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
+    });
+
+    it('rejects settings that are not valid', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .post(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Broken',
+          type: 'LIST',
+          settings: {
+            filters: {
+              combinator: 'AND',
+              conditions: [{ field: 'title', operator: 'NOT_AN_OPERATOR' }],
+            },
+          },
+        })
+        .expect(400);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('custom fields', () => {
+    const createField = (scope: Scope, body: Record<string, unknown>) =>
+      request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send(body);
+
+    it('creates a select field with its options', async () => {
+      const scope = await setupScope();
+
+      const response = await createField(scope, {
+        name: 'Department',
+        type: 'SINGLE_SELECT',
+        options: [{ label: 'Support', colorToken: 'blue' }, { label: 'Platform' }],
+      }).expect(201);
+
+      expect(response.body.data.options).toHaveLength(2);
+      expect(response.body.data.options[0].colorToken).toBe('blue');
+    });
+
+    it('refuses a select field with no options', async () => {
+      const scope = await setupScope();
+
+      await createField(scope, { name: 'Empty', type: 'SINGLE_SELECT' }).expect(400);
+    });
+
+    it('refuses options on a field type that has none', async () => {
+      const scope = await setupScope();
+
+      await createField(scope, {
+        name: 'Notes',
+        type: 'TEXT',
+        options: [{ label: 'nope' }],
+      }).expect(400);
+    });
+
+    it('refuses a duplicate name in the same project', async () => {
+      const scope = await setupScope();
+
+      await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+      await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(409);
+    });
+
+    /* Managing the shape of a project's data is a MANAGER decision. */
+    it('refuses a member without the role', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .send({ name: 'Sneaky', type: 'TEXT' })
+        .expect(403);
+    });
+
+    it('does not reach across workspaces', async () => {
+      const scope = await setupScope();
+      const other = await setupScope();
+
+      const theirs = await request(server())
+        .post(fieldsUrl(other))
+        .set('Authorization', `Bearer ${other.owner.token}`)
+        .send({ name: 'Theirs', type: 'TEXT' })
+        .expect(201);
+
+      await request(server())
+        .get(`${fieldsUrl(scope)}/${theirs.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('custom field values', () => {
+    const valueUrl = (scope: Scope, fieldId: string) =>
+      url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/custom-fields/${fieldId}`);
+
+    it('stores and returns a value', async () => {
+      const scope = await setupScope();
+
+      const field = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Notes', type: 'TEXT' })
+        .expect(201);
+
+      const response = await request(server())
+        .put(valueUrl(scope, field.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ text: 'Needs review' })
+        .expect(200);
+
+      expect(response.body.data.text).toBe('Needs review');
+    });
+
+    /*
+     * The check that stops a custom field being a way to store arbitrary ids:
+     * a select value must name a live option *of that field*.
+     */
+    it('refuses an option that does not belong to the field', async () => {
+      const scope = await setupScope();
+
+      const field = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Department', type: 'SINGLE_SELECT', options: [{ label: 'Support' }] })
+        .expect(201);
+
+      const otherField = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Region', type: 'SINGLE_SELECT', options: [{ label: 'EMEA' }] })
+        .expect(201);
+
+      // A real option id, but from the wrong field.
+      await request(server())
+        .put(valueUrl(scope, field.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ optionIds: [otherField.body.data.options[0].id] })
+        .expect(400);
+    });
+
+    it('refuses two choices on a single-select', async () => {
+      const scope = await setupScope();
+
+      const field = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Department',
+          type: 'SINGLE_SELECT',
+          options: [{ label: 'Support' }, { label: 'Platform' }],
+        })
+        .expect(201);
+
+      await request(server())
+        .put(valueUrl(scope, field.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ optionIds: field.body.data.options.map((o: { id: string }) => o.id) })
+        .expect(400);
+    });
+
+    it('refuses a person who is not a workspace member', async () => {
+      const scope = await setupScope();
+      const stranger = await registerUser('Stranger');
+
+      const field = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Reviewer', type: 'PEOPLE' })
+        .expect(201);
+
+      await request(server())
+        .put(valueUrl(scope, field.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ userIds: [stranger.userId] })
+        .expect(400);
+    });
+
+    /*
+     * A field is easy to recreate; its data is not. One holding values archives,
+     * an unused one is deleted outright.
+     */
+    it('archives a field that holds values, deletes one that does not', async () => {
+      const scope = await setupScope();
+
+      const used = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Used', type: 'TEXT' })
+        .expect(201);
+
+      await request(server())
+        .put(valueUrl(scope, used.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ text: 'something' })
+        .expect(200);
+
+      const archived = await request(server())
+        .delete(`${fieldsUrl(scope)}/${used.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(archived.body.data).toEqual({ deleted: false, archived: true });
+
+      const unused = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Unused', type: 'TEXT' })
+        .expect(201);
+
+      const deleted = await request(server())
+        .delete(`${fieldsUrl(scope)}/${unused.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(deleted.body.data).toEqual({ deleted: true, archived: false });
+    });
+  });
+});
