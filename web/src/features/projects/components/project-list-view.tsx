@@ -20,6 +20,12 @@ import {
   useViewTasks,
 } from '../hooks/use-project-views';
 import { useRenameSection } from '../hooks/use-projects';
+import {
+  ADD_COLUMN_WIDTH,
+  columnWidth,
+  pinnedLayout,
+  type PinnedLayout,
+} from '../lib/column-layout';
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { CustomFieldCell } from './cells/custom-field-cell';
 import { useCellEditor } from './cells/use-cell-editor';
@@ -31,9 +37,9 @@ import {
   TitleCell,
 } from './cells/system-cells';
 
-import { columnLabel } from '../lib/column-labels';
 
 import { AddFieldControl } from './add-field-control';
+import { ColumnHeaderTable } from './column-header';
 import { ColumnManager } from './column-manager';
 
 interface ProjectListViewProps {
@@ -87,12 +93,28 @@ export function ProjectListView({
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
 
-  // Holds the cards to a common width so the shared scroll container spans the
-  // widest of them rather than each card stopping at its own content.
-  const totalWidth = useMemo(
-    () => columns.reduce((sum, column) => sum + columnWidth(column), ADD_COLUMN_WIDTH),
-    [columns],
+  /*
+   * The width under the cursor mid-drag, before it is saved.
+   *
+   * Held here rather than in the handle, because every table has to follow the
+   * drag together: a header that widens while the rows below it do not is worse
+   * feedback than none. On release the real column is written and this clears.
+   */
+  const [resizing, setResizing] = useState<{ field: string; width: number } | null>(null);
+
+  const shown = useMemo(
+    () =>
+      resizing
+        ? columns.map((column) =>
+            column.field === resizing.field ? { ...column, width: resizing.width } : column,
+          )
+        : columns,
+    [columns, resizing],
   );
+
+  // Pinned offsets and the grid's width come from the same pass, so the frozen
+  // block and the scroll container can never disagree about how wide a column is.
+  const pinned: PinnedLayout = useMemo(() => pinnedLayout(shown), [shown]);
 
   /*
    * The grid is its own scrolling pane, sized to reach the bottom of the
@@ -218,7 +240,7 @@ export function ProjectListView({
           onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}
           className="overflow-auto rounded-lg"
         >
-          <div className="space-y-3 pb-1" style={{ minWidth: totalWidth }}>
+          <div className="space-y-3 pb-1" style={{ minWidth: pinned.totalWidth }}>
             {/*
              * The column header sits above the cards rather than repeating
              * inside each one: the columns are a property of the view, not of
@@ -232,47 +254,31 @@ export function ProjectListView({
                 header has to sit in the same geometry as the tables it labels,
                 or every column is off by the card's one-pixel border. */}
             <div className="sticky top-0 z-30 rounded-lg border border-transparent bg-background">
-              <table className="w-full table-fixed text-sm">
-                <ColumnWidths columns={columns} />
-                <thead>
-                  <tr className="text-left">
-                    {columns.map((column) => (
-                      <th
-                        key={column.field}
-                        scope="col"
-                        className={cn(
-                          'px-3 pb-1 text-xs font-medium text-muted-foreground',
-                          // The task name is what a reader scans, so it stays put
-                          // while the rest scrolls.
-                          column.field === SystemField.TITLE && 'sticky left-0 z-20 bg-background',
-                          column.field === SystemField.TITLE &&
-                            scrolled &&
-                            'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
-                        )}
-                      >
-                        {columnLabel(column.field, metadata)}
-                      </th>
-                    ))}
-
-                    <th scope="col" className="pb-1">
-                      {canEdit ? (
-                        <AddFieldControl
-                          columns={columns}
-                          metadata={metadata}
-                          workspaceId={workspaceId}
-                          projectId={projectId}
-                          onChange={onColumnsChange}
-                        />
-                      ) : (
-                        // The column still exists for someone who cannot add
-                        // fields, because its width is what keeps the cards
-                        // aligned with this header.
-                        <span className="sr-only">Actions</span>
-                      )}
-                    </th>
-                  </tr>
-                </thead>
-              </table>
+              <ColumnHeaderTable
+                columns={shown}
+                metadata={metadata}
+                canEdit={canEdit}
+                pinned={{ ...pinned, scrolled }}
+                onChange={onColumnsChange}
+                onResizePreview={setResizing}
+                widths={<ColumnWidths columns={shown} />}
+                addControl={
+                  canEdit ? (
+                    <AddFieldControl
+                      columns={columns}
+                      metadata={metadata}
+                      workspaceId={workspaceId}
+                      projectId={projectId}
+                      onChange={onColumnsChange}
+                    />
+                  ) : (
+                    // The column still exists for someone who cannot add
+                    // fields, because its width is what keeps the cards
+                    // aligned with this header.
+                    <span className="sr-only">Actions</span>
+                  )
+                }
+              />
             </div>
 
             {groups.map((group) => (
@@ -303,12 +309,12 @@ export function ProjectListView({
 
                 {!collapsed.has(group.id) && (
                   <table className="w-full table-fixed text-sm">
-                    <ColumnWidths columns={columns} />
+                    <ColumnWidths columns={shown} />
                     <tbody>
                       {group.tasks.length === 0 && (
                         <tr>
                           <td
-                            colSpan={columns.length + 1}
+                            colSpan={shown.length + 2}
                             className="px-3 py-3 text-xs italic text-muted-foreground"
                           >
                             <span className="sticky left-3">No tasks in this section</span>
@@ -322,10 +328,10 @@ export function ProjectListView({
                           task={task}
                           workspaceId={workspaceId}
                           projectId={projectId}
-                          columns={columns}
+                          columns={shown}
                           metadata={metadata}
                           canEdit={canEdit}
-                          scrolled={scrolled}
+                          pinned={{ ...pinned, scrolled }}
                           onOpenTask={onOpenTask}
                           onSaveTask={(taskId, payload) =>
                             updateTask.mutate({ taskId, payload: payload as never })
@@ -353,7 +359,7 @@ interface RowProps {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
   canEdit: boolean;
-  scrolled: boolean;
+  pinned: PinnedLayout & { scrolled: boolean };
   onOpenTask: (taskId: string) => void;
   onSaveTask: (taskId: string, payload: Record<string, unknown>) => void;
   onSaveField: (taskId: string, fieldId: string, value: Record<string, unknown>) => void;
@@ -425,7 +431,7 @@ function Row({
   columns,
   metadata,
   canEdit,
-  scrolled,
+  pinned,
   onOpenTask,
   onSaveTask,
   onSaveField,
@@ -437,17 +443,23 @@ function Row({
 }) {
   return (
     <tr className="group border-b border-border last:border-0 hover:bg-muted/30">
-      {columns.map((column) => (
-        <td
-          key={column.field}
-          className={cn(
-            'px-3 py-2 align-middle',
-            column.field === SystemField.TITLE && 'sticky left-0 z-10 bg-card',
-            column.field === SystemField.TITLE &&
-              scrolled &&
-              'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
-          )}
-        >
+      {columns.map((column) => {
+        // A pinned cell's offset has to match its header's exactly, so both read
+        // it from the same layout pass rather than each working it out.
+        const left = pinned.offsets.get(column.field);
+
+        return (
+          <td
+            key={column.field}
+            style={left === undefined ? undefined : { left }}
+            className={cn(
+              'px-3 py-2 align-middle',
+              left !== undefined && 'sticky z-10 bg-card',
+              column.field === pinned.lastPinned &&
+                pinned.scrolled &&
+                'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+            )}
+          >
           <Cell
             task={task}
             field={column.field}
@@ -457,14 +469,17 @@ function Row({
             expanded={expanded}
             onToggleExpand={onToggleExpand}
             onOpen={() => onOpenTask(task.id)}
-            onSaveTask={(payload) => onSaveTask(task.id, payload)}
-            onSaveField={(fieldId, value) => onSaveField(task.id, fieldId, value)}
-          />
-        </td>
-      ))}
+              onSaveTask={(payload) => onSaveTask(task.id, payload)}
+              onSaveField={(fieldId, value) => onSaveField(task.id, fieldId, value)}
+            />
+          </td>
+        );
+      })}
 
-      {/* Empty, but present: it holds the row to the same number of cells as
-          the header so the `+` column does not push everything out of line. */}
+      {/* Empty, but present: these hold the row to the same number of cells as
+          the header, so neither the `+` column nor the trailing spacer pushes
+          anything out of line. */}
+      <td aria-hidden="true" />
       <td aria-hidden="true" />
     </tr>
   );
@@ -562,29 +577,6 @@ function SectionHeader({
  * not line up with the card above it. Every table declares the same widths and
  * `table-fixed`, which makes the stack read as one grid.
  */
-const DEFAULT_COLUMN_WIDTH = 150;
-
-const COLUMN_WIDTHS: Record<string, number> = {
-  [SystemField.TITLE]: 300,
-  [SystemField.ASSIGNEE]: 170,
-  [SystemField.STATUS]: 140,
-  [SystemField.PRIORITY]: 130,
-  [SystemField.DUE_DATE]: 130,
-  [SystemField.START_DATE]: 130,
-  [SystemField.ESTIMATE]: 120,
-};
-
-function columnWidth(column: ViewColumn): number {
-  return column.width ?? COLUMN_WIDTHS[column.field] ?? DEFAULT_COLUMN_WIDTH;
-}
-
-/*
- * The `+` lives in a narrow trailing column of its own. Every table declares it,
- * including the section tables that have nothing to put there, because a card
- * with one fewer cell than the header is a card whose columns no longer line up.
- */
-const ADD_COLUMN_WIDTH = 44;
-
 function ColumnWidths({ columns }: { columns: ViewColumn[] }) {
   return (
     <colgroup>
@@ -592,6 +584,7 @@ function ColumnWidths({ columns }: { columns: ViewColumn[] }) {
         <col key={column.field} style={{ width: columnWidth(column) }} />
       ))}
       <col style={{ width: ADD_COLUMN_WIDTH }} />
+      <col />
     </colgroup>
   );
 }
