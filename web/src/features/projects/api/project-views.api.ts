@@ -82,7 +82,7 @@ export const projectViewsApi = {
   fieldCatalog: (
     workspaceId: string,
     projectId: string,
-    params: { search?: string; visible?: string[] } = {},
+    params: { search?: string; visible?: string[]; includeArchived?: boolean } = {},
   ): Promise<FieldCatalog> =>
     apiClient.get<FieldCatalog>(`${base(workspaceId, projectId)}/field-catalog`, {
       params: {
@@ -90,6 +90,7 @@ export const projectViewsApi = {
         // Joined rather than repeated: axios serialises arrays as `visible[]=`,
         // which the API's strict validation refuses as an unknown property.
         ...(params.visible?.length ? { visible: params.visible.join(',') } : {}),
+        ...(params.includeArchived ? { includeArchived: 'true' } : {}),
       },
     }),
 

@@ -94,11 +94,21 @@ export function useFieldCatalog(
   search: string,
   visible: string[],
   enabled: boolean,
+  includeArchived = false,
 ) {
   return useQuery({
-    queryKey: queryKeys.projectViews.catalog(workspaceId ?? '', projectId, search),
+    // `includeArchived` is in the key because it changes which rows come back;
+    // `visible` is not, because it only changes the marks on them.
+    queryKey: [
+      ...queryKeys.projectViews.catalog(workspaceId ?? '', projectId, search),
+      includeArchived,
+    ],
     queryFn: () =>
-      projectViewsApi.fieldCatalog(workspaceId as string, projectId, { search, visible }),
+      projectViewsApi.fieldCatalog(workspaceId as string, projectId, {
+        search,
+        visible,
+        includeArchived,
+      }),
     enabled: Boolean(workspaceId) && enabled,
     // The catalog is small and cheap; keeping the previous answer on screen
     // while the next one loads stops the list flickering on every keystroke.

@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useAttachField, useFieldCatalog } from '../../hooks/use-project-views';
 
 import { CreateCustomFieldDialog } from './create-custom-field-dialog';
+import { FieldLibraryDialog } from './field-library-dialog';
 import { FieldTypeIcon } from './field-type-icon';
 
 /**
@@ -49,6 +50,7 @@ export function FieldPickerPopover({
   const [debounced, setDebounced] = useState('');
   const [creating, setCreating] = useState<{ name: string; type?: CustomFieldType } | null>(null);
   const [highlighted, setHighlighted] = useState('');
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // So focus can go back where it came from when the popover closes.
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -306,7 +308,25 @@ export function FieldPickerPopover({
               )}
             </CommandList>
 
+            {/* Sticky footer: the two things somebody falls back on when the
+                list did not have what they wanted stay reachable without
+                scrolling to the end of it. */}
             <div className="shrink-0 border-t border-border p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setLibraryOpen(true);
+                }}
+                className={cn(
+                  'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                  'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
+                )}
+              >
+                <Library className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                Choose from field library
+              </button>
+
               <button
                 type="button"
                 onClick={() => setCreating({ name: '' })}
@@ -322,6 +342,28 @@ export function FieldPickerPopover({
           </Command>
         </PopoverContent>
       </Popover>
+
+      {libraryOpen && (
+        <FieldLibraryDialog
+          columns={columns}
+          workspaceId={workspaceId}
+          projectId={projectId}
+          onOpenChange={(next) => {
+            if (!next) {
+              setLibraryOpen(false);
+              triggerRef.current?.focus();
+            }
+          }}
+          onAddColumn={(field) => {
+            addColumn(field);
+            setLibraryOpen(false);
+          }}
+          onCreateNew={() => {
+            setLibraryOpen(false);
+            setCreating({ name: '' });
+          }}
+        />
+      )}
 
       {/*
         Mounted only while creating, and keyed by what it was opened with, so
