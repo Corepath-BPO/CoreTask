@@ -110,3 +110,21 @@ logger.
 `GET /api/v1/health` reports PostgreSQL and Redis independently and always
 answers `200`, so an orchestrator can distinguish "the process is up" from "a
 dependency is down" by reading `data.status`.
+
+## The project module
+
+The project upgrade added four documents of its own:
+
+- [project-views.md](./project-views.md) — why a project is not a board, how
+  saved views store presentation without copying tasks
+- [custom-fields.md](./custom-fields.md) — user-defined fields, statuses and
+  priorities, and why category outlives a rename
+- [automation-engine.md](./automation-engine.md) — rule execution, and the three
+  loop-protection mechanisms
+- [color-system.md](./color-system.md) — semantic tokens and why a stored colour
+  is never a CSS class
+
+The status and priority migration is deliberately incomplete and documented
+separately in
+[docs/database/project-view-migration.md](../database/project-view-migration.md).
+Read it before touching `Task.status`.

@@ -17,6 +17,11 @@ the original choice made sense at the time.
 | [0006](0006-independent-deployability.md)   | Frontend and backend independently deployable   | Accepted |
 | [0007](0007-uuid-v7-primary-keys.md)        | UUID v7 primary keys                            | Accepted |
 | [0008](0008-refresh-token-rotation.md)      | Rotating refresh tokens in an HTTP-only cookie  | Accepted |
+| [0009](0009-project-is-separate-from-its-views.md) | A project is separate from its views      | Accepted |
+| [0010](0010-custom-field-storage.md)        | Typed columns for custom field values           | Accepted |
+| [0011](0011-automation-loop-prevention.md)  | Automation loop prevention                      | Accepted |
+| [0012](0012-semantic-colour-tokens.md)      | Semantic colour tokens, not CSS classes         | Accepted |
+| [0013](0013-automation-node-tree.md)        | A node tree for automation rules                | Accepted |
 
 ## Template
 
