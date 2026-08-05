@@ -1,5 +1,5 @@
 import { CustomFieldType, SystemField } from '@coretask/contracts';
-import type { FieldCatalog, ProjectFieldMetadata } from '@coretask/types';
+import type { FieldCatalog } from '@coretask/types';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -50,19 +50,10 @@ const catalog = (overrides: Partial<FieldCatalog> = {}): FieldCatalog => ({
   ...overrides,
 });
 
-const metadata: ProjectFieldMetadata = {
-  customFields: [],
-  statuses: [],
-  priorities: [],
-  sections: [],
-  members: [],
-};
-
 const open = async (onChange = vi.fn()) => {
   renderWithProviders(
     <FieldPickerPopover
       columns={[{ field: SystemField.TITLE }]}
-      metadata={metadata}
       workspaceId="ws-1"
       projectId="p-1"
       onChange={onChange}

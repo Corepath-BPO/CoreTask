@@ -116,6 +116,8 @@ export const customFieldsApi = {
       type: string;
       description?: string;
       isRequired?: boolean;
+      /** Type-specific configuration; validated against the type server-side. */
+      settings?: Record<string, unknown>;
       options?: { label: string; colorToken?: string }[];
     },
   ): Promise<CustomField> =>

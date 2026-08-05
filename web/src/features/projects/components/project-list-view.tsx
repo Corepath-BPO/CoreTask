@@ -267,7 +267,6 @@ export function ProjectListView({
                   canEdit ? (
                     <FieldPickerPopover
                       columns={columns}
-                      metadata={metadata}
                       workspaceId={workspaceId}
                       projectId={projectId}
                       onChange={onColumnsChange}

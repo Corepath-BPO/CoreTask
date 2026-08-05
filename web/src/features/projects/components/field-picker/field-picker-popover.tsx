@@ -1,5 +1,5 @@
 import type { CustomFieldType } from '@coretask/contracts';
-import type { ProjectFieldMetadata, ViewColumn } from '@coretask/types';
+import type { ViewColumn } from '@coretask/types';
 import { Check, Library, Loader2, Plus, RotateCw } from 'lucide-react';
 import { useRef, useState } from 'react';
 
@@ -35,13 +35,11 @@ import { FieldTypeIcon } from './field-type-icon';
  */
 export function FieldPickerPopover({
   columns,
-  metadata,
   workspaceId,
   projectId,
   onChange,
 }: {
   columns: ViewColumn[];
-  metadata: ProjectFieldMetadata | undefined;
   workspaceId: string | undefined;
   projectId: string;
   onChange: (columns: ViewColumn[]) => void;
@@ -337,13 +335,29 @@ export function FieldPickerPopover({
           initialType={creating.type}
           workspaceId={workspaceId}
           projectId={projectId}
-          existingNames={(metadata?.customFields ?? []).map((field) => field.name)}
+          // Both groups, because a same-named field the project already uses is
+          // just as worth reusing as one sitting in the library.
+          libraryMatches={[...(data?.projectFields ?? []), ...(data?.libraryFields ?? [])]}
           onOpenChange={(next) => {
             if (!next) setCreating(null);
           }}
           onCreated={(fieldId) => {
             setCreating(null);
             addColumn(`custom:${fieldId}`);
+          }}
+          onUseExisting={(field) => {
+            setCreating(null);
+
+            // Already on this project: it only needs a column. Otherwise it has
+            // to be attached first, or the column points at nothing.
+            if (field.isInProject) {
+              addColumn(`custom:${field.id}`);
+              return;
+            }
+
+            attachField.mutate(field.id, {
+              onSuccess: () => addColumn(`custom:${field.id}`),
+            });
           }}
         />
       )}
