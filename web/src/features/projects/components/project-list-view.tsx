@@ -64,7 +64,7 @@ export function ProjectListView({
   workspaceId,
   projectId,
   canEdit,
-  columns,
+  columns: allColumns,
   onColumnsChange,
   onOpenTask,
 }: ProjectListViewProps) {
@@ -93,6 +93,20 @@ export function ProjectListView({
   const tasks = useMemo(() => data?.items ?? [], [data]);
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
+
+  /*
+   * The Section column is dropped, however a saved view came by it.
+   *
+   * Every row already sits inside a card headed by its section, so the column
+   * repeated the same word down the page and cost a column's width to do it.
+   * Filtered here rather than migrated away, because a view is presentation:
+   * rewriting stored settings to remove a column somebody can no longer see
+   * would be a migration with nothing to gain.
+   */
+  const columns = useMemo(
+    () => allColumns.filter((column) => column.field !== SystemField.SECTION),
+    [allColumns],
+  );
 
   /*
    * The width under the cursor mid-drag, before it is saved.
@@ -648,10 +662,6 @@ function Cell({
     case SystemField.DUE_DATE:
       return <DueDateCell {...shared} />;
 
-    case SystemField.SECTION: {
-      const section = metadata?.sections.find((entry) => entry.id === task.sectionId);
-      return <span className="text-xs">{section?.name ?? '—'}</span>;
-    }
     case SystemField.START_DATE:
       return <span className="text-xs">{task.startDate ? formatDate(task.startDate) : '—'}</span>;
     case SystemField.COMPLETED_AT:

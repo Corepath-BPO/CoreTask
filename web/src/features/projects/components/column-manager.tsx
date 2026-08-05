@@ -15,14 +15,18 @@ import { cn } from '@/lib/utils';
 
 import { COLUMN_LABEL, columnLabel as label } from '../lib/column-labels';
 
-/** Every system column a List view can show, in the order they are offered. */
+/**
+ * Every system column a List view can show, in the order they are offered.
+ *
+ * No `SECTION`: the rows are grouped under section headings, so the column
+ * would repeat on every row what the card around it already says.
+ */
 const AVAILABLE_SYSTEM_FIELDS = [
   SystemField.TITLE,
   SystemField.ASSIGNEE,
   SystemField.PRIORITY,
   SystemField.STATUS,
   SystemField.DUE_DATE,
-  SystemField.SECTION,
   SystemField.START_DATE,
   SystemField.COMPLETED_AT,
   SystemField.CREATED_AT,

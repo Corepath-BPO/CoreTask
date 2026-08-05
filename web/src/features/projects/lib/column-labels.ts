@@ -14,7 +14,6 @@ export const COLUMN_LABEL: Record<string, string> = {
   [SystemField.PRIORITY]: 'Priority',
   [SystemField.STATUS]: 'Status',
   [SystemField.DUE_DATE]: 'Due date',
-  [SystemField.SECTION]: 'Section',
   [SystemField.CREATED_BY]: 'Created by',
   [SystemField.START_DATE]: 'Start date',
   [SystemField.COMPLETED_AT]: 'Completed',

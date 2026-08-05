@@ -32,6 +32,11 @@ export interface SystemFieldDefinition {
  * `TITLE` is absent on purpose. It is the row's identity and its link to the
  * task, it can never be hidden, and offering it in a menu of columns to add
  * would be offering something that is always already there.
+ *
+ * `SECTION` is absent for the same reason in a different shape: the List view
+ * groups its rows under a section heading, so a Section column repeats on every
+ * row what the card it sits in already says. It stays a real field for
+ * filtering and grouping — it is simply not a column worth offering.
  */
 export const SYSTEM_FIELD_CATALOG: readonly SystemFieldDefinition[] = [
   {
@@ -83,16 +88,6 @@ export const SYSTEM_FIELD_CATALOG: readonly SystemFieldDefinition[] = [
     isFilterable: true,
     isGroupable: false,
     isEditable: true,
-  },
-  {
-    key: SystemField.SECTION,
-    label: 'Section',
-    description: 'Which column of the board the task sits in',
-    dataType: CustomFieldType.SINGLE_SELECT,
-    isSortable: true,
-    isFilterable: true,
-    isGroupable: true,
-    isEditable: false,
   },
   {
     key: SystemField.ESTIMATE,
