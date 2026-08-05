@@ -23,12 +23,28 @@ export const COLUMN_LABEL: Record<string, string> = {
   [SystemField.ESTIMATE]: 'Estimate',
 };
 
-/** Falls back to the custom field's own name, then to the raw reference. */
+/**
+ * The label a column shows in the header.
+ *
+ * A saved view outlives the fields it names: delete a custom field and its
+ * column is still in the stored settings. That used to put the raw reference —
+ * `custom:019fd248-…` — in the header, which tells a reader nothing and puts an
+ * internal id on screen. A deleted field gets a plain label instead, matching
+ * the `—` its cells already render.
+ */
 export function columnLabel(field: string, metadata: ProjectFieldMetadata | undefined): string {
   if (COLUMN_LABEL[field]) return COLUMN_LABEL[field];
 
-  const customId = field.startsWith('custom:') ? field.slice('custom:'.length) : null;
-  const custom = customId ? metadata?.customFields.find((entry) => entry.id === customId) : null;
+  if (field.startsWith('custom:')) {
+    const customId = field.slice('custom:'.length);
+    const custom = metadata?.customFields.find((entry) => entry.id === customId);
 
-  return custom?.name ?? field;
+    // Undefined metadata means "not loaded yet", which is not the same as a
+    // field that is gone — an empty header beats flashing "Deleted field".
+    if (!metadata) return '';
+
+    return custom?.name ?? 'Deleted field';
+  }
+
+  return field;
 }

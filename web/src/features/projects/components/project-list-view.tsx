@@ -33,6 +33,7 @@ import {
 
 import { columnLabel } from '../lib/column-labels';
 
+import { AddFieldControl } from './add-field-control';
 import { ColumnManager } from './column-manager';
 
 interface ProjectListViewProps {
@@ -89,7 +90,7 @@ export function ProjectListView({
   // Holds the cards to a common width so the shared scroll container spans the
   // widest of them rather than each card stopping at its own content.
   const totalWidth = useMemo(
-    () => columns.reduce((sum, column) => sum + columnWidth(column), 0),
+    () => columns.reduce((sum, column) => sum + columnWidth(column), ADD_COLUMN_WIDTH),
     [columns],
   );
 
@@ -252,6 +253,23 @@ export function ProjectListView({
                         {columnLabel(column.field, metadata)}
                       </th>
                     ))}
+
+                    <th scope="col" className="pb-1">
+                      {canEdit ? (
+                        <AddFieldControl
+                          columns={columns}
+                          metadata={metadata}
+                          workspaceId={workspaceId}
+                          projectId={projectId}
+                          onChange={onColumnsChange}
+                        />
+                      ) : (
+                        // The column still exists for someone who cannot add
+                        // fields, because its width is what keeps the cards
+                        // aligned with this header.
+                        <span className="sr-only">Actions</span>
+                      )}
+                    </th>
                   </tr>
                 </thead>
               </table>
@@ -290,7 +308,7 @@ export function ProjectListView({
                       {group.tasks.length === 0 && (
                         <tr>
                           <td
-                            colSpan={columns.length}
+                            colSpan={columns.length + 1}
                             className="px-3 py-3 text-xs italic text-muted-foreground"
                           >
                             <span className="sticky left-3">No tasks in this section</span>
@@ -372,7 +390,7 @@ function TaskRows({ task, ...shared }: RowProps & { task: TaskRow }) {
           not appear to do nothing on a slow connection. */}
       {expanded && isLoading && (
         <tr className="border-b border-border last:border-0">
-          <td colSpan={shared.columns.length} className="py-2 pl-11 pr-3">
+          <td colSpan={shared.columns.length + 1} className="py-2 pl-11 pr-3">
             <span className="sticky left-11 flex items-center gap-2">
               <Skeleton className="h-4 w-48" />
             </span>
@@ -382,7 +400,7 @@ function TaskRows({ task, ...shared }: RowProps & { task: TaskRow }) {
 
       {expanded && isError && (
         <tr className="border-b border-border last:border-0">
-          <td colSpan={shared.columns.length} className="py-2 pl-11 pr-3">
+          <td colSpan={shared.columns.length + 1} className="py-2 pl-11 pr-3">
             <span className="sticky left-11 text-xs text-destructive">
               Could not load these subtasks.
             </span>
@@ -444,6 +462,10 @@ function Row({
           />
         </td>
       ))}
+
+      {/* Empty, but present: it holds the row to the same number of cells as
+          the header so the `+` column does not push everything out of line. */}
+      <td aria-hidden="true" />
     </tr>
   );
 }
@@ -556,12 +578,20 @@ function columnWidth(column: ViewColumn): number {
   return column.width ?? COLUMN_WIDTHS[column.field] ?? DEFAULT_COLUMN_WIDTH;
 }
 
+/*
+ * The `+` lives in a narrow trailing column of its own. Every table declares it,
+ * including the section tables that have nothing to put there, because a card
+ * with one fewer cell than the header is a card whose columns no longer line up.
+ */
+const ADD_COLUMN_WIDTH = 44;
+
 function ColumnWidths({ columns }: { columns: ViewColumn[] }) {
   return (
     <colgroup>
       {columns.map((column) => (
         <col key={column.field} style={{ width: columnWidth(column) }} />
       ))}
+      <col style={{ width: ADD_COLUMN_WIDTH }} />
     </colgroup>
   );
 }
