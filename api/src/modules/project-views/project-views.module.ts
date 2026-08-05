@@ -6,6 +6,7 @@ import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
+import { FieldCatalogService } from './field-catalog.service';
 import { FieldMetadataService } from './field-metadata.service';
 import { ProjectTasksController } from './project-tasks.controller';
 import { ProjectViewsController } from './project-views.controller';
@@ -22,7 +23,7 @@ import { ProjectViewsService } from './project-views.service';
     DefinitionsModule,
   ],
   controllers: [ProjectViewsController, ProjectTasksController],
-  providers: [ProjectViewsService, FieldMetadataService],
+  providers: [FieldCatalogService, ProjectViewsService, FieldMetadataService],
   exports: [ProjectViewsService, FieldMetadataService],
 })
 export class ProjectViewsModule {}

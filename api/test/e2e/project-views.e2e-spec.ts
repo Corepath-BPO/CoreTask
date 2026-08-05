@@ -100,6 +100,13 @@ describe('Project views and custom fields (e2e)', () => {
   const fieldsUrl = (scope: Scope) =>
     url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/custom-fields`);
 
+  /** Shared by every field suite below, so they all create fields the same way. */
+  const createField = (scope: Scope, body: Record<string, unknown>) =>
+    request(server())
+      .post(fieldsUrl(scope))
+      .set('Authorization', `Bearer ${scope.owner.token}`)
+      .send(body);
+
   // -------------------------------------------------------------------------
   describe('views', () => {
     it('creates the List and Board defaults on first read', async () => {
@@ -268,12 +275,6 @@ describe('Project views and custom fields (e2e)', () => {
 
   // -------------------------------------------------------------------------
   describe('custom fields', () => {
-    const createField = (scope: Scope, body: Record<string, unknown>) =>
-      request(server())
-        .post(fieldsUrl(scope))
-        .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send(body);
-
     it('creates a select field with its options', async () => {
       const scope = await setupScope();
 
@@ -667,6 +668,285 @@ describe('Project views and custom fields (e2e)', () => {
         .get(subtasksUrl(scope, outsider.taskId))
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(404);
+    });
+  });
+  // -------------------------------------------------------------------------
+  describe('field catalog', () => {
+    const catalogUrl = (scope: Scope) =>
+      url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/field-catalog`);
+
+    it('answers with all four groups at once', async () => {
+      const scope = await setupScope();
+      await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+
+      const response = await request(server())
+        .get(catalogUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const catalog = response.body.data;
+      expect(catalog.fieldTypes.length).toBeGreaterThan(0);
+      expect(catalog.systemFields.length).toBeGreaterThan(0);
+      expect(catalog.projectFields.map((f: { name: string }) => f.name)).toContain('Risk');
+      expect(catalog.libraryFields).toEqual([]);
+    });
+
+    it('offers only field types that actually work', async () => {
+      // A type in the picker is one somebody can choose, and choosing a type
+      // whose cells cannot hold a value is worse than not seeing it.
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .get(catalogUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const offered = response.body.data.fieldTypes.map((t: { type: string }) => t.type);
+      expect(offered).toHaveLength(9);
+      expect(offered).not.toContain('FORMULA');
+      expect(offered).not.toContain('ROLLUP');
+    });
+
+    it('searches types, system fields and custom fields together', async () => {
+      const scope = await setupScope();
+      await createField(scope, { name: 'Delivery date', type: 'DATE' }).expect(201);
+
+      const response = await request(server())
+        .get(`${catalogUrl(scope)}?search=date`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const catalog = response.body.data;
+      expect(catalog.fieldTypes.map((t: { type: string }) => t.type)).toContain('DATE');
+      expect(catalog.systemFields.map((f: { label: string }) => f.label)).toContain('Due date');
+      expect(catalog.projectFields.map((f: { name: string }) => f.name)).toContain('Delivery date');
+    });
+
+    it('marks a system field already in the view rather than hiding it', async () => {
+      // Silently omitting it reads as the search having failed to find it.
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .get(`${catalogUrl(scope)}?visible=status`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const status = response.body.data.systemFields.find(
+        (f: { key: string }) => f.key === 'status',
+      );
+      expect(status.isInView).toBe(true);
+    });
+
+    it('carries the metadata that decides filters, sorts and grouping', async () => {
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .get(catalogUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const assignee = response.body.data.systemFields.find(
+        (f: { key: string }) => f.key === 'assigneeId',
+      );
+      expect(assignee).toMatchObject({
+        label: 'Assignee',
+        dataType: 'PEOPLE',
+        isSortable: true,
+        isFilterable: true,
+        isGroupable: true,
+        isEditable: true,
+      });
+
+      // Derived values are shown but never edited from the grid.
+      const createdAt = response.body.data.systemFields.find(
+        (f: { key: string }) => f.key === 'createdAt',
+      );
+      expect(createdAt.isEditable).toBe(false);
+    });
+
+    it('never shows another workspace’s fields', async () => {
+      const scope = await setupScope();
+      const outsider = await setupScope();
+      await createField(outsider, { name: 'Secret', type: 'TEXT' }).expect(201);
+
+      const response = await request(server())
+        .get(catalogUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const everyName = [
+        ...response.body.data.projectFields,
+        ...response.body.data.libraryFields,
+      ].map((f: { name: string }) => f.name);
+      expect(everyName).not.toContain('Secret');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('field library', () => {
+    const secondProject = async (scope: Scope): Promise<string> => {
+      const created = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Second Project' })
+        .expect(201);
+
+      return created.body.data.id as string;
+    };
+
+    it('reuses one definition across two projects', async () => {
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const otherId = await secondProject(scope);
+
+      const attached = await request(server())
+        .post(
+          url(
+            `/workspaces/${scope.workspaceId}/projects/${otherId}/custom-fields/${field.body.data.id}/attach`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(201);
+
+      // The same definition, not a copy — that is what makes it reusable.
+      expect(attached.body.data.id).toBe(field.body.data.id);
+
+      const catalog = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects/${otherId}/field-catalog`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const risk = catalog.body.data.projectFields.find((f: { name: string }) => f.name === 'Risk');
+      expect(risk.usageCount).toBe(2);
+    });
+
+    it('offers a field the project does not have as a library field', async () => {
+      const scope = await setupScope();
+      await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const otherId = await secondProject(scope);
+
+      const catalog = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects/${otherId}/field-catalog`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(catalog.body.data.projectFields).toEqual([]);
+      expect(catalog.body.data.libraryFields.map((f: { name: string }) => f.name)).toContain('Risk');
+    });
+
+    it('leaves the definition alone when one project stops using it', async () => {
+      /*
+       * The library's whole risk: removing a column from one project must never
+       * take another project's data with it.
+       */
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const otherId = await secondProject(scope);
+
+      await request(server())
+        .post(
+          url(
+            `/workspaces/${scope.workspaceId}/projects/${otherId}/custom-fields/${field.body.data.id}/attach`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(201);
+
+      const removed = await request(server())
+        .delete(`${fieldsUrl(scope)}/${field.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      // Detached here, neither deleted nor archived, because it is still in use.
+      expect(removed.body.data).toEqual({ deleted: false, archived: false });
+
+      const stillThere = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects/${otherId}/custom-fields`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(stillThere.body.data.map((f: { name: string }) => f.name)).toContain('Risk');
+    });
+
+    it('refuses to attach the same field twice', async () => {
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+
+      await request(server())
+        .post(`${fieldsUrl(scope)}/${field.body.data.id}/attach`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(409);
+    });
+
+    it('refuses to attach a field from another workspace', async () => {
+      const scope = await setupScope();
+      const outsider = await setupScope();
+      const theirs = await createField(outsider, { name: 'Secret', type: 'TEXT' }).expect(201);
+
+      await request(server())
+        .post(`${fieldsUrl(scope)}/${theirs.body.data.id}/attach`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+
+    it('refuses a member without the role', async () => {
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const otherId = await secondProject(scope);
+
+      await request(server())
+        .post(
+          url(
+            `/workspaces/${scope.workspaceId}/projects/${otherId}/custom-fields/${field.body.data.id}/attach`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(403);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('field settings', () => {
+    it('stores type-specific settings and fills in the defaults', async () => {
+      const scope = await setupScope();
+
+      const created = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Notes', type: 'TEXT', settings: { textMode: 'LONG' } })
+        .expect(201);
+
+      expect(created.body.data.settings).toEqual({ textMode: 'LONG' });
+
+      const plain = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Points', type: 'NUMBER' })
+        .expect(201);
+
+      // A field always carries a complete document, so no reader has to know
+      // what a missing key used to mean.
+      expect(plain.body.data.settings).toEqual({ numberFormat: 'PLAIN', decimalPlaces: 0 });
+    });
+
+    it('rejects a setting that is not valid for the type', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Notes', type: 'TEXT', settings: { textMode: 'MEDIUM' } })
+        .expect(422);
+    });
+
+    it('rejects a number range that cannot contain anything', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Points', type: 'NUMBER', settings: { minValue: 10, maxValue: 1 } })
+        .expect(422);
     });
   });
 });

@@ -95,6 +95,13 @@ export interface CustomField {
   isRequired: boolean;
   isArchived: boolean;
   position: number;
+  /**
+   * Type-specific configuration, e.g. `{ textMode: 'LONG' }`.
+   *
+   * Always complete: the API fills in every default on write, so a reader never
+   * has to know what a missing key used to mean.
+   */
+  settings: Record<string, unknown>;
   /** Present only for select types. */
   options: CustomFieldOption[];
   createdAt: string;
@@ -128,11 +135,13 @@ export interface CreateCustomFieldPayload {
   type: CustomFieldType;
   description?: string;
   isRequired?: boolean;
+  settings?: Record<string, unknown>;
   options?: { label: string; colorToken?: string }[];
 }
 
 export interface UpdateCustomFieldPayload {
   name?: string;
+  settings?: Record<string, unknown>;
   description?: string | null;
   isRequired?: boolean;
   isArchived?: boolean;

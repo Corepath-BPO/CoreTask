@@ -8,6 +8,7 @@ import {
   IsDateString,
   IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -76,6 +77,22 @@ export class CreateCustomFieldDto {
   @IsBoolean()
   isRequired?: boolean;
 
+  /*
+   * Type-specific configuration, kept as an object here and validated against
+   * the field's own type in the service. `class-validator` cannot express
+   * "these keys depend on the value of `type`", and a per-type DTO class would
+   * mean nine of them plus a discriminator the service already knows.
+   */
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description:
+      'Type-specific settings, e.g. `{ "textMode": "LONG" }`. Validated against the field type; unknown keys are dropped.',
+  })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+
   @ApiPropertyOptional({
     type: [CreateFieldOptionDto],
     description: 'Required for select types, refused for every other type.',
@@ -89,6 +106,15 @@ export class CreateCustomFieldDto {
 }
 
 export class UpdateCustomFieldDto {
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description: 'Replaces the settings document. Validated against the field type.',
+  })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+
   @ApiPropertyOptional({ maxLength: 80 })
   @IsOptional()
   @Transform(trim)

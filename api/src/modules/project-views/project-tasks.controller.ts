@@ -17,6 +17,8 @@ import { TaskDto } from '../tasks/dto/task-response.dto';
 import { TasksService } from '../tasks/tasks.service';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
+import { FieldCatalogDto, FieldCatalogQueryDto } from './dto/field-catalog.dto';
+import { FieldCatalogService, type FieldCatalog } from './field-catalog.service';
 import { ProjectFieldMetadataDto } from './dto/field-metadata.dto';
 import { FieldMetadataService } from './field-metadata.service';
 
@@ -66,7 +68,29 @@ export class ProjectTasksController {
   constructor(
     private readonly tasks: TasksService,
     private readonly metadata: FieldMetadataService,
+    private readonly catalog: FieldCatalogService,
   ) {}
+
+  @Get('field-catalog')
+  @ApiOperation({
+    summary: 'Everything the add-field picker can offer',
+    description:
+      'Field types, system fields, this project’s custom fields and the rest of the workspace library, searched together. One request because they answer one question, and separate requests would let the lists disagree about what is already visible.',
+  })
+  @ApiEnvelopeResponse(FieldCatalogDto)
+  fieldCatalog(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query() query: FieldCatalogQueryDto,
+  ): Promise<FieldCatalog> {
+    return this.catalog.build(workspaceId, projectId, {
+      search: query.search,
+      // Repeated query params arrive as a string when there is only one.
+      visible: query.visible === undefined ? [] : [query.visible].flat(),
+      includeLibrary: query.includeLibrary !== 'false',
+      includeArchived: query.includeArchived === 'true',
+    });
+  }
 
   @Get('tasks/:taskId/subtasks')
   @ApiOperation({

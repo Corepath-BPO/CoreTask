@@ -49,6 +49,15 @@ export class CustomFieldDto {
   @ApiProperty({ example: 0 })
   position!: number;
 
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: true,
+    example: { textMode: 'SHORT' },
+    description:
+      'Type-specific configuration. Always complete — every default is filled in on write.',
+  })
+  settings!: Record<string, unknown>;
+
   @ApiProperty({ type: [CustomFieldOptionDto], description: 'Empty for non-select types.' })
   options!: CustomFieldOptionDto[];
 

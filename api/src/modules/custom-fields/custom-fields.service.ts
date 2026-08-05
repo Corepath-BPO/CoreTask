@@ -1,19 +1,25 @@
 import {
   ActivityAction,
   ActivityEntity,
+  AutomationTrigger,
   CustomFieldType,
   SELECT_FIELD_TYPES,
+  ServerEvent,
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
 import type { CustomField, TaskCustomFieldValue } from '@coretask/types';
+import { safeParseFieldSettings } from '@coretask/validation';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
+import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { ProjectsService } from '../projects/projects.service';
+import { taskInclude, toTaskDto } from '../tasks/task.mapper';
 
 import type {
   CreateCustomFieldDto,
@@ -64,6 +70,8 @@ export class CustomFieldsService {
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
     private readonly activity: ActivityLogsService,
+    private readonly realtime: RealtimeGateway,
+    private readonly automation: AutomationEventPublisher,
   ) {}
 
   async list(workspaceId: string, projectId: string): Promise<CustomField[]> {
@@ -94,6 +102,13 @@ export class CustomFieldsService {
 
     const type = dto.type as CustomFieldType;
     const isSelect = SELECT_FIELD_TYPES.includes(type);
+
+    /*
+     * Parsed against the type before anything is written. Defaults are filled
+     * in here rather than left absent, so a field always carries a complete
+     * settings document and no reader has to know what a missing key meant.
+     */
+    const settings = this.parseSettings(type, dto.settings);
 
     // A select field with no options is a column nobody can fill in, and the
     // failure only shows up when someone tries to use it.
@@ -127,6 +142,7 @@ export class CustomFieldsService {
             name: dto.name,
             description: dto.description ?? null,
             type,
+            settings,
             createdById: userId,
             ...(dto.options?.length
               ? {
@@ -177,7 +193,7 @@ export class CustomFieldsService {
     fieldId: string,
     dto: UpdateCustomFieldDto,
   ): Promise<CustomField> {
-    await this.requireField(workspaceId, projectId, fieldId);
+    const field = await this.requireField(workspaceId, projectId, fieldId);
     this.assertMayManage(role);
 
     /*
@@ -186,6 +202,12 @@ export class CustomFieldsService {
      * true of this project only.
      */
     const definition: Prisma.CustomFieldUpdateInput = {};
+    if (dto.settings !== undefined) {
+      definition.settings = this.parseSettings(
+        field.customField.type as CustomFieldType,
+        dto.settings,
+      );
+    }
     if (dto.name !== undefined) definition.name = dto.name;
     if (dto.description !== undefined) definition.description = dto.description;
     if (dto.isArchived !== undefined) definition.isArchived = dto.isArchived;
@@ -288,6 +310,73 @@ export class CustomFieldsService {
 
     await this.prisma.customField.delete({ where: { id: fieldId } });
     return { deleted: true, archived: false };
+  }
+
+  /**
+   * Puts an existing workspace field to work on this project.
+   *
+   * This is the whole point of the library: the same "Risk" field, with the
+   * same options, reported on across every project that uses it. Attaching
+   * creates an association, never a second definition, so two projects sharing
+   * a field really are sharing it.
+   */
+  async attach(
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    role: WorkspaceRole,
+    fieldId: string,
+  ): Promise<CustomField> {
+    await this.projects.requireProject(workspaceId, projectId);
+    this.assertMayManage(role);
+
+    // Scoped to the workspace: a field id from another tenant must not become
+    // attachable merely by being named in a URL this caller can reach.
+    const field = await this.prisma.customField.findFirst({
+      where: { id: fieldId, workspaceId },
+      select: { id: true, name: true, isArchived: true },
+    });
+
+    if (!field) {
+      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Field not found.');
+    }
+
+    if (field.isArchived) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        `"${field.name}" is archived. Restore it before adding it to a project.`,
+      );
+    }
+
+    const existing = await this.prisma.projectCustomField.findUnique({
+      where: { projectId_customFieldId: { projectId, customFieldId: fieldId } },
+    });
+
+    if (existing) {
+      throw AppException.conflict('RESOURCE_CONFLICT', 'This project already uses that field.');
+    }
+
+    const last = await this.prisma.projectCustomField.findFirst({
+      where: { projectId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+
+    await this.prisma.projectCustomField.create({
+      data: { projectId, customFieldId: fieldId, position: (last?.position ?? 0) + 1 },
+    });
+
+    await this.activity.record({
+      workspaceId,
+      actorId: userId,
+      action: ActivityAction.UPDATED,
+      entity: ActivityEntity.PROJECT,
+      entityId: projectId,
+      summary: `Added the existing field "${field.name}" to this project`,
+      metadata: { fieldId },
+    });
+
+    return this.get(workspaceId, projectId, fieldId);
   }
 
   // -------------------------------------------------------------------------
@@ -420,29 +509,111 @@ export class CustomFieldsService {
     const field = await this.requireField(workspaceId, task.projectId, fieldId);
     const data = await this.buildValue(workspaceId, resolve(field), dto);
 
+    const previous = await this.prisma.taskCustomFieldValue.findUnique({
+      where: { taskId_customFieldId: { taskId, customFieldId: fieldId } },
+    });
+
     const value = await this.prisma.taskCustomFieldValue.upsert({
       where: { taskId_customFieldId: { taskId, customFieldId: fieldId } },
       create: { taskId, customFieldId: fieldId, updatedById: userId, ...data },
       update: { updatedById: userId, ...data },
     });
 
+    await this.announce(
+      workspaceId,
+      task.projectId,
+      taskId,
+      userId,
+      field.customField.name,
+      previous ? toValueDto(previous) : null,
+      toValueDto(value),
+    );
+
     return toValueDto(value);
   }
 
-  async clearValue(workspaceId: string, taskId: string, fieldId: string): Promise<void> {
+  async clearValue(
+    workspaceId: string,
+    taskId: string,
+    fieldId: string,
+    userId?: string,
+  ): Promise<void> {
     const task = await this.prisma.task.findFirst({
       where: { id: taskId, workspaceId },
-      select: { id: true },
+      select: { id: true, projectId: true },
     });
 
     if (!task) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
     }
 
+    const previous = await this.prisma.taskCustomFieldValue.findUnique({
+      where: { taskId_customFieldId: { taskId, customFieldId: fieldId } },
+      include: { customField: { select: { name: true } } },
+    });
+
     // Deleting rather than nulling every column: absent and empty mean the same
     // thing to a reader, and one representation is easier to reason about.
     await this.prisma.taskCustomFieldValue.deleteMany({
       where: { taskId, customFieldId: fieldId },
+    });
+
+    // Clearing a value is a change like any other. Skipped when there was
+    // nothing there, so a repeated delete does not wake every rule again.
+    if (previous && task.projectId) {
+      await this.announce(
+        workspaceId,
+        task.projectId,
+        taskId,
+        userId ?? null,
+        previous.customField.name,
+        toValueDto(previous),
+        null,
+      );
+    }
+  }
+
+  /**
+   * Tells the rest of the system that a task's field value changed.
+   *
+   * Neither of these existed before: a custom-field edit updated the database
+   * and nothing else. The board and any other open view kept showing the old
+   * value until something unrelated refetched, and `CUSTOM_FIELD_CHANGED` was a
+   * trigger you could build a rule on that could never once fire.
+   *
+   * `TASK_UPDATED` rather than a bespoke event, because every view already
+   * listens for it — a new event would need every listener taught about it.
+   */
+  private async announce(
+    workspaceId: string,
+    projectId: string,
+    taskId: string,
+    actorId: string | null,
+    fieldName: string,
+    before: TaskCustomFieldValue | null,
+    after: TaskCustomFieldValue | null,
+  ): Promise<void> {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: taskInclude,
+    });
+
+    if (task) {
+      this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, toTaskDto(task));
+    }
+
+    // After the write has landed, never before: a rule must react to what is
+    // true. Fire-and-forget, because a rule failing to enqueue must not fail
+    // the edit that caused it.
+    await this.automation.publish({
+      workspaceId,
+      projectId,
+      trigger: AutomationTrigger.CUSTOM_FIELD_CHANGED,
+      entityType: 'TASK',
+      entityId: taskId,
+      actorId,
+      before: { fieldName, value: before },
+      after: { fieldName, value: after },
     });
   }
 
@@ -570,6 +741,26 @@ export class CustomFieldsService {
     }
   }
 
+  /**
+   * Validates a settings document against the field type it belongs to.
+   *
+   * Reported as a 422 with the offending path rather than a bare 500: a client
+   * sending `decimalPlaces: 9` deserves to be told which key was wrong.
+   */
+  private parseSettings(type: CustomFieldType, settings: unknown): Prisma.InputJsonValue {
+    const result = safeParseFieldSettings(type, settings);
+
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      throw AppException.unprocessable(
+        'VALIDATION_FAILED',
+        `Invalid setting${issue?.path.length ? ` "${issue.path.join('.')}"` : ''}: ${issue?.message ?? 'not allowed for this field type.'}`,
+      );
+    }
+
+    return result.data as Prisma.InputJsonValue;
+  }
+
   private assertOptional(field: ProjectField): void {
     if (field.isRequired) {
       throw AppException.badRequest('BAD_REQUEST', `"${field.name}" is required.`);
@@ -674,6 +865,7 @@ function toFieldDto(link: FieldLink): CustomField {
     isRequired: link.isRequired,
     isArchived: field.isArchived,
     position: link.position,
+    settings: (field.settings ?? {}) as Record<string, unknown>,
     options: field.options.map((option) => ({
       id: option.id,
       label: option.label,

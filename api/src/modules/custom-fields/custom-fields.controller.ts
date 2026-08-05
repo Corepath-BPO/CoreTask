@@ -83,6 +83,27 @@ export class CustomFieldsController {
     return this.fields.create(workspaceId, projectId, userId, role, dto);
   }
 
+  @Post(':fieldId/attach')
+  @ApiOperation({
+    summary: 'Use an existing workspace field on this project',
+    description:
+      'Creates an association, never a second definition, so two projects sharing a field really share it — including its options and everything reported across them.',
+  })
+  @ApiParam({ name: 'fieldId', format: 'uuid' })
+  @ApiEnvelopeResponse(CustomFieldDto, { status: 201 })
+  @ApiErrorResponseDoc(404, 'No such field in this workspace')
+  @ApiErrorResponseDoc(403, 'Only a workspace manager can change a project’s fields')
+  @ApiErrorResponseDoc(409, 'This project already uses that field')
+  attach(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('fieldId', ParseUUIDPipe) fieldId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+  ): Promise<CustomField> {
+    return this.fields.attach(workspaceId, projectId, userId, role, fieldId);
+  }
+
   @Get(':fieldId')
   @ApiOperation({ summary: 'Read one field' })
   @ApiParam({ name: 'fieldId', format: 'uuid' })
@@ -225,7 +246,8 @@ export class TaskCustomFieldsController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
+    @CurrentUser('id') userId: string,
   ): Promise<void> {
-    return this.fields.clearValue(workspaceId, taskId, fieldId);
+    return this.fields.clearValue(workspaceId, taskId, fieldId, userId);
   }
 }
