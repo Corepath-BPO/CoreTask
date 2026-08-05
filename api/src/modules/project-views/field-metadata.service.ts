@@ -69,7 +69,7 @@ export class FieldMetadataService {
    */
   async customFieldMap(workspaceId: string, projectId: string): Promise<CustomFieldMap> {
     const fields = await this.prisma.customField.findMany({
-      where: { workspaceId, projectId },
+      where: { workspaceId, projects: { some: { projectId } } },
       select: { id: true, type: true },
     });
 

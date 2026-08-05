@@ -8,7 +8,7 @@ import {
 } from '@coretask/contracts';
 import type { CustomField, TaskCustomFieldValue } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
-import type { CustomField as PrismaCustomField, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
@@ -27,7 +27,32 @@ const fieldInclude = {
   options: { where: { isArchived: false }, orderBy: { position: 'asc' } },
 } satisfies Prisma.CustomFieldInclude;
 
-type FieldWithOptions = Prisma.CustomFieldGetPayload<{ include: typeof fieldInclude }>;
+/*
+ * A project's field is read through its association, never straight off the
+ * definition. The definition says what the field *is*; the association says
+ * where it sits in this project and whether it is required here. Both halves
+ * are needed to answer "what are this project's fields", and reading only the
+ * definition is how a field ends up at position 0 on every project at once.
+ */
+const linkInclude = {
+  customField: { include: fieldInclude },
+} satisfies Prisma.ProjectCustomFieldInclude;
+
+type FieldLink = Prisma.ProjectCustomFieldGetPayload<{ include: typeof linkInclude }>;
+
+/**
+ * A field as one project sees it: the definition, plus the facts that are only
+ * true here.
+ *
+ * Value validation needs both halves at once — the type and options come from
+ * the definition, but whether a blank is allowed is per-project — so they are
+ * flattened rather than threaded through every rule as two arguments.
+ */
+type ProjectField = FieldLink['customField'] & { isRequired: boolean };
+
+function resolve(link: FieldLink): ProjectField {
+  return { ...link.customField, isRequired: link.isRequired };
+}
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -44,13 +69,13 @@ export class CustomFieldsService {
   async list(workspaceId: string, projectId: string): Promise<CustomField[]> {
     await this.projects.requireProject(workspaceId, projectId);
 
-    const fields = await this.prisma.customField.findMany({
-      where: { projectId, isArchived: false },
-      include: fieldInclude,
+    const links = await this.prisma.projectCustomField.findMany({
+      where: { projectId, customField: { isArchived: false } },
+      include: linkInclude,
       orderBy: { position: 'asc' },
     });
 
-    return fields.map(toFieldDto);
+    return links.map(toFieldDto);
   }
 
   async get(workspaceId: string, projectId: string, fieldId: string): Promise<CustomField> {
@@ -83,38 +108,53 @@ export class CustomFieldsService {
       );
     }
 
-    const last = await this.prisma.customField.findFirst({
+    const last = await this.prisma.projectCustomField.findFirst({
       where: { projectId },
       orderBy: { position: 'desc' },
       select: { position: true },
     });
 
-    const field = await this.prisma.customField
-      .create({
-        data: {
-          workspaceId,
-          projectId,
-          name: dto.name,
-          description: dto.description ?? null,
-          type,
-          isRequired: dto.isRequired ?? false,
-          position: (last?.position ?? 0) + 1,
-          createdById: userId,
-          ...(dto.options?.length
-            ? {
-                options: {
-                  create: dto.options.map((option, index) => ({
-                    label: option.label,
-                    colorToken: option.colorToken ?? 'gray',
-                    position: index,
-                  })),
-                },
-              }
-            : {}),
-        },
-        include: fieldInclude,
+    /*
+     * One transaction, because a definition without an association is a field
+     * nobody can see and nobody can delete: it belongs to the workspace but
+     * appears on no project. Creating it and attaching it are one act.
+     */
+    const link = await this.prisma
+      .$transaction(async (tx) => {
+        const field = await tx.customField.create({
+          data: {
+            workspaceId,
+            name: dto.name,
+            description: dto.description ?? null,
+            type,
+            createdById: userId,
+            ...(dto.options?.length
+              ? {
+                  options: {
+                    create: dto.options.map((option, index) => ({
+                      label: option.label,
+                      colorToken: option.colorToken ?? 'gray',
+                      position: index,
+                    })),
+                  },
+                }
+              : {}),
+          },
+        });
+
+        return tx.projectCustomField.create({
+          data: {
+            projectId,
+            customFieldId: field.id,
+            isRequired: dto.isRequired ?? false,
+            position: (last?.position ?? 0) + 1,
+          },
+          include: linkInclude,
+        });
       })
       .catch(rethrowDuplicateName);
+
+    const field = link.customField;
 
     await this.activity.record({
       workspaceId,
@@ -126,7 +166,7 @@ export class CustomFieldsService {
       metadata: { fieldId: field.id, type },
     });
 
-    return toFieldDto(field);
+    return toFieldDto(link);
   }
 
   async update(
@@ -140,33 +180,59 @@ export class CustomFieldsService {
     await this.requireField(workspaceId, projectId, fieldId);
     this.assertMayManage(role);
 
-    const data: Prisma.CustomFieldUpdateInput = {};
-    if (dto.name !== undefined) data.name = dto.name;
-    if (dto.description !== undefined) data.description = dto.description;
-    if (dto.isRequired !== undefined) data.isRequired = dto.isRequired;
-    if (dto.isArchived !== undefined) data.isArchived = dto.isArchived;
-    if (dto.position !== undefined) data.position = dto.position;
+    /*
+     * Split by what the change means. Renaming a field renames it everywhere it
+     * is used, because it is one field; making it required, or moving it, is
+     * true of this project only.
+     */
+    const definition: Prisma.CustomFieldUpdateInput = {};
+    if (dto.name !== undefined) definition.name = dto.name;
+    if (dto.description !== undefined) definition.description = dto.description;
+    if (dto.isArchived !== undefined) definition.isArchived = dto.isArchived;
 
-    if (Object.keys(data).length === 0) {
+    const association: Prisma.ProjectCustomFieldUpdateInput = {};
+    if (dto.isRequired !== undefined) association.isRequired = dto.isRequired;
+    if (dto.position !== undefined) association.position = dto.position;
+
+    if (Object.keys(definition).length === 0 && Object.keys(association).length === 0) {
       throw AppException.badRequest('BAD_REQUEST', 'Provide at least one field to update.');
     }
 
     // `type` is deliberately absent: changing it would strand every value
     // already stored in the old type's column, and there is no honest
     // conversion from a date to a checkbox.
-    const updated = await this.prisma.customField
-      .update({ where: { id: fieldId }, data, include: fieldInclude })
+    await this.prisma
+      .$transaction(async (tx) => {
+        if (Object.keys(definition).length > 0) {
+          await tx.customField.update({ where: { id: fieldId }, data: definition });
+        }
+
+        if (Object.keys(association).length > 0) {
+          await tx.projectCustomField.update({
+            where: { projectId_customFieldId: { projectId, customFieldId: fieldId } },
+            data: association,
+          });
+        }
+      })
       .catch(rethrowDuplicateName);
 
-    return toFieldDto(updated);
+    return this.get(workspaceId, projectId, fieldId);
   }
 
   /**
-   * Archives a field rather than deleting it once it holds values.
+   * Detaches a field from this project, and disposes of the definition only if
+   * nothing else is using it.
    *
-   * Deleting would take every task's value with it through the cascade, and a
-   * field is easy to add back but its data is not. An unused field is deleted
-   * outright, because there is nothing to lose.
+   * Three outcomes, in increasing order of finality:
+   *
+   *   * another project still uses the field — detach here, leave it alone;
+   *   * this was the last project but tasks hold values — archive it, because
+   *     a field is easy to add back and its data is not;
+   *   * last project and no values — delete it, there is nothing to lose.
+   *
+   * The first case is what the library makes possible and what makes deleting
+   * outright wrong: removing a column from one project must never take another
+   * project's data with it.
    */
   async remove(
     workspaceId: string,
@@ -178,9 +244,28 @@ export class CustomFieldsService {
     const field = await this.requireField(workspaceId, projectId, fieldId);
     this.assertMayManage(role);
 
-    const valueCount = await this.prisma.taskCustomFieldValue.count({
-      where: { customFieldId: fieldId },
+    await this.prisma.projectCustomField.delete({
+      where: { projectId_customFieldId: { projectId, customFieldId: fieldId } },
     });
+
+    const [remainingProjects, valueCount] = await Promise.all([
+      this.prisma.projectCustomField.count({ where: { customFieldId: fieldId } }),
+      this.prisma.taskCustomFieldValue.count({ where: { customFieldId: fieldId } }),
+    ]);
+
+    if (remainingProjects > 0) {
+      await this.activity.record({
+        workspaceId,
+        actorId: userId,
+        action: ActivityAction.UPDATED,
+        entity: ActivityEntity.PROJECT,
+        entityId: projectId,
+        summary: `Removed the field "${field.customField.name}" from this project`,
+        metadata: { fieldId, remainingProjects },
+      });
+
+      return { deleted: false, archived: false };
+    }
 
     if (valueCount > 0) {
       await this.prisma.customField.update({
@@ -194,7 +279,7 @@ export class CustomFieldsService {
         action: ActivityAction.ARCHIVED,
         entity: ActivityEntity.PROJECT,
         entityId: projectId,
-        summary: `Archived the field "${field.name}"`,
+        summary: `Archived the field "${field.customField.name}"`,
         metadata: { fieldId, valueCount },
       });
 
@@ -218,7 +303,7 @@ export class CustomFieldsService {
   ): Promise<CustomField> {
     const field = await this.requireField(workspaceId, projectId, fieldId);
     this.assertMayManage(role);
-    this.assertSelectField(field);
+    this.assertSelectField(resolve(field));
 
     const last = await this.prisma.customFieldOption.findFirst({
       where: { customFieldId: fieldId },
@@ -333,7 +418,7 @@ export class CustomFieldsService {
     }
 
     const field = await this.requireField(workspaceId, task.projectId, fieldId);
-    const data = await this.buildValue(workspaceId, field, dto);
+    const data = await this.buildValue(workspaceId, resolve(field), dto);
 
     const value = await this.prisma.taskCustomFieldValue.upsert({
       where: { taskId_customFieldId: { taskId, customFieldId: fieldId } },
@@ -367,7 +452,7 @@ export class CustomFieldsService {
 
   private async buildValue(
     workspaceId: string,
-    field: FieldWithOptions,
+    field: ProjectField,
     dto: SetCustomFieldValueDto,
   ): Promise<Prisma.TaskCustomFieldValueUncheckedCreateInput extends never ? never : object> {
     const blank = {
@@ -485,13 +570,13 @@ export class CustomFieldsService {
     }
   }
 
-  private assertOptional(field: PrismaCustomField): void {
+  private assertOptional(field: ProjectField): void {
     if (field.isRequired) {
       throw AppException.badRequest('BAD_REQUEST', `"${field.name}" is required.`);
     }
   }
 
-  private assertSelectField(field: PrismaCustomField): void {
+  private assertSelectField(field: ProjectField): void {
     if (!SELECT_FIELD_TYPES.includes(field.type)) {
       throw AppException.badRequest(
         'BAD_REQUEST',
@@ -514,17 +599,23 @@ export class CustomFieldsService {
     workspaceId: string,
     projectId: string,
     fieldId: string,
-  ): Promise<FieldWithOptions> {
-    const field = await this.prisma.customField.findFirst({
-      where: { id: fieldId, projectId, workspaceId },
-      include: fieldInclude,
+  ): Promise<FieldLink> {
+    /*
+     * Scoped by association *and* by the definition's workspace. The
+     * association alone would let a caller reach a field through a project they
+     * can see; the workspace check is what ties the definition to the tenant in
+     * the URL.
+     */
+    const link = await this.prisma.projectCustomField.findFirst({
+      where: { projectId, customFieldId: fieldId, customField: { workspaceId } },
+      include: linkInclude,
     });
 
-    if (!field) {
+    if (!link) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Field not found.');
     }
 
-    return field;
+    return link;
   }
 
   private async requireOption(fieldId: string, optionId: string): Promise<void> {
@@ -539,7 +630,7 @@ export class CustomFieldsService {
   }
 }
 
-function requireString(field: PrismaCustomField, value: string | null | undefined): string | null {
+function requireString(field: ProjectField, value: string | null | undefined): string | null {
   const text = value?.trim() ?? '';
 
   if (text === '') {
@@ -552,23 +643,37 @@ function requireString(field: PrismaCustomField, value: string | null | undefine
   return text;
 }
 
+/*
+ * Only the association is unique now, not the name. Two projects may each have
+ * a "Status" field with different options, so a name collision is a warning the
+ * picker shows, never a rejection here.
+ */
 function rethrowDuplicateName(error: unknown): never {
   if ((error as { code?: string }).code === 'P2002') {
-    throw AppException.conflict('RESOURCE_CONFLICT', 'This project already has a field by that name.');
+    throw AppException.conflict('RESOURCE_CONFLICT', 'This project already uses that field.');
   }
   throw error;
 }
 
-function toFieldDto(field: FieldWithOptions): CustomField {
+/**
+ * The wire shape is unchanged by the move to a library.
+ *
+ * `projectId`, `isRequired` and `position` now come from the association rather
+ * than the definition, so every existing client keeps working while the model
+ * underneath is a workspace field used by N projects.
+ */
+function toFieldDto(link: FieldLink): CustomField {
+  const field = link.customField;
+
   return {
     id: field.id,
-    projectId: field.projectId,
+    projectId: link.projectId,
     name: field.name,
     description: field.description,
     type: field.type,
-    isRequired: field.isRequired,
+    isRequired: link.isRequired,
     isArchived: field.isArchived,
-    position: field.position,
+    position: link.position,
     options: field.options.map((option) => ({
       id: option.id,
       label: option.label,

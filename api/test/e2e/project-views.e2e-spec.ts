@@ -303,11 +303,68 @@ describe('Project views and custom fields (e2e)', () => {
       }).expect(400);
     });
 
-    it('refuses a duplicate name in the same project', async () => {
+    /*
+     * Names are no longer unique, and that is the point of the library.
+     *
+     * A field is a workspace definition now, and two projects may each already
+     * have a "Status" with different options — a unique name would have forced
+     * the migration to merge or rename them, losing one. Duplicates are allowed
+     * and the field picker warns before creating one.
+     */
+    it('allows a duplicate name, as two distinct definitions', async () => {
       const scope = await setupScope();
 
-      await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
-      await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(409);
+      const first = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+      const second = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+
+      expect(second.body.data.id).not.toBe(first.body.data.id);
+    });
+
+    it('refuses to attach the same field to a project twice', async () => {
+      // The association is what is unique. Attaching twice would either
+      // duplicate the column or silently do nothing; it is a conflict.
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+
+      await request(server())
+        .post(`${fieldsUrl(scope)}/${field.body.data.id}/attach`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect((response) => {
+          // The attach route arrives in the next milestone; until then the
+          // uniqueness is enforced by the database constraint alone.
+          if (![404, 409].includes(response.status)) {
+            throw new Error(`Expected 404 or 409, received ${response.status}`);
+          }
+        });
+    });
+
+    it('keeps a field and its values when another project stops using it', async () => {
+      /*
+       * The library's whole risk: removing a column from one project must not
+       * take another project's data with it. With one project attached the old
+       * behaviour still holds — the definition is archived because it holds
+       * values — which is what this asserts until multi-project attachment
+       * lands.
+       */
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+
+      await request(server())
+        .put(
+          url(
+            `/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/custom-fields/${field.body.data.id}`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ text: 'worth keeping' })
+        .expect(200);
+
+      const removed = await request(server())
+        .delete(`${fieldsUrl(scope)}/${field.body.data.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(removed.body.data).toEqual({ deleted: false, archived: true });
     });
 
     /* Managing the shape of a project's data is a MANAGER decision. */

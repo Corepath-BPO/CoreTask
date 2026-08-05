@@ -445,8 +445,10 @@ export class AutomationRunnerService {
 
       case AutomationAction.SET_CUSTOM_FIELD: {
         const fieldId = String(config['fieldId'] ?? '');
+        // Through the association: a rule may only write a field its own
+        // project actually uses, even though the definition is shared.
         const field = await this.prisma.customField.findFirst({
-          where: { id: fieldId, projectId: rule.projectId },
+          where: { id: fieldId, projects: { some: { projectId: rule.projectId } } },
           select: { id: true, type: true },
         });
 

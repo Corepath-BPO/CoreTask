@@ -345,7 +345,7 @@ model Project {
   tasks        Task[]
   tickets      Ticket[]
   statuses     StatusDefinition[]
-  customFields CustomField[]
+  customFields ProjectCustomField[]
   views        ProjectView[]
   automations  AutomationRule[]
 
@@ -755,16 +755,24 @@ enum CustomFieldType {
 }
 
 /// A user-defined field on a project's tasks.
+/// A reusable field definition belonging to a workspace.
+///
+/// Workspace-scoped, not project-scoped: the same "Risk" field should mean the
+/// same thing on every project that uses it, and a definition duplicated per
+/// project cannot be reported on across projects. Which projects use it is a
+/// separate fact — see `ProjectCustomField`.
+///
+/// Deliberately no unique constraint on the name. Two projects may each already
+/// have a "Status" field with different options, and a constraint would force
+/// the migration to merge or rename them; both lose information. Duplicates are
+/// allowed and the field picker warns before creating one.
 model CustomField {
   id          String          @id @default(uuid(7)) @db.Uuid
   workspaceId String          @db.Uuid
-  projectId   String          @db.Uuid
   name        String          @db.VarChar(80)
   description String?
   type        CustomFieldType
-  isRequired  Boolean         @default(false)
   isArchived  Boolean         @default(false)
-  position    Float           @default(0)
   /// Type-specific configuration. Validated per type in the service rather than
   /// trusted as arbitrary JSON.
   settings    Json            @default("{}")
@@ -773,14 +781,37 @@ model CustomField {
   updatedAt   DateTime        @updatedAt
 
   workspace Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project   Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy User?                  @relation("CustomFieldCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   options   CustomFieldOption[]
   values    TaskCustomFieldValue[]
+  projects  ProjectCustomField[]
 
-  @@unique([projectId, name])
-  @@index([projectId, position])
+  @@index([workspaceId, name])
   @@map("custom_fields")
+}
+
+/// Which projects use a workspace field, and how it behaves on each.
+///
+/// `position` and `isRequired` live here rather than on the definition: a field
+/// can be the second column on one project and the tenth on another, and
+/// required on one without being required everywhere it appears.
+model ProjectCustomField {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  projectId     String   @db.Uuid
+  customFieldId String   @db.Uuid
+  position      Float    @default(0)
+  isRequired    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  /// A project uses a field once. Attaching twice is a no-op, not two columns.
+  @@unique([projectId, customFieldId])
+  @@index([projectId, position])
+  @@index([customFieldId])
+  @@map("project_custom_fields")
 }
 
 /// One choice on a single- or multi-select field.
