@@ -7,6 +7,19 @@ import { uuidSchema } from './common.js';
 const optionalNullableUuid = uuidSchema.nullish();
 
 /**
+ * A status or priority reference: a definition id, or a legacy enum value.
+ *
+ * Not a uuid. A task whose status has not been backfilled has no definition
+ * row, so the read model hands out `IN_PROGRESS` as the id — and a ticket's
+ * status is *only* ever an enum. Whatever the server hands out has to be
+ * accepted back, or setting a status from the List fails on exactly the rows
+ * that have not been migrated yet.
+ */
+const stateRef = z
+  .union([uuidSchema, z.string().regex(/^[A-Z][A-Z_]{1,40}$/, 'Not a status or priority')])
+  .nullish();
+
+/**
  * Accepts any declared type — including one that cannot be created yet.
  *
  * Used where the value is being *read* (a project default, a filter). Creation
@@ -43,8 +56,8 @@ export const createWorkItemSchema = z.object({
   description: z.string().max(20_000).nullish(),
   sectionId: optionalNullableUuid,
   parentId: optionalNullableUuid,
-  statusId: optionalNullableUuid,
-  priorityId: optionalNullableUuid,
+  statusId: stateRef,
+  priorityId: stateRef,
   assigneeIds: z.array(uuidSchema).max(20).optional(),
   startDate: z.string().datetime().nullish(),
   dueDate: z.string().datetime().nullish(),
@@ -57,8 +70,8 @@ export const updateWorkItemSchema = z
   .object({
     title: title.optional(),
     description: z.string().max(20_000).nullish(),
-    statusId: optionalNullableUuid,
-    priorityId: optionalNullableUuid,
+    statusId: stateRef,
+    priorityId: stateRef,
     assigneeIds: z.array(uuidSchema).max(20).optional(),
     startDate: z.string().datetime().nullish(),
     dueDate: z.string().datetime().nullish(),

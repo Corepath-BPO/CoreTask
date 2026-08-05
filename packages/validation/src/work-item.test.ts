@@ -58,6 +58,26 @@ describe('createWorkItemSchema', () => {
   });
 });
 
+describe('status and priority references', () => {
+  it('accepts a definition id', () => {
+    expect(updateWorkItemSchema.safeParse({ statusId: uuid }).success).toBe(true);
+  });
+
+  it('accepts a legacy enum value, which is what the server hands out', () => {
+    // A task with no backfilled definition, and every ticket, report their
+    // status as an enum name. Refusing it here would break setting a status on
+    // exactly the rows that have not been migrated.
+    for (const value of ['IN_PROGRESS', 'RESOLVED', 'TODO', 'CRITICAL']) {
+      expect(updateWorkItemSchema.safeParse({ statusId: value }).success).toBe(true);
+    }
+  });
+
+  it('still refuses free text', () => {
+    expect(updateWorkItemSchema.safeParse({ statusId: 'in progress' }).success).toBe(false);
+    expect(updateWorkItemSchema.safeParse({ statusId: 'x' }).success).toBe(false);
+  });
+});
+
 describe('updateWorkItemSchema', () => {
   it('refuses an update that changes nothing', () => {
     // A correlation id alone is bookkeeping, not a change. Accepting it would

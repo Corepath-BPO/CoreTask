@@ -87,3 +87,57 @@ export interface WorkItemEventPayload<TItem = unknown> {
   correlationId?: string;
   occurredAt: string;
 }
+
+/**
+ * Ticket enums rendered the way a status definition is.
+ *
+ * A task's status is a row somebody can rename; a ticket's is a fixed enum.
+ * Both end up in the same column of the same grid, so both are resolved to a
+ * name and a colour token before they leave the server — the alternative is
+ * every cell, badge and card switching on the item's type to decide how to draw
+ * one value.
+ *
+ * The tokens are chosen to agree with `DEFAULT_STATUS_DEFINITIONS`, so a board
+ * showing tasks and tickets side by side does not use two different blues for
+ * "in progress".
+ */
+export const TICKET_STATUS_DISPLAY = {
+  OPEN: { name: 'Open', colorToken: 'gray' },
+  TRIAGED: { name: 'Triaged', colorToken: 'slate' },
+  IN_PROGRESS: { name: 'In progress', colorToken: 'blue' },
+  WAITING: { name: 'Waiting', colorToken: 'amber' },
+  RESOLVED: { name: 'Resolved', colorToken: 'emerald' },
+  CLOSED: { name: 'Closed', colorToken: 'gray' },
+} as const;
+
+export const TICKET_PRIORITY_DISPLAY = {
+  LOW: { name: 'Low', colorToken: 'blue' },
+  MEDIUM: { name: 'Medium', colorToken: 'amber' },
+  HIGH: { name: 'High', colorToken: 'orange' },
+  URGENT: { name: 'Urgent', colorToken: 'red' },
+} as const;
+
+/**
+ * A task's legacy enum, for the same reason.
+ *
+ * `Task.status` is still authoritative while the definition backfill is being
+ * verified, so a task may have no `statusDefinitionId` to resolve. This is the
+ * fallback, not the primary path — see docs/database/project-view-migration.md.
+ */
+export const TASK_STATUS_DISPLAY = {
+  BACKLOG: { name: 'Backlog', colorToken: 'slate' },
+  TODO: { name: 'To Do', colorToken: 'gray' },
+  IN_PROGRESS: { name: 'In Progress', colorToken: 'blue' },
+  IN_REVIEW: { name: 'In Review', colorToken: 'violet' },
+  BLOCKED: { name: 'Blocked', colorToken: 'red' },
+  DONE: { name: 'Done', colorToken: 'emerald' },
+  CANCELLED: { name: 'Cancelled', colorToken: 'gray' },
+} as const;
+
+export const TASK_PRIORITY_DISPLAY = {
+  NONE: { name: 'None', colorToken: 'gray' },
+  LOW: { name: 'Low', colorToken: 'blue' },
+  MEDIUM: { name: 'Medium', colorToken: 'amber' },
+  HIGH: { name: 'High', colorToken: 'orange' },
+  CRITICAL: { name: 'Critical', colorToken: 'red' },
+} as const;

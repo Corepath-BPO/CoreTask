@@ -422,6 +422,7 @@ model Section {
   workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks         Task[]
+  tickets       Ticket[]
   defaultStatus StatusDefinition? @relation(fields: [defaultStatusId], references: [id], onDelete: SetNull)
 
   @@index([projectId, position])
@@ -498,11 +499,19 @@ model Ticket {
   dueDate     DateTime?
   resolvedAt  DateTime?
   closedAt    DateTime?
+  /// Where the ticket sits on the project board. Null means nobody has placed
+  /// it — every ticket created before tickets could hold a section.
+  sectionId   String?        @db.Uuid
+  /// Fractional, and shared with the tasks in the same section: one ordering
+  /// per column, so a board does not interleave two independent sequences.
+  position    Float          @default(0)
+  archivedAt  DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project     Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  section     Section?     @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   reporter    User?        @relation("TicketReporter", fields: [reporterId], references: [id], onDelete: SetNull)
   assignee    User?        @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   comments    Comment[]
@@ -514,6 +523,8 @@ model Ticket {
   @@index([assigneeId, status])
   @@index([workspaceId, priority])
   @@index([projectId])
+  @@index([projectId, sectionId, position])
+  @@index([archivedAt])
   @@map("tickets")
 }
 
