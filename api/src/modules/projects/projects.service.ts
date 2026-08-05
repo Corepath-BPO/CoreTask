@@ -121,6 +121,7 @@ export class ProjectsService {
           description: dto.description ?? null,
           status: dto.status ?? ProjectStatus.PLANNING,
           ...(dto.color ? { color: dto.color } : {}),
+          ...(dto.defaultWorkItemType ? { defaultWorkItemType: dto.defaultWorkItemType } : {}),
           leadId: dto.leadId ?? null,
           teamId: dto.teamId ?? null,
           startDate: toDate(dto.startDate),
@@ -174,6 +175,9 @@ export class ProjectsService {
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.color !== undefined) data.color = dto.color;
+    if (dto.defaultWorkItemType !== undefined) {
+      data.defaultWorkItemType = dto.defaultWorkItemType;
+    }
     if (dto.startDate !== undefined) data.startDate = toDate(dto.startDate);
     if (dto.dueDate !== undefined) data.dueDate = toDate(dto.dueDate);
     if (dto.leadId !== undefined) {
@@ -391,6 +395,7 @@ export class ProjectsService {
       description: project.description,
       status: project.status,
       color: project.color,
+      defaultWorkItemType: project.defaultWorkItemType,
       leadId: project.leadId,
       lead: project.lead,
       teamId: project.teamId,

@@ -42,12 +42,22 @@ const optionalDate = z
   .nullable()
   .refine((value) => value === null || !Number.isNaN(Date.parse(value)), 'Enter a valid date.');
 
+/**
+ * Only a type that can actually be created.
+ *
+ * Narrower than the full `WorkItemType` on purpose: a project defaulting to
+ * Milestone would render "+ Add milestone" on a button whose click the API
+ * refuses, which is exactly the fake-type failure this avoids.
+ */
+export const defaultWorkItemTypeSchema = z.enum(['TASK', 'TICKET']);
+
 export const createProjectSchema = z.object({
   name: projectNameSchema,
   key: projectKeySchema.optional(),
   description: z.string().trim().max(DESCRIPTION_MAX_LENGTH).optional(),
   status: projectStatusSchema.optional(),
   color: projectColorSchema.optional(),
+  defaultWorkItemType: defaultWorkItemTypeSchema.optional(),
   leadId: z.uuid().nullable().optional(),
   startDate: optionalDate.optional(),
   dueDate: optionalDate.optional(),
@@ -65,6 +75,7 @@ export const updateProjectSchema = z
     description: z.string().trim().max(DESCRIPTION_MAX_LENGTH).nullable().optional(),
     status: projectStatusSchema.optional(),
     color: projectColorSchema.optional(),
+    defaultWorkItemType: defaultWorkItemTypeSchema.optional(),
     leadId: z.uuid().nullable().optional(),
     startDate: optionalDate.optional(),
     dueDate: optionalDate.optional(),
@@ -87,6 +98,7 @@ export const projectFormSchema = z
     description: z.string().trim().max(DESCRIPTION_MAX_LENGTH),
     status: projectStatusSchema,
     color: projectColorSchema,
+    defaultWorkItemType: defaultWorkItemTypeSchema,
     /** `''` means "no team" — a native select cannot hold null. */
     teamId: z.string(),
     startDate: z.string().trim(),

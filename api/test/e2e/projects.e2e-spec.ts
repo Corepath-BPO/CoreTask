@@ -324,6 +324,67 @@ describe('Projects (e2e)', () => {
     });
   });
 
+  describe('default work-item type', () => {
+    it('starts as TASK, which is what the board already created', async () => {
+      const owner = await registerUser();
+      const workspaceId = await createWorkspace(owner);
+      const project = await createProject(workspaceId, owner);
+
+      expect(project.defaultWorkItemType).toBe('TASK');
+    });
+
+    it('can be chosen at creation', async () => {
+      const owner = await registerUser();
+      const workspaceId = await createWorkspace(owner);
+
+      const response = await request(server())
+        .post(url(`/workspaces/${workspaceId}/projects`))
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send({ name: 'Support Queue', defaultWorkItemType: 'TICKET' })
+        .expect(201);
+
+      expect(response.body.data.defaultWorkItemType).toBe('TICKET');
+    });
+
+    it('can be changed later, and persists', async () => {
+      const owner = await registerUser();
+      const workspaceId = await createWorkspace(owner);
+      const project = await createProject(workspaceId, owner);
+
+      await request(server())
+        .patch(url(`/workspaces/${workspaceId}/projects/${project.id}`))
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send({ defaultWorkItemType: 'TICKET' })
+        .expect(200);
+
+      const reread = await request(server())
+        .get(url(`/workspaces/${workspaceId}/projects/${project.id}`))
+        .set('Authorization', `Bearer ${owner.token}`)
+        .expect(200);
+
+      expect(reread.body.data.defaultWorkItemType).toBe('TICKET');
+    });
+
+    it('refuses a type that cannot be created', async () => {
+      /*
+       * The whole point of narrowing the enum. A project defaulting to
+       * Milestone would render "+ Add milestone" on a button whose click the
+       * API refuses — a control that lies about what it does.
+       */
+      const owner = await registerUser();
+      const workspaceId = await createWorkspace(owner);
+      const project = await createProject(workspaceId, owner);
+
+      for (const type of ['MILESTONE', 'APPROVAL', 'EPIC']) {
+        await request(server())
+          .patch(url(`/workspaces/${workspaceId}/projects/${project.id}`))
+          .set('Authorization', `Bearer ${owner.token}`)
+          .send({ defaultWorkItemType: type })
+          .expect(422);
+      }
+    });
+  });
+
   describe('update', () => {
     it('updates the editable fields', async () => {
       const owner = await registerUser();

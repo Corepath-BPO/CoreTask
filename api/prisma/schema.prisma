@@ -33,6 +33,15 @@ enum WorkspaceRole {
   GUEST
 }
 
+/// The types a project may default to, which is exactly the types that can be
+/// created. Milestone and Approval exist in the shared contract so the picker
+/// can show them as coming; a project defaulting to one would render a button
+/// that fails on click.
+enum CreatableWorkItemType {
+  TASK
+  TICKET
+}
+
 enum ProjectStatus {
   PLANNING
   ACTIVE
@@ -326,6 +335,9 @@ model Project {
   description String?
   status      ProjectStatus @default(PLANNING)
   color       String        @default("#6366F1") @db.VarChar(9)
+  /// What the "+ Add" control creates without being asked. Backfilled from
+  /// each project's own mix of tasks and tickets — see the migration.
+  defaultWorkItemType CreatableWorkItemType @default(TASK)
   leadId      String?       @db.Uuid
   startDate   DateTime?
   dueDate     DateTime?

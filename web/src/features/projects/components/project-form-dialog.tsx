@@ -1,4 +1,10 @@
-import { PROJECT_COLORS, PROJECT_STATUSES, ProjectStatus } from '@coretask/contracts';
+import {
+  CREATABLE_WORK_ITEM_TYPES,
+  PROJECT_COLORS,
+  PROJECT_STATUSES,
+  ProjectStatus,
+  WORK_ITEM_TYPE_LABEL,
+} from '@coretask/contracts';
 import type { ProjectSummary } from '@coretask/types';
 import { deriveProjectKey, projectFormSchema, type ProjectFormInput } from '@coretask/validation';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -49,6 +55,7 @@ const EMPTY: ProjectFormInput = {
   description: '',
   status: ProjectStatus.PLANNING,
   color: PROJECT_COLORS[0] as string,
+  defaultWorkItemType: 'TASK',
   teamId: '',
   startDate: '',
   dueDate: '',
@@ -92,6 +99,7 @@ export function ProjectFormDialog({
             description: project.description ?? '',
             status: project.status,
             color: project.color,
+            defaultWorkItemType: project.defaultWorkItemType,
             teamId: project.teamId ?? '',
             startDate: toDateInput(project.startDate),
             dueDate: toDateInput(project.dueDate),
@@ -117,6 +125,7 @@ export function ProjectFormDialog({
           description: values.description || null,
           status: values.status as ProjectSummary['status'],
           color: values.color,
+          defaultWorkItemType: values.defaultWorkItemType,
           teamId: values.teamId || null,
           startDate: values.startDate || null,
           dueDate: values.dueDate || null,
@@ -129,6 +138,7 @@ export function ProjectFormDialog({
         ...(values.description ? { description: values.description } : {}),
         status: values.status as ProjectSummary['status'],
         color: values.color,
+        defaultWorkItemType: values.defaultWorkItemType,
         ...(values.teamId ? { teamId: values.teamId } : {}),
         ...(values.startDate ? { startDate: values.startDate } : {}),
         ...(values.dueDate ? { dueDate: values.dueDate } : {}),
@@ -223,6 +233,38 @@ export function ProjectFormDialog({
                       {PROJECT_STATUSES.map((status) => (
                         <SelectItem key={status} value={status}>
                           {humanizeEnum(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+
+            <Field
+              label="Default item type"
+              htmlFor="project-default-type"
+              error={errors.defaultWorkItemType?.message}
+              hint="What the project’s “+ Add” button creates."
+            >
+              <Controller
+                control={control}
+                name="defaultWorkItemType"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange} disabled={busy}>
+                    <SelectTrigger id="project-default-type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/*
+                        Only the types that can actually be created. Milestone
+                        and Approval are listed in the picker as coming, but
+                        offering one here would set a project up to render a
+                        button whose click the API refuses.
+                      */}
+                      {CREATABLE_WORK_ITEM_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {WORK_ITEM_TYPE_LABEL[type]}
                         </SelectItem>
                       ))}
                     </SelectContent>

@@ -1,4 +1,5 @@
 import type {
+  CreatableWorkItemType,
   ProjectStatus,
   TaskPriority,
   TaskStatus,
@@ -26,6 +27,13 @@ export interface Project {
   description: string | null;
   status: ProjectStatus;
   color: string;
+  /**
+   * What the project's "+ Add" control creates without being asked.
+   *
+   * Only ever a type that can actually be created — a default the API would
+   * refuse renders a button that fails on click.
+   */
+  defaultWorkItemType: CreatableWorkItemType;
   leadId: string | null;
   /** The team that owns this project, or null when it belongs to nobody in particular. */
   teamId: string | null;
@@ -65,6 +73,7 @@ export interface CreateProjectPayload {
   description?: string;
   status?: ProjectStatus;
   color?: string;
+  defaultWorkItemType?: CreatableWorkItemType;
   leadId?: string | null;
   teamId?: string | null;
   startDate?: string | null;
@@ -76,6 +85,7 @@ export interface UpdateProjectPayload {
   description?: string | null;
   status?: ProjectStatus;
   color?: string;
+  defaultWorkItemType?: CreatableWorkItemType;
   leadId?: string | null;
   teamId?: string | null;
   startDate?: string | null;

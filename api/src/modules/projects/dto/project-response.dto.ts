@@ -28,6 +28,12 @@ export class ProjectTeamRefDto {
 
   @ApiProperty({ example: '#6366F1' })
   color!: string;
+
+  @ApiProperty({
+    enum: ['TASK', 'TICKET'],
+    description: 'What the “+ Add” control creates without being asked.',
+  })
+  defaultWorkItemType!: 'TASK' | 'TICKET';
 }
 
 export class ProjectSummaryDto {

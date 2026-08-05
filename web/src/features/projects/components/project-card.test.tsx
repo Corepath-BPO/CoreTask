@@ -13,6 +13,7 @@ const baseProject: ProjectSummary = {
   description: 'Authentication and the shell',
   status: 'ACTIVE',
   color: '#6366F1',
+  defaultWorkItemType: 'TASK',
   leadId: null,
   lead: null,
   teamId: null,
@@ -102,7 +103,9 @@ describe('ProjectCard', () => {
     await renderCard({}, { canEdit: false, canArchive: false });
 
     expect(
-      screen.queryByRole('button', { name: /actions for platform foundation/i }),
+      screen.queryByRole('button', {
+        name: /actions for platform foundation/i,
+      }),
     ).not.toBeInTheDocument();
   });
 

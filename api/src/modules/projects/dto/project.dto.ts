@@ -15,6 +15,7 @@ import {
   IsBoolean,
   IsEnum,
   IsISO8601,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -84,6 +85,16 @@ export class CreateProjectDto {
   color?: string;
 
   @ApiPropertyOptional({
+    enum: ['TASK', 'TICKET'],
+    description:
+      'What the project’s “+ Add” control creates without being asked. Only a type that can ' +
+      'actually be created — a default the API would refuse renders a button that fails on click.',
+  })
+  @IsOptional()
+  @IsIn(['TASK', 'TICKET'])
+  defaultWorkItemType?: 'TASK' | 'TICKET';
+
+  @ApiPropertyOptional({
     format: 'uuid',
     nullable: true,
     description: 'Must be a member of this workspace.',
@@ -150,6 +161,16 @@ export class UpdateProjectDto {
   @trim()
   @Matches(HEX_COLOR_PATTERN, { message: 'Enter a hex colour such as #6366F1.' })
   color?: string;
+
+  @ApiPropertyOptional({
+    enum: ['TASK', 'TICKET'],
+    description:
+      'What the project’s “+ Add” control creates without being asked. Only a type that can ' +
+      'actually be created — a default the API would refuse renders a button that fails on click.',
+  })
+  @IsOptional()
+  @IsIn(['TASK', 'TICKET'])
+  defaultWorkItemType?: 'TASK' | 'TICKET';
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   @IsOptional()

@@ -40,6 +40,15 @@ export function isCreatableWorkItemType(type: WorkItemType): boolean {
   return CREATABLE_WORK_ITEM_TYPES.includes(type);
 }
 
+/**
+ * The narrowed union, matching the database enum of the same name.
+ *
+ * A project's default must be a type that can be created, so it is typed as
+ * this rather than `WorkItemType` — the compiler refuses a default of
+ * `MILESTONE` rather than leaving it to a runtime check.
+ */
+export type CreatableWorkItemType = 'TASK' | 'TICKET';
+
 export const WORK_ITEM_TYPE_LABEL: Record<WorkItemType, string> = {
   TASK: 'Task',
   TICKET: 'Ticket',
