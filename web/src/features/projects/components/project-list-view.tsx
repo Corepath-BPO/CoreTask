@@ -1,4 +1,4 @@
-import { SystemField } from '@coretask/contracts';
+import { SystemField, type CreatableWorkItemType, type WorkItemType } from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task, TaskCustomFieldValue, ViewColumn } from '@coretask/types';
 
 /** A task as this view receives it — the task plus its field values. */
@@ -15,13 +15,8 @@ import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-t
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { cn, formatDate } from '@/lib/utils';
 
-import {
-  useFieldMetadata,
-  useSetCustomFieldValue,
-  useSubtasks,
-  useViewTasks,
-} from '../hooks/use-project-views';
-import { useRenameSection } from '../hooks/use-projects';
+import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/use-project-views';
+import { useProject, useRenameSection } from '../hooks/use-projects';
 import {
   ADD_COLUMN_WIDTH,
   columnWidth,
@@ -32,6 +27,14 @@ import {
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
+import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
+import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
+import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
+import {
+  useCreateProjectWorkItem,
+  useProjectWorkItems,
+} from '@/features/work-items/hooks/use-project-work-items';
+import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { ViewToolbar } from './view-toolbar-slot';
 import { CustomFieldCell } from './cells/custom-field-cell';
 import { useCellEditor } from './cells/use-cell-editor';
@@ -42,7 +45,6 @@ import {
   StatusCell,
   TitleCell,
 } from './cells/system-cells';
-
 
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { ColumnHeaderTable } from './column-header';
@@ -77,17 +79,51 @@ export function ProjectListView({
   const [debounced, setDebounced] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  /** Non-null while the fuller create form is open, holding what it starts from. */
+  const [composing, setComposing] = useState<{
+    type: CreatableWorkItemType;
+    sectionId?: string | undefined;
+  } | null>(null);
+
   // Debounced so typing does not fire a request per keystroke.
   useDebouncedValue(search, setDebounced);
 
-  const { data, isLoading, isError } = useViewTasks(workspaceId, projectId, {
-    search: debounced || undefined,
+  /*
+   * The shared work-item query, not the task-only one.
+   *
+   * This is what makes a ticket created here actually appear here. Reading
+   * tasks alone meant filing a ticket from the List made it vanish — present in
+   * the database, absent from the only screen that had just created it.
+   */
+  const { data, isLoading, isError } = useProjectWorkItems(workspaceId, projectId, {
+    ...(debounced ? { search: debounced } : {}),
+    includeCustomFields: true,
   });
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
   const updateTask = useUpdateTask(workspaceId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveTask = useMoveTaskToSection(workspaceId);
+  const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const { data: project } = useProject(workspaceId, projectId);
+
+  // `TASK` until the project loads, which is what it was before this existed.
+  const defaultType: CreatableWorkItemType = project?.defaultWorkItemType ?? 'TASK';
+
+  /** Every create in this view goes through here, whatever opened it. */
+  const create = async (input: {
+    type: WorkItemType;
+    title: string;
+    sectionId?: string | undefined;
+    parentId?: string | undefined;
+  }) => {
+    await createWorkItem.mutateAsync({
+      type: input.type,
+      title: input.title,
+      ...(input.sectionId ? { sectionId: input.sectionId } : {}),
+      ...(input.parentId ? { parentId: input.parentId } : {}),
+    });
+  };
 
   /*
    * Horizontal scroll is tracked so the frozen column can grow a shadow only
@@ -96,7 +132,12 @@ export function ProjectListView({
    */
   const [scrolled, setScrolled] = useState(false);
 
-  const tasks = useMemo(() => data?.items ?? [], [data]);
+  /*
+   * Converted at the boundary — see `toWorkItemRow`. The cells were written
+   * against `Task`, and rewriting a dozen of them in the same change that puts
+   * tickets in the grid would make one large diff out of two separate risks.
+   */
+  const tasks = useMemo(() => (data?.items ?? []).map(toWorkItemRow), [data]);
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
 
@@ -195,7 +236,9 @@ export function ProjectListView({
     if (!canEdit) return;
 
     const dropGroups: TaskGroups = Object.fromEntries(
-      groups.filter((group) => group.id !== ORPHAN_GROUP_ID).map((group) => [group.id, group.tasks]),
+      groups
+        .filter((group) => group.id !== ORPHAN_GROUP_ID)
+        .map((group) => [group.id, group.tasks]),
     );
 
     const plan = resolveTaskDrop(dropGroups, taskId, target);
@@ -231,6 +274,13 @@ export function ProjectListView({
             className="h-8 pl-9"
           />
         </div>
+
+        <ProjectWorkItemCreateButton
+          defaultType={defaultType}
+          context={{ projectId, sourceView: 'LIST' }}
+          pending={createWorkItem.isPending}
+          onCreate={(type) => setComposing({ type: type as CreatableWorkItemType })}
+        />
 
         <ColumnManager
           columns={columns}
@@ -289,124 +339,166 @@ export function ProjectListView({
           className="overflow-auto rounded-lg"
         >
           <ListDndContext onDrop={handleDrop}>
-          <div className="space-y-3 pb-1" style={{ minWidth: pinned.totalWidth }}>
-            {/*
-             * The column header sits above the cards rather than repeating
-             * inside each one: the columns are a property of the view, not of
-             * any one section, and repeating them turns a long project into a
-             * page of headers.
-             *
-             * Sticky to the top of the pane, because a header that scrolls away
-             * leaves you reading unlabelled columns.
-             */}
-            {/* Wrapped in a box with the cards' border, made transparent: the
+            <div className="space-y-3 pb-1" style={{ minWidth: pinned.totalWidth }}>
+              {/*
+               * The column header sits above the cards rather than repeating
+               * inside each one: the columns are a property of the view, not of
+               * any one section, and repeating them turns a long project into a
+               * page of headers.
+               *
+               * Sticky to the top of the pane, because a header that scrolls away
+               * leaves you reading unlabelled columns.
+               */}
+              {/* Wrapped in a box with the cards' border, made transparent: the
                 header has to sit in the same geometry as the tables it labels,
                 or every column is off by the card's one-pixel border. */}
-            <div className="sticky top-0 z-30 rounded-lg border border-transparent bg-background">
-              <ColumnHeaderTable
-                columns={shown}
-                metadata={metadata}
-                canEdit={canEdit}
-                pinned={{ ...pinned, scrolled }}
-                onChange={onColumnsChange}
-                onResizePreview={setResizing}
-                widths={<ColumnWidths columns={shown} />}
-                addControl={
-                  canEdit ? (
-                    <FieldPickerPopover
-                      columns={columns}
-                      workspaceId={workspaceId}
-                      projectId={projectId}
-                      onChange={onColumnsChange}
-                    />
-                  ) : (
-                    // The column still exists for someone who cannot add
-                    // fields, because its width is what keeps the cards
-                    // aligned with this header.
-                    <span className="sr-only">Actions</span>
-                  )
-                }
-              />
-            </div>
+              <div className="sticky top-0 z-30 rounded-lg border border-transparent bg-background">
+                <ColumnHeaderTable
+                  columns={shown}
+                  metadata={metadata}
+                  canEdit={canEdit}
+                  pinned={{ ...pinned, scrolled }}
+                  onChange={onColumnsChange}
+                  onResizePreview={setResizing}
+                  widths={<ColumnWidths columns={shown} />}
+                  addControl={
+                    canEdit ? (
+                      <FieldPickerPopover
+                        columns={columns}
+                        workspaceId={workspaceId}
+                        projectId={projectId}
+                        onChange={onColumnsChange}
+                      />
+                    ) : (
+                      // The column still exists for someone who cannot add
+                      // fields, because its width is what keeps the cards
+                      // aligned with this header.
+                      <span className="sr-only">Actions</span>
+                    )
+                  }
+                />
+              </div>
 
-            {groups.map((group) => (
-              /*
-               * No `overflow-hidden` on the card, tempting as it is for the
-               * rounded corners: an overflow ancestor between a sticky cell and
-               * the scroll container silently stops the cell sticking, and the
-               * frozen column would scroll away with everything else.
-               */
-              <SectionDropZone key={group.id} sectionId={group.id}>
-                {({ ref: dropRef, isOver }) => (
-              <section
-                ref={dropRef}
-                aria-label={group.name}
-                className={cn(
-                  'rounded-lg border bg-card shadow-sm transition-colors',
-                  // Lit while a row hovers it, because a drop with no feedback
-                  // is a guess about where the task will land.
-                  isOver ? 'border-primary/60 bg-primary/5' : 'border-border',
-                )}
-              >
-                <h3 className="border-b border-border px-3 py-2">
-                  {/* Sticky so a section's name stays readable once the table
-                      has been scrolled sideways past it. */}
-                  <span className="sticky left-3 flex w-fit items-center gap-1.5">
-                    <SectionHeader
-                      group={group}
-                      collapsed={collapsed.has(group.id)}
-                      canEdit={canEdit}
-                      onToggle={() => toggle(group.id)}
-                      onRename={(name) => renameSection.mutate({ sectionId: group.id, name })}
-                    />
-                  </span>
-                </h3>
-
-                {!collapsed.has(group.id) && (
-                  <table className="w-full table-fixed text-sm">
-                    <ColumnWidths columns={shown} />
-                    <tbody>
-                      {group.tasks.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={shown.length + 2}
-                            className="px-3 py-3 text-xs italic text-muted-foreground"
-                          >
-                            <span className="sticky left-3">No tasks in this section</span>
-                          </td>
-                        </tr>
+              {groups.map((group) => (
+                /*
+                 * No `overflow-hidden` on the card, tempting as it is for the
+                 * rounded corners: an overflow ancestor between a sticky cell and
+                 * the scroll container silently stops the cell sticking, and the
+                 * frozen column would scroll away with everything else.
+                 */
+                <SectionDropZone key={group.id} sectionId={group.id}>
+                  {({ ref: dropRef, isOver }) => (
+                    <section
+                      ref={dropRef}
+                      aria-label={group.name}
+                      className={cn(
+                        'rounded-lg border bg-card shadow-sm transition-colors',
+                        // Lit while a row hovers it, because a drop with no feedback
+                        // is a guess about where the task will land.
+                        isOver ? 'border-primary/60 bg-primary/5' : 'border-border',
                       )}
+                    >
+                      <h3 className="border-b border-border px-3 py-2">
+                        {/* Sticky so a section's name stays readable once the table
+                      has been scrolled sideways past it. */}
+                        <span className="sticky left-3 flex w-fit items-center gap-1.5">
+                          <SectionHeader
+                            group={group}
+                            collapsed={collapsed.has(group.id)}
+                            canEdit={canEdit}
+                            onToggle={() => toggle(group.id)}
+                            onRename={(name) => renameSection.mutate({ sectionId: group.id, name })}
+                          />
+                        </span>
+                      </h3>
 
-                      {group.tasks.map((task) => (
-                        <TaskRows
-                          key={task.id}
-                          task={task}
-                          workspaceId={workspaceId}
-                          projectId={projectId}
-                          columns={shown}
-                          metadata={metadata}
-                          canEdit={canEdit}
-                          pinned={{ ...pinned, scrolled }}
-                          onOpenTask={onOpenTask}
-                          onSaveTask={(taskId, payload) =>
-                            updateTask.mutate({ taskId, payload: payload as never })
-                          }
-                          onSaveField={(taskId, fieldId, value) =>
-                            setFieldValue.mutate({ taskId, fieldId, value })
-                          }
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </section>
-                )}
-              </SectionDropZone>
-            ))}
-          </div>
+                      {!collapsed.has(group.id) && (
+                        <table className="w-full table-fixed text-sm">
+                          <ColumnWidths columns={shown} />
+                          <tbody>
+                            {group.tasks.length === 0 && (
+                              <tr>
+                                <td
+                                  colSpan={shown.length + 2}
+                                  className="px-3 py-3 text-xs italic text-muted-foreground"
+                                >
+                                  <span className="sticky left-3">No tasks in this section</span>
+                                </td>
+                              </tr>
+                            )}
+
+                            {group.tasks.map((task) => (
+                              <TaskRows
+                                key={task.id}
+                                task={task}
+                                workspaceId={workspaceId}
+                                projectId={projectId}
+                                columns={shown}
+                                metadata={metadata}
+                                canEdit={canEdit}
+                                pinned={{ ...pinned, scrolled }}
+                                onOpenTask={onOpenTask}
+                                onSaveTask={(taskId, payload) =>
+                                  updateTask.mutate({ taskId, payload: payload as never })
+                                }
+                                onSaveField={(taskId, fieldId, value) =>
+                                  setFieldValue.mutate({ taskId, fieldId, value })
+                                }
+                                onAddSubtask={(parentId, title) =>
+                                  create({ type: 'TASK', title, parentId, sectionId: group.id })
+                                }
+                              />
+                            ))}
+
+                            {/*
+                        The add row lives inside the table so it lines up with
+                        the rows above it, and spans every column because it is
+                        one field rather than a row of cells. The orphan bucket
+                        is excluded: it is not a section, so nothing can be
+                        filed into it.
+                      */}
+                            {group.id !== ORPHAN_GROUP_ID && (
+                              <tr>
+                                <td colSpan={shown.length + 2} className="p-0">
+                                  <div className="sticky left-0 w-fit min-w-[320px]">
+                                    <QuickCreateWorkItemRow
+                                      defaultType={defaultType}
+                                      sectionName={group.name}
+                                      pending={createWorkItem.isPending}
+                                      onCreate={({ type, title }) =>
+                                        create({ type, title, sectionId: group.id })
+                                      }
+                                    />
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      )}
+                    </section>
+                  )}
+                </SectionDropZone>
+              ))}
+            </div>
           </ListDndContext>
         </div>
       )}
+
+      {/*
+        One dialog for the view rather than one per section: it is keyed by what
+        it opens from, so reopening it for a different section builds a fresh
+        form instead of carrying the last one's answers across.
+      */}
+      <CreateWorkItemDialog
+        open={composing !== null}
+        onOpenChange={(next) => !next && setComposing(null)}
+        initialType={composing?.type ?? defaultType}
+        initialSectionId={composing?.sectionId}
+        metadata={metadata}
+        pending={createWorkItem.isPending}
+        onSubmit={(payload) => createWorkItem.mutateAsync(payload)}
+      />
     </div>
   );
 }
@@ -421,6 +513,8 @@ interface RowProps {
   onOpenTask: (taskId: string) => void;
   onSaveTask: (taskId: string, payload: Record<string, unknown>) => void;
   onSaveField: (taskId: string, fieldId: string, value: Record<string, unknown>) => void;
+  /** Absent when the caller cannot create — the row then offers nothing. */
+  onAddSubtask?: ((parentId: string, title: string) => Promise<unknown>) | undefined;
 }
 
 /**
@@ -431,15 +525,17 @@ interface RowProps {
  * one level deep, so a subtask renders as a plain row: no recursion, and no
  * expander on a row that can never have children.
  */
-function TaskRows({ task, ...shared }: RowProps & { task: TaskRow }) {
+// `onAddSubtask` is pulled out rather than left in `shared`: the row below is a
+// plain `<tr>` and has no use for it, and spreading it there would hand a child
+// row a handler for creating children of its own.
+function TaskRows({ task, onAddSubtask, ...shared }: RowProps & { task: TaskRow }) {
   const [expanded, setExpanded] = useState(false);
 
-  const { data: subtasks, isLoading, isError } = useSubtasks(
-    shared.workspaceId,
-    shared.projectId,
-    task.id,
-    expanded,
-  );
+  const {
+    data: subtasks,
+    isLoading,
+    isError,
+  } = useSubtasks(shared.workspaceId, shared.projectId, task.id, expanded);
 
   return (
     <>
@@ -476,6 +572,26 @@ function TaskRows({ task, ...shared }: RowProps & { task: TaskRow }) {
         subtasks?.map((subtask) => (
           <Row key={subtask.id} {...shared} task={subtask as TaskRow} depth={1} />
         ))}
+
+      {/*
+        A subtask is always a TASK, whatever the project defaults to and
+        whatever the parent is. Tickets have no hierarchy — the API refuses one
+        as a child — so offering the choice here would offer something that
+        cannot happen.
+      */}
+      {expanded && !isLoading && onAddSubtask && (
+        <tr className="border-b border-border last:border-0">
+          <td colSpan={shared.columns.length + 2} className="p-0">
+            <div className="sticky left-0 w-fit min-w-[320px] pl-8">
+              <QuickCreateWorkItemRow
+                defaultType="TASK"
+                sectionName={task.title}
+                onCreate={({ title }) => onAddSubtask(task.id, title)}
+              />
+            </div>
+          </td>
+        </tr>
+      )}
     </>
   );
 }
@@ -531,18 +647,18 @@ function Row({
                 'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
             )}
           >
-          <Cell
-            task={task}
-            field={column.field}
-            metadata={metadata}
-            canEdit={canEdit}
-            // Only top-level rows drag: a subtask belongs to its parent, and
-            // moving one into a section would quietly promote it.
-            draggable={canEdit && depth === 0}
-            depth={depth}
-            expanded={expanded}
-            onToggleExpand={onToggleExpand}
-            onOpen={() => onOpenTask(task.id)}
+            <Cell
+              task={task}
+              field={column.field}
+              metadata={metadata}
+              canEdit={canEdit}
+              // Only top-level rows drag: a subtask belongs to its parent, and
+              // moving one into a section would quietly promote it.
+              draggable={canEdit && depth === 0}
+              depth={depth}
+              expanded={expanded}
+              onToggleExpand={onToggleExpand}
+              onOpen={() => onOpenTask(task.id)}
               onSaveTask={(payload) => onSaveTask(task.id, payload)}
               onSaveField={(fieldId, value) => onSaveField(task.id, fieldId, value)}
             />
@@ -763,4 +879,3 @@ function Cell({
     }
   }
 }
-

@@ -1,4 +1,6 @@
 import type {
+  TaskPriority,
+  TaskStatus,
   TicketPriority,
   TicketSeverity,
   TicketStatus,
@@ -95,6 +97,17 @@ export type WorkItemDetails = TaskDetails | TicketDetails;
 export interface TaskDetails {
   kind: 'TASK';
   estimatedMinutes: number | null;
+  /**
+   * The legacy enums, alongside the resolved `status`/`priority` above.
+   *
+   * Both are needed and they are not interchangeable. `status` resolves to a
+   * definition when one exists, and its id is then a uuid — fine for display,
+   * useless to a control that renders a fixed set of enum badges. A ticket
+   * carries its raw values for the same reason; a task doing otherwise made the
+   * List print a uuid where a status should be.
+   */
+  rawStatus: TaskStatus;
+  rawPriority: TaskPriority;
 }
 
 export interface TicketDetails {

@@ -115,7 +115,12 @@ export function taskToWorkItem(task: TaskRow): ProjectWorkItem {
       optionIds: value.optionIds,
       userIds: value.userIds,
     })),
-    details: { kind: 'TASK', estimatedMinutes: task.estimatedMinutes },
+    details: {
+      kind: 'TASK',
+      estimatedMinutes: task.estimatedMinutes,
+      rawStatus: task.status,
+      rawPriority: task.priority,
+    },
     createdById: task.createdById,
     createdBy: userRef(task.createdBy),
     createdAt: task.createdAt.toISOString(),

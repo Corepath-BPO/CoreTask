@@ -1,9 +1,21 @@
-import { TASK_PRIORITIES, TASK_STATUSES, TaskStatus } from '@coretask/contracts';
+import {
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TaskStatus,
+} from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
-import { TaskPriorityBadge, TaskStatusBadge } from '@/components/data-display/status-badge';
+import {
+  TaskPriorityBadge,
+  TaskStatusBadge,
+  TicketPriorityBadge,
+  TicketStatusBadge,
+} from '@/components/data-display/status-badge';
+import { isTicketRow } from '@/features/work-items/lib/work-item-row';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import {
@@ -180,11 +192,7 @@ export function AssigneeCell({ task, metadata, canEdit, onSave }: CellProps) {
   }
 
   return (
-    <CellButton
-      onOpen={editor.open}
-      disabled={!canEdit}
-      ariaLabel={`Assignee for "${task.title}"`}
-    >
+    <CellButton onOpen={editor.open} disabled={!canEdit} ariaLabel={`Assignee for "${task.title}"`}>
       {task.assignee ? (
         <span className="inline-flex items-center gap-1.5">
           <Avatar className="size-5">
@@ -249,26 +257,51 @@ function EnumCell({
   );
 }
 
+/*
+ * Two vocabularies, chosen by what the row actually is.
+ *
+ * A ticket's statuses are OPEN, TRIAGED, RESOLVED, CLOSED — not a task's
+ * BACKLOG, TODO, DONE. Offering a task's list on a ticket would present choices
+ * the API refuses, and render its current status as a badge that has no colour
+ * for it. Reading the row's type is what keeps the shared grid from flattening
+ * a real difference.
+ */
 export function StatusCell(props: CellProps) {
+  const ticket = isTicketRow(props.task);
+
   return (
     <EnumCell
       {...props}
       field="status"
-      values={TASK_STATUSES}
+      values={ticket ? TICKET_STATUSES : TASK_STATUSES}
       current={props.task.status}
-      render={(value) => <TaskStatusBadge status={value as never} />}
+      render={(value) =>
+        ticket ? (
+          <TicketStatusBadge status={value as never} />
+        ) : (
+          <TaskStatusBadge status={value as never} />
+        )
+      }
     />
   );
 }
 
 export function PriorityCell(props: CellProps) {
+  const ticket = isTicketRow(props.task);
+
   return (
     <EnumCell
       {...props}
       field="priority"
-      values={TASK_PRIORITIES}
+      values={ticket ? TICKET_PRIORITIES : TASK_PRIORITIES}
       current={props.task.priority}
-      render={(value) => <TaskPriorityBadge priority={value as never} />}
+      render={(value) =>
+        ticket ? (
+          <TicketPriorityBadge priority={value as never} />
+        ) : (
+          <TaskPriorityBadge priority={value as never} />
+        )
+      }
     />
   );
 }
