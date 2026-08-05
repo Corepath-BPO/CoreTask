@@ -131,15 +131,55 @@ export class TasksService {
       }),
     ]);
 
-    const [summary, completed] = await Promise.all([
+    const [summary, completed, customFieldValues] = await Promise.all([
       this.summarize(where, total),
       this.completedSubtaskCounts(tasks.map((task) => task.id)),
+      // One query for the whole page rather than one per row. A list of a
+      // hundred tasks with four custom fields each is four hundred values, and
+      // fetching them per task is the N+1 the spec warns about by name.
+      this.customFieldValues(tasks.map((task) => task.id)),
     ]);
 
     return new PaginatedResult(
-      tasks.map((task) => toTaskDto(task, completed.get(task.id) ?? 0)),
+      tasks.map((task) => ({
+        ...toTaskDto(task, completed.get(task.id) ?? 0),
+        customFieldValues: customFieldValues.get(task.id) ?? [],
+      })),
       { ...buildPaginationMeta(query, total), summary },
     );
+  }
+
+  /** Every custom field value for a page of tasks, grouped by task. */
+  private async customFieldValues(
+    taskIds: string[],
+  ): Promise<Map<string, Record<string, unknown>[]>> {
+    if (taskIds.length === 0) return new Map();
+
+    const rows = await this.prisma.taskCustomFieldValue.findMany({
+      where: { taskId: { in: taskIds } },
+    });
+
+    const grouped = new Map<string, Record<string, unknown>[]>();
+
+    for (const row of rows) {
+      const value = {
+        customFieldId: row.customFieldId,
+        text: row.textValue,
+        // Decimal keeps precision in PostgreSQL; JSON has no such type, and the
+        // range is far inside what a double represents exactly.
+        number: row.numberValue === null ? null : Number(row.numberValue),
+        date: row.dateValue?.toISOString() ?? null,
+        checkbox: row.booleanValue,
+        optionIds: row.optionIds,
+        userIds: row.userIds,
+      };
+
+      const bucket = grouped.get(row.taskId);
+      if (bucket) bucket.push(value);
+      else grouped.set(row.taskId, [value]);
+    }
+
+    return grouped;
   }
 
   async getDetail(workspaceId: string, taskId: string): Promise<TaskDetail> {

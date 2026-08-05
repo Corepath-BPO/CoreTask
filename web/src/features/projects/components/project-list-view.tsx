@@ -1,17 +1,37 @@
-import { SystemField, TaskStatus } from '@coretask/contracts';
-import type { ProjectFieldMetadata, Task, ViewColumn } from '@coretask/types';
+import { SystemField } from '@coretask/contracts';
+import type {
+  ProjectFieldMetadata,
+  Task,
+  TaskCustomFieldValue,
+  ViewColumn,
+} from '@coretask/types';
+
+/** A task as this view receives it — the task plus its field values. */
+type TaskRow = Task & { customFieldValues?: TaskCustomFieldValue[] };
 import { ChevronDown, ChevronRight, Search, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { TaskPriorityBadge, TaskStatusBadge } from '@/components/data-display/status-badge';
 import { EmptyState } from '@/components/feedback/empty-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn, formatDate, initials } from '@/lib/utils';
+import { useUpdateTask } from '@/features/tasks/hooks/use-tasks';
+import { cn, formatDate } from '@/lib/utils';
 
-import { useFieldMetadata, useViewTasks } from '../hooks/use-project-views';
+import {
+  useFieldMetadata,
+  useSetCustomFieldValue,
+  useViewTasks,
+} from '../hooks/use-project-views';
+import { groupBySection } from '../lib/group-by-section';
+import { CustomFieldCell } from './cells/custom-field-cell';
+import {
+  AssigneeCell,
+  DueDateCell,
+  PriorityCell,
+  StatusCell,
+  TitleCell,
+} from './cells/system-cells';
 
 import { columnLabel } from '../lib/column-labels';
 
@@ -20,6 +40,7 @@ import { ColumnManager } from './column-manager';
 interface ProjectListViewProps {
   workspaceId: string | undefined;
   projectId: string;
+  canEdit: boolean;
   columns: ViewColumn[];
   onColumnsChange: (columns: ViewColumn[]) => void;
   onOpenTask: (taskId: string) => void;
@@ -36,6 +57,7 @@ interface ProjectListViewProps {
 export function ProjectListView({
   workspaceId,
   projectId,
+  canEdit,
   columns,
   onColumnsChange,
   onOpenTask,
@@ -51,6 +73,15 @@ export function ProjectListView({
     search: debounced || undefined,
   });
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
+  const updateTask = useUpdateTask(workspaceId);
+  const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
+
+  /*
+   * Horizontal scroll is tracked so the frozen column can grow a shadow only
+   * once something is actually hidden behind it. A permanent shadow reads as a
+   * visual seam; one that appears on scroll says "there is more this way".
+   */
+  const [scrolled, setScrolled] = useState(false);
 
   const tasks = useMemo(() => data?.items ?? [], [data]);
 
@@ -106,7 +137,14 @@ export function ProjectListView({
             <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
-      ) : tasks.length === 0 ? (
+      ) : groups.length === 0 || (debounced && tasks.length === 0) ? (
+        /*
+         * Only when there is genuinely nothing to show — no tasks *and* no
+         * sections to put them in. A project with sections renders its table
+         * even while empty, because the sections are the answer to "where does
+         * a task go?". A search that matches nothing is the exception: a wall
+         * of empty sections hides the fact that the term found nothing.
+         */
         <EmptyState
           icon={SlidersHorizontal}
           title={debounced ? 'Nothing matches that search' : 'No tasks yet'}
@@ -119,7 +157,10 @@ export function ProjectListView({
       ) : (
         // The table scrolls inside its own container rather than the page, so
         // a wide column set never pushes the whole layout sideways.
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <div
+          onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}
+          className="overflow-x-auto rounded-lg border border-border"
+        >
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
@@ -132,7 +173,10 @@ export function ProjectListView({
                       // The task name is what a reader scans, so it stays put
                       // while the rest scrolls.
                       column.field === SystemField.TITLE &&
-                        'sticky left-0 z-10 bg-muted/40 min-w-[240px]',
+                        'sticky left-0 z-20 min-w-[240px] bg-muted/40',
+                      column.field === SystemField.TITLE &&
+                        scrolled &&
+                        'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
                     )}
                     style={column.width ? { width: column.width } : undefined}
                   >
@@ -169,11 +213,22 @@ export function ProjectListView({
                   </th>
                 </tr>
 
+                {!collapsed.has(group.id) && group.tasks.length === 0 && (
+                  <tr className="border-b border-border last:border-0">
+                    <td
+                      colSpan={columns.length}
+                      className="px-3 py-2 text-xs italic text-muted-foreground"
+                    >
+                      No tasks in this section
+                    </td>
+                  </tr>
+                )}
+
                 {!collapsed.has(group.id) &&
                   group.tasks.map((task) => (
                     <tr
                       key={task.id}
-                      className="border-b border-border last:border-0 hover:bg-muted/30"
+                      className="group border-b border-border last:border-0 hover:bg-muted/30"
                     >
                       {columns.map((column) => (
                         <td
@@ -182,13 +237,23 @@ export function ProjectListView({
                             'px-3 py-2 align-middle',
                             column.field === SystemField.TITLE &&
                               'sticky left-0 z-10 bg-background',
+                            column.field === SystemField.TITLE &&
+                              scrolled &&
+                              'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
                           )}
                         >
                           <Cell
                             task={task}
                             field={column.field}
                             metadata={metadata}
+                            canEdit={canEdit}
                             onOpen={() => onOpenTask(task.id)}
+                            onSaveTask={(payload) =>
+                              updateTask.mutate({ taskId: task.id, payload: payload as never })
+                            }
+                            onSaveField={(fieldId, payload) =>
+                              setFieldValue.mutate({ taskId: task.id, fieldId, value: payload })
+                            }
                           />
                         </td>
                       ))}
@@ -203,78 +268,56 @@ export function ProjectListView({
   );
 }
 
+/**
+ * One cell, editable in place.
+ *
+ * System fields have bespoke editors; everything else dispatches on the field
+ * *definition's* type. That split is what stops a new field type meaning a new
+ * table component.
+ */
 function Cell({
   task,
   field,
   metadata,
+  canEdit,
   onOpen,
+  onSaveTask,
+  onSaveField,
 }: {
-  task: Task;
+  task: TaskRow;
   field: string;
   metadata: ProjectFieldMetadata | undefined;
+  canEdit: boolean;
   onOpen: () => void;
+  onSaveTask: (payload: Record<string, unknown>) => void;
+  onSaveField: (fieldId: string, payload: Record<string, unknown>) => void;
 }) {
+  const shared = { task, metadata, canEdit, onSave: onSaveTask, onOpenTask: onOpen };
+
   switch (field) {
     case SystemField.TITLE:
-      return (
-        <button
-          type="button"
-          onClick={onOpen}
-          // Opens the existing task dialog rather than a second editor. One
-          // task editor, reached from wherever the task is shown.
-          className={cn(
-            'text-left font-medium text-foreground hover:underline',
-            task.status === TaskStatus.DONE && 'text-muted-foreground line-through',
-          )}
-        >
-          {task.title}
-        </button>
-      );
-
+      return <TitleCell {...shared} />;
     case SystemField.ASSIGNEE:
-      return task.assignee ? (
-        <span className="inline-flex items-center gap-1.5">
-          <Avatar className="size-5">
-            {task.assignee.avatarUrl && <AvatarImage src={task.assignee.avatarUrl} alt="" />}
-            <AvatarFallback className="text-[9px]">
-              {initials(task.assignee.name)}
-            </AvatarFallback>
-          </Avatar>
-          <span className="text-xs">{task.assignee.name}</span>
-        </span>
-      ) : (
-        <span className="text-xs text-muted-foreground">Unassigned</span>
-      );
-
+      return <AssigneeCell {...shared} />;
     case SystemField.STATUS:
-      return <TaskStatusBadge status={task.status} />;
-
+      return <StatusCell {...shared} />;
     case SystemField.PRIORITY:
-      return <TaskPriorityBadge priority={task.priority} />;
-
+      return <PriorityCell {...shared} />;
     case SystemField.DUE_DATE:
-      return task.dueDate ? (
-        <span className="text-xs">{formatDate(task.dueDate)}</span>
-      ) : (
-        <span className="text-xs text-muted-foreground">—</span>
-      );
+      return <DueDateCell {...shared} />;
 
     case SystemField.SECTION: {
       const section = metadata?.sections.find((entry) => entry.id === task.sectionId);
       return <span className="text-xs">{section?.name ?? '—'}</span>;
     }
-
     case SystemField.START_DATE:
       return <span className="text-xs">{task.startDate ? formatDate(task.startDate) : '—'}</span>;
-
     case SystemField.COMPLETED_AT:
       return (
         <span className="text-xs">{task.completedAt ? formatDate(task.completedAt) : '—'}</span>
       );
-
     case SystemField.CREATED_AT:
       return <span className="text-xs">{formatDate(task.createdAt)}</span>;
-
     case SystemField.ESTIMATE:
       return (
         <span className="text-xs tabular-nums">
@@ -282,52 +325,28 @@ function Cell({
         </span>
       );
 
-    default:
-      // A custom field, or a column whose field has since been archived. Shown
-      // as blank rather than crashing the row — a missing cell is recoverable,
-      // a thrown render is not.
-      return <span className="text-xs text-muted-foreground">—</span>;
+    default: {
+      const fieldId = field.startsWith('custom:') ? field.slice('custom:'.length) : null;
+      const definition = fieldId
+        ? metadata?.customFields.find((entry) => entry.id === fieldId)
+        : undefined;
+
+      // A column whose field was archived or removed. Blank rather than a
+      // thrown render — a missing cell is recoverable, a broken row is not.
+      if (!definition) return <span className="text-xs text-muted-foreground">—</span>;
+
+      return (
+        <CustomFieldCell
+          field={definition}
+          value={task.customFieldValues?.find((entry) => entry.customFieldId === definition.id)}
+          metadata={metadata}
+          canEdit={canEdit}
+          taskTitle={task.title}
+          onSave={(payload) => onSaveField(definition.id, payload)}
+        />
+      );
+    }
   }
-}
-
-interface Group {
-  id: string;
-  name: string;
-  tasks: Task[];
-}
-
-/**
- * Groups rows by section, keeping the project's section order.
- *
- * Tasks with no section land in a trailing group rather than being hidden —
- * a task that is invisible in the only view that lists everything is a task
- * nobody will find again.
- */
-function groupBySection(tasks: Task[], metadata: ProjectFieldMetadata | undefined): Group[] {
-  const sections = metadata?.sections ?? [];
-  const bySection = new Map<string, Task[]>();
-
-  for (const task of tasks) {
-    const key = task.sectionId ?? '__none__';
-    const bucket = bySection.get(key);
-    if (bucket) bucket.push(task);
-    else bySection.set(key, [task]);
-  }
-
-  const groups: Group[] = sections
-    .filter((section) => bySection.has(section.id))
-    .map((section) => ({
-      id: section.id,
-      name: section.name,
-      tasks: bySection.get(section.id) ?? [],
-    }));
-
-  const orphans = bySection.get('__none__');
-  if (orphans?.length) {
-    groups.push({ id: '__none__', name: 'No section', tasks: orphans });
-  }
-
-  return groups;
 }
 
 /**

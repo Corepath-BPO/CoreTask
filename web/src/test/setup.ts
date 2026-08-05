@@ -1,22 +1,30 @@
 import '@testing-library/jest-dom/vitest';
 
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterEach } from 'vitest';
 
-// jsdom implements neither of these, and both are touched during a normal render
-// (theme resolution and Radix's collision handling).
+/*
+ * jsdom implements neither of these, and both are touched during a normal
+ * render (theme resolution and Radix's collision handling).
+ *
+ * A plain function rather than `vi.fn()`: `restoreMocks: true` strips the
+ * implementation off a spy after the first test, so from the second test in a
+ * file onwards `matchMedia()` returned undefined and any component that reads
+ * the theme threw "Cannot read properties of undefined". Nothing here needs to
+ * be asserted on, so there is no reason for it to be a spy at all.
+ */
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
+  value: (query: string) => ({
     matches: false,
     media: query,
     onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }),
 });
 
 globalThis.ResizeObserver = class {

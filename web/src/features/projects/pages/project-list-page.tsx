@@ -1,4 +1,4 @@
-import { ProjectViewType, WorkspaceRole } from '@coretask/contracts';
+import { ProjectViewType, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import type { ViewColumn } from '@coretask/types';
 import { useState } from 'react';
 
@@ -56,6 +56,7 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
       <ProjectListView
         workspaceId={workspaceId}
         projectId={projectId}
+        canEdit={hasAtLeastRole(role, WorkspaceRole.MEMBER)}
         columns={columns}
         onColumnsChange={onColumnsChange}
         onOpenTask={setOpenTaskId}

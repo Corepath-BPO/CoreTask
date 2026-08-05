@@ -118,6 +118,11 @@ export interface TaskCustomFieldValue {
   userIds: string[];
 }
 
+/** A task as the List view receives it: the task plus its field values. */
+export interface TaskWithCustomFields {
+  customFieldValues: TaskCustomFieldValue[];
+}
+
 export interface CreateCustomFieldPayload {
   name: string;
   type: CustomFieldType;
