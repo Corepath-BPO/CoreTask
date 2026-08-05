@@ -10,7 +10,8 @@ import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useUpdateTask } from '@/features/tasks/hooks/use-tasks';
+import { useMoveTaskToSection, useUpdateTask } from '@/features/tasks/hooks/use-tasks';
+import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-task-drop';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -25,9 +26,12 @@ import {
   ADD_COLUMN_WIDTH,
   columnWidth,
   pinnedLayout,
+  visibleColumns,
   type PinnedLayout,
 } from '../lib/column-layout';
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
+import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
+import { useRowDropTarget } from './use-row-drop-target';
 import { CustomFieldCell } from './cells/custom-field-cell';
 import { useCellEditor } from './cells/use-cell-editor';
 import {
@@ -82,6 +86,7 @@ export function ProjectListView({
   const updateTask = useUpdateTask(workspaceId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
+  const moveTask = useMoveTaskToSection(workspaceId);
 
   /*
    * Horizontal scroll is tracked so the frozen column can grow a shadow only
@@ -94,19 +99,8 @@ export function ProjectListView({
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
 
-  /*
-   * The Section column is dropped, however a saved view came by it.
-   *
-   * Every row already sits inside a card headed by its section, so the column
-   * repeated the same word down the page and cost a column's width to do it.
-   * Filtered here rather than migrated away, because a view is presentation:
-   * rewriting stored settings to remove a column somebody can no longer see
-   * would be a migration with nothing to gain.
-   */
-  const columns = useMemo(
-    () => allColumns.filter((column) => column.field !== SystemField.SECTION),
-    [allColumns],
-  );
+  // See `visibleColumns`: a saved view outlives what it points at.
+  const columns = useMemo(() => visibleColumns(allColumns, metadata), [allColumns, metadata]);
 
   /*
    * The width under the cursor mid-drag, before it is saved.
@@ -173,6 +167,33 @@ export function ProjectListView({
       observer.disconnect();
     };
   }, []);
+
+  /*
+   * Handled by the same resolver the board uses, so a drop means the same thing
+   * in both views. Duplicating the arithmetic would be how "dropped onto the
+   * third row" comes to mean one position on the board and another here.
+   *
+   * The orphan group is excluded: it is a synthetic bucket for tasks whose
+   * section was removed, not a section anything can be moved into.
+   */
+  const handleDrop = (
+    taskId: string,
+    target: { id: string; type: 'task' | 'column'; sectionId?: string },
+  ) => {
+    if (!canEdit) return;
+
+    const dropGroups: TaskGroups = Object.fromEntries(
+      groups.filter((group) => group.id !== ORPHAN_GROUP_ID).map((group) => [group.id, group.tasks]),
+    );
+
+    const plan = resolveTaskDrop(dropGroups, taskId, target);
+    if (!plan) return;
+
+    moveTask.mutate({
+      taskId,
+      payload: { sectionId: plan.sectionId, afterTaskId: plan.afterTaskId },
+    });
+  };
 
   const toggle = (sectionId: string) =>
     setCollapsed((previous) => {
@@ -255,6 +276,7 @@ export function ProjectListView({
           onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}
           className="overflow-auto rounded-lg"
         >
+          <ListDndContext onDrop={handleDrop}>
           <div className="space-y-3 pb-1" style={{ minWidth: pinned.totalWidth }}>
             {/*
              * The column header sits above the cards rather than repeating
@@ -302,10 +324,17 @@ export function ProjectListView({
                * the scroll container silently stops the cell sticking, and the
                * frozen column would scroll away with everything else.
                */
+              <SectionDropZone key={group.id} sectionId={group.id}>
+                {({ ref: dropRef, isOver }) => (
               <section
-                key={group.id}
+                ref={dropRef}
                 aria-label={group.name}
-                className="rounded-lg border border-border bg-card shadow-sm"
+                className={cn(
+                  'rounded-lg border bg-card shadow-sm transition-colors',
+                  // Lit while a row hovers it, because a drop with no feedback
+                  // is a guess about where the task will land.
+                  isOver ? 'border-primary/60 bg-primary/5' : 'border-border',
+                )}
               >
                 <h3 className="border-b border-border px-3 py-2">
                   {/* Sticky so a section's name stays readable once the table
@@ -359,8 +388,11 @@ export function ProjectListView({
                   </table>
                 )}
               </section>
+                )}
+              </SectionDropZone>
             ))}
           </div>
+          </ListDndContext>
         </div>
       )}
     </div>
@@ -455,8 +487,18 @@ function Row({
   expanded?: boolean;
   onToggleExpand?: () => void;
 }) {
+  const drop = useRowDropTarget(task.id);
+
   return (
-    <tr className="group border-b border-border last:border-0 hover:bg-muted/30">
+    <tr
+      ref={depth === 0 ? drop.ref : undefined}
+      className={cn(
+        'group border-b border-border last:border-0 hover:bg-muted/30',
+        // A line where the row would land, rather than a filled highlight that
+        // hides the row it is about to sit beside.
+        drop.isOver && depth === 0 && 'shadow-[inset_0_2px_0_0_var(--color-primary)]',
+      )}
+    >
       {columns.map((column) => {
         // A pinned cell's offset has to match its header's exactly, so both read
         // it from the same layout pass rather than each working it out.
@@ -479,6 +521,9 @@ function Row({
             field={column.field}
             metadata={metadata}
             canEdit={canEdit}
+            // Only top-level rows drag: a subtask belongs to its parent, and
+            // moving one into a section would quietly promote it.
+            draggable={canEdit && depth === 0}
             depth={depth}
             expanded={expanded}
             onToggleExpand={onToggleExpand}
@@ -615,6 +660,7 @@ function Cell({
   field,
   metadata,
   canEdit,
+  draggable,
   depth,
   expanded,
   onToggleExpand,
@@ -626,6 +672,7 @@ function Cell({
   field: string;
   metadata: ProjectFieldMetadata | undefined;
   canEdit: boolean;
+  draggable?: boolean;
   depth?: number;
   expanded?: boolean;
   onToggleExpand?: () => void;
@@ -651,6 +698,7 @@ function Cell({
           depth={depth}
           expanded={expanded}
           onToggleExpand={onToggleExpand}
+          dragHandle={draggable ? <RowDragHandle taskId={task.id} title={task.title} /> : undefined}
         />
       );
     case SystemField.ASSIGNEE:

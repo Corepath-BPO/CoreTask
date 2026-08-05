@@ -43,12 +43,15 @@ export function TitleCell({
   depth = 0,
   expanded,
   onToggleExpand,
+  dragHandle,
 }: CellProps & {
   /** 0 for a top-level task, 1 for a subtask. Nesting goes no deeper. */
   depth?: number;
   expanded?: boolean;
   /** Absent when the task has no subtasks — there is nothing to expand. */
   onToggleExpand?: () => void;
+  /** The grip that starts a row drag; absent for subtasks and read-only views. */
+  dragHandle?: React.ReactNode;
 }) {
   const editor = useCellEditor(task.title, (title) => {
     const trimmed = title.trim();
@@ -80,6 +83,8 @@ export function TitleCell({
   return (
     // Indented by depth so a subtask reads as belonging to the row above it.
     <span className={cn('flex min-w-0 items-center gap-1', depth > 0 && 'pl-6')}>
+      {dragHandle}
+
       {onToggleExpand ? (
         <button
           type="button"

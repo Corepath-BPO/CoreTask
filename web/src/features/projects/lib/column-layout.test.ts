@@ -1,5 +1,5 @@
 import { SystemField } from '@coretask/contracts';
-import type { ViewColumn } from '@coretask/types';
+import type { ProjectFieldMetadata, ViewColumn } from '@coretask/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +12,7 @@ import {
   moveColumn,
   pinnedLayout,
   setPinned,
+  visibleColumns,
 } from './column-layout';
 
 /** `a*` is pinned, `b` is not — short names keep the arrangements readable. */
@@ -147,5 +148,56 @@ describe('moveColumn', () => {
 
   it('clamps a drop past the end rather than losing the column', () => {
     expect(shape(moveColumn(cols('a* b c'), 'b', 99))).toBe('a* c b');
+  });
+});
+
+describe('columns a saved view can no longer show', () => {
+  const metadata = (customFields: { id: string }[]): ProjectFieldMetadata =>
+    ({
+      customFields: customFields as never,
+      statuses: [],
+      priorities: [],
+      sections: [],
+      members: [],
+    }) as ProjectFieldMetadata;
+
+  it('drops the Section column, which the grouping already says', () => {
+    expect(
+      visibleColumns(
+        [{ field: SystemField.TITLE }, { field: SystemField.SECTION }],
+        metadata([]),
+      ),
+    ).toEqual([{ field: SystemField.TITLE }]);
+  });
+
+  it('drops a custom column whose field no longer exists', () => {
+    // A view outlives the fields it names. A column of dashes under a header
+    // reading "Deleted field" is worse than no column.
+    expect(
+      visibleColumns(
+        [{ field: SystemField.TITLE }, { field: 'custom:gone' }],
+        metadata([]),
+      ),
+    ).toEqual([{ field: SystemField.TITLE }]);
+  });
+
+  it('keeps a custom column whose field is still there', () => {
+    expect(
+      visibleColumns([{ field: 'custom:f-1' }], metadata([{ id: 'f-1' }])),
+    ).toEqual([{ field: 'custom:f-1' }]);
+  });
+
+  it('keeps every custom column while metadata is still loading', () => {
+    // Nothing is known to exist yet, and filtering now would drop them all and
+    // add them back a moment later.
+    expect(visibleColumns([{ field: 'custom:f-1' }], undefined)).toEqual([
+      { field: 'custom:f-1' },
+    ]);
+  });
+
+  it('leaves system columns alone regardless', () => {
+    expect(
+      visibleColumns([{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }], metadata([])),
+    ).toEqual([{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }]);
   });
 });

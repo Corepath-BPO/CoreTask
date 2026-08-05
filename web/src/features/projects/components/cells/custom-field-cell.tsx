@@ -14,6 +14,19 @@ import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 import { cn, formatDate } from '@/lib/utils';
 
 import { CellButton, EmptyCell } from './editable-cell';
+import {
+  allowsManyPeople,
+  checkboxLabel,
+  formatNumber,
+  fromInputValue,
+  isLongText,
+  maxLengthFor,
+  numberFormat,
+  placeholderFor,
+  toInputValue,
+  wantsTime,
+} from './field-settings';
+import { LongTextCell } from './long-text-cell';
 import { useCellEditor } from './use-cell-editor';
 
 /**
@@ -46,47 +59,87 @@ export function CustomFieldCell({
   const label = `${field.name} for "${taskTitle}"`;
 
   switch (field.type) {
-    case CustomFieldType.CHECKBOX:
+    case CustomFieldType.CHECKBOX: {
+      const checked = value?.checkbox ?? false;
+      const wording = checkboxLabel(field, checked);
+
       // No open/commit cycle: a checkbox *is* its editor, and making someone
       // click twice to toggle one would be worse than the read-only table.
       return (
-        <input
-          type="checkbox"
-          checked={value?.checkbox ?? false}
-          disabled={!canEdit}
-          onChange={(event) => onSave({ checkbox: event.target.checked })}
-          aria-label={label}
-          className="size-4 cursor-pointer rounded border-input accent-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
-        />
+        <span className="inline-flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={!canEdit}
+            onChange={(event) => onSave({ checkbox: event.target.checked })}
+            aria-label={label}
+            className="size-4 cursor-pointer rounded border-input accent-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          />
+          {/* The field's own wording where it has any: "Blocked / Clear" says
+              more than a bare tick, and a column of ticks means remembering
+              what the header meant. */}
+          {wording && <span className="text-xs text-muted-foreground">{wording}</span>}
+        </span>
       );
+    }
 
-    case CustomFieldType.NUMBER:
+    case CustomFieldType.NUMBER: {
+      const format = numberFormat(field);
+
       return (
         <ScalarCell
           initial={value?.number == null ? '' : String(value.number)}
           canEdit={canEdit}
           label={label}
           type="number"
+          min={format.min}
+          max={format.max}
+          step={format.decimalPlaces > 0 ? 1 / 10 ** format.decimalPlaces : 1}
           onCommit={(next) => onSave({ number: next === '' ? null : Number(next) })}
+          // Formatted for reading only. The editor keeps the raw value, because
+          // rounding what somebody typed the moment they look away is how 12.5
+          // becomes 13 without anyone deciding it should.
           render={(text) =>
-            text === '' ? <EmptyCell /> : <span className="tabular-nums">{text}</span>
+            text === '' ? (
+              <EmptyCell />
+            ) : (
+              <span className="tabular-nums">{formatNumber(Number(text), format)}</span>
+            )
           }
         />
       );
+    }
 
-    case CustomFieldType.DATE:
+    case CustomFieldType.DATE: {
+      const withTime = wantsTime(field);
+
       return (
         <ScalarCell
-          initial={value?.date ? value.date.slice(0, 10) : ''}
+          initial={toInputValue(value?.date, withTime)}
           canEdit={canEdit}
           label={label}
-          type="date"
-          onCommit={(next) =>
-            onSave({ date: next ? new Date(`${next}T00:00:00.000Z`).toISOString() : null })
+          type={withTime ? 'datetime-local' : 'date'}
+          onCommit={(next) => onSave({ date: fromInputValue(next, withTime) })}
+          render={(text) =>
+            text ? (
+              <span>
+                {formatDate(text)}
+                {withTime && (
+                  <span className="ml-1 text-muted-foreground">
+                    {new Date(text).toLocaleTimeString(undefined, {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <EmptyCell />
+            )
           }
-          render={(text) => (text ? formatDate(text) : <EmptyCell />)}
         />
       );
+    }
 
     case CustomFieldType.URL:
       return (
@@ -95,6 +148,7 @@ export function CustomFieldCell({
           canEdit={canEdit}
           label={label}
           type="url"
+          placeholder={placeholderFor(field)}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) =>
             text ? (
@@ -123,18 +177,32 @@ export function CustomFieldCell({
           canEdit={canEdit}
           label={label}
           type="email"
+          placeholder={placeholderFor(field)}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) => text || <EmptyCell />}
         />
       );
 
     case CustomFieldType.TEXT:
-      return (
+      // A paragraph typed into a one-line input is a paragraph nobody can read
+      // back, so long text gets a box it can actually be written in.
+      return isLongText(field) ? (
+        <LongTextCell
+          value={value?.text ?? ''}
+          canEdit={canEdit}
+          label={label}
+          placeholder={placeholderFor(field)}
+          maxLength={maxLengthFor(field)}
+          onCommit={(next) => onSave({ text: next || null })}
+        />
+      ) : (
         <ScalarCell
           initial={value?.text ?? ''}
           canEdit={canEdit}
           label={label}
           type="text"
+          placeholder={placeholderFor(field)}
+          maxLength={maxLengthFor(field)}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) => text || <EmptyCell />}
         />
@@ -169,6 +237,7 @@ export function CustomFieldCell({
           selected={value?.userIds ?? []}
           canEdit={canEdit}
           label={label}
+          allowMany={allowsManyPeople(field)}
           onCommit={(userIds) => onSave({ userIds })}
         />
       );
@@ -186,13 +255,23 @@ function ScalarCell({
   canEdit,
   label,
   type,
+  placeholder,
+  maxLength,
+  min,
+  max,
+  step,
   onCommit,
   render,
 }: {
   initial: string;
   canEdit: boolean;
   label: string;
-  type: 'text' | 'number' | 'date' | 'url' | 'email';
+  type: 'text' | 'number' | 'date' | 'datetime-local' | 'url' | 'email';
+  placeholder?: string;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  step?: number;
   onCommit: (value: string) => void;
   render: (value: string) => React.ReactNode;
 }) {
@@ -208,6 +287,11 @@ function ScalarCell({
         onBlur={editor.commit}
         onKeyDown={editor.onKeyDown}
         aria-label={label}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        min={min}
+        max={max}
+        step={step}
         className="h-7 text-xs"
       />
     );
@@ -370,22 +454,81 @@ function MultiSelectCell({
   );
 }
 
+/**
+ * One person, or several, depending on how the field was configured.
+ *
+ * The two modes are genuinely different interactions rather than one with a
+ * limit: picking one person should close on the choice, and picking several
+ * should stay open — asking somebody to reopen a menu per name is the same
+ * mistake the multi-select cell avoids.
+ *
+ * Either way the list is the workspace's members, which is also what the API
+ * validates against, so a cell can never offer a person the save would refuse.
+ */
 function PeopleCell({
   metadata,
   selected,
   canEdit,
   label,
+  allowMany,
   onCommit,
 }: {
   metadata: ProjectFieldMetadata | undefined;
   selected: string[];
   canEdit: boolean;
   label: string;
+  allowMany: boolean;
   onCommit: (userIds: string[]) => void;
 }) {
   const current = selected[0] ?? '';
   const editor = useCellEditor(current, (value) => onCommit(value ? [value] : []));
   const people = metadata?.members ?? [];
+
+  const names = selected
+    .map((id) => people.find((member) => member.id === id)?.name)
+    .filter(Boolean);
+
+  if (editor.editing && allowMany) {
+    return (
+      <div
+        role="group"
+        aria-label={label}
+        onKeyDown={editor.onKeyDown}
+        className="flex flex-wrap gap-1 rounded-md border border-input bg-background p-1"
+      >
+        {people.map((member) => {
+          const isOn = selected.includes(member.id);
+
+          return (
+            <button
+              key={member.id}
+              type="button"
+              role="checkbox"
+              aria-checked={isOn}
+              onClick={() =>
+                onCommit(
+                  isOn ? selected.filter((id) => id !== member.id) : [...selected, member.id],
+                )
+              }
+              className={cn(
+                'cursor-pointer rounded px-1.5 py-0.5 text-xs',
+                isOn ? 'bg-primary/10 ring-1 ring-ring' : 'hover:bg-muted',
+              )}
+            >
+              {member.name}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={editor.cancel}
+          className="cursor-pointer rounded px-1.5 text-xs text-muted-foreground hover:bg-muted"
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
 
   if (editor.editing) {
     return (
@@ -413,10 +556,6 @@ function PeopleCell({
       </Select>
     );
   }
-
-  const names = selected
-    .map((id) => people.find((member) => member.id === id)?.name)
-    .filter(Boolean);
 
   return (
     <CellButton onOpen={editor.open} disabled={!canEdit} ariaLabel={label} className="text-xs">

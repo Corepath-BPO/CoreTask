@@ -30,6 +30,37 @@ export const MAX_COLUMN_WIDTH = 800;
 /** The `+` control's column, which every table declares. */
 export const ADD_COLUMN_WIDTH = 44;
 
+/**
+ * The columns a view can actually show, out of the ones it names.
+ *
+ * A saved view outlives what it points at. Two things get dropped:
+ *
+ *   * `SECTION`, because every row already sits inside a card headed by its
+ *     section, so the column repeats that down the page for a column's width;
+ *   * any custom field that no longer exists, because a column of dashes under
+ *     a header reading "Deleted field" is worse than no column at all.
+ *
+ * Custom columns survive while `metadata` is undefined. Nothing is known to
+ * exist during loading, and filtering then would drop every custom column and
+ * put it back a moment later.
+ *
+ * Filtered rather than written back: a view is presentation, and rewriting
+ * stored settings would decide on somebody's behalf that a field is gone for
+ * good — when an archived field can be restored.
+ */
+export function visibleColumns(
+  columns: ViewColumn[],
+  metadata: { customFields: { id: string }[] } | undefined,
+): ViewColumn[] {
+  const live = new Set((metadata?.customFields ?? []).map((field) => `custom:${field.id}`));
+
+  return columns.filter((column) => {
+    if (column.field === SystemField.SECTION) return false;
+    if (!metadata || !column.field.startsWith('custom:')) return true;
+    return live.has(column.field);
+  });
+}
+
 export function columnWidth(column: ViewColumn): number {
   return column.width ?? COLUMN_WIDTHS[column.field] ?? DEFAULT_COLUMN_WIDTH;
 }
