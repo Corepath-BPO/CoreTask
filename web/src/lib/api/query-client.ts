@@ -73,6 +73,9 @@ export const queryKeys = {
       ['project-views', workspaceId, projectId] as const,
     metadata: (workspaceId: string, projectId: string) =>
       ['project-views', workspaceId, projectId, 'metadata'] as const,
+    /** The search term is part of the key — each one is a different answer. */
+    catalog: (workspaceId: string, projectId: string, search: string) =>
+      ['project-views', workspaceId, projectId, 'catalog', search] as const,
     /** Prefix only — the filter and page are appended by the caller. */
     tasks: (workspaceId: string, projectId: string) =>
       ['project-views', workspaceId, projectId, 'tasks'] as const,

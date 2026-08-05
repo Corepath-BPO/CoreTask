@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useUpdateTask } from '@/features/tasks/hooks/use-tasks';
+import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { cn, formatDate } from '@/lib/utils';
 
 import {
@@ -38,7 +39,7 @@ import {
 } from './cells/system-cells';
 
 
-import { AddFieldControl } from './add-field-control';
+import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { ColumnHeaderTable } from './column-header';
 import { ColumnManager } from './column-manager';
 
@@ -264,7 +265,7 @@ export function ProjectListView({
                 widths={<ColumnWidths columns={shown} />}
                 addControl={
                   canEdit ? (
-                    <AddFieldControl
+                    <FieldPickerPopover
                       columns={columns}
                       metadata={metadata}
                       workspaceId={workspaceId}
@@ -691,18 +692,3 @@ function Cell({
   }
 }
 
-/**
- * Debounce without pulling in a dependency for one call site.
- *
- * `useEffect`, not `useMemo` — a memo does not run the cleanup it is handed, so
- * every keystroke would leave a live timer and the search would fire once per
- * character after a delay rather than once at the end.
- */
-function useDebouncedValue(value: string, onSettled: (value: string) => void) {
-  useEffect(() => {
-    const timer = setTimeout(() => onSettled(value.trim()), 300);
-    return () => clearTimeout(timer);
-    // `onSettled` is a `useState` setter, which React guarantees is stable —
-    // including it would be honest but adds a dependency that never changes.
-  }, [value, onSettled]);
-}

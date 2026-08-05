@@ -1,6 +1,7 @@
 import type {
   CreateProjectViewPayload,
   CustomField,
+  FieldCatalog,
   ProjectFieldMetadata,
   ProjectView,
   Task,
@@ -71,6 +72,27 @@ export const projectViewsApi = {
   subtasks: (workspaceId: string, projectId: string, taskId: string): Promise<Task[]> =>
     apiClient.get<Task[]>(`${base(workspaceId, projectId)}/tasks/${taskId}/subtasks`),
 
+  /**
+   * Everything the add-field picker offers, searched server-side.
+   *
+   * `visible` is sent so the API can mark entries already in the view rather
+   * than the client filtering them out — the difference between "already
+   * added" and "no such field" matters to whoever is looking.
+   */
+  fieldCatalog: (
+    workspaceId: string,
+    projectId: string,
+    params: { search?: string; visible?: string[] } = {},
+  ): Promise<FieldCatalog> =>
+    apiClient.get<FieldCatalog>(`${base(workspaceId, projectId)}/field-catalog`, {
+      params: {
+        ...(params.search ? { search: params.search } : {}),
+        // Joined rather than repeated: axios serialises arrays as `visible[]=`,
+        // which the API's strict validation refuses as an unknown property.
+        ...(params.visible?.length ? { visible: params.visible.join(',') } : {}),
+      },
+    }),
+
   fieldMetadata: (workspaceId: string, projectId: string): Promise<ProjectFieldMetadata> =>
     apiClient.get<ProjectFieldMetadata>(`${base(workspaceId, projectId)}/field-metadata`),
 };
@@ -78,6 +100,13 @@ export const projectViewsApi = {
 export const customFieldsApi = {
   list: (workspaceId: string, projectId: string): Promise<CustomField[]> =>
     apiClient.get<CustomField[]>(`${base(workspaceId, projectId)}/custom-fields`),
+
+  /** Reuses an existing workspace field here, rather than making a second one. */
+  attach: (workspaceId: string, projectId: string, fieldId: string): Promise<CustomField> =>
+    apiClient.post<CustomField>(
+      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/attach`,
+      {},
+    ),
 
   create: (
     workspaceId: string,

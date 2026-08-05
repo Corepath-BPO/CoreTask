@@ -157,6 +157,53 @@ export interface SetCustomFieldValuePayload {
   userIds?: string[];
 }
 
+/**
+ * One entry in the add-field picker's "field types" group.
+ *
+ * Only types the API implements end to end appear here. A type somebody can
+ * choose whose cells cannot hold a value is worse than one they never see.
+ */
+export interface FieldTypeOption {
+  type: CustomFieldType;
+  label: string;
+  description: string;
+  hasOptions: boolean;
+}
+
+/** A built-in task property, and what the application can do with it. */
+export interface SystemFieldOption {
+  key: string;
+  label: string;
+  description: string;
+  dataType: CustomFieldType;
+  isSortable: boolean;
+  isFilterable: boolean;
+  isGroupable: boolean;
+  isEditable: boolean;
+  /** Already a column in the view being edited. */
+  isInView: boolean;
+}
+
+/** A custom field the picker can offer, with where it already stands. */
+export interface CatalogCustomField {
+  id: string;
+  name: string;
+  description: string | null;
+  type: CustomFieldType;
+  optionPreview: { id: string; label: string; colorToken: string }[];
+  usageCount: number;
+  isInProject: boolean;
+  isArchived: boolean;
+}
+
+/** Everything the add-field picker needs, in one response. */
+export interface FieldCatalog {
+  fieldTypes: FieldTypeOption[];
+  systemFields: SystemFieldOption[];
+  projectFields: CatalogCustomField[];
+  libraryFields: CatalogCustomField[];
+}
+
 /** What the Fields menu and the filter builder need to render themselves. */
 export interface ProjectFieldMetadata {
   customFields: CustomField[];

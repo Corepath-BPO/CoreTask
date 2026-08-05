@@ -727,7 +727,7 @@ describe('Project views and custom fields (e2e)', () => {
       const scope = await setupScope();
 
       const response = await request(server())
-        .get(`${catalogUrl(scope)}?visible=status`)
+        .get(`${catalogUrl(scope)}?visible=title,status`)
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(200);
 

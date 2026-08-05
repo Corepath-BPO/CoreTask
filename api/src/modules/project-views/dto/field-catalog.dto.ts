@@ -13,12 +13,13 @@ export class FieldCatalogQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Field references already visible in the view, e.g. `status` or `custom:<uuid>`. Repeat the parameter for several. Matching entries are returned marked rather than omitted, so a search does not appear to lose them.',
-    isArray: true,
-    type: String,
+      'Comma-separated field references already visible in the view, e.g. `status,custom:<uuid>`. Matching entries are returned marked rather than omitted, so a search does not appear to lose them. One string rather than a repeated parameter because array serialisation differs between clients — axios sends `visible[]=`, which a strict validation pipe rejects outright.',
+    example: 'title,status,custom:019fd2...',
   })
   @IsOptional()
-  visible?: string | string[];
+  @IsString()
+  @MaxLength(4000)
+  visible?: string;
 
   @ApiPropertyOptional({
     description: 'Pass `false` to skip the workspace library and return only this project’s fields.',

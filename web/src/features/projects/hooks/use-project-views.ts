@@ -81,6 +81,46 @@ export function useSubtasks(
   });
 }
 
+/**
+ * The add-field picker's catalog, re-fetched as somebody types.
+ *
+ * `visible` is deliberately not in the query key. It changes the marks on the
+ * response, not which rows come back, and putting an array rebuilt every render
+ * into a key is what put the dashboard into a refetch loop once already.
+ */
+export function useFieldCatalog(
+  workspaceId: string | undefined,
+  projectId: string,
+  search: string,
+  visible: string[],
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.projectViews.catalog(workspaceId ?? '', projectId, search),
+    queryFn: () =>
+      projectViewsApi.fieldCatalog(workspaceId as string, projectId, { search, visible }),
+    enabled: Boolean(workspaceId) && enabled,
+    // The catalog is small and cheap; keeping the previous answer on screen
+    // while the next one loads stops the list flickering on every keystroke.
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** Puts an existing workspace field to work on this project. */
+export function useAttachField(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: (fieldId: string) =>
+      customFieldsApi.attach(workspaceId as string, projectId, fieldId),
+    onSuccess: async () => {
+      toast.success('Field added to this project.');
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projectViews.all(workspaceId as string, projectId),
+      });
+    },
+    onError: (error) => reportError(error, 'Could not add that field.'),
+  });
+}
+
 export function useUpdateProjectView(workspaceId: string | undefined, projectId: string) {
   return useMutation({
     mutationFn: ({ viewId, payload }: { viewId: string; payload: UpdateProjectViewPayload }) =>

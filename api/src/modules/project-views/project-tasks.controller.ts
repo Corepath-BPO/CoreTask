@@ -85,8 +85,7 @@ export class ProjectTasksController {
   ): Promise<FieldCatalog> {
     return this.catalog.build(workspaceId, projectId, {
       search: query.search,
-      // Repeated query params arrive as a string when there is only one.
-      visible: query.visible === undefined ? [] : [query.visible].flat(),
+      visible: query.visible?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? [],
       includeLibrary: query.includeLibrary !== 'false',
       includeArchived: query.includeArchived === 'true',
     });
