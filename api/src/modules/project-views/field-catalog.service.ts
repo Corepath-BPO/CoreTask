@@ -23,6 +23,8 @@ export interface CatalogField {
   /** Whether this project already uses it. */
   isInProject: boolean;
   isArchived: boolean;
+  /** Whether it is already a column in the view being edited. */
+  isInView: boolean;
 }
 
 export interface FieldCatalog {
@@ -63,25 +65,36 @@ export class FieldCatalogService {
   ): Promise<FieldCatalog> {
     await this.projects.requireProject(workspaceId, projectId);
 
-    const term = query.search?.trim().toLowerCase() ?? '';
+    const words = (value: string) =>
+      value
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+
+    const terms = words(query.search ?? '');
     const visible = new Set(query.visible ?? []);
 
     /*
-     * Matched at word starts, not anywhere in the string.
+     * Matched at word starts, and per word on both sides.
      *
      * A plain `includes` looked reasonable until "date" returned the URL and
      * Email types, because both descriptions say "validate". Searching for a
      * field type by name should not surface two unrelated ones on a substring
      * nobody typed.
+     *
+     * Splitting the *query* too is what makes typing a field's full name work.
+     * Comparing whole-query against each word meant "Due date" matched nothing
+     * at all — no single word can start with two — so a field vanished at the
+     * moment somebody finished typing its name. Every word of the query has to
+     * match some word of the text, which also makes the terms order-independent.
      */
     const matches = (...text: (string | null | undefined)[]) =>
-      !term ||
-      text.some((value) =>
-        (value ?? '')
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .some((word) => word.startsWith(term)),
-      );
+      terms.length === 0 ||
+      text.some((value) => {
+        const candidate = words(value ?? '');
+
+        return terms.every((term) => candidate.some((word) => word.startsWith(term)));
+      });
 
     /*
      * Every custom field in the workspace, with the project links that decide
@@ -118,6 +131,7 @@ export class FieldCatalogService {
         usageCount: projectIds.size,
         isInProject: projectIds.has(projectId),
         isArchived: field.isArchived,
+        isInView: visible.has(`custom:${field.id}`),
       };
     });
 
@@ -136,14 +150,20 @@ export class FieldCatalogService {
         matches(field.label, field.description),
       ).map((field) => ({ ...field, isInView: visible.has(field.key) })),
 
-      projectFields: catalogFields
-        .filter((field) => field.isInProject && matchesField(field))
-        // Already a column here is still worth showing, ticked — see above.
-        .filter((field) => !visible.has(`custom:${field.id}`)),
+      /*
+       * Marked rather than filtered, the same as the system fields above.
+       *
+       * Dropping the ones already on screen hid the field somebody was looking
+       * straight at, and the picker — seeing no field by that name — went on to
+       * offer to create a second one with it. Two definitions, one name, and no
+       * hint that the first existed.
+       */
+      projectFields: catalogFields.filter((field) => field.isInProject && matchesField(field)),
 
-      libraryFields: query.includeLibrary === false
-        ? []
-        : catalogFields.filter((field) => !field.isInProject && matchesField(field)),
+      libraryFields:
+        query.includeLibrary === false
+          ? []
+          : catalogFields.filter((field) => !field.isInProject && matchesField(field)),
     };
   }
 }

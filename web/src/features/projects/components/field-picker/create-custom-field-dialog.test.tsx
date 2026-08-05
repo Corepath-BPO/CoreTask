@@ -22,6 +22,7 @@ const libraryField = (overrides: Partial<CatalogCustomField> = {}): CatalogCusto
   usageCount: 2,
   isInProject: false,
   isArchived: false,
+  isInView: false,
   ...overrides,
 });
 

@@ -23,8 +23,10 @@ const cols = (spec: string): ViewColumn[] =>
     ...(token.endsWith('*') ? { isPinned: true } : {}),
   }));
 
+// Starred by the rule rather than by the stored flag, so a column pinned
+// because of what it is reads the same here as one pinned by hand.
 const shape = (columns: ViewColumn[]) =>
-  columns.map((column) => `${column.field}${column.isPinned ? '*' : ''}`).join(' ');
+  columns.map((column) => `${column.field}${isPinnedColumn(column) ? '*' : ''}`).join(' ');
 
 describe('columnWidth', () => {
   it('prefers a stored width over the default', () => {
@@ -47,15 +49,17 @@ describe('clampWidth', () => {
 });
 
 describe('isPinnedColumn', () => {
-  it('freezes the Task column in a view saved before pinning existed', () => {
-    // Those views have no `isPinned` at all, and the Task column was hard-coded
-    // frozen back then. Anything else silently unfreezes every existing view.
+  it('freezes the Task column, and leaves the rest unpinned by default', () => {
     expect(isPinnedColumn({ field: SystemField.TITLE })).toBe(true);
     expect(isPinnedColumn({ field: SystemField.STATUS })).toBe(false);
   });
 
-  it('lets an explicit choice override the default, in both directions', () => {
-    expect(isPinnedColumn({ field: SystemField.TITLE, isPinned: false })).toBe(false);
+  it('will not let a stored setting unfreeze the Task column', () => {
+    // It is what the row is about. Scrolled away, nothing names the task.
+    expect(isPinnedColumn({ field: SystemField.TITLE, isPinned: false })).toBe(true);
+  });
+
+  it('lets an explicit choice pin any other column', () => {
     expect(isPinnedColumn({ field: SystemField.STATUS, isPinned: true })).toBe(true);
   });
 
@@ -110,6 +114,11 @@ describe('setPinned', () => {
     expect(shape(setPinned(cols('a* b* c'), 'a', false))).toBe('b* a c');
   });
 
+  it('refuses to unpin the Task column', () => {
+    const columns: ViewColumn[] = [{ field: SystemField.TITLE }, { field: SystemField.STATUS }];
+    expect(setPinned(columns, SystemField.TITLE, false)).toBe(columns);
+  });
+
   it('leaves the columns alone when the field is not one of them', () => {
     const columns = cols('a* b');
     expect(setPinned(columns, 'nope', true)).toBe(columns);
@@ -139,6 +148,29 @@ describe('moveColumn', () => {
     expect(offsets.get('c')).toBe(0);
     expect(offsets.get('a')).toBe(100);
     expect(offsets.get('b')).toBe(200);
+  });
+
+  it('will not drag the Task column out of first place', () => {
+    const columns: ViewColumn[] = [
+      { field: SystemField.TITLE },
+      { field: SystemField.STATUS },
+      { field: SystemField.PRIORITY },
+    ];
+    expect(moveColumn(columns, SystemField.TITLE, 2)).toBe(columns);
+  });
+
+  it('will not drop another column in front of the Task column', () => {
+    // The drop still lands — just at the first place that is actually free,
+    // rather than being refused in a way that reads as the drag having failed.
+    const columns: ViewColumn[] = [
+      { field: SystemField.TITLE },
+      { field: SystemField.STATUS },
+      { field: SystemField.PRIORITY },
+    ];
+
+    expect(shape(moveColumn(columns, SystemField.PRIORITY, 0))).toBe(
+      `${SystemField.TITLE}* ${SystemField.PRIORITY} ${SystemField.STATUS}`,
+    );
   });
 
   it('does nothing when a column is dropped where it already was', () => {

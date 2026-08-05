@@ -315,8 +315,14 @@ describe('Project views and custom fields (e2e)', () => {
     it('allows a duplicate name, as two distinct definitions', async () => {
       const scope = await setupScope();
 
-      const first = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
-      const second = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+      const first = await createField(scope, {
+        name: 'Notes',
+        type: 'TEXT',
+      }).expect(201);
+      const second = await createField(scope, {
+        name: 'Notes',
+        type: 'TEXT',
+      }).expect(201);
 
       expect(second.body.data.id).not.toBe(first.body.data.id);
     });
@@ -325,7 +331,10 @@ describe('Project views and custom fields (e2e)', () => {
       // The association is what is unique. Attaching twice would either
       // duplicate the column or silently do nothing; it is a conflict.
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Notes',
+        type: 'TEXT',
+      }).expect(201);
 
       await request(server())
         .post(`${fieldsUrl(scope)}/${field.body.data.id}/attach`)
@@ -348,7 +357,10 @@ describe('Project views and custom fields (e2e)', () => {
        * lands.
        */
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Notes', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Notes',
+        type: 'TEXT',
+      }).expect(201);
 
       await request(server())
         .put(
@@ -429,13 +441,21 @@ describe('Project views and custom fields (e2e)', () => {
       const field = await request(server())
         .post(fieldsUrl(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send({ name: 'Department', type: 'SINGLE_SELECT', options: [{ label: 'Support' }] })
+        .send({
+          name: 'Department',
+          type: 'SINGLE_SELECT',
+          options: [{ label: 'Support' }],
+        })
         .expect(201);
 
       const otherField = await request(server())
         .post(fieldsUrl(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send({ name: 'Region', type: 'SINGLE_SELECT', options: [{ label: 'EMEA' }] })
+        .send({
+          name: 'Region',
+          type: 'SINGLE_SELECT',
+          options: [{ label: 'EMEA' }],
+        })
         .expect(201);
 
       // A real option id, but from the wrong field.
@@ -462,7 +482,9 @@ describe('Project views and custom fields (e2e)', () => {
       await request(server())
         .put(valueUrl(scope, field.body.data.id))
         .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send({ optionIds: field.body.data.options.map((o: { id: string }) => o.id) })
+        .send({
+          optionIds: field.body.data.options.map((o: { id: string }) => o.id),
+        })
         .expect(400);
     });
 
@@ -591,7 +613,10 @@ describe('Project views and custom fields (e2e)', () => {
         .expect(200);
 
       expect(response.body.data[0].customFieldValues).toEqual([
-        expect.objectContaining({ customFieldId: field.body.data.id, text: 'on the subtask' }),
+        expect.objectContaining({
+          customFieldId: field.body.data.id,
+          text: 'on the subtask',
+        }),
       ]);
     });
 
@@ -722,6 +747,59 @@ describe('Project views and custom fields (e2e)', () => {
       expect(catalog.projectFields.map((f: { name: string }) => f.name)).toContain('Delivery date');
     });
 
+    it('still finds a field when its whole name is typed', async () => {
+      /*
+       * The moment somebody finishes typing "Delivery date", the field they are
+       * looking at has to still be there. Matching the whole query against each
+       * word meant it vanished on the space — no single word starts with two —
+       * and the picker then offered to create a duplicate of it.
+       */
+      const scope = await setupScope();
+      await createField(scope, { name: 'Delivery date', type: 'DATE' }).expect(201);
+
+      const search = async (term: string) => {
+        const response = await request(server())
+          .get(`${catalogUrl(scope)}?search=${encodeURIComponent(term)}`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(200);
+
+        return response.body.data.projectFields.map((f: { name: string }) => f.name);
+      };
+
+      expect(await search('Delivery date')).toContain('Delivery date');
+      expect(await search('delivery dat')).toContain('Delivery date');
+
+      // Order-independent, because the words are matched rather than the string.
+      expect(await search('date delivery')).toContain('Delivery date');
+
+      // And still not a substring match: "very" is inside "Delivery", not a word.
+      expect(await search('very')).not.toContain('Delivery date');
+    });
+
+    it('marks a custom field already in the view rather than hiding it', async () => {
+      /*
+       * Hiding it was worse than useless: the picker saw no field by that name
+       * and offered to create a second one, so the way to end up with two
+       * identical fields was to search for the one you already had.
+       */
+      const scope = await setupScope();
+      const created = await createField(scope, {
+        name: 'Exposure',
+        type: 'TEXT',
+      }).expect(201);
+      const fieldId = created.body.data.id;
+
+      const response = await request(server())
+        .get(`${catalogUrl(scope)}?search=Exposure&visible=title,custom:${fieldId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const field = response.body.data.projectFields.find((f: { id: string }) => f.id === fieldId);
+
+      expect(field).toBeDefined();
+      expect(field.isInView).toBe(true);
+    });
+
     it('marks a system field already in the view rather than hiding it', async () => {
       // Silently omitting it reads as the search having failed to find it.
       const scope = await setupScope();
@@ -796,7 +874,10 @@ describe('Project views and custom fields (e2e)', () => {
 
     it('reuses one definition across two projects', async () => {
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Risk',
+        type: 'TEXT',
+      }).expect(201);
       const otherId = await secondProject(scope);
 
       const attached = await request(server())
@@ -831,7 +912,9 @@ describe('Project views and custom fields (e2e)', () => {
         .expect(200);
 
       expect(catalog.body.data.projectFields).toEqual([]);
-      expect(catalog.body.data.libraryFields.map((f: { name: string }) => f.name)).toContain('Risk');
+      expect(catalog.body.data.libraryFields.map((f: { name: string }) => f.name)).toContain(
+        'Risk',
+      );
     });
 
     it('leaves the definition alone when one project stops using it', async () => {
@@ -840,7 +923,10 @@ describe('Project views and custom fields (e2e)', () => {
        * take another project's data with it.
        */
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Risk',
+        type: 'TEXT',
+      }).expect(201);
       const otherId = await secondProject(scope);
 
       await request(server())
@@ -870,7 +956,10 @@ describe('Project views and custom fields (e2e)', () => {
 
     it('refuses to attach the same field twice', async () => {
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Risk',
+        type: 'TEXT',
+      }).expect(201);
 
       await request(server())
         .post(`${fieldsUrl(scope)}/${field.body.data.id}/attach`)
@@ -881,7 +970,10 @@ describe('Project views and custom fields (e2e)', () => {
     it('refuses to attach a field from another workspace', async () => {
       const scope = await setupScope();
       const outsider = await setupScope();
-      const theirs = await createField(outsider, { name: 'Secret', type: 'TEXT' }).expect(201);
+      const theirs = await createField(outsider, {
+        name: 'Secret',
+        type: 'TEXT',
+      }).expect(201);
 
       await request(server())
         .post(`${fieldsUrl(scope)}/${theirs.body.data.id}/attach`)
@@ -891,7 +983,10 @@ describe('Project views and custom fields (e2e)', () => {
 
     it('refuses a member without the role', async () => {
       const scope = await setupScope();
-      const field = await createField(scope, { name: 'Risk', type: 'TEXT' }).expect(201);
+      const field = await createField(scope, {
+        name: 'Risk',
+        type: 'TEXT',
+      }).expect(201);
       const otherId = await secondProject(scope);
 
       await request(server())
@@ -926,7 +1021,10 @@ describe('Project views and custom fields (e2e)', () => {
 
       // A field always carries a complete document, so no reader has to know
       // what a missing key used to mean.
-      expect(plain.body.data.settings).toEqual({ numberFormat: 'PLAIN', decimalPlaces: 0 });
+      expect(plain.body.data.settings).toEqual({
+        numberFormat: 'PLAIN',
+        decimalPlaces: 0,
+      });
     });
 
     it('rejects a setting that is not valid for the type', async () => {
@@ -945,7 +1043,11 @@ describe('Project views and custom fields (e2e)', () => {
       await request(server())
         .post(fieldsUrl(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send({ name: 'Points', type: 'NUMBER', settings: { minValue: 10, maxValue: 1 } })
+        .send({
+          name: 'Points',
+          type: 'NUMBER',
+          settings: { minValue: 10, maxValue: 1 },
+        })
         .expect(422);
     });
   });

@@ -21,6 +21,7 @@ import {
   clampWidth,
   columnWidth,
   isPinnedColumn,
+  isFixedColumn,
   moveColumn,
   setPinned,
 } from '../lib/column-layout';
@@ -165,10 +166,19 @@ function HeaderCell({
   onResizePreview: (preview: { field: string; width: number } | null) => void;
   onResizeEnd: (width: number) => void;
 }) {
+  /*
+   * The Task column is not a sortable at all, rather than a sortable that
+   * refuses to move: disabled, it is neither dragged nor dropped onto, so there
+   * is no drop indicator promising a rearrangement that will not happen.
+   */
+  const isFixed = isFixedColumn(column.field);
+
   const { attributes, listeners, setNodeRef, isDragging, isOver } = useSortable({
     id: column.field,
-    disabled: !canEdit,
+    disabled: !canEdit || isFixed,
   });
+
+  const canArrange = canEdit && !isFixed;
 
   /*
    * No `transform` from the sortable, deliberately.
@@ -187,7 +197,7 @@ function HeaderCell({
       scope="col"
       style={isPinned ? { left } : undefined}
       className={cn(
-        'group/header px-3 pb-1 text-xs font-medium text-muted-foreground',
+        'group/header border-r border-border/60 px-3 pb-1 text-xs font-medium text-muted-foreground',
         isPinned && 'sticky z-20 bg-background',
         // The shadow belongs to the last frozen column: it marks where the
         // frozen block ends and the scrolling part begins.
@@ -200,13 +210,13 @@ function HeaderCell({
     >
       <span className="relative flex items-center gap-1">
         <span
-          {...(canEdit ? { ...attributes, ...listeners } : {})}
-          className={cn('flex-1 truncate', canEdit && 'cursor-grab active:cursor-grabbing')}
+          {...(canArrange ? { ...attributes, ...listeners } : {})}
+          className={cn('flex-1 truncate', canArrange && 'cursor-grab active:cursor-grabbing')}
         >
           {label}
         </span>
 
-        {canEdit && (
+        {canArrange && (
           <button
             type="button"
             onClick={() => onPin(!isPinnedColumn(column))}

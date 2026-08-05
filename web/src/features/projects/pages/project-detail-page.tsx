@@ -18,6 +18,7 @@ import { cn, daysUntil, formatDate, initials, percentage } from '@/lib/utils';
 import { ProjectFormDialog } from '../components/project-form-dialog';
 import { ProjectStatusBadge } from '../components/project-status-badge';
 import { ProjectViewTabs } from '../components/project-view-tabs';
+import { ViewToolbarProvider, ViewToolbarSlot } from '../components/view-toolbar-slot';
 import { useArchiveProject, useProject } from '../hooks/use-projects';
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
@@ -155,14 +156,29 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         </span>
       </div>
 
-      <ProjectViewTabs projectId={project.id} />
-
       {/*
-        Each tab renders here. The board is one representation of the project,
-        not the project itself — which is why it lives on its own route rather
-        than being the page.
+        The provider spans the row and the view below it, because the slot is up
+        here and whatever fills it renders down there — see `view-toolbar-slot`.
       */}
-      <Outlet />
+      <ViewToolbarProvider>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* `min-w-0` so the tabs scroll rather than shoving the controls off
+              the row; `flex-wrap` on the parent still drops them to their own
+              line once there is genuinely no space. */}
+          <div className="min-w-0 flex-1">
+            <ProjectViewTabs projectId={project.id} />
+          </div>
+
+          <ViewToolbarSlot />
+        </div>
+
+        {/*
+          Each tab renders here. The board is one representation of the project,
+          not the project itself — which is why it lives on its own route rather
+          than being the page.
+        */}
+        <Outlet />
+      </ViewToolbarProvider>
 
       <ProjectFormDialog
         open={editOpen}

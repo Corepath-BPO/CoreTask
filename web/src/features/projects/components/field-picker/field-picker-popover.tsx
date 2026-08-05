@@ -155,7 +155,15 @@ export function FieldPickerPopover({
             filtering the response again would drop rows it deliberately
             returned — an already-visible field, for one.
           */}
+          {/*
+            `label` rather than only an `aria-label` on the input. cmdk points
+            the input's `aria-labelledby` at its own label element, and
+            `aria-labelledby` beats `aria-label` in the accessible-name
+            computation — so with the element left empty the search box
+            announced nothing at all.
+          */}
           <Command
+            label="Search or create a field"
             shouldFilter={false}
             value={activeValue}
             onValueChange={setHighlighted}
@@ -168,7 +176,14 @@ export function FieldPickerPopover({
               aria-label="Search or create a field"
             />
 
-            <CommandList>
+            {/*
+              A floor under the list so the footer stays put.
+              Without it the popover grew and shrank on every keystroke as
+              results arrived, and the two actions at the bottom — the library
+              and "create a new field" — moved out from under the cursor just as
+              somebody reached for them.
+            */}
+            <CommandList className="min-h-[240px]">
               {catalog.isLoading && (
                 <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -222,14 +237,24 @@ export function FieldPickerPopover({
                       <CommandItem
                         key={field.id}
                         value={`project:${field.id}`}
+                        disabled={field.isInView}
                         onSelect={() => addColumn(`custom:${field.id}`)}
                       >
                         <FieldTypeIcon type={field.type} />
                         <span className="flex-1 truncate">{field.name}</span>
-                        {field.usageCount > 1 && (
-                          <span className="text-xs text-muted-foreground">
-                            {field.usageCount} projects
+                        {field.isInView ? (
+                          // Ticked, not hidden: somebody who searched for it
+                          // deserves to see it is already here.
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Check className="size-3.5" aria-hidden="true" />
+                            In this view
                           </span>
+                        ) : (
+                          field.usageCount > 1 && (
+                            <span className="text-xs text-muted-foreground">
+                              {field.usageCount} projects
+                            </span>
+                          )
                         )}
                       </CommandItem>
                     ))}
@@ -308,38 +333,44 @@ export function FieldPickerPopover({
               )}
             </CommandList>
 
-            {/* Sticky footer: the two things somebody falls back on when the
-                list did not have what they wanted stay reachable without
-                scrolling to the end of it. */}
-            <div className="shrink-0 border-t border-border p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  setLibraryOpen(true);
-                }}
-                className={cn(
-                  'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
-                  'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
-                )}
-              >
-                <Library className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                Choose from field library
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCreating({ name: '' })}
-                className={cn(
-                  'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
-                  'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
-                )}
-              >
-                <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                Create a new field
-              </button>
-            </div>
           </Command>
+          {/*
+            Outside `Command`, not merely below the list.
+
+            cmdk binds Enter on its root to select the highlighted item, so a
+            footer button inside it could be focused and still never fire —
+            Enter went to the list instead. Out here the two fallbacks somebody
+            reaches for when the list had nothing are ordinary buttons again.
+          */}
+          <div className="shrink-0 border-t border-border p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setLibraryOpen(true);
+              }}
+              className={cn(
+                'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
+              )}
+            >
+              <Library className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              Choose from field library
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCreating({ name: '' })}
+              className={cn(
+                'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                'hover:bg-muted focus-visible:bg-muted focus-visible:outline-none',
+              )}
+            >
+              <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              Create a new field
+            </button>
+          </div>
+
         </PopoverContent>
       </Popover>
 

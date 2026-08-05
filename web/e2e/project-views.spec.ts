@@ -33,7 +33,14 @@ test.describe('project views', () => {
     await page.getByRole('tab', { name: /^list$/i }).click();
 
     await expect(page).toHaveURL(/\/list$/);
-    await expect(page.getByRole('table')).toBeVisible();
+
+    /*
+     * A table per section, not one for the whole view: each section is its own
+     * card, and they line up because every table declares the same widths. So
+     * this asks a named section for its table rather than asking the page for
+     * "the" table, which now matches five things.
+     */
+    await expect(page.getByRole('region', { name: 'Backlog' }).getByRole('table')).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Task' })).toBeVisible();
   });
 
@@ -44,7 +51,7 @@ test.describe('project views', () => {
 
     await page.reload();
 
-    await expect(page.getByRole('table')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Backlog' }).getByRole('table')).toBeVisible();
     await expect(page.getByRole('tab', { name: /^list$/i })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -68,7 +75,13 @@ test.describe('project views', () => {
 
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: 'Section' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Due date' })).toBeVisible();
+
+    // Section is not among them: every row already sits inside a card headed by
+    // its section, so the column repeated that down the page for a column's
+    // width. Asserted rather than merely dropped — an offer that puts back a
+    // column the view will not render is worse than no offer.
+    await expect(menu.getByRole('menuitem', { name: 'Section' })).toBeHidden();
   });
 
   /**

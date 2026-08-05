@@ -134,6 +134,7 @@ describe('FieldPickerPopover', () => {
           usageCount: 1,
           isInProject: true,
           isArchived: false,
+          isInView: false,
         },
       ],
     });
@@ -159,6 +160,7 @@ describe('FieldPickerPopover', () => {
           usageCount: 2,
           isInProject: false,
           isArchived: false,
+          isInView: false,
         },
       ],
     });
@@ -205,6 +207,7 @@ describe('FieldPickerPopover', () => {
           usageCount: 1,
           isInProject: true,
           isArchived: false,
+          isInView: false,
         },
       ],
     });

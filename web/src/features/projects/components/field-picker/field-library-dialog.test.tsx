@@ -31,6 +31,7 @@ const field = (overrides: Partial<CatalogCustomField>): CatalogCustomField => ({
   usageCount: 1,
   isInProject: false,
   isArchived: false,
+  isInView: false,
   ...overrides,
 });
 

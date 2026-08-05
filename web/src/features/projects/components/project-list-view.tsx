@@ -32,6 +32,7 @@ import {
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
+import { ViewToolbar } from './view-toolbar-slot';
 import { CustomFieldCell } from './cells/custom-field-cell';
 import { useCellEditor } from './cells/use-cell-editor';
 import {
@@ -151,7 +152,18 @@ export function ProjectListView({
     const fit = () => {
       const { top } = pane.getBoundingClientRect();
       // A floor, so a short window leaves something usable rather than a sliver.
-      pane.style.maxHeight = `${Math.max(240, window.innerHeight - top - 16)}px`;
+      const next = `${Math.max(240, window.innerHeight - top - 16)}px`;
+
+      /*
+       * Written only when it actually changes.
+       *
+       * The observer watches the body, and this writes a height that changes
+       * the body's — so an unconditional assignment feeds itself: set height,
+       * body resizes, observer fires, set height again. It never visibly
+       * settled, and anything positioned against the page (a popover, a
+       * tooltip) was repositioned on every pass.
+       */
+      if (pane.style.maxHeight !== next) pane.style.maxHeight = next;
     };
 
     fit();
@@ -205,8 +217,8 @@ export function ProjectListView({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1 sm:max-w-xs">
+      <ViewToolbar>
+        <div className="relative w-56">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
@@ -216,7 +228,7 @@ export function ProjectListView({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search tasks…"
             aria-label="Search tasks"
-            className="pl-9"
+            className="h-8 pl-9"
           />
         </div>
 
@@ -231,7 +243,7 @@ export function ProjectListView({
             </Button>
           }
         />
-      </div>
+      </ViewToolbar>
 
       {isError ? (
         <EmptyState
@@ -509,7 +521,10 @@ function Row({
             key={column.field}
             style={left === undefined ? undefined : { left }}
             className={cn(
-              'px-3 py-2 align-middle',
+              // A rule down the right of every cell. With only row lines, a
+              // value sitting under a wide header reads as belonging to
+              // whichever column the eye happens to land on.
+              'border-r border-border/60 px-3 py-2 align-middle',
               left !== undefined && 'sticky z-10 bg-card',
               column.field === pinned.lastPinned &&
                 pinned.scrolled &&

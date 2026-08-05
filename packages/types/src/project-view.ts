@@ -194,6 +194,8 @@ export interface CatalogCustomField {
   usageCount: number;
   isInProject: boolean;
   isArchived: boolean;
+  /** Already a column in the view being edited. */
+  isInView: boolean;
 }
 
 /** Everything the add-field picker needs, in one response. */

@@ -70,15 +70,27 @@ export function clampWidth(width: number): number {
 }
 
 /**
- * Whether a column is frozen, with the Task column frozen unless told otherwise.
+ * The Task column, which is furniture rather than a column somebody arranged.
  *
- * Every view saved before pinning existed has no `isPinned` at all, and the
- * Task column was hard-coded frozen back then. Defaulting it here keeps those
- * views looking the way their owners left them without a data migration, and an
- * explicit `false` still unpins it — the default is a starting point, not a rule.
+ * It is what every other cell in the row is *about*: unpinned it scrolls away
+ * and the row loses the only thing identifying it, and moved out of first place
+ * it reads as another attribute of a task the grid no longer names. So it does
+ * not move and does not unpin — not by drag, not by the pin control, and not by
+ * a stored setting that says otherwise.
+ */
+export function isFixedColumn(field: string): boolean {
+  return field === SystemField.TITLE;
+}
+
+/**
+ * Whether a column is frozen.
+ *
+ * The Task column is frozen outright — see `isFixedColumn`. For the rest, an
+ * absent `isPinned` means not pinned, which is what every view saved before
+ * pinning existed intends.
  */
 export function isPinnedColumn(column: ViewColumn): boolean {
-  return column.isPinned ?? column.field === SystemField.TITLE;
+  return isFixedColumn(column.field) || (column.isPinned ?? false);
 }
 
 export interface PinnedLayout {
@@ -131,6 +143,8 @@ export function setPinned(
   field: string,
   isPinned: boolean,
 ): ViewColumn[] {
+  if (isFixedColumn(field)) return columns;
+
   const target = columns.find((column) => column.field === field);
   if (!target) return columns;
 
@@ -151,8 +165,13 @@ export function setPinned(
  * having failed — the column lands where it was dropped and its pinned state
  * follows from where that is. Dragging out of the frozen block unpins; dragging
  * into it pins.
+ *
+ * The fixed columns are the exception at both ends: they cannot be dragged, and
+ * nothing can be dropped in front of them.
  */
 export function moveColumn(columns: ViewColumn[], field: string, toIndex: number): ViewColumn[] {
+  if (isFixedColumn(field)) return columns;
+
   const from = columns.findIndex((column) => column.field === field);
   if (from === -1 || from === toIndex) return columns;
 
@@ -160,7 +179,11 @@ export function moveColumn(columns: ViewColumn[], field: string, toIndex: number
   if (!target) return columns;
 
   const rest = columns.filter((column) => column.field !== field);
-  const landing = Math.max(0, Math.min(toIndex, rest.length));
+
+  // Never in front of the Task column, however far left the drop landed.
+  const firstMovable = rest.findIndex((column) => !isFixedColumn(column.field));
+  const floor = firstMovable === -1 ? rest.length : firstMovable;
+  const landing = Math.max(floor, Math.min(toIndex, rest.length));
 
   // How much of the grid is frozen once this column is out of the way. Reading
   // it from the *other* columns is what makes the answer independent of where
