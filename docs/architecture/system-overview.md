@@ -124,6 +124,21 @@ The project upgrade added four documents of its own:
 - [color-system.md](./color-system.md) — semantic tokens and why a stored colour
   is never a CSS class
 
+The field-management upgrade added three more, plus two API references:
+
+- [custom-field-system.md](./custom-field-system.md) — the nine types, their
+  settings documents, and the three outcomes of deleting a field
+- [field-library.md](./field-library.md) — workspace-scoped definitions, and why
+  duplicate names are permitted rather than refused
+- [list-view-columns.md](./list-view-columns.md) — where columns are stored, what
+  is fixed, and what a view does about a field that no longer exists
+- [../api/custom-fields.md](../api/custom-fields.md) and
+  [../api/project-view-columns.md](../api/project-view-columns.md)
+
+The move from project-scoped to workspace-scoped fields is documented with its
+verification run in
+[docs/database/custom-field-migration.md](../database/custom-field-migration.md).
+
 The status and priority migration is deliberately incomplete and documented
 separately in
 [docs/database/project-view-migration.md](../database/project-view-migration.md).

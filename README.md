@@ -655,6 +655,12 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 | [Database](docs/architecture/database.md)               | Schema, indexes, tenancy, ticket keys  |
 | [Docker](docs/architecture/docker.md)                   | Images, Compose layering, volumes      |
 | [Authentication](docs/api/authentication.md)            | Token lifecycle, cookies, error codes  |
+| [Custom field system](docs/architecture/custom-field-system.md) | Types, settings, value storage, lifecycle |
+| [Field library](docs/architecture/field-library.md)     | Sharing one field across projects      |
+| [List view columns](docs/architecture/list-view-columns.md) | Storage, pinning, sizing, the fixed Task column |
+| [Custom fields API](docs/api/custom-fields.md)          | Definitions, options, values, errors   |
+| [View and column API](docs/api/project-view-columns.md) | Views, field catalog, task query       |
+| [Field library migration](docs/database/custom-field-migration.md) | Project→workspace move, with its verification run |
 | [Decision records](docs/decisions/)                     | Why each major choice was made         |
 
 ---

@@ -5,9 +5,17 @@ workspace calls something must never determine what the code does with it.
 
 ## Custom fields
 
-A `CustomField` belongs to a project. Creating one makes it a usable List column
-and a usable filter **immediately** — no frontend change — because operators are
-declared per field *kind* rather than per field.
+A `CustomField` belongs to a **workspace**, and a `ProjectCustomField` row says
+which projects use it. Creating one makes it a usable List column and a usable
+filter **immediately** — no frontend change — because operators are declared per
+field *kind* rather than per field.
+
+This section is the short version. The full treatment is split across three
+documents:
+
+- [The custom field system](custom-field-system.md) — types, settings, lifecycle
+- [The workspace field library](field-library.md) — sharing one field across projects
+- [List view columns](list-view-columns.md) — how a field becomes a column
 
 ### Value storage
 
@@ -43,8 +51,9 @@ against a task.
 
 | Situation | Behaviour |
 | --- | --- |
-| field with values | archived |
-| unused field | deleted |
+| field still used by another project | detached |
+| last project, field has values | archived |
+| last project, unused field | deleted |
 | option in use | archived |
 | unused option | deleted |
 
@@ -120,6 +129,11 @@ choice.
 - **The legacy enums are still authoritative.** `Task.status` and
   `Task.priority` remain `TaskStatus`/`TaskPriority`; the definition FKs shadow
   them. See [the migration note](../database/project-view-migration.md).
-- **Future field types** (`CURRENCY`, `RATING`, `FORMULA`, `RELATION`, …) are
-  named in the spec and deliberately absent from the enum until implemented.
+- **Future field types** (`CURRENCY`, `RATING`, `FORMULA`, `RELATION`, `ROLLUP`)
+  are named in the spec and deliberately absent from the enum until implemented.
+  A type that only creates a name would lose the values people put in it.
+- **Field names are not unique within a workspace.** Two projects may legitimately
+  have kept separate fields that share a name; the picker surfaces the existing
+  one rather than a constraint refusing the second. See
+  [the migration note](../database/custom-field-migration.md).
 - **`Section.defaultStatusId` is stored but not applied.** Nothing reads it yet.
