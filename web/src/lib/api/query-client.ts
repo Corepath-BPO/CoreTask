@@ -76,6 +76,9 @@ export const queryKeys = {
     /** Prefix only — the filter and page are appended by the caller. */
     tasks: (workspaceId: string, projectId: string) =>
       ['project-views', workspaceId, projectId, 'tasks'] as const,
+    /** One entry per expanded parent, so collapsing does not discard the fetch. */
+    subtasks: (workspaceId: string, projectId: string, taskId: string) =>
+      ['project-views', workspaceId, projectId, 'subtasks', taskId] as const,
   },
   attachments: {
     all: (workspaceId: string) => ['attachments', workspaceId] as const,

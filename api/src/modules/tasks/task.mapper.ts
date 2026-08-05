@@ -8,10 +8,15 @@ const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as co
  * Subtask rollups come from a filtered relation count. Prisma cannot alias two
  * differently-filtered counts on the same relation, so "completed" is counted
  * separately in the service and passed in.
+ *
+ * `archivedAt: null` matters: the count was unfiltered while the completed
+ * count beside it was not, so archiving a subtask left every "2/5" in the app
+ * claiming work that no longer exists. It only became obvious once a row could
+ * be expanded and the rows underneath counted.
  */
 export const taskInclude = {
   assignee: { select: USER_SELECT },
-  _count: { select: { subtasks: true } },
+  _count: { select: { subtasks: { where: { archivedAt: null } } } },
 } satisfies Prisma.TaskInclude;
 
 export type TaskWithRelations = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;

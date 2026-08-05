@@ -68,6 +68,22 @@ export class ProjectTasksController {
     private readonly metadata: FieldMetadataService,
   ) {}
 
+  @Get('tasks/:taskId/subtasks')
+  @ApiOperation({
+    summary: 'The subtasks of one task',
+    description:
+      'Shaped exactly like the rows of a view, custom field values included, so an expanded row renders through the same cells as its parent. Fetched on expand rather than with the page: most rows are never opened, and loading every subtask up front would multiply the payload for something nobody asked to see.',
+  })
+  @ApiEnvelopeResponse(TaskDto, { isArray: true })
+  @ApiErrorResponseDoc(404, 'No such task in this project')
+  subtasks(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+  ): Promise<Task[]> {
+    return this.tasks.listSubtasksForView(workspaceId, projectId, taskId);
+  }
+
   @Post('tasks/query')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

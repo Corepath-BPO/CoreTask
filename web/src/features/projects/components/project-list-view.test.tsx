@@ -158,6 +158,68 @@ describe('editable cells', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('offers no expander on a task with no subtasks', () => {
+    render(<TitleCell {...cellProps} task={task()} onSave={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /subtasks of/ })).not.toBeInTheDocument();
+  });
+
+  it('shows how much of a task’s subtask work is done', () => {
+    render(
+      <TitleCell
+        {...cellProps}
+        task={task({ subtaskCount: 3, completedSubtaskCount: 2 })}
+        onSave={vi.fn()}
+        onToggleExpand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('2/3')).toBeInTheDocument();
+  });
+
+  it('expands subtasks without opening the task', () => {
+    const onToggleExpand = vi.fn();
+    const onOpenTask = vi.fn();
+    render(
+      <TitleCell
+        {...cellProps}
+        task={task({ subtaskCount: 2 })}
+        onSave={vi.fn()}
+        onOpenTask={onOpenTask}
+        onToggleExpand={onToggleExpand}
+      />,
+    );
+
+    const expander = screen.getByRole('button', {
+      name: 'Show subtasks of "Ship the grid"',
+    });
+    expect(expander).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(expander);
+
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+    // Expanding is not opening: the two live in the same cell and must not be
+    // confusable.
+    expect(onOpenTask).not.toHaveBeenCalled();
+  });
+
+  it('says "Hide" once expanded, so the control describes what it will do', () => {
+    render(
+      <TitleCell
+        {...cellProps}
+        task={task({ subtaskCount: 2 })}
+        onSave={vi.fn()}
+        expanded
+        onToggleExpand={vi.fn()}
+      />,
+    );
+
+    const expander = screen.getByRole('button', {
+      name: 'Hide subtasks of "Ship the grid"',
+    });
+    expect(expander).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('offers no editor at all when the caller cannot edit', () => {
     render(<DueDateCell {...cellProps} canEdit={false} task={task()} onSave={vi.fn()} />);
 

@@ -149,6 +149,55 @@ export class TasksService {
     );
   }
 
+  /**
+   * The subtasks of one parent, shaped exactly like the rows above them.
+   *
+   * Separate from `listForView` rather than a `parentTaskId` filter on it: that
+   * endpoint compiles a saved view's filters and sorts against a closed set of
+   * fields, and a drill-down is not a view. Keeping them apart means expanding
+   * a row cannot be made to reach outside the project by way of a filter.
+   *
+   * Unpaged on purpose — nesting is one level deep and a parent with enough
+   * children to need paging is a parent that wants to be its own project.
+   */
+  async listSubtasksForView(
+    workspaceId: string,
+    projectId: string,
+    parentTaskId: string,
+  ): Promise<Task[]> {
+    /*
+     * The parent is verified against this workspace *and* project before its
+     * children are read. Without it, a task id from another workspace would
+     * return that workspace's subtasks: the guard proves the caller belongs to
+     * the workspace in the URL, never that the id in the path does.
+     */
+    const parent = await this.prisma.task.findFirst({
+      where: { id: parentTaskId, workspaceId, projectId },
+      select: { id: true },
+    });
+
+    if (!parent) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
+
+    const subtasks = await this.prisma.task.findMany({
+      where: { parentTaskId, workspaceId, archivedAt: null },
+      include: taskInclude,
+      // The same tail the view uses, so an expanded row is ordered the way its
+      // siblings are and two equal positions never swap between reads.
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
+    });
+
+    const ids = subtasks.map((task) => task.id);
+    const [completed, customFieldValues] = await Promise.all([
+      this.completedSubtaskCounts(ids),
+      this.customFieldValues(ids),
+    ]);
+
+    return subtasks.map((task) => ({
+      ...toTaskDto(task, completed.get(task.id) ?? 0),
+      customFieldValues: customFieldValues.get(task.id) ?? [],
+    }));
+  }
+
   /** Every custom field value for a page of tasks, grouped by task. */
   private async customFieldValues(
     taskIds: string[],

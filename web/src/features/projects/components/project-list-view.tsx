@@ -13,7 +13,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useUpdateTask } from '@/features/tasks/hooks/use-tasks';
 import { cn, formatDate } from '@/lib/utils';
 
-import { useFieldMetadata, useSetCustomFieldValue, useViewTasks } from '../hooks/use-project-views';
+import {
+  useFieldMetadata,
+  useSetCustomFieldValue,
+  useSubtasks,
+  useViewTasks,
+} from '../hooks/use-project-views';
 import { useRenameSection } from '../hooks/use-projects';
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { CustomFieldCell } from './cells/custom-field-cell';
@@ -294,44 +299,23 @@ export function ProjectListView({
                       )}
 
                       {group.tasks.map((task) => (
-                        <tr
+                        <TaskRows
                           key={task.id}
-                          className="group border-b border-border last:border-0 hover:bg-muted/30"
-                        >
-                          {columns.map((column) => (
-                            <td
-                              key={column.field}
-                              className={cn(
-                                'px-3 py-2 align-middle',
-                                column.field === SystemField.TITLE && 'sticky left-0 z-10 bg-card',
-                                column.field === SystemField.TITLE &&
-                                  scrolled &&
-                                  'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
-                              )}
-                            >
-                              <Cell
-                                task={task}
-                                field={column.field}
-                                metadata={metadata}
-                                canEdit={canEdit}
-                                onOpen={() => onOpenTask(task.id)}
-                                onSaveTask={(payload) =>
-                                  updateTask.mutate({
-                                    taskId: task.id,
-                                    payload: payload as never,
-                                  })
-                                }
-                                onSaveField={(fieldId, payload) =>
-                                  setFieldValue.mutate({
-                                    taskId: task.id,
-                                    fieldId,
-                                    value: payload,
-                                  })
-                                }
-                              />
-                            </td>
-                          ))}
-                        </tr>
+                          task={task}
+                          workspaceId={workspaceId}
+                          projectId={projectId}
+                          columns={columns}
+                          metadata={metadata}
+                          canEdit={canEdit}
+                          scrolled={scrolled}
+                          onOpenTask={onOpenTask}
+                          onSaveTask={(taskId, payload) =>
+                            updateTask.mutate({ taskId, payload: payload as never })
+                          }
+                          onSaveField={(taskId, fieldId, value) =>
+                            setFieldValue.mutate({ taskId, fieldId, value })
+                          }
+                        />
                       ))}
                     </tbody>
                   </table>
@@ -342,6 +326,125 @@ export function ProjectListView({
         </div>
       )}
     </div>
+  );
+}
+
+interface RowProps {
+  workspaceId: string | undefined;
+  projectId: string;
+  columns: ViewColumn[];
+  metadata: ProjectFieldMetadata | undefined;
+  canEdit: boolean;
+  scrolled: boolean;
+  onOpenTask: (taskId: string) => void;
+  onSaveTask: (taskId: string, payload: Record<string, unknown>) => void;
+  onSaveField: (taskId: string, fieldId: string, value: Record<string, unknown>) => void;
+}
+
+/**
+ * One task, and its subtasks once somebody asks for them.
+ *
+ * A component per row rather than rows built in a loop, because the expand
+ * state and the fetch it triggers belong to the row that owns them. Nesting is
+ * one level deep, so a subtask renders as a plain row: no recursion, and no
+ * expander on a row that can never have children.
+ */
+function TaskRows({ task, ...shared }: RowProps & { task: TaskRow }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { data: subtasks, isLoading, isError } = useSubtasks(
+    shared.workspaceId,
+    shared.projectId,
+    task.id,
+    expanded,
+  );
+
+  return (
+    <>
+      <Row
+        {...shared}
+        task={task}
+        expanded={expanded}
+        onToggleExpand={task.subtaskCount > 0 ? () => setExpanded((open) => !open) : undefined}
+      />
+
+      {/* The row stays expanded while its children load, so the chevron does
+          not appear to do nothing on a slow connection. */}
+      {expanded && isLoading && (
+        <tr className="border-b border-border last:border-0">
+          <td colSpan={shared.columns.length} className="py-2 pl-11 pr-3">
+            <span className="sticky left-11 flex items-center gap-2">
+              <Skeleton className="h-4 w-48" />
+            </span>
+          </td>
+        </tr>
+      )}
+
+      {expanded && isError && (
+        <tr className="border-b border-border last:border-0">
+          <td colSpan={shared.columns.length} className="py-2 pl-11 pr-3">
+            <span className="sticky left-11 text-xs text-destructive">
+              Could not load these subtasks.
+            </span>
+          </td>
+        </tr>
+      )}
+
+      {expanded &&
+        subtasks?.map((subtask) => (
+          <Row key={subtask.id} {...shared} task={subtask as TaskRow} depth={1} />
+        ))}
+    </>
+  );
+}
+
+/** One `<tr>`. Shared by parents and subtasks so a row means the same thing. */
+function Row({
+  task,
+  depth = 0,
+  expanded,
+  onToggleExpand,
+  columns,
+  metadata,
+  canEdit,
+  scrolled,
+  onOpenTask,
+  onSaveTask,
+  onSaveField,
+}: RowProps & {
+  task: TaskRow;
+  depth?: number;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+}) {
+  return (
+    <tr className="group border-b border-border last:border-0 hover:bg-muted/30">
+      {columns.map((column) => (
+        <td
+          key={column.field}
+          className={cn(
+            'px-3 py-2 align-middle',
+            column.field === SystemField.TITLE && 'sticky left-0 z-10 bg-card',
+            column.field === SystemField.TITLE &&
+              scrolled &&
+              'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+          )}
+        >
+          <Cell
+            task={task}
+            field={column.field}
+            metadata={metadata}
+            canEdit={canEdit}
+            depth={depth}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onOpen={() => onOpenTask(task.id)}
+            onSaveTask={(payload) => onSaveTask(task.id, payload)}
+            onSaveField={(fieldId, value) => onSaveField(task.id, fieldId, value)}
+          />
+        </td>
+      ))}
+    </tr>
   );
 }
 
@@ -475,6 +578,9 @@ function Cell({
   field,
   metadata,
   canEdit,
+  depth,
+  expanded,
+  onToggleExpand,
   onOpen,
   onSaveTask,
   onSaveField,
@@ -483,6 +589,9 @@ function Cell({
   field: string;
   metadata: ProjectFieldMetadata | undefined;
   canEdit: boolean;
+  depth?: number;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   onOpen: () => void;
   onSaveTask: (payload: Record<string, unknown>) => void;
   onSaveField: (fieldId: string, payload: Record<string, unknown>) => void;
@@ -497,7 +606,16 @@ function Cell({
 
   switch (field) {
     case SystemField.TITLE:
-      return <TitleCell {...shared} />;
+      // Indent and the expander live on the title, the only column where the
+      // hierarchy means anything.
+      return (
+        <TitleCell
+          {...shared}
+          depth={depth}
+          expanded={expanded}
+          onToggleExpand={onToggleExpand}
+        />
+      );
     case SystemField.ASSIGNEE:
       return <AssigneeCell {...shared} />;
     case SystemField.STATUS:

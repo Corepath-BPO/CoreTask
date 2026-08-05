@@ -1,5 +1,6 @@
 import { TASK_PRIORITIES, TASK_STATUSES, TaskStatus } from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { TaskPriorityBadge, TaskStatusBadge } from '@/components/data-display/status-badge';
@@ -34,7 +35,21 @@ export interface CellProps {
  * away the only route to the detail view; making it only a link would mean
  * renaming required opening the task, which is what this view exists to avoid.
  */
-export function TitleCell({ task, canEdit, onSave, onOpenTask }: CellProps) {
+export function TitleCell({
+  task,
+  canEdit,
+  onSave,
+  onOpenTask,
+  depth = 0,
+  expanded,
+  onToggleExpand,
+}: CellProps & {
+  /** 0 for a top-level task, 1 for a subtask. Nesting goes no deeper. */
+  depth?: number;
+  expanded?: boolean;
+  /** Absent when the task has no subtasks — there is nothing to expand. */
+  onToggleExpand?: () => void;
+}) {
   const editor = useCellEditor(task.title, (title) => {
     const trimmed = title.trim();
     // An empty title would leave a row nobody can identify, so it reverts
@@ -63,7 +78,27 @@ export function TitleCell({ task, canEdit, onSave, onOpenTask }: CellProps) {
   }
 
   return (
-    <span className="flex min-w-0 items-center gap-1">
+    // Indented by depth so a subtask reads as belonging to the row above it.
+    <span className={cn('flex min-w-0 items-center gap-1', depth > 0 && 'pl-6')}>
+      {onToggleExpand ? (
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          aria-expanded={expanded ?? false}
+          aria-label={`${expanded ? 'Hide' : 'Show'} subtasks of "${task.title}"`}
+          className="shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        >
+          {expanded ? (
+            <ChevronDown className="size-4" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="size-4" aria-hidden="true" />
+          )}
+        </button>
+      ) : (
+        // A spacer, so titles line up whether or not a row has children.
+        <span className="size-4 shrink-0" aria-hidden="true" />
+      )}
+
       <button
         type="button"
         onClick={onOpenTask}
@@ -76,6 +111,16 @@ export function TitleCell({ task, canEdit, onSave, onOpenTask }: CellProps) {
       >
         {task.title}
       </button>
+
+      {/* How much of the work under this row is done, without opening it. */}
+      {task.subtaskCount > 0 && (
+        <span
+          className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground"
+          title={`${task.completedSubtaskCount} of ${task.subtaskCount} subtasks complete`}
+        >
+          {task.completedSubtaskCount}/{task.subtaskCount}
+        </span>
+      )}
 
       {canEdit && (
         <button

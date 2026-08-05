@@ -60,6 +60,27 @@ export function useViewTasks(
   });
 }
 
+/**
+ * A parent's subtasks, fetched the first time its row is expanded.
+ *
+ * `enabled` is the whole point: most rows are never opened, and fetching every
+ * task's children with the page would multiply the payload for something nobody
+ * asked to see. Once fetched the result stays cached, so collapsing and
+ * reopening a row costs nothing.
+ */
+export function useSubtasks(
+  workspaceId: string | undefined,
+  projectId: string,
+  taskId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.projectViews.subtasks(workspaceId ?? '', projectId, taskId),
+    queryFn: () => projectViewsApi.subtasks(workspaceId as string, projectId, taskId),
+    enabled: Boolean(workspaceId) && enabled,
+  });
+}
+
 export function useUpdateProjectView(workspaceId: string | undefined, projectId: string) {
   return useMutation({
     mutationFn: ({ viewId, payload }: { viewId: string; payload: UpdateProjectViewPayload }) =>

@@ -68,6 +68,9 @@ export const projectViewsApi = {
       },
     ),
 
+  subtasks: (workspaceId: string, projectId: string, taskId: string): Promise<Task[]> =>
+    apiClient.get<Task[]>(`${base(workspaceId, projectId)}/tasks/${taskId}/subtasks`),
+
   fieldMetadata: (workspaceId: string, projectId: string): Promise<ProjectFieldMetadata> =>
     apiClient.get<ProjectFieldMetadata>(`${base(workspaceId, projectId)}/field-metadata`),
 };

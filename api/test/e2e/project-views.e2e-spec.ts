@@ -465,4 +465,151 @@ describe('Project views and custom fields (e2e)', () => {
       expect(deleted.body.data).toEqual({ deleted: true, archived: false });
     });
   });
+  // -------------------------------------------------------------------------
+  describe('subtasks', () => {
+    const subtasksUrl = (scope: Scope, taskId: string) =>
+      url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/tasks/${taskId}/subtasks`);
+
+    const addSubtask = async (scope: Scope, title: string, status?: string) => {
+      const created = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ title, parentTaskId: scope.taskId, projectId: scope.projectId })
+        .expect(201);
+
+      if (status) {
+        await request(server())
+          .patch(url(`/workspaces/${scope.workspaceId}/tasks/${created.body.data.id}`))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({ status })
+          .expect(200);
+      }
+
+      return created.body.data.id as string;
+    };
+
+    it('returns a parent’s children shaped like view rows', async () => {
+      const scope = await setupScope();
+      await addSubtask(scope, 'First child');
+      await addSubtask(scope, 'Second child');
+
+      const response = await request(server())
+        .get(subtasksUrl(scope, scope.taskId))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(2);
+      // The List view renders these through the same cells as their parent, so
+      // the field-value array has to be there even when it is empty.
+      for (const row of response.body.data) {
+        expect(Array.isArray(row.customFieldValues)).toBe(true);
+        expect(row.parentTaskId).toBe(scope.taskId);
+      }
+    });
+
+    it('carries custom field values, so a subtask row is not blank', async () => {
+      const scope = await setupScope();
+      const childId = await addSubtask(scope, 'Child with a field');
+
+      const field = await request(server())
+        .post(fieldsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Notes', type: 'TEXT' })
+        .expect(201);
+
+      await request(server())
+        .put(
+          url(
+            `/workspaces/${scope.workspaceId}/tasks/${childId}/custom-fields/${field.body.data.id}`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ text: 'on the subtask' })
+        .expect(200);
+
+      const response = await request(server())
+        .get(subtasksUrl(scope, scope.taskId))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.data[0].customFieldValues).toEqual([
+        expect.objectContaining({ customFieldId: field.body.data.id, text: 'on the subtask' }),
+      ]);
+    });
+
+    it('keeps subtasks out of the top level of the view', async () => {
+      const scope = await setupScope();
+      await addSubtask(scope, 'Hidden child');
+
+      const view = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/tasks/query`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ filters: [], sorts: [] })
+        .expect(200);
+
+      expect(view.body.data).toHaveLength(1);
+      expect(view.body.data[0].id).toBe(scope.taskId);
+      expect(view.body.data[0].subtaskCount).toBe(1);
+    });
+
+    it('counts only subtasks that still exist', async () => {
+      const scope = await setupScope();
+      await addSubtask(scope, 'Still here');
+      const doomed = await addSubtask(scope, 'Archived later', 'DONE');
+
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/tasks/${doomed}`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const view = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/tasks/query`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ filters: [], sorts: [] })
+        .expect(200);
+
+      const rows = await request(server())
+        .get(subtasksUrl(scope, scope.taskId))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      // The badge on a collapsed row and the rows it expands into have to agree.
+      // They did not: the count included archived children while the completed
+      // count beside it did not, so "1/2" expanded into a single row.
+      expect(view.body.data[0].subtaskCount).toBe(rows.body.data.length);
+      expect(view.body.data[0].completedSubtaskCount).toBe(0);
+    });
+
+    it('refuses a task that belongs to another project', async () => {
+      const scope = await setupScope();
+      await addSubtask(scope, 'A child');
+
+      const other = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Another Project' })
+        .expect(201);
+
+      // The guard proves the caller belongs to the workspace, never that the
+      // task id in the path belongs to the project in the path.
+      await request(server())
+        .get(
+          url(
+            `/workspaces/${scope.workspaceId}/projects/${other.body.data.id}/tasks/${scope.taskId}/subtasks`,
+          ),
+        )
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+
+    it('refuses a task from another workspace entirely', async () => {
+      const scope = await setupScope();
+      const outsider = await setupScope();
+
+      await request(server())
+        .get(subtasksUrl(scope, outsider.taskId))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+  });
 });
