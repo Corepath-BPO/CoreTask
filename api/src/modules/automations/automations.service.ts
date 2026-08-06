@@ -7,6 +7,7 @@ import {
   hasAtLeastRole,
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { AutomationRule, Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
@@ -14,6 +15,18 @@ import { PrismaService } from '../../database/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 
 import type { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
+
+/** One node as the builder sends it. Mirrors `SaveAutomationGraphNode`. */
+export interface GraphNodeInput {
+  id?: string;
+  nodeType: string;
+  subtype: string;
+  configuration?: Record<string, unknown>;
+  position?: { x: number; y: number };
+  parentId?: string | null;
+  branchKey?: string | null;
+  order?: number;
+}
 
 const ruleInclude = {
   nodes: { orderBy: { position: 'asc' } },
@@ -39,9 +52,7 @@ export class AutomationsService {
         // Section scoping reads the trigger config rather than a column: the
         // section a rule watches is part of how it triggers, not a second
         // relationship that could drift out of step with it.
-        ...(sectionId
-          ? { triggerConfig: { path: ['sectionId'], equals: sectionId } }
-          : {}),
+        ...(sectionId ? { triggerConfig: { path: ['sectionId'], equals: sectionId } } : {}),
       },
       include: ruleInclude,
       orderBy: { createdAt: 'desc' },
@@ -65,7 +76,7 @@ export class AutomationsService {
     // Created as a DRAFT regardless of what was asked for. A rule becomes live
     // through `publish`, which validates it — otherwise a half-built rule could
     // start acting on real tasks the moment it was saved.
-    return this.prisma.automationRule.create({
+    const rule = await this.prisma.automationRule.create({
       data: {
         workspaceId,
         projectId,
@@ -75,17 +86,24 @@ export class AutomationsService {
         triggerType: dto.triggerType,
         triggerConfig: (dto.triggerConfig ?? {}) as Prisma.InputJsonValue,
         createdById: userId,
-        nodes: {
-          create: (dto.nodes ?? []).map((node, index) => ({
-            nodeType: node.nodeType as AutomationNodeType,
-            subtype: node.subtype,
-            configuration: (node.configuration ?? {}) as Prisma.InputJsonValue,
-            position: index,
-          })),
-        },
       },
       include: ruleInclude,
     });
+
+    /*
+     * Nodes are written by the same path an update uses.
+     *
+     * They were inlined here once, which meant `create` quietly dropped
+     * positions and parentage while `update` kept them — a rule saved on its
+     * first write came back flat, and only started holding its shape on the
+     * second.
+     */
+    if (dto.nodes?.length) {
+      await this.replaceNodes(rule.id, dto.nodes);
+      return this.get(workspaceId, projectId, rule.id);
+    }
+
+    return rule;
   }
 
   async update(
@@ -115,18 +133,7 @@ export class AutomationsService {
      * counter records that the shape changed.
      */
     if (dto.nodes) {
-      await this.prisma.$transaction([
-        this.prisma.automationNode.deleteMany({ where: { ruleId } }),
-        this.prisma.automationNode.createMany({
-          data: dto.nodes.map((node, index) => ({
-            ruleId,
-            nodeType: node.nodeType as AutomationNodeType,
-            subtype: node.subtype,
-            configuration: (node.configuration ?? {}) as Prisma.InputJsonValue,
-            position: index,
-          })),
-        }),
-      ]);
+      await this.replaceNodes(ruleId, dto.nodes);
       data.version = { increment: 1 };
     }
 
@@ -134,6 +141,67 @@ export class AutomationsService {
       where: { id: ruleId },
       data,
       include: ruleInclude,
+    });
+  }
+
+  /**
+   * Writes the graph, keeping the ids the builder sent.
+   *
+   * Nodes are replaced wholesale rather than diffed — a builder sends the canvas
+   * as it now stands, and reconciling that against stored rows means guessing
+   * which node is "the same" one. Guessing wrong silently rewires a rule.
+   *
+   * The ids are kept because `parentNodeId` points at them: rewriting them on
+   * every save would break every parent link in the same statement that wrote
+   * it. Ids from the client are accepted only after being mapped through the
+   * ones this call creates, so a caller cannot smuggle in a row it does not own.
+   *
+   * Two passes, because a parent may appear after its child in the array and a
+   * self-referencing insert cannot resolve forward.
+   */
+  private async replaceNodes(ruleId: string, nodes: GraphNodeInput[]): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.automationNode.deleteMany({ where: { ruleId } });
+
+      // Client ids are opaque strings — a new node has never been to the
+      // database. Mapping them to real ones keeps `parentId` meaningful without
+      // trusting anything the client says about identity.
+      const realId = new Map<string, string>();
+      // Only nodes that named themselves go in the map. One that did not came
+      // from the old flat API, has no children, and needs no entry — nothing
+      // will ever look it up.
+      for (const node of nodes) {
+        if (node.id) realId.set(node.id, randomUUID());
+      }
+
+      await tx.automationNode.createMany({
+        data: nodes.map((node, index) => ({
+          id: (node.id ? realId.get(node.id) : undefined) ?? randomUUID(),
+          ruleId,
+          nodeType: node.nodeType as AutomationNodeType,
+          subtype: node.subtype,
+          configuration: (node.configuration ?? {}) as Prisma.InputJsonValue,
+          positionX: node.position?.x ?? 0,
+          positionY: node.position?.y ?? 0,
+          branchKey: node.branchKey ?? null,
+          position: node.order ?? index,
+        })),
+      });
+
+      // Parents in a second pass: `createMany` cannot reference rows it is in
+      // the middle of inserting.
+      for (const node of nodes) {
+        if (!node.parentId || !node.id) continue;
+
+        const parent = realId.get(node.parentId);
+        const child = realId.get(node.id);
+        if (!parent || !child) continue;
+
+        await tx.automationNode.update({
+          where: { id: child },
+          data: { parentNodeId: parent },
+        });
+      }
     });
   }
 
@@ -166,7 +234,9 @@ export class AutomationsService {
 
   /** Everything wrong with a rule, so the builder can show all of it at once. */
   async validate(
-    rule: AutomationRule & { nodes: { nodeType: string; subtype: string; configuration: unknown }[] },
+    rule: AutomationRule & {
+      nodes: { nodeType: string; subtype: string; configuration: unknown }[];
+    },
   ): Promise<string[]> {
     const problems: string[] = [];
 
@@ -292,10 +362,7 @@ export class AutomationsService {
 
   private assertMayManage(role: WorkspaceRole): void {
     if (!hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
-      throw AppException.forbidden(
-        'FORBIDDEN',
-        'Only a workspace manager can change automations.',
-      );
+      throw AppException.forbidden('FORBIDDEN', 'Only a workspace manager can change automations.');
     }
   }
 

@@ -5,6 +5,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsIn,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -32,6 +33,44 @@ export class AutomationNodeDto {
   @IsOptional()
   @IsObject()
   configuration?: Record<string, unknown>;
+
+  /*
+   * The graph fields. All optional, so a caller that only knows about a flat
+   * list of steps — which is every caller written before the canvas — keeps
+   * working and simply gets a rule with no parentage and no positions.
+   */
+
+  @ApiPropertyOptional({
+    description:
+      'The builder’s own id for this node, used to express parentage within one save. ' +
+      'Mapped to a real id on write; never trusted as a database key.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  id?: string;
+
+  @ApiPropertyOptional({ description: 'Canvas coordinates. Absent means unplaced.' })
+  @IsOptional()
+  @IsObject()
+  position?: { x: number; y: number };
+
+  @ApiPropertyOptional({ description: 'The `id` of the node this follows. Null on the trigger.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  parentId?: string | null;
+
+  @ApiPropertyOptional({ description: 'Which arm of a parent branch this hangs off.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  branchKey?: string | null;
+
+  @ApiPropertyOptional({ description: 'Ordinal among siblings.' })
+  @IsOptional()
+  @IsNumber()
+  order?: number;
 }
 
 export class CreateRuleDto {

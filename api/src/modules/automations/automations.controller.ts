@@ -18,10 +18,14 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestj
 import { ApiErrorResponseDoc } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+
+import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
+import { AutomationMetadataService } from './builder/automation-metadata.service';
+import { toGraph } from './builder/automation-graph.mapper';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AutomationsService } from './automations.service';
-import { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import { AutomationNodeDto, CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
 
 /**
  * Project workflow rules.
@@ -40,7 +44,11 @@ import { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 @ApiErrorResponseDoc(403, 'Not a member, or not a manager for a write')
 export class AutomationsController {
-  constructor(private readonly automations: AutomationsService) {}
+  constructor(
+    private readonly automations: AutomationsService,
+    private readonly validator: AutomationGraphValidatorService,
+    private readonly metadata: AutomationMetadataService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List the rules on a project' })
@@ -70,6 +78,75 @@ export class AutomationsController {
     @Body() dto: CreateRuleDto,
   ) {
     return this.automations.create(workspaceId, projectId, userId, role, dto);
+  }
+
+  @Get('metadata')
+  @ApiOperation({
+    summary: 'What the builder’s forms can offer',
+    description:
+      'Triggers, actions, condition fields and the project’s own sections, statuses, ' +
+      'priorities, members and fields. Read from the project so a form cannot offer a status ' +
+      'the project does not define.',
+  })
+  metadataForProject(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return this.metadata.forProject(workspaceId, projectId);
+  }
+
+  @Get(':ruleId/graph')
+  @ApiOperation({
+    summary: 'Read one rule as a graph',
+    description:
+      'The same nodes as `GET :ruleId`, plus the edges the canvas draws. Edges are derived ' +
+      'from each node’s parent rather than stored — `parentNodeId` already says what an edge ' +
+      'row would, and keeping both is how two answers to one question start disagreeing.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  async graph(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+  ) {
+    const rule = await this.automations.get(workspaceId, projectId, ruleId);
+
+    return {
+      id: rule.id,
+      projectId: rule.projectId,
+      name: rule.name,
+      description: rule.description,
+      status: rule.status,
+      version: rule.version,
+      publishedAt: rule.publishedAt?.toISOString() ?? null,
+      graph: toGraph(rule.nodes),
+      createdAt: rule.createdAt.toISOString(),
+      updatedAt: rule.updatedAt.toISOString(),
+    };
+  }
+
+  @Post(':ruleId/validate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Check a graph without saving it',
+    description:
+      'Answers the same question Publish asks, so the builder can show why Publish is ' +
+      'unavailable before anybody presses it. Warnings do not block publishing; errors do.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  async validateGraph(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Body() body: { name?: string; nodes?: AutomationNodeDto[] },
+  ) {
+    const rule = await this.automations.get(workspaceId, projectId, ruleId);
+
+    // The body is what is on the canvas right now; the stored rule is the
+    // fallback, so this also answers "is what I saved publishable?".
+    const nodes = (body.nodes ?? rule.nodes.map(toValidatable)).map(toValidatableFromDto);
+
+    return this.validator.validate(projectId, workspaceId, body.name ?? rule.name, nodes);
   }
 
   @Get(':ruleId')
@@ -195,4 +272,35 @@ export class AutomationsController {
   ) {
     return this.automations.executions(workspaceId, projectId, ruleId);
   }
+}
+
+/** A stored node in the shape the validator reads. */
+function toValidatable(node: {
+  id: string;
+  nodeType: string;
+  subtype: string;
+  configuration: unknown;
+  parentNodeId: string | null;
+  branchKey: string | null;
+}): AutomationNodeDto & { id: string; parentId: string | null; branchKey: string | null } {
+  return {
+    id: node.id,
+    nodeType: node.nodeType,
+    subtype: node.subtype,
+    configuration: (node.configuration ?? {}) as Record<string, unknown>,
+    parentId: node.parentNodeId,
+    branchKey: node.branchKey,
+  };
+}
+
+/** A node off the wire in the shape the validator reads. */
+function toValidatableFromDto(node: AutomationNodeDto) {
+  return {
+    id: node.id ?? '',
+    type: node.nodeType,
+    subtype: node.subtype,
+    configuration: node.configuration ?? {},
+    parentId: node.parentId ?? null,
+    branchKey: node.branchKey ?? null,
+  };
 }

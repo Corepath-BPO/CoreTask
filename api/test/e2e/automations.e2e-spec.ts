@@ -152,6 +152,212 @@ describe('Automations (e2e)', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('the graph endpoints', () => {
+    const draftWithNodes = async (scope: Scope, nodes: Record<string, unknown>[]) => {
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Graph probe', triggerType: 'TASK_MOVED_TO_SECTION', nodes })
+        .expect(201);
+
+      return created.body.data.id as string;
+    };
+
+    const readGraph = async (scope: Scope, ruleId: string) => {
+      const response = await request(server())
+        .get(`${rulesUrl(scope)}/${ruleId}/graph`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      return response.body.data.graph as {
+        nodes: {
+          id: string;
+          type: string;
+          parentId: string | null;
+          position: { x: number; y: number };
+        }[];
+        edges: { source: string; target: string; kind: string }[];
+      };
+    };
+
+    const check = async (scope: Scope, ruleId: string, body: Record<string, unknown>) => {
+      const response = await request(server())
+        .post(`${rulesUrl(scope)}/${ruleId}/validate`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send(body)
+        .expect(200);
+
+      return response.body.data as {
+        publishable: boolean;
+        issues: { level: string; message: string }[];
+      };
+    };
+
+    it('lays out a rule built before the canvas existed', async () => {
+      /*
+       * Every node of an old rule sits at (0, 0) — the columns are non-nullable
+       * with a zero default, so there is no telling "never placed" from "placed
+       * at the origin". Drawn literally they would stack on top of each other,
+       * and an existing rule would look broken rather than un-arranged.
+       */
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'CONDITION', subtype: 'FIELD_COMPARISON' },
+        { nodeType: 'ACTION', subtype: 'ASSIGN_USER' },
+      ]);
+
+      const xs = (await readGraph(scope, ruleId)).nodes.map((node) => node.position.x);
+
+      expect(new Set(xs).size).toBe(3);
+      expect(xs[0]).toBeLessThan(xs[1] as number);
+      expect(xs[1]).toBeLessThan(xs[2] as number);
+    });
+
+    it('keeps positions somebody actually chose', async () => {
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, [
+        {
+          id: 'trigger-1',
+          nodeType: 'TRIGGER',
+          subtype: 'TASK_MOVED_TO_SECTION',
+          position: { x: 123, y: 456 },
+        },
+      ]);
+
+      expect((await readGraph(scope, ruleId)).nodes[0]?.position).toEqual({ x: 123, y: 456 });
+    });
+
+    it('derives an edge from each parent, and maps client ids to real ones', async () => {
+      // No edge table: parentNodeId already says what an edge row would, and
+      // keeping both is how two answers to one question start disagreeing. The
+      // builder's own ids never become database keys — one that did would let a
+      // caller point a parent at a row it does not own.
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        { id: 'a', nodeType: 'ACTION', subtype: 'ASSIGN_USER', parentId: 't' },
+      ]);
+
+      const { nodes, edges } = await readGraph(scope, ruleId);
+      const trigger = nodes.find((node) => node.type === 'TRIGGER');
+      const action = nodes.find((node) => node.type === 'ACTION');
+
+      expect(edges).toHaveLength(1);
+      expect(edges[0]).toMatchObject({ source: trigger?.id, target: action?.id, kind: 'DEFAULT' });
+      expect(action?.parentId).toBe(trigger?.id);
+      expect(trigger?.id).not.toBe('t');
+    });
+
+    it('offers the forms this project’s own values', async () => {
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .get(`${rulesUrl(scope)}/metadata`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const metadata = response.body.data;
+      expect(metadata.triggers.length).toBeGreaterThan(0);
+      expect(metadata.sections.length).toBeGreaterThan(0);
+
+      // A status field offering free text is a field that silently never
+      // matches.
+      const status = metadata.conditionFields.find(
+        (field: { field: string }) => field.field === 'status',
+      );
+      expect(status.valueKind).toBe('ENUM');
+      expect(status.options.length).toBeGreaterThan(0);
+    });
+
+    it('reports why a graph cannot be published, without saving it', async () => {
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, { name: '', nodes: [] });
+
+      expect(result.publishable).toBe(false);
+      expect(result.issues.map((issue) => issue.message)).toEqual(
+        expect.arrayContaining(['Give the rule a name.', 'Add at least one action.']),
+      );
+    });
+
+    it('refuses a step type the runner cannot execute', async () => {
+      /*
+       * BRANCH and DELAY are in the schema and the runner never reads them. A
+       * published rule containing one would look like it splits and would run
+       * straight through — worse than not offering it at all.
+       */
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, {
+        name: 'Has a branch',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+          { id: 'b', nodeType: 'BRANCH', subtype: 'IF_ELSE', parentId: 't' },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            parentId: 'b',
+            branchKey: 'match',
+          },
+        ],
+      });
+
+      expect(result.publishable).toBe(false);
+      expect(result.issues.map((issue) => issue.message)).toContain(
+        'This step type cannot run yet.',
+      );
+    });
+
+    it('warns rather than refuses when an action can re-fire its own trigger', async () => {
+      // Occasionally what somebody means, and the runner already has depth
+      // limits and correlation ids. Refusing would block a legitimate rule to
+      // prevent a survivable one.
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, {
+        name: 'Loop risk',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_STATUS_CHANGED', parentId: null },
+          { id: 'a', nodeType: 'ACTION', subtype: 'UPDATE_STATUS', parentId: 't' },
+        ],
+      });
+
+      expect(result.publishable).toBe(true);
+      expect(
+        result.issues.filter((issue) => issue.level === 'WARNING').map((issue) => issue.message),
+      ).toContain('This action can set off the same trigger again.');
+    });
+
+    it('refuses a graph naming a section from another project', async () => {
+      const scope = await setupScope();
+      const other = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, {
+        name: 'Cross-project',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'MOVE_TO_SECTION',
+            parentId: 't',
+            configuration: { sectionId: other.sectionId },
+          },
+        ],
+      });
+
+      expect(result.issues.map((issue) => issue.message)).toContain(
+        'That section is no longer in this project.',
+      );
+    });
+  });
+
   describe('authoring', () => {
     it('creates a rule as a draft', async () => {
       const scope = await setupScope();

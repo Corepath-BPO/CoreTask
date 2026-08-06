@@ -5,11 +5,13 @@ import { WorkspaceMembersModule } from '../workspace-members/workspace-members.m
 
 import { AutomationsController } from './automations.controller';
 import { AutomationsService } from './automations.service';
+import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
+import { AutomationMetadataService } from './builder/automation-metadata.service';
 
 @Module({
   imports: [WorkspaceMembersModule, ProjectsModule],
   controllers: [AutomationsController],
-  providers: [AutomationsService],
+  providers: [AutomationsService, AutomationGraphValidatorService, AutomationMetadataService],
   exports: [AutomationsService],
 })
 export class AutomationsModule {}
