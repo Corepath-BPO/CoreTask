@@ -169,17 +169,31 @@ export function AutomationNode({ data, selected }: NodeProps) {
         React Flow needs them positioned to route an edge, and a visible dot on
         every node reads as something to drag when connections are made by
         adding steps, not by drawing lines.
+
+        Anchored a fixed distance from the top, not at half the height.
+
+        A card grows when its summary wraps, and the layout places cards by
+        their top edge — so two neighbours on the same line have their tops
+        aligned and their middles at different heights. Handles at 50% therefore
+        put the two ends of one edge at different heights, and the line between
+        them came out as a step. Measuring from the top instead makes every
+        connection point the same distance down, which is level by construction
+        however tall any card happens to be.
+
+        The distance is the middle of the icon tile: `py-2.5` of padding plus
+        half of a `size-8` tile. Keep it in step with those two if either
+        changes.
       */}
         <Handle
           type="target"
           position={Position.Left}
-          className="!opacity-0"
+          className="!top-[26px] !translate-y-0 !opacity-0"
           isConnectable={false}
         />
         <Handle
           type="source"
           position={Position.Right}
-          className="!opacity-0"
+          className="!top-[26px] !translate-y-0 !opacity-0"
           isConnectable={false}
         />
         <Handle
