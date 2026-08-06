@@ -9,11 +9,14 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
+import { usePublishRule } from '../../hooks/use-automations';
 import {
   useAutomationGraph,
   useAutomationMetadata,
   useSaveGraph,
 } from '../hooks/use-automation-graph';
+
+import { NodeConfigurationSheet } from '../configuration/node-configuration-sheet';
 
 import { AutomationCanvas } from './automation-canvas';
 import { AutomationValidationBanner } from './automation-validation-banner';
@@ -48,6 +51,7 @@ export function AutomationBuilderPage({
   const { data: rule, isLoading } = useAutomationGraph(workspaceId, projectId, ruleId);
   const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
   const saveGraph = useSaveGraph(workspaceId, projectId);
+  const publishRule = usePublishRule(workspaceId, projectId);
 
   const [name, setName] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -61,6 +65,20 @@ export function AutomationBuilderPage({
    */
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
 
+  /*
+   * Edits to a step's settings, held until the draft is saved.
+   *
+   * Applied over the server's copy rather than written into it, so cancelling
+   * out of a sheet leaves nothing behind and one save writes the whole canvas —
+   * a request per field would make a half-configured rule the normal state of
+   * the row rather than a moment during editing.
+   */
+  const [edits, setEdits] = useState<Record<string, Record<string, unknown>>>({});
+
+  /** Which step's settings are open. Separate from selection: clicking a node
+      on the canvas highlights it; opening it is a deliberate second act. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const currentName = name ?? rule?.name ?? '';
 
   const graph = useMemo(() => {
@@ -71,9 +89,10 @@ export function AutomationBuilderPage({
       nodes: rule.graph.nodes.map((node) => ({
         ...node,
         position: moved[node.id] ?? node.position,
+        configuration: edits[node.id] ?? node.configuration,
       })),
     };
-  }, [rule, moved]);
+  }, [rule, moved, edits]);
 
   /*
    * Checked locally as you type; the server checks again on save and publish.
@@ -99,7 +118,7 @@ export function AutomationBuilderPage({
   );
 
   const blocking = issues.filter((issue) => issue.level === 'ERROR');
-  const dirty = name !== null || Object.keys(moved).length > 0;
+  const dirty = name !== null || Object.keys(moved).length > 0 || Object.keys(edits).length > 0;
 
   const saveDraft = async () => {
     if (!rule) return;
@@ -121,6 +140,19 @@ export function AutomationBuilderPage({
 
     setName(null);
     setMoved({});
+    setEdits({});
+  };
+
+  /**
+   * Publishing saves first.
+   *
+   * The endpoint validates what is *stored*, so publishing without saving would
+   * check a rule nobody is looking at — and could make live a version different
+   * from the one on screen.
+   */
+  const publish = async () => {
+    await saveDraft();
+    await publishRule.mutateAsync(ruleId);
   };
 
   if (isLoading || !rule) {
@@ -175,9 +207,13 @@ export function AutomationBuilderPage({
           <Button
             size="sm"
             className="cursor-pointer"
-            disabled={blocking.length > 0}
+            disabled={blocking.length > 0 || publishRule.isPending || saveGraph.isPending}
             title={blocking.length > 0 ? 'Fix the problems listed above first' : undefined}
+            onClick={() => void publish()}
           >
+            {publishRule.isPending && (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            )}
             Publish rule
           </Button>
         </div>
@@ -202,12 +238,24 @@ export function AutomationBuilderPage({
           metadata={metadata}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          onOpenNode={setSelectedId}
+          onOpenNode={(nodeId) => {
+            setSelectedId(nodeId);
+            setEditingId(nodeId);
+          }}
           onMoveNode={(nodeId, position) =>
             setMoved((previous) => ({ ...previous, [nodeId]: position }))
           }
         />
       </div>
+
+      <NodeConfigurationSheet
+        node={graph.nodes.find((node) => node.id === editingId) ?? null}
+        metadata={metadata}
+        onClose={() => setEditingId(null)}
+        onSave={(nodeId, configuration) =>
+          setEdits((previous) => ({ ...previous, [nodeId]: configuration }))
+        }
+      />
     </div>
   );
 }
