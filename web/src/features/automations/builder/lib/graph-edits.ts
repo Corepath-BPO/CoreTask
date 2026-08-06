@@ -1,4 +1,4 @@
-import { PLACEHOLDER_NODE_TYPE, defaultPosition } from '@coretask/contracts';
+import { BranchKey, PLACEHOLDER_NODE_TYPE, defaultPosition } from '@coretask/contracts';
 import type { AutomationNodeType } from '@coretask/contracts';
 import type { AutomationGraphNode } from '@coretask/types';
 
@@ -109,24 +109,60 @@ function reconnect(
  * API refuses the type for exactly that reason.
  */
 export function withPlaceholder(nodes: CanvasNode[]): CanvasNode[] {
-  if (nodes.some((node) => node.type === 'ACTION')) return nodes;
+  const placeholders: CanvasNode[] = [];
 
-  const last = lastOnMainPath(nodes);
-  if (!last) return nodes;
+  const make = (parent: CanvasNode, arm: string | null, row: number): CanvasNode => ({
+    // The id encodes where it goes, so choosing an action knows which arm it
+    // lands on without the page tracking a separate selection.
+    id: placeholderId(parent.id, arm),
+    type: PLACEHOLDER_NODE_TYPE,
+    subtype: 'ACTION',
+    configuration: {},
+    position: defaultPosition(columnOf(parent, nodes) + 1, row),
+    parentId: parent.id,
+    branchKey: arm,
+    order: nodes.length + placeholders.length,
+  });
 
-  return [
-    ...nodes,
-    {
-      id: 'placeholder',
-      type: PLACEHOLDER_NODE_TYPE,
-      subtype: 'ACTION',
-      configuration: {},
-      position: defaultPosition(columnOf(last, nodes) + 1),
-      parentId: last.id,
-      branchKey: null,
-      order: nodes.length,
-    },
-  ];
+  /*
+   * Every arm of a branch gets one, filled or not.
+   *
+   * A split showing only the path somebody has already built looks like it goes
+   * one way. Both arms visible is what makes it read as a choice — and an empty
+   * arm is exactly where the next step goes.
+   */
+  for (const branch of nodes.filter((node) => node.type === 'BRANCH')) {
+    const arms = [BranchKey.MATCH, BranchKey.ELSE];
+
+    arms.forEach((arm, index) => {
+      const filled = nodes.some((node) => node.parentId === branch.id && node.branchKey === arm);
+      if (!filled) placeholders.push(make(branch, arm, index));
+    });
+  }
+
+  // And one at the end when the rule has no action anywhere, which is what a
+  // brand-new rule looks like.
+  if (!nodes.some((node) => node.type === 'ACTION')) {
+    const last = lastOnMainPath(nodes);
+
+    if (last && last.type !== 'BRANCH') placeholders.push(make(last, null, 0));
+  }
+
+  return placeholders.length ? [...nodes, ...placeholders] : nodes;
+}
+
+/** Where a placeholder puts what replaces it. */
+export function placeholderId(parentId: string, arm: string | null): string {
+  return `placeholder:${parentId}:${arm ?? 'main'}`;
+}
+
+export function readPlaceholderId(id: string): { parentId: string; arm: string | null } | null {
+  if (!id.startsWith('placeholder:')) return null;
+
+  const [, parentId, arm] = id.split(':');
+  if (!parentId) return null;
+
+  return { parentId, arm: arm === 'main' ? null : (arm ?? null) };
 }
 
 /** The deepest node with nothing following it — where a new step attaches. */
@@ -163,6 +199,19 @@ export function makeNode(
 ): CanvasNode {
   const parent = lastOnMainPath(nodes);
 
+  return makeNodeUnder(type, subtype, parent?.id ?? null, null, nodes);
+}
+
+/** A new step under a named parent — the arm of a branch, usually. */
+export function makeNodeUnder(
+  type: AutomationNodeType,
+  subtype: string,
+  parentId: string | null,
+  branchKey: string | null,
+  nodes: readonly CanvasNode[],
+): CanvasNode {
+  const parent = nodes.find((node) => node.id === parentId) ?? null;
+
   return {
     // Prefixed so it is obvious in a payload that this id has never been to the
     // database — the API maps it to a real one and never trusts it as a key.
@@ -170,9 +219,23 @@ export function makeNode(
     type,
     subtype,
     configuration: {},
-    position: defaultPosition(parent ? columnOf(parent, nodes) + 1 : 0),
-    parentId: parent?.id ?? null,
-    branchKey: null,
+    position: defaultPosition(
+      parent ? columnOf(parent, nodes) + 1 : 0,
+      branchKey === BranchKey.ELSE ? 1 : 0,
+    ),
+    parentId,
+    branchKey,
     order: nodes.length,
   };
+}
+
+/**
+ * A split, attached to the end of the rule.
+ *
+ * It carries the comparison itself rather than sitting beside a condition —
+ * that is what the runner evaluates to choose an arm, so putting it anywhere
+ * else would mean two nodes describing one decision.
+ */
+export function makeBranch(nodes: readonly CanvasNode[]): CanvasNode {
+  return makeNode('BRANCH', 'FIELD_COMPARISON', nodes);
 }

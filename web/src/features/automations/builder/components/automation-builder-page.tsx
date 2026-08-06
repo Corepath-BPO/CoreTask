@@ -1,6 +1,6 @@
 import { validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Loader2, Plus } from 'lucide-react';
+import { ArrowLeft, GitBranch, Loader2, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -20,8 +20,10 @@ import { NodeConfigurationSheet } from '../configuration/node-configuration-shee
 import {
   applyEdits,
   hasEdits,
-  makeNode,
+  makeBranch,
+  makeNodeUnder,
   NO_EDITS,
+  readPlaceholderId,
   withPlaceholder,
   type GraphEdits,
 } from '../lib/graph-edits';
@@ -74,7 +76,8 @@ export function AutomationBuilderPage({
    * back under the cursor — and it is not worth a request on its own.
    */
   const [edits, setEdits] = useState<GraphEdits>(NO_EDITS);
-  const [addingAfter, setAddingAfter] = useState(false);
+  /** Where a chosen action will land: the end of the rule, or one arm of a split. */
+  const [addingAt, setAddingAt] = useState<{ parentId: string; arm: string | null } | null>(null);
 
   /** Which step's settings are open. Separate from selection: clicking a node
       on the canvas highlights it; opening it is a deliberate second act. */
@@ -90,17 +93,31 @@ export function AutomationBuilderPage({
     return { ...rule.graph, nodes: withPlaceholder(applyEdits(rule.graph.nodes, edits)) };
   }, [rule, edits]);
 
-  /** What the canvas can actually save — the placeholder is not one of them. */
+  /** What the canvas can actually save — the placeholders are not among them. */
   const realNodes = useMemo(
     () => graph.nodes.filter((node) => node.type !== 'PLACEHOLDER'),
     [graph.nodes],
   );
 
-  const addAction = (subtype: string) =>
+  const lastNodeId = useMemo(() => {
+    const hasChild = new Set(realNodes.map((node) => node.parentId).filter(Boolean));
+    return realNodes.filter((node) => !hasChild.has(node.id)).at(-1)?.id ?? null;
+  }, [realNodes]);
+
+  const addAction = (subtype: string) => {
+    const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
+
     setEdits((previous) => ({
       ...previous,
-      added: [...previous.added, makeNode('ACTION', subtype, realNodes)],
+      added: [
+        ...previous.added,
+        makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
+      ],
     }));
+  };
+
+  const addBranch = () =>
+    setEdits((previous) => ({ ...previous, added: [...previous.added, makeBranch(realNodes)] }));
 
   /*
    * Checked locally as you type; the server checks again on save and publish.
@@ -229,17 +246,37 @@ export function AutomationBuilderPage({
       <div className="flex items-center gap-2 pt-3">
         <StepSelector
           entries={metadata?.actions ?? []}
-          open={addingAfter}
-          onOpenChange={setAddingAfter}
+          open={addingAt !== null}
+          onOpenChange={(open) =>
+            setAddingAt(open ? (addingAt ?? { parentId: lastNodeId ?? '', arm: null }) : null)
+          }
           onChoose={addAction}
           placeholder="Search actions"
           trigger={
-            <Button variant="outline" size="sm" className="cursor-pointer">
+            <Button
+              variant="outline"
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => setAddingAt({ parentId: lastNodeId ?? '', arm: null })}
+            >
               <Plus className="size-4" aria-hidden="true" />
               Add action
             </Button>
           }
         />
+
+        {/* A split is added, then filled: both arms appear as placeholders, so
+            the choice is visible before either side has anything in it. */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          disabled={!lastNodeId}
+          onClick={addBranch}
+        >
+          <GitBranch className="size-4" aria-hidden="true" />
+          Add branch
+        </Button>
       </div>
 
       <AutomationValidationBanner issues={issues} onFocusNode={(nodeId) => setSelectedId(nodeId)} />
@@ -264,10 +301,15 @@ export function AutomationBuilderPage({
           onOpenNode={(nodeId) => {
             setSelectedId(nodeId);
 
-            // The placeholder is not a step to configure — it is the invitation
-            // to choose one, so it opens the selector instead of the sheet.
-            if (nodeId === 'placeholder') {
-              setAddingAfter(true);
+            /*
+             * A placeholder is not a step to configure — it is the invitation
+             * to choose one. Its id carries where it sits, so the action lands
+             * on the right arm without tracking a separate selection.
+             */
+            const target = readPlaceholderId(nodeId);
+
+            if (target) {
+              setAddingAt(target);
               return;
             }
 

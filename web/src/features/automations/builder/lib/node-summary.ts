@@ -50,8 +50,12 @@ export function summarise(node: CanvasNode, metadata: AutomationMetadata | undef
     case 'ACTION':
       return actionSummary(node.subtype, config, metadata);
 
-    case 'BRANCH':
-      return 'Split the path';
+    case 'BRANCH': {
+      // A split says what it splits on, or asks — "Split the path" tells
+      // somebody nothing they cannot already see.
+      const summary = conditionSummary(config, metadata);
+      return summary === 'Choose what to check' ? 'Split on — choose what to check' : summary;
+    }
 
     case 'DELAY':
       return 'Wait';

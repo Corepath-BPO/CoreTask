@@ -97,7 +97,9 @@ function NodeForm({
       </SheetHeader>
 
       <div className="grid gap-4">
-        {node.type === 'CONDITION' ? (
+        {/* A branch holds the comparison that chooses its arm, so it is
+            configured exactly as a condition is — one decision, one node. */}
+        {node.type === 'CONDITION' || node.type === 'BRANCH' ? (
           <ConditionFields config={config} metadata={metadata} set={set} read={read} />
         ) : (
           <StepFields
