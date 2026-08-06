@@ -485,7 +485,7 @@ pnpm compose:validate
   for people who do not have an account yet
 - Teams: named groups inside a workspace with a colour, an optional lead, a
   roster drawn from the workspace, and an optional owning team on each project
-  with a filter to match. Deliberately *not* a permission boundary — see below
+  with a filter to match. Deliberately _not_ a permission boundary — see below
 - Comment threads on tasks and tickets: post, edit in place (marked "edited"),
   delete your own, manager moderation, and notifications to everyone already in
   the conversation
@@ -501,14 +501,14 @@ pnpm compose:validate
 
 ### Design notes
 
-A team is an *organisational* grouping, not a permission boundary.
+A team is an _organisational_ grouping, not a permission boundary.
 `WorkspaceMember.role` still decides everything anyone is allowed to do; a team
 answers "who works on this together". Keeping the two apart is what stops moving
 somebody between teams from silently changing what they can see — the classic
 mess that follows from conflating them.
 
 The one place a team does confer authority is its own management: editing a team
-and changing its roster is open to workspace administrators *or* that team's
+and changing its roster is open to workspace administrators _or_ that team's
 lead. Creating and deleting teams stays ADMIN-only — a lead may run a team but
 not dissolve one. Deleting a team is a real delete; its projects survive with no
 team attached, because losing a grouping must never take work with it.
@@ -647,21 +647,27 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 
 ## Documentation
 
-| Document                                                | Covers                                 |
-| ------------------------------------------------------- | -------------------------------------- |
-| [System overview](docs/architecture/system-overview.md) | Components, request flow, boundaries   |
-| [Frontend](docs/architecture/frontend.md)               | Structure, state, data access, styling |
-| [Backend](docs/architecture/backend.md)                 | Layering, envelope, guards, jobs       |
-| [Database](docs/architecture/database.md)               | Schema, indexes, tenancy, ticket keys  |
-| [Docker](docs/architecture/docker.md)                   | Images, Compose layering, volumes      |
-| [Authentication](docs/api/authentication.md)            | Token lifecycle, cookies, error codes  |
-| [Custom field system](docs/architecture/custom-field-system.md) | Types, settings, value storage, lifecycle |
-| [Field library](docs/architecture/field-library.md)     | Sharing one field across projects      |
-| [List view columns](docs/architecture/list-view-columns.md) | Storage, pinning, sizing, the fixed Task column |
-| [Custom fields API](docs/api/custom-fields.md)          | Definitions, options, values, errors   |
-| [View and column API](docs/api/project-view-columns.md) | Views, field catalog, task query       |
-| [Field library migration](docs/database/custom-field-migration.md) | Project→workspace move, with its verification run |
-| [Decision records](docs/decisions/)                     | Why each major choice was made         |
+| Document                                                                      | Covers                                                 |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [System overview](docs/architecture/system-overview.md)                       | Components, request flow, boundaries                   |
+| [Frontend](docs/architecture/frontend.md)                                     | Structure, state, data access, styling                 |
+| [Backend](docs/architecture/backend.md)                                       | Layering, envelope, guards, jobs                       |
+| [Database](docs/architecture/database.md)                                     | Schema, indexes, tenancy, ticket keys                  |
+| [Docker](docs/architecture/docker.md)                                         | Images, Compose layering, volumes                      |
+| [Authentication](docs/api/authentication.md)                                  | Token lifecycle, cookies, error codes                  |
+| [Custom field system](docs/architecture/custom-field-system.md)               | Types, settings, value storage, lifecycle              |
+| [Field library](docs/architecture/field-library.md)                           | Sharing one field across projects                      |
+| [List view columns](docs/architecture/list-view-columns.md)                   | Storage, pinning, sizing, the fixed Task column        |
+| [Custom fields API](docs/api/custom-fields.md)                                | Definitions, options, values, errors                   |
+| [View and column API](docs/api/project-view-columns.md)                       | Views, field catalog, task query                       |
+| [Field library migration](docs/database/custom-field-migration.md)            | Project→workspace move, with its verification run      |
+| [Project work items](docs/architecture/project-work-items.md)                 | One project, two views; tasks and tickets side by side |
+| [One dataset, two views](docs/architecture/project-views-shared-data.md)      | What List and Board share, and what each still owns    |
+| [Creating work items](docs/architecture/work-item-creation.md)                | Split button, quick add, and what the server checks    |
+| [List/Board synchronization](docs/architecture/list-board-synchronization.md) | Cache keys, invalidation, sockets, correlation ids     |
+| [Work items API](docs/api/project-work-items.md)                              | List, create, update, move; events and errors          |
+| [Work-item storage](docs/database/work-item-compatibility.md)                 | Why the tables stay separate, and the migrations       |
+| [Decision records](docs/decisions/)                                           | Why each major choice was made                         |
 
 ---
 

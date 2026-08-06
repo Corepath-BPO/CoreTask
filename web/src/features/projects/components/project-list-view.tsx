@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useMoveTaskToSection, useUpdateTask } from '@/features/tasks/hooks/use-tasks';
+import { useMoveTaskToSection } from '@/features/tasks/hooks/use-tasks';
 import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-task-drop';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { cn, formatDate } from '@/lib/utils';
@@ -35,7 +35,9 @@ import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-c
 import {
   useCreateProjectWorkItem,
   useProjectWorkItems,
+  useUpdateProjectWorkItem,
 } from '@/features/work-items/hooks/use-project-work-items';
+import { toWorkItemUpdate } from '@/features/work-items/lib/cell-payload';
 import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { ViewToolbar } from './view-toolbar-slot';
 import { CustomFieldCell } from './cells/custom-field-cell';
@@ -102,12 +104,12 @@ export function ProjectListView({
     includeCustomFields: true,
   });
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
-  const updateTask = useUpdateTask(workspaceId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveTask = useMoveTaskToSection(workspaceId);
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
   const createSection = useCreateSection(workspaceId, projectId);
+  const updateWorkItem = useUpdateProjectWorkItem(workspaceId, projectId);
   const [addingSection, setAddingSection] = useState(false);
   const { data: project } = useProject(workspaceId, projectId);
 
@@ -444,8 +446,19 @@ export function ProjectListView({
                                 canEdit={canEdit}
                                 pinned={{ ...pinned, scrolled }}
                                 onOpenTask={onOpenTask}
-                                onSaveTask={(taskId, payload) =>
-                                  updateTask.mutate({ taskId, payload: payload as never })
+                                /*
+                                 * Through the shared mutation, whatever the row
+                                 * is. Sending every edit to the task endpoint
+                                 * meant a ticket's inline changes hit
+                                 * `PATCH /tasks/:id` with a ticket id and 404'd
+                                 * — the cell reverted and the grid looked as
+                                 * though nothing had been typed.
+                                 */
+                                onSaveTask={(workItemId, payload) =>
+                                  updateWorkItem.mutate({
+                                    workItemId,
+                                    payload: toWorkItemUpdate(payload),
+                                  })
                                 }
                                 onSaveField={(taskId, fieldId, value) =>
                                   setFieldValue.mutate({ taskId, fieldId, value })
