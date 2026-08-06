@@ -553,27 +553,6 @@ describe('Automations (e2e)', () => {
       expect(trigger?.id).not.toBe('t');
     });
 
-    it('offers the forms this project’s own values', async () => {
-      const scope = await setupScope();
-
-      const response = await request(server())
-        .get(`${rulesUrl(scope)}/metadata`)
-        .set('Authorization', `Bearer ${scope.owner.token}`)
-        .expect(200);
-
-      const metadata = response.body.data;
-      expect(metadata.triggers.length).toBeGreaterThan(0);
-      expect(metadata.sections.length).toBeGreaterThan(0);
-
-      // A status field offering free text is a field that silently never
-      // matches.
-      const status = metadata.conditionFields.find(
-        (field: { field: string }) => field.field === 'status',
-      );
-      expect(status.valueKind).toBe('ENUM');
-      expect(status.options.length).toBeGreaterThan(0);
-    });
-
     it('reports why a graph cannot be published, without saving it', async () => {
       const scope = await setupScope();
       const ruleId = await draftWithNodes(scope, []);
@@ -1006,6 +985,341 @@ describe('Automations (e2e)', () => {
         where: { ruleId },
       });
       expect(execution.correlationId).toBe(correlationId);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  /**
+   * The catalogue, over the wire, answered from one project.
+   *
+   * The unit spec pins `available` to the engine; these pin the other half —
+   * that the lists and the values in them belong to *this* project. A section
+   * from somebody else's project or a status the board stopped showing produces
+   * a rule that saves, publishes, and can never match.
+   */
+  describe('the builder’s metadata', () => {
+    interface CatalogueEntry {
+      subtype: string;
+      label: string;
+      category: string;
+      available: boolean;
+      reason: string | null;
+      fieldId?: string;
+      fieldName?: string;
+    }
+
+    interface Metadata {
+      triggers: (CatalogueEntry & {
+        configForms: { form: string; label: string; available: boolean; reason: string | null }[];
+      })[];
+      conditions: (CatalogueEntry & { valueType: string })[];
+      actions: CatalogueEntry[];
+      conditionFields: { field: string; valueKind: string; options?: unknown[] }[];
+      sections: { id: string; name: string }[];
+      statuses: { id: string; name: string }[];
+      priorities: { id: string; name: string }[];
+      customFields: { id: string; name: string; type: string; options: { label: string }[] }[];
+      capabilities: Record<string, unknown>;
+      permissions: Record<string, unknown>;
+    }
+
+    const readMetadata = async (scope: Scope, token = scope.owner.token): Promise<Metadata> => {
+      const response = await request(server())
+        .get(`${rulesUrl(scope)}/metadata`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      return response.body.data as Metadata;
+    };
+
+    /** A workspace field, attached to one project, with two options. */
+    const addCustomField = async (
+      scope: Scope,
+      name: string,
+      type: 'SINGLE_SELECT' | 'NUMBER' = 'SINGLE_SELECT',
+      projectId = scope.projectId,
+    ) => {
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name,
+          type,
+          projects: { create: { projectId } },
+          ...(type === 'SINGLE_SELECT'
+            ? {
+                options: {
+                  create: [
+                    { label: 'Low', position: 0 },
+                    { label: 'High', position: 1 },
+                  ],
+                },
+              }
+            : {}),
+        },
+      });
+
+      return field.id;
+    };
+
+    it('explains every entry it will not let somebody choose', async () => {
+      /*
+       * The convention, end to end. A greyed row with no explanation says "not
+       * for you" without saying why or whether that changes, and is worse than
+       * the row being absent — so this is the property worth testing over the
+       * wire rather than only where the lists are built.
+       */
+      const scope = await setupScope();
+      await addCustomField(scope, 'Risk');
+
+      const metadata = await readMetadata(scope);
+      const entries = [...metadata.triggers, ...metadata.conditions, ...metadata.actions];
+
+      expect(entries.length).toBeGreaterThan(0);
+
+      const unexplained = entries
+        .filter((entry) => !entry.available)
+        .filter((entry) => typeof entry.reason !== 'string' || entry.reason.trim() === '');
+
+      expect(unexplained.map((entry) => `${entry.category} / ${entry.label}`)).toEqual([]);
+
+      const forms = metadata.triggers.flatMap((trigger) => trigger.configForms);
+      expect(forms.filter((form) => !form.available && !form.reason)).toEqual([]);
+    });
+
+    it('generates the custom field rows from the fields the project really has', async () => {
+      const scope = await setupScope();
+      await addCustomField(scope, 'Risk', 'SINGLE_SELECT');
+      await addCustomField(scope, 'Effort', 'NUMBER');
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.customFields.map((field) => field.name)).toEqual(['Effort', 'Risk']);
+      // The options travel with the field: "Risk is…" is unusable without the
+      // values Risk can take, and a request per row would be absurd.
+      expect(
+        metadata.customFields.find((field) => field.name === 'Risk')?.options.map((o) => o.label),
+      ).toEqual(['Low', 'High']);
+
+      const generated = metadata.conditions.filter((entry) => entry.category === 'Custom field is');
+      expect(generated.map((entry) => entry.label)).toEqual(['Effort is…', 'Risk is…']);
+      expect(generated.map((entry) => entry.fieldName)).toEqual(['Effort', 'Risk']);
+      expect(generated.every((entry) => entry.fieldId)).toBe(true);
+      expect(generated.map((entry) => entry.valueType)).toEqual(['NUMBER', 'SINGLE_SELECT']);
+
+      const writes = metadata.actions.filter(
+        (entry) => entry.category === 'Change custom field to…',
+      );
+      expect(writes.map((entry) => entry.label)).toEqual(['Change Effort to…', 'Change Risk to…']);
+      expect(writes.every((entry) => entry.subtype === 'SET_CUSTOM_FIELD')).toBe(true);
+      // The engine writes custom fields and cannot read them, so the same field
+      // is an available action and an unavailable check.
+      expect(writes.every((entry) => entry.available)).toBe(true);
+      expect(generated.every((entry) => !entry.available && entry.reason)).toBe(true);
+    });
+
+    it('leaves out a field another project uses, and one that was archived', async () => {
+      const scope = await setupScope();
+
+      const other = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Somebody else’s project' })
+        .expect(201);
+
+      await addCustomField(scope, 'Mine');
+      await addCustomField(scope, 'Theirs', 'SINGLE_SELECT', other.body.data.id as string);
+
+      const archived = await addCustomField(scope, 'Retired');
+      await context.prisma.customField.update({
+        where: { id: archived },
+        data: { isArchived: true },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.customFields.map((field) => field.name)).toEqual(['Mine']);
+      expect(
+        metadata.conditions.filter((entry) => entry.category === 'Custom field is').length,
+      ).toBe(1);
+    });
+
+    it('offers this project’s sections and never another project’s', async () => {
+      /*
+       * Scoping rather than tidiness. A rule that moves a task into another
+       * project's section is a reach across a tenant boundary, and the runner
+       * refuses it at execution time — so a form that offers one produces a rule
+       * that looks right and quietly fails every time it runs.
+       */
+      const scope = await setupScope();
+
+      const other = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Somebody else’s project' })
+        .expect(201);
+
+      const theirs = await context.prisma.section.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: other.body.data.id as string,
+          name: 'Their column',
+          position: 0,
+        },
+      });
+
+      const metadata = await readMetadata(scope);
+      const ids = metadata.sections.map((section) => section.id);
+
+      expect(ids).toContain(scope.sectionId);
+      expect(ids).not.toContain(theirs.id);
+
+      const mine = await context.prisma.section.findMany({
+        where: { projectId: scope.projectId },
+        orderBy: { position: 'asc' },
+      });
+      expect(ids).toEqual(mine.map((section) => section.id));
+    });
+
+    it('drops an archived status and stops mixing the workspace set into the project’s', async () => {
+      /*
+       * The old query was `OR: [{ projectId }, { projectId: null }]` with no
+       * archive filter, so a project that had defined its own statuses saw them
+       * *and* the workspace's, duplicated — with nothing to say which of two
+       * identically named rows a rule would compare against. Archived rows came
+       * through as well.
+       */
+      const scope = await setupScope();
+
+      // Seeded here rather than relied upon: a workspace only grows definitions
+      // once something reads a project view, so this flow has none of its own.
+      await context.prisma.statusDefinition.createMany({
+        data: [
+          {
+            workspaceId: scope.workspaceId,
+            name: 'Workspace wide',
+            slug: 'workspace-wide',
+            category: 'NOT_STARTED',
+            position: 0,
+          },
+          {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Triage',
+            slug: 'triage',
+            category: 'NOT_STARTED',
+            position: 0,
+          },
+          {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Retired',
+            slug: 'retired',
+            category: 'CANCELLED',
+            position: 1,
+            isArchived: true,
+          },
+        ],
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.statuses.map((status) => status.name)).toEqual(['Triage']);
+    });
+
+    it('falls back to the workspace set for a project with no statuses of its own', async () => {
+      // A project that has never overridden its statuses has none, and an empty
+      // list would leave "Status is…" impossible to complete.
+      const scope = await setupScope();
+
+      await context.prisma.statusDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Workspace wide',
+          slug: 'workspace-wide',
+          category: 'NOT_STARTED',
+          position: 0,
+        },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.statuses.map((status) => status.name)).toEqual(['Workspace wide']);
+    });
+
+    it('drops an archived priority', async () => {
+      const scope = await setupScope();
+
+      await context.prisma.priorityDefinition.createMany({
+        data: [
+          { workspaceId: scope.workspaceId, name: 'Low', slug: 'low', level: 1 },
+          { workspaceId: scope.workspaceId, name: 'Retired', slug: 'retired', level: 2 },
+        ],
+      });
+      await context.prisma.priorityDefinition.update({
+        where: { workspaceId_slug: { workspaceId: scope.workspaceId, slug: 'retired' } },
+        data: { isArchived: true },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.priorities.map((priority) => priority.name)).toEqual(['Low']);
+    });
+
+    it('offers the forms this project’s own values', async () => {
+      const scope = await setupScope();
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.triggers.length).toBeGreaterThan(0);
+      expect(metadata.sections.length).toBeGreaterThan(0);
+
+      // A status field offering free text is a field that silently never
+      // matches.
+      const status = metadata.conditionFields.find((field) => field.field === 'status');
+      expect(status?.valueKind).toBe('ENUM');
+      expect(status?.options?.length).toBeGreaterThan(0);
+    });
+
+    it('says which of the four move forms the engine can honour', async () => {
+      const scope = await setupScope();
+      const metadata = await readMetadata(scope);
+
+      const moved = metadata.triggers.find((entry) => entry.subtype === 'TASK_MOVED_TO_SECTION');
+
+      expect(moved?.configForms.map((form) => form.label)).toEqual([
+        'Section is changed',
+        'Section is…',
+        'Section is not…',
+        'Section is one of…',
+      ]);
+      expect(moved?.configForms.filter((form) => form.available).map((form) => form.form)).toEqual([
+        'SECTION_CHANGED',
+        'SECTION_CHANGED_TO',
+      ]);
+    });
+
+    it('tells a member they may read the rules and not write them', async () => {
+      /*
+       * Sent so the builder can present a rule as read-only rather than let
+       * somebody fill in a form and meet a 403 on save. It is not the check —
+       * the service still refuses — because a permission the client is told
+       * about is one the client could ignore.
+       */
+      const scope = await setupScope();
+
+      expect(await readMetadata(scope, scope.owner.token)).toMatchObject({
+        permissions: { role: 'OWNER', canView: true, canCreate: true, canPublish: true },
+      });
+
+      expect(await readMetadata(scope, scope.member.token)).toMatchObject({
+        permissions: {
+          role: 'MEMBER',
+          canView: true,
+          canCreate: false,
+          canEdit: false,
+          canPublish: false,
+          canDelete: false,
+        },
+      });
     });
   });
 });

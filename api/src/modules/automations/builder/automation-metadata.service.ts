@@ -1,16 +1,11 @@
 import {
-  ACTION_LABEL,
-  AUTOMATION_ACTIONS,
-  AUTOMATION_SELECTOR_CATEGORY,
-  AUTOMATION_TRIGGERS,
-  AutomationAction,
-  AutomationTrigger,
   ConditionValueKind,
   TASK_PRIORITIES,
   TASK_PRIORITY_DISPLAY,
   TASK_STATUS_DISPLAY,
   TASK_STATUSES,
-  TRIGGER_LABEL,
+  WorkspaceRole,
+  hasAtLeastRole,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -22,13 +17,52 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { ProjectsService } from '../../projects/projects.service';
 
+import {
+  actionCatalogue,
+  capabilities,
+  conditionCatalogue,
+  permissionsFor,
+  triggerCatalogue,
+  type AutomationCapabilities,
+  type AutomationConditionEntry,
+  type AutomationPermissions,
+  type AutomationTriggerEntry,
+} from './automation-catalogue';
+
+/**
+ * The metadata response.
+ *
+ * Extends the shared shape rather than replacing it: `triggers` narrow to
+ * entries carrying their configuration forms, and the three additions are the
+ * parts a builder cannot work out for itself — what the catalogue offers, what
+ * the engine can do, and what this caller may do with it.
+ */
+export interface AutomationMetadataResponse extends AutomationMetadata {
+  triggers: AutomationTriggerEntry[];
+  actions: AutomationCatalogEntry[];
+  /** The condition catalogue, grouped and ordered. */
+  conditions: AutomationConditionEntry[];
+  customFields: { id: string; name: string; type: string; options: CustomFieldOption[] }[];
+  capabilities: AutomationCapabilities;
+  permissions: AutomationPermissions;
+}
+
+interface CustomFieldOption {
+  id: string;
+  label: string;
+  colorToken: string;
+}
+
 /**
  * Everything the builder's forms need to offer real choices.
  *
- * The old builder hard-coded its condition fields and read sections from
- * whatever the page happened to have. That meant a form could offer a status a
- * project does not define, and a workspace that renamed its statuses saw
- * somebody else's words. One endpoint, answered from the project.
+ * Two jobs, and the split matters. The catalogue — which triggers, conditions
+ * and actions exist and which of them run — is a fact about the engine and lives
+ * in `automation-catalogue.ts`. This service answers the other half: what *this*
+ * project holds. A form that offers a status the project does not define, or a
+ * section belonging to somebody else's project, produces a rule that is accepted
+ * and can never match, and one endpoint answering from the project is what stops
+ * that happening.
  */
 @Injectable()
 export class AutomationMetadataService {
@@ -37,22 +71,33 @@ export class AutomationMetadataService {
     private readonly projects: ProjectsService,
   ) {}
 
-  async forProject(workspaceId: string, projectId: string): Promise<AutomationMetadata> {
+  async forProject(
+    workspaceId: string,
+    projectId: string,
+    role: WorkspaceRole,
+  ): Promise<AutomationMetadataResponse> {
     await this.projects.requireProject(workspaceId, projectId);
 
     const [sections, statuses, priorities, members, customFields] = await Promise.all([
+      /*
+       * This project's own sections, in the order the board shows them.
+       *
+       * There is no archive flag on a section — deleting one is a delete — so
+       * there is nothing to filter beyond the project. The scoping is the part
+       * that matters: a section list leaking another project's rows would offer
+       * a move across a tenant boundary, which the runner then refuses at
+       * execution time as a rule that mysteriously never works.
+       */
       this.prisma.section.findMany({
         where: { projectId },
         orderBy: { position: 'asc' },
         select: { id: true, name: true },
       }),
-      this.prisma.statusDefinition.findMany({
-        where: { workspaceId, OR: [{ projectId }, { projectId: null }] },
-        orderBy: { position: 'asc' },
-        select: { id: true, name: true, colorToken: true },
-      }),
+      this.statusesFor(workspaceId, projectId),
       this.prisma.priorityDefinition.findMany({
-        where: { workspaceId },
+        // Archived priorities were being offered alongside live ones, so a rule
+        // could be built against a value nothing carries any more.
+        where: { workspaceId, isArchived: false },
         orderBy: { level: 'asc' },
         select: { id: true, name: true, colorToken: true },
       }),
@@ -65,105 +110,77 @@ export class AutomationMetadataService {
       this.prisma.customField.findMany({
         where: { workspaceId, isArchived: false, projects: { some: { projectId } } },
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, type: true },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          // The options come with the field because the generated condition and
+          // action rows are useless without them: "Risk is…" needs the values
+          // Risk can take, and a second round trip per field to fetch them
+          // would be one request per row in the catalogue.
+          options: {
+            where: { isArchived: false },
+            orderBy: { position: 'asc' },
+            select: { id: true, label: true, colorToken: true },
+          },
+        },
       }),
     ]);
 
     return {
-      triggers: this.triggers(),
-      actions: this.actions(),
+      triggers: triggerCatalogue(),
+      actions: actionCatalogue(customFields),
+      conditions: conditionCatalogue(customFields),
       conditionFields: this.conditionFields(statuses, priorities, sections, members),
       sections,
       statuses,
       priorities,
       members: members.map((row) => row.user),
       customFields,
+      capabilities: capabilities(),
+      permissions: permissionsFor(role, hasAtLeastRole(role, WorkspaceRole.MANAGER)),
     };
   }
 
   /**
-   * Every declared trigger, with whether it can actually run.
+   * The statuses this project actually uses.
    *
-   * Listed rather than filtered: an unavailable trigger shown disabled says
-   * "not yet", and one simply missing says "never considered". The engine's own
-   * list is the source of truth for `available`, so a trigger cannot appear
-   * usable here and be refused on publish.
+   * Its own set when it has one, the workspace default set when it does not —
+   * the same resolution `DefinitionsService.statusesFor` performs, because a
+   * project's status list has one right answer and two places computing it
+   * differently is how a rule comes to name a status the board never shows.
+   *
+   * This used to be `OR: [{ projectId }, { projectId: null }]`, which merged the
+   * two: a project that had renamed its statuses saw its own words *and* the
+   * workspace's, duplicated, with no way to tell which of the two "In review"
+   * rows the rule would compare against. Archived rows came through as well.
    */
-  private triggers(): AutomationCatalogEntry[] {
-    return AUTOMATION_TRIGGERS.map((subtype) => ({
-      subtype,
-      label: TRIGGER_LABEL[subtype],
-      /*
-       * Empty rather than a copy of the label.
-       *
-       * This repeated the label verbatim, which was invisible while the picker
-       * showed only one of them and reads as a stutter now that it shows both —
-       * "Assign a person / Assign a person". Nothing useful is known to say
-       * here yet, and saying nothing is the honest version of that.
-       */
-      description: '',
-      category: this.triggerCategory(subtype),
-      available: true,
-    }));
-  }
+  private async statusesFor(workspaceId: string, projectId: string) {
+    const select = { id: true, name: true, colorToken: true } as const;
 
-  private actions(): AutomationCatalogEntry[] {
-    return AUTOMATION_ACTIONS.map((subtype) => ({
-      subtype,
-      label: ACTION_LABEL[subtype],
-      description: '',
-      category: this.actionCategory(subtype),
-      available: true,
-    }));
-  }
+    const own = await this.prisma.statusDefinition.findMany({
+      where: { workspaceId, projectId, isArchived: false },
+      orderBy: { position: 'asc' },
+      select,
+    });
 
-  private triggerCategory(trigger: AutomationTrigger): string {
-    if (trigger === AutomationTrigger.COMMENT_ADDED) {
-      return AUTOMATION_SELECTOR_CATEGORY.COMMUNICATION;
-    }
-    if (trigger === AutomationTrigger.TASK_ASSIGNED) {
-      return AUTOMATION_SELECTOR_CATEGORY.ASSIGNMENT;
-    }
-    if (trigger === AutomationTrigger.CUSTOM_FIELD_CHANGED) {
-      return AUTOMATION_SELECTOR_CATEGORY.FIELDS;
-    }
-    if (
-      trigger === AutomationTrigger.TASK_STATUS_CHANGED ||
-      trigger === AutomationTrigger.TASK_PRIORITY_CHANGED ||
-      trigger === AutomationTrigger.TASK_MOVED_TO_SECTION ||
-      trigger === AutomationTrigger.TASK_COMPLETED
-    ) {
-      return AUTOMATION_SELECTOR_CATEGORY.WORKFLOW;
-    }
+    if (own.length > 0) return own;
 
-    return AUTOMATION_SELECTOR_CATEGORY.WORK_ITEM;
-  }
-
-  private actionCategory(action: AutomationAction): string {
-    const byAction: Partial<Record<AutomationAction, string>> = {
-      ASSIGN_USER: AUTOMATION_SELECTOR_CATEGORY.ASSIGNMENT,
-      UNASSIGN_USER: AUTOMATION_SELECTOR_CATEGORY.ASSIGNMENT,
-      MOVE_TO_SECTION: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-      UPDATE_STATUS: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-      UPDATE_PRIORITY: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-      SET_DUE_DATE: AUTOMATION_SELECTOR_CATEGORY.DATES,
-      CLEAR_DUE_DATE: AUTOMATION_SELECTOR_CATEGORY.DATES,
-      SET_CUSTOM_FIELD: AUTOMATION_SELECTOR_CATEGORY.FIELDS,
-      ADD_COMMENT: AUTOMATION_SELECTOR_CATEGORY.COMMUNICATION,
-      SEND_IN_APP_NOTIFICATION: AUTOMATION_SELECTOR_CATEGORY.COMMUNICATION,
-      CREATE_SUBTASK: AUTOMATION_SELECTOR_CATEGORY.SUBTASKS,
-    };
-
-    return byAction[action] ?? AUTOMATION_SELECTOR_CATEGORY.WORK_ITEM;
+    return this.prisma.statusDefinition.findMany({
+      where: { workspaceId, projectId: null, isArchived: false },
+      orderBy: { position: 'asc' },
+      select,
+    });
   }
 
   /**
    * What a condition may be about, with the values it can be compared against.
    *
-   * The `valueKind` is what makes the operator list type-aware — see
-   * `OPERATORS_BY_VALUE_KIND`. Options are supplied for the fields whose values
-   * are a fixed set, so the form offers this project's statuses rather than a
-   * free text box that silently never matches.
+   * The older, flatter view of the same question, kept because the graph
+   * validator and the stored node configurations both speak it: a condition node
+   * holds a `field` and a `FilterOperator`, and `valueKind` is what makes that
+   * operator list type-aware. The new `conditions` catalogue is the picker; this
+   * is what the picked row is configured with.
    */
   private conditionFields(
     statuses: { id: string; name: string }[],

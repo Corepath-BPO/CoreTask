@@ -287,7 +287,7 @@ test.describe('the automation builder', () => {
     // From the placeholder on the canvas: the card that says "choose a step" is
     // the invitation, so pressing it is how an action gets chosen.
     await page.getByRole('button', { name: /^Add a step —/ }).click();
-    await page.getByRole('option', { name: /add a comment/i }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
 
     /*
      * The count does not change, and that is the point: the placeholder is the
@@ -444,7 +444,7 @@ test.describe('the automation builder', () => {
     await openBuilder(page);
 
     await page.getByRole('button', { name: /^Add a step —/ }).click();
-    await page.getByRole('option', { name: /add a comment/i }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
 
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();
@@ -592,6 +592,266 @@ test.describe('the automation builder', () => {
 
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
     await expect(page.getByRole('button', { name: `Rule name: ${before}` })).toBeVisible();
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* The three inspectors                                                */
+  /* ------------------------------------------------------------------ */
+
+  /** The panel, whichever of its jobs it is currently doing. */
+  const inspector = (page: Page) => page.getByRole('complementary', { name: /step settings/i });
+
+  const openStep = async (page: Page, name: RegExp) => {
+    await page.locator('.react-flow__node').filter({ hasText: name }).first().click();
+
+    const rail = inspector(page);
+    await expect(rail).toBeVisible();
+
+    return rail;
+  };
+
+  test('the When inspector offers exactly the four ways a move can be narrowed', async ({
+    page,
+  }) => {
+    /*
+     * The whole point of the trigger panel.
+     *
+     * A move can be watched four ways, and the old panel — one optional section
+     * — could express exactly one of them. If this list ever shrinks back, the
+     * inspector has quietly lost three quarters of what it is for.
+     */
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    // A breadcrumb above, the particular trigger below it — and the trigger
+    // does not say "When" twice.
+    await expect(rail.getByText('When… /')).toBeVisible();
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText(
+      'A task is moved to a section',
+    );
+
+    await rail.getByLabel('Choose an option').click();
+
+    await expect(page.getByRole('option')).toHaveText([
+      'Section is changed',
+      'Section is…',
+      'Section is not…',
+      'Section is one of…',
+    ]);
+
+    await page.keyboard.press('Escape');
+  });
+
+  test('“Section is one of…” asks for several sections at once', async ({ page }) => {
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+
+    /*
+     * One section is a select; several is a menu of checkboxes.
+     *
+     * The difference between the two controls *is* the difference between the
+     * two forms, so a "one of" that renders the single picker would be a rule
+     * that can only ever name one section however it is labelled.
+     */
+    await expect(rail.getByLabel('Choose a section')).toHaveCount(0);
+
+    const picker = rail.getByLabel('Choose sections');
+    await expect(picker).toBeVisible();
+    await picker.click();
+
+    const boxes = page.getByRole('menuitemcheckbox');
+    await expect(boxes.first()).toBeVisible();
+
+    const first = ((await boxes.nth(0).textContent()) ?? '').trim();
+    const second = ((await boxes.nth(1).textContent()) ?? '').trim();
+
+    // The second click without reopening: a question with more than one answer
+    // by definition cannot shut its menu after the first.
+    await boxes.nth(0).click();
+    await boxes.nth(1).click();
+    await page.keyboard.press('Escape');
+
+    await expect(picker).toContainText(first);
+    await expect(picker).toContainText(second);
+  });
+
+  test('the comparisons on offer follow the field being checked', async ({ page }) => {
+    /*
+     * "Due date contains High" is the combination this exists to prevent. The
+     * endpoint refuses it too, so the form is a convenience — but a form that
+     * offers it makes somebody build a rule that cannot be saved.
+     */
+    await openBuilder(page);
+    const rail = await openStep(page, /Check if/);
+
+    await rail.getByLabel('Field', { exact: true }).click();
+    await page.getByRole('option', { name: 'Section', exact: true }).click();
+
+    await rail.getByLabel('Choose an option').click();
+    await expect(page.getByRole('option')).toHaveText([
+      'is',
+      'is not',
+      'is one of',
+      'is not one of',
+      'is empty',
+      'is not empty',
+    ]);
+    await page.keyboard.press('Escape');
+
+    await rail.getByLabel('Field', { exact: true }).click();
+    await page.getByRole('option', { name: 'Due date' }).click();
+
+    await rail.getByLabel('Choose an option').click();
+    const dates = await page.getByRole('option').allTextContents();
+
+    expect(dates).toContain('is before');
+    expect(dates).toContain('is overdue');
+    // Nothing on a date contains anything.
+    expect(dates).not.toContain('contains');
+
+    await page.keyboard.press('Escape');
+  });
+
+  test('the condition reads as a sentence, and never as an identifier', async ({ page }) => {
+    await openBuilder(page);
+    const rail = await openStep(page, /Check if/);
+    const heading = rail.getByRole('heading', { level: 2 });
+
+    await expect(rail.getByText('Check if… /')).toBeVisible();
+
+    await rail.getByLabel('Field', { exact: true }).click();
+    await page.getByRole('option', { name: 'Section', exact: true }).click();
+
+    // The section field asks in the words of the thing it is asking about.
+    const value = rail.getByLabel('Choose a column/section');
+    await value.click();
+
+    const section = ((await page.getByRole('option').first().textContent()) ?? '').trim();
+    await page.getByRole('option').first().click();
+
+    await expect(heading).toHaveText(`Section is ${section}`);
+
+    /*
+     * And it follows the operator, live.
+     *
+     * There is no save button on this panel, so the heading changing as the
+     * form is answered is the only thing that says an edit landed.
+     */
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'is one of', exact: true }).click();
+
+    await expect(heading).toHaveText(`Section is one of ${section}`);
+
+    // Never the id behind the name. One on a heading looks like data rather
+    // than like a mistake, and the mistake is what needs noticing.
+    expect(await heading.textContent()).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+
+  test('the action catalogue is grouped, and keeps a tab for external actions', async ({
+    page,
+  }) => {
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Do this…');
+    await expect(
+      rail.getByText('Add an action that occurs as a result of the rule.'),
+    ).toBeVisible();
+
+    /*
+     * Grouped in the server's order, not in whichever order a Map happened to
+     * hand back. Taken from the endpoint rather than hard-coded, so renaming a
+     * category is not a test to fix.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const expected: string[] = [];
+    for (const entry of metadata.data.actions) {
+      if (!expected.includes(entry.category)) expected.push(entry.category);
+    }
+
+    const rendered = await rail
+      .getByRole('group')
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute('aria-label') ?? ''),
+      );
+
+    expect(rendered).toEqual(expected);
+
+    // Every offer is still an option inside a listbox, so a screen reader can
+    // say how much catalogue is left below the fold.
+    await expect(rail.getByRole('listbox')).toBeVisible();
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    /*
+     * The tab exists and says it is not ready, rather than being quietly
+     * removed so that nobody asks. No fake integrations behind it.
+     */
+    await rail.getByRole('tab', { name: 'External actions' }).click();
+    await expect(rail.getByText('External actions will be available later.')).toBeVisible();
+    await expect(rail.getByRole('option')).toHaveCount(0);
+  });
+
+  test('an action the engine cannot run is listed with the reason it cannot', async ({ page }) => {
+    /*
+     * Listed rather than filtered. Absence reads as "never considered"; a
+     * greyed row with a reason reads as "not yet", which is the truth and saves
+     * somebody searching for it a second time somewhere else.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const blocked = metadata.data.actions.filter(
+      (entry: { available: boolean }) => !entry.available,
+    );
+
+    expect(
+      blocked.length,
+      'the metadata offered nothing unavailable, so the convention cannot be checked',
+    ).toBeGreaterThan(0);
+
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    const entry = blocked[0] as { label: string; reason: string };
+    const row = rail.getByRole('option', { name: entry.label }).first();
+
+    await expect(row).toBeDisabled();
+    await expect(row.locator('[data-slot="catalogue-reason"]')).toHaveText(entry.reason);
+  });
+
+  test('searching the catalogue matches the group as well as the row', async ({ page }) => {
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    const groups = rail.getByRole('group');
+    await expect(groups.first()).toBeVisible();
+
+    const heading = (await groups.first().getAttribute('aria-label')) ?? '';
+
+    // The category is printed above every row, so a search that cannot find it
+    // reads as a search that is broken.
+    await rail.getByRole('textbox', { name: /search actions/i }).fill(heading);
+
+    await expect(groups).toHaveCount(1);
+    await expect(groups.first()).toHaveAttribute('aria-label', heading);
   });
 
   test('renders in dark mode too', async ({ page }) => {

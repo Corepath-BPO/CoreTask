@@ -136,6 +136,23 @@ export interface AutomationCatalogEntry {
   category: string;
   /** False for something declared but not executable — shown disabled. */
   available: boolean;
+  /**
+   * Why it cannot be chosen, when it cannot.
+   *
+   * A greyed row with no explanation is worse than an absent one: it says "not
+   * for you" without saying why or whether that will change. This is the half
+   * that makes showing it rather than hiding it the kinder choice.
+   */
+  reason?: string | null;
+  /**
+   * The custom field an entry was generated from.
+   *
+   * Set only for the per-field entries, so the card can render the field's name
+   * as a token — "Change `Priority` to…" — rather than baking it into the label
+   * and losing the distinction between the words and the field.
+   */
+  fieldId?: string;
+  fieldName?: string;
 }
 
 export interface ConditionFieldDefinition {

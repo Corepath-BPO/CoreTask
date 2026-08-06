@@ -10,10 +10,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { ApiErrorResponseDoc } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -26,6 +27,7 @@ import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guar
 
 import { AutomationsService } from './automations.service';
 import { AutomationNodeDto, CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 /**
  * Project workflow rules.
@@ -48,6 +50,7 @@ export class AutomationsController {
     private readonly automations: AutomationsService,
     private readonly validator: AutomationGraphValidatorService,
     private readonly metadata: AutomationMetadataService,
+    private readonly definitions: AutomationDefinitionService,
   ) {}
 
   @Get()
@@ -84,15 +87,17 @@ export class AutomationsController {
   @ApiOperation({
     summary: 'What the builder’s forms can offer',
     description:
-      'Triggers, actions, condition fields and the project’s own sections, statuses, ' +
-      'priorities, members and fields. Read from the project so a form cannot offer a status ' +
-      'the project does not define.',
+      'The trigger, condition and action catalogues, plus the project’s own sections, ' +
+      'statuses, priorities, members and custom fields. Read from the project so a form cannot ' +
+      'offer a status the project does not define. Every entry carries `available`, derived ' +
+      'from what the engine can actually run, and every unavailable one carries the reason.',
   })
   metadataForProject(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
-    return this.metadata.forProject(workspaceId, projectId);
+    return this.metadata.forProject(workspaceId, projectId, role);
   }
 
   @Get(':ruleId/graph')
@@ -275,6 +280,88 @@ export class AutomationsController {
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
   ) {
     return this.automations.executions(workspaceId, projectId, ruleId);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* The structured rule                                                       */
+  /* ------------------------------------------------------------------------ */
+
+  /*
+   * Alongside the graph routes above rather than replacing them. The node tree
+   * is what every live rule still executes from, so both models are readable
+   * for as long as the migration takes — the graph routes go when the runner
+   * reads the published version, and not before.
+   */
+
+  @Get(':ruleId/definition')
+  @ApiOperation({
+    summary: 'Read the rule being edited, as a trigger and ordered branches',
+    description:
+      'Returns the draft version. A rule that has never been edited in this builder has its ' +
+      'node tree converted on the first read, so an existing rule opens showing what it does ' +
+      'rather than empty. `issues` says why `publishable` is false, and is answered on the read ' +
+      'as well as the save because a rule can stop being publishable while nobody is looking — ' +
+      'the section it names may have been deleted since.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  definition(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+  ) {
+    return this.definitions.getDraft(workspaceId, projectId, ruleId);
+  }
+
+  @Put(':ruleId/definition')
+  @ApiOperation({
+    summary: 'Save the whole rule into its draft version',
+    description:
+      'Replaces the draft’s branches wholesale — a builder sends the rule as it now stands, and ' +
+      'reconciling that against stored rows means guessing which branch is “the same” one. ' +
+      'An unfinished rule saves: a branch with no condition chosen yet, or an action not set up, ' +
+      'is reported in `issues` and blocks publishing rather than the save. A rule that is wrong ' +
+      'rather than unfinished — two “Check if” branches, an id from another workspace — is ' +
+      'refused, because storing it only moves the failure to whoever reads it next. ' +
+      'Nothing here changes what a published rule does.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  @ApiBody({
+    description: 'A rule definition: `name`, `trigger`, and `branches` with their positions.',
+    schema: { type: 'object' },
+  })
+  @ApiErrorResponseDoc(400, 'The rule cannot be stored as described; the reasons are in details')
+  @ApiErrorResponseDoc(422, 'The body is not a rule definition')
+  saveDefinition(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() body: unknown,
+  ) {
+    return this.definitions.saveDraft(workspaceId, projectId, role, ruleId, body);
+  }
+
+  @Post(':ruleId/definition/publish')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Make the draft the running version',
+    description:
+      'Refuses anything the rule builder would grey Publish out for, plus everything only the ' +
+      'server can answer — a section from another project, a person no longer in the workspace, ' +
+      'an action the engine has no code for. On success the draft becomes the published version ' +
+      'and a copy of it becomes the new draft, so the version that is running is never the one ' +
+      'anybody is editing.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  @ApiErrorResponseDoc(400, 'The rule is not ready; the reasons are in details')
+  publishDefinition(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+  ) {
+    return this.definitions.publish(workspaceId, projectId, userId, role, ruleId);
   }
 }
 
