@@ -21,8 +21,17 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.21 0.006 285.9);
 
-  --primary: oklch(0.51 0.23 276.9);
-  --primary-foreground: oklch(0.985 0 0);
+  /*
+   * Brand: #85C854 / rgb(133 200 84), written in oklch like the rest of the
+   * theme so lightness and chroma stay adjustable without leaving the space.
+   *
+   * The foreground is dark, not white. This green sits at L=0.76, so white text
+   * on it measures 2.02:1 — well under the 4.5:1 AA needs for body text, and
+   * every primary button in the app is text on this colour. Dark text measures
+   * 10.4:1.
+   */
+  --primary: oklch(0.763 0.164 134);
+  --primary-foreground: oklch(0.21 0.006 285.9);
 
   --secondary: oklch(0.967 0.001 286.4);
   --secondary-foreground: oklch(0.21 0.006 285.9);
@@ -43,7 +52,7 @@
 
   --border: oklch(0.92 0.004 286.3);
   --input: oklch(0.92 0.004 286.3);
-  --ring: oklch(0.51 0.23 276.9);
+  --ring: oklch(0.763 0.164 134);
 
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.21 0.006 285.9);
@@ -51,8 +60,14 @@
   --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
   --sidebar-border: oklch(0.92 0.004 286.3);
 
-  --chart-1: oklch(0.51 0.23 276.9);
-  --chart-2: oklch(0.596 0.145 163.2);
+  /*
+   * `chart-2` was emerald at hue 163 — close enough to the brand green at 134
+   * to be indistinguishable in a legend. It takes the outgoing indigo instead,
+   * which keeps the series far apart in hue and reuses a colour the theme has
+   * already been checked against.
+   */
+  --chart-1: oklch(0.763 0.164 134);
+  --chart-2: oklch(0.51 0.23 276.9);
   --chart-3: oklch(0.769 0.163 70.1);
   --chart-4: oklch(0.627 0.194 12.5);
   --chart-5: oklch(0.585 0.146 233.4);
@@ -67,7 +82,9 @@
   --popover: oklch(0.211 0.006 285.9);
   --popover-foreground: oklch(0.967 0.001 286.4);
 
-  --primary: oklch(0.63 0.19 277.5);
+  /* The same brand colour in both themes: at L=0.76 it already reads bright
+     against a dark background, so lightening it further would only wash it out. */
+  --primary: oklch(0.763 0.164 134);
   --primary-foreground: oklch(0.171 0.006 285.9);
 
   --secondary: oklch(0.274 0.006 286);
@@ -89,7 +106,7 @@
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.63 0.19 277.5);
+  --ring: oklch(0.763 0.164 134);
 
   --sidebar: oklch(0.196 0.006 285.9);
   --sidebar-foreground: oklch(0.967 0.001 286.4);
@@ -97,8 +114,10 @@
   --sidebar-accent-foreground: oklch(0.967 0.001 286.4);
   --sidebar-border: oklch(1 0 0 / 10%);
 
-  --chart-1: oklch(0.63 0.19 277.5);
-  --chart-2: oklch(0.667 0.15 163.2);
+  --chart-1: oklch(0.763 0.164 134);
+  /* Same swap as the light theme: the outgoing indigo, so the first two series
+     are not two greens. */
+  --chart-2: oklch(0.63 0.19 277.5);
   --chart-3: oklch(0.828 0.152 78.8);
   --chart-4: oklch(0.712 0.17 12.5);
   --chart-5: oklch(0.685 0.14 233.4);
