@@ -1,4 +1,6 @@
-import type { AutomationGraphNode, AutomationMetadata } from '@coretask/types';
+import type { AutomationMetadata } from '@coretask/types';
+
+import type { CanvasNode } from './graph-edits';
 import { describe, expect, it } from 'vitest';
 
 import { isNodeIncomplete, summarise } from './node-summary';
@@ -22,7 +24,7 @@ const metadata = {
   customFields: [],
 } as AutomationMetadata;
 
-const node = (over: Partial<AutomationGraphNode>): AutomationGraphNode =>
+const node = (over: Partial<CanvasNode>): CanvasNode =>
   ({
     id: 'n-1',
     type: 'ACTION',
@@ -33,7 +35,7 @@ const node = (over: Partial<AutomationGraphNode>): AutomationGraphNode =>
     branchKey: null,
     order: 0,
     ...over,
-  }) as AutomationGraphNode;
+  }) as CanvasNode;
 
 describe('what a node says', () => {
   it('names the section a trigger watches', () => {

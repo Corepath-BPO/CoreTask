@@ -1,9 +1,12 @@
+import type { AutomationNodeType } from '@coretask/contracts';
 import {
   NODE_CATEGORY_LABEL,
   OPERATORS_BY_VALUE_KIND,
   operatorTakesValue,
 } from '@coretask/contracts';
-import type { AutomationGraphNode, AutomationMetadata } from '@coretask/types';
+import type { AutomationMetadata } from '@coretask/types';
+
+import type { CanvasNode } from '../lib/graph-edits';
 import { useState } from 'react';
 
 import { Field } from '@/components/forms/field';
@@ -30,7 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 const NONE = '__none__';
 
 interface Props {
-  node: AutomationGraphNode | null;
+  node: CanvasNode | null;
   metadata: AutomationMetadata | undefined;
   onClose: () => void;
   onSave: (nodeId: string, configuration: Record<string, unknown>) => void;
@@ -71,7 +74,7 @@ function NodeForm({
   onClose,
   onSave,
 }: {
-  node: AutomationGraphNode;
+  node: CanvasNode;
   metadata: AutomationMetadata | undefined;
   onClose: () => void;
   onSave: (nodeId: string, configuration: Record<string, unknown>) => void;
@@ -89,7 +92,7 @@ function NodeForm({
   return (
     <>
       <SheetHeader>
-        <SheetTitle>{NODE_CATEGORY_LABEL[node.type] ?? 'Step'}</SheetTitle>
+        <SheetTitle>{NODE_CATEGORY_LABEL[node.type as AutomationNodeType] ?? 'Step'}</SheetTitle>
         <SheetDescription>{node.subtype.replace(/_/g, ' ').toLowerCase()}</SheetDescription>
       </SheetHeader>
 

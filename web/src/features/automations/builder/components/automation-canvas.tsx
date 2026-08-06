@@ -1,4 +1,4 @@
-import type { AutomationGraph, AutomationMetadata } from '@coretask/types';
+import type { AutomationGraphEdge, AutomationMetadata } from '@coretask/types';
 import {
   Background,
   BackgroundVariant,
@@ -14,13 +14,16 @@ import { useEffect, useMemo } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
+import type { CanvasNode } from '../lib/graph-edits';
 import { isNodeIncomplete, summarise } from '../lib/node-summary';
 
 /** Registered once, outside render: a new object each time remounts every node. */
 const nodeTypes = { automation: AutomationNode };
 
 interface Props {
-  graph: AutomationGraph;
+  /** Widened for the placeholder, which the canvas draws and the database has
+      no row for — see `CanvasNode`. */
+  graph: { nodes: CanvasNode[]; edges: AutomationGraphEdge[] };
   metadata: AutomationMetadata | undefined;
   selectedId: string | null;
   onSelect: (nodeId: string | null) => void;

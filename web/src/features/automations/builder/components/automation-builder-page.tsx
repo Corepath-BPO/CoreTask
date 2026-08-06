@@ -1,6 +1,6 @@
 import { validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,15 @@ import {
 } from '../hooks/use-automation-graph';
 
 import { NodeConfigurationSheet } from '../configuration/node-configuration-sheet';
+import {
+  applyEdits,
+  hasEdits,
+  makeNode,
+  NO_EDITS,
+  withPlaceholder,
+  type GraphEdits,
+} from '../lib/graph-edits';
+import { StepSelector } from '../selectors/step-selector';
 
 import { AutomationCanvas } from './automation-canvas';
 import { AutomationValidationBanner } from './automation-validation-banner';
@@ -57,23 +66,15 @@ export function AutomationBuilderPage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /*
-   * Local positions, applied over the server's.
+   * Everything changed but not saved, in one place.
    *
-   * A drag has to land immediately — waiting for a round trip makes the node
-   * spring back under the cursor — and it is not worth a save on its own. They
-   * are folded into the graph here and written when the draft is saved.
+   * Held apart from the server's copy rather than merged into it: cancelling
+   * leaves nothing behind, and one save writes the whole canvas. A drag also
+   * has to land immediately — waiting for a round trip makes the node spring
+   * back under the cursor — and it is not worth a request on its own.
    */
-  const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
-
-  /*
-   * Edits to a step's settings, held until the draft is saved.
-   *
-   * Applied over the server's copy rather than written into it, so cancelling
-   * out of a sheet leaves nothing behind and one save writes the whole canvas —
-   * a request per field would make a half-configured rule the normal state of
-   * the row rather than a moment during editing.
-   */
-  const [edits, setEdits] = useState<Record<string, Record<string, unknown>>>({});
+  const [edits, setEdits] = useState<GraphEdits>(NO_EDITS);
+  const [addingAfter, setAddingAfter] = useState(false);
 
   /** Which step's settings are open. Separate from selection: clicking a node
       on the canvas highlights it; opening it is a deliberate second act. */
@@ -84,15 +85,22 @@ export function AutomationBuilderPage({
   const graph = useMemo(() => {
     if (!rule) return { nodes: [], edges: [] };
 
-    return {
-      ...rule.graph,
-      nodes: rule.graph.nodes.map((node) => ({
-        ...node,
-        position: moved[node.id] ?? node.position,
-        configuration: edits[node.id] ?? node.configuration,
-      })),
-    };
-  }, [rule, moved, edits]);
+    // The placeholder is derived last and never saved: it is the *absence* of
+    // an action, and the API refuses the type for exactly that reason.
+    return { ...rule.graph, nodes: withPlaceholder(applyEdits(rule.graph.nodes, edits)) };
+  }, [rule, edits]);
+
+  /** What the canvas can actually save — the placeholder is not one of them. */
+  const realNodes = useMemo(
+    () => graph.nodes.filter((node) => node.type !== 'PLACEHOLDER'),
+    [graph.nodes],
+  );
+
+  const addAction = (subtype: string) =>
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, makeNode('ACTION', subtype, realNodes)],
+    }));
 
   /*
    * Checked locally as you type; the server checks again on save and publish.
@@ -104,7 +112,7 @@ export function AutomationBuilderPage({
   const issues = useMemo(
     () =>
       validateGraphStructure(
-        graph.nodes.map((node) => ({
+        realNodes.map((node) => ({
           id: node.id,
           type: node.type,
           subtype: node.subtype,
@@ -114,11 +122,11 @@ export function AutomationBuilderPage({
         })),
         currentName,
       ),
-    [graph.nodes, currentName],
+    [realNodes, currentName],
   );
 
   const blocking = issues.filter((issue) => issue.level === 'ERROR');
-  const dirty = name !== null || Object.keys(moved).length > 0 || Object.keys(edits).length > 0;
+  const dirty = name !== null || hasEdits(edits);
 
   const saveDraft = async () => {
     if (!rule) return;
@@ -126,7 +134,7 @@ export function AutomationBuilderPage({
     await saveGraph.mutateAsync({
       ruleId: rule.id,
       name: currentName,
-      nodes: graph.nodes.map((node) => ({
+      nodes: realNodes.map((node) => ({
         id: node.id,
         nodeType: node.type,
         subtype: node.subtype,
@@ -139,8 +147,7 @@ export function AutomationBuilderPage({
     });
 
     setName(null);
-    setMoved({});
-    setEdits({});
+    setEdits(NO_EDITS);
   };
 
   /**
@@ -219,6 +226,22 @@ export function AutomationBuilderPage({
         </div>
       </header>
 
+      <div className="flex items-center gap-2 pt-3">
+        <StepSelector
+          entries={metadata?.actions ?? []}
+          open={addingAfter}
+          onOpenChange={setAddingAfter}
+          onChoose={addAction}
+          placeholder="Search actions"
+          trigger={
+            <Button variant="outline" size="sm" className="cursor-pointer">
+              <Plus className="size-4" aria-hidden="true" />
+              Add action
+            </Button>
+          }
+        />
+      </div>
+
       <AutomationValidationBanner issues={issues} onFocusNode={(nodeId) => setSelectedId(nodeId)} />
 
       {/*
@@ -240,10 +263,21 @@ export function AutomationBuilderPage({
           onSelect={setSelectedId}
           onOpenNode={(nodeId) => {
             setSelectedId(nodeId);
+
+            // The placeholder is not a step to configure — it is the invitation
+            // to choose one, so it opens the selector instead of the sheet.
+            if (nodeId === 'placeholder') {
+              setAddingAfter(true);
+              return;
+            }
+
             setEditingId(nodeId);
           }}
           onMoveNode={(nodeId, position) =>
-            setMoved((previous) => ({ ...previous, [nodeId]: position }))
+            setEdits((previous) => ({
+              ...previous,
+              moved: { ...previous.moved, [nodeId]: position },
+            }))
           }
         />
       </div>
@@ -253,7 +287,10 @@ export function AutomationBuilderPage({
         metadata={metadata}
         onClose={() => setEditingId(null)}
         onSave={(nodeId, configuration) =>
-          setEdits((previous) => ({ ...previous, [nodeId]: configuration }))
+          setEdits((previous) => ({
+            ...previous,
+            configured: { ...previous.configured, [nodeId]: configuration },
+          }))
         }
       />
     </div>

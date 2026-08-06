@@ -4,7 +4,9 @@ import {
   type AutomationAction,
   type AutomationTrigger,
 } from '@coretask/contracts';
-import type { AutomationGraphNode, AutomationMetadata } from '@coretask/types';
+import type { AutomationMetadata } from '@coretask/types';
+
+import type { CanvasNode } from './graph-edits';
 
 /**
  * What a node says on the canvas.
@@ -18,10 +20,7 @@ import type { AutomationGraphNode, AutomationMetadata } from '@coretask/types';
  * id would make a broken rule look merely technical, when what it needs is for
  * somebody to notice the section was deleted.
  */
-export function summarise(
-  node: AutomationGraphNode,
-  metadata: AutomationMetadata | undefined,
-): string {
+export function summarise(node: CanvasNode, metadata: AutomationMetadata | undefined): string {
   const config = node.configuration;
 
   const name = (
@@ -153,7 +152,7 @@ function actionSummary(
 }
 
 /** Whether a node is missing something it needs, for the badge on the card. */
-export function isNodeIncomplete(node: AutomationGraphNode): boolean {
+export function isNodeIncomplete(node: CanvasNode): boolean {
   const config = node.configuration;
   const has = (key: string) => typeof config[key] === 'string' && config[key] !== '';
 
