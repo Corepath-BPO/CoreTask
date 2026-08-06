@@ -154,6 +154,19 @@ export function validateGraphStructure(
     error('The trigger has to come first.', trigger.id);
   }
 
+  /*
+   * A trigger node with nothing chosen is the same problem as no trigger.
+   *
+   * The builder starts a new rule with the trigger already on the canvas, so
+   * "there is a trigger" became true the moment the page opened while "somebody
+   * said what starts this" was still false. Same message on purpose: from where
+   * the person is sitting these are one thing, and two different sentences for
+   * it would read as two different faults.
+   */
+  if (trigger && trigger.subtype.trim() === '') {
+    error('Choose what starts this rule.', trigger.id, 'subtype');
+  }
+
   if (actions.length === 0) error('Add at least one action.');
 
   /*

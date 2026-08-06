@@ -135,6 +135,28 @@ export class AutomationsService {
     if (dto.nodes) {
       await this.replaceNodes(ruleId, dto.nodes);
       data.version = { increment: 1 };
+
+      /*
+       * The rule's own trigger columns follow the trigger node.
+       *
+       * `triggerType` on the row is a denormalisation of the graph — it is how
+       * the runner finds candidate rules without loading everybody's nodes —
+       * and until now only an explicit field kept it current. A builder that
+       * saved a changed trigger as part of the canvas would leave the two
+       * disagreeing: the rule would show one trigger and fire on another.
+       *
+       * Derived here rather than asked of the caller, so the invariant holds
+       * for any client. An explicit value still wins, and a graph saved without
+       * a trigger leaves the columns alone rather than blanking them.
+       */
+      const trigger = dto.nodes.find((node) => node.nodeType === AutomationNodeType.TRIGGER);
+
+      if (trigger && dto.triggerType === undefined) {
+        data.triggerType = trigger.subtype;
+      }
+      if (trigger && dto.triggerConfig === undefined) {
+        data.triggerConfig = (trigger.configuration ?? {}) as Prisma.InputJsonValue;
+      }
     }
 
     return this.prisma.automationRule.update({

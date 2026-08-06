@@ -13,12 +13,14 @@ import { useEffect, useMemo } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
+import { AutomationEdge } from '../nodes/automation-edge';
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
 import type { CanvasNode } from '../lib/graph-edits';
-import { isNodeIncomplete, summarise } from '../lib/node-summary';
+import { isNodeIncomplete, summarise, summariseParts } from '../lib/node-summary';
 
 /** Registered once, outside render: a new object each time remounts every node. */
 const nodeTypes = { automation: AutomationNode };
+const edgeTypes = { automation: AutomationEdge };
 
 interface Props {
   /** Widened for the placeholder, which the canvas draws and the database has
@@ -29,6 +31,10 @@ interface Props {
   onSelect: (nodeId: string | null) => void;
   onOpenNode: (nodeId: string) => void;
   onMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
+  /** Add a step directly after `parentId`, before whatever follows it. */
+  onInsertStep: (parentId: string) => void;
+  /** Split the rule directly after `parentId`. */
+  onInsertBranch: (parentId: string) => void;
 }
 
 /**
@@ -51,7 +57,16 @@ export function AutomationCanvas(props: Props) {
   );
 }
 
-function Canvas({ graph, metadata, selectedId, onSelect, onOpenNode, onMoveNode }: Props) {
+function Canvas({
+  graph,
+  metadata,
+  selectedId,
+  onSelect,
+  onOpenNode,
+  onMoveNode,
+  onInsertStep,
+  onInsertBranch,
+}: Props) {
   const { fitView } = useReactFlow();
 
   const nodes = useMemo<Node<AutomationNodeData>[]>(
@@ -63,7 +78,8 @@ function Canvas({ graph, metadata, selectedId, onSelect, onOpenNode, onMoveNode 
         selected: node.id === selectedId,
         data: {
           category: node.type,
-          summary: summarise(node, metadata),
+          summary: summariseParts(node, metadata),
+          label: summarise(node, metadata),
           invalid: isNodeIncomplete(node),
           onOpen: () => onOpenNode(node.id),
         },
@@ -79,11 +95,11 @@ function Canvas({ graph, metadata, selectedId, onSelect, onOpenNode, onMoveNode 
         target: edge.target,
         ...(edge.kind === 'DEFAULT' ? {} : { sourceHandle: 'branch' }),
         ...(edge.label ? { label: edge.label } : {}),
-        type: 'smoothstep',
+        type: 'automation',
         animated: false,
-        style: { strokeWidth: 1.5 },
+        data: { onInsertStep, onInsertBranch },
       })),
-    [graph.edges],
+    [graph.edges, onInsertStep, onInsertBranch],
   );
 
   /*
@@ -108,6 +124,7 @@ function Canvas({ graph, metadata, selectedId, onSelect, onOpenNode, onMoveNode 
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       // Connections are made by adding steps, never by dragging between dots.
       // This is a workflow builder, not a diagram editor.
       nodesConnectable={false}

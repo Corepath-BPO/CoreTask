@@ -3,7 +3,10 @@ import { expect, test } from './fixtures';
 test.describe('automations', () => {
   const openProject = async (page: import('@playwright/test').Page) => {
     await page.goto('/projects');
-    await page.getByRole('link', { name: /platform foundation/i }).first().click();
+    await page
+      .getByRole('link', { name: /platform foundation/i })
+      .first()
+      .click();
     await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/);
   };
 
@@ -26,7 +29,10 @@ test.describe('automations', () => {
 
   test('the popover explains an empty section rather than showing nothing', async ({ page }) => {
     await openProject(page);
-    await page.getByRole('button', { name: /automations for .* — /i }).first().click();
+    await page
+      .getByRole('button', { name: /automations for .* — /i })
+      .first()
+      .click();
 
     await expect(page.getByText(/rules for/i)).toBeVisible();
     await expect(page.getByText(/nothing runs when a task lands here yet/i)).toBeVisible();
@@ -38,15 +44,21 @@ test.describe('automations', () => {
    */
   test('Add rule carries the section into the builder', async ({ page }) => {
     await openProject(page);
-    await page.getByRole('button', { name: /automations for .* — /i }).first().click();
+    await page
+      .getByRole('button', { name: /automations for .* — /i })
+      .first()
+      .click();
     await page.getByRole('link', { name: /add rule/i }).click();
 
-    await expect(page).toHaveURL(/\/automations\?.*sectionId=[0-9a-f-]+/);
+    await expect(page).toHaveURL(/\/automations\/new\?.*sectionId=[0-9a-f-]+/);
   });
 
   test('Manage all reaches the rules page', async ({ page }) => {
     await openProject(page);
-    await page.getByRole('button', { name: /automations for .* — /i }).first().click();
+    await page
+      .getByRole('button', { name: /automations for .* — /i })
+      .first()
+      .click();
     await page.getByRole('link', { name: /manage all/i }).click();
 
     await expect(page).toHaveURL(/\/automations$/);

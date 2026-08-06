@@ -65,7 +65,24 @@ export const automationsApi = {
       triggerType: string;
       description?: string;
       triggerConfig?: Record<string, unknown>;
-      nodes?: { nodeType: string; subtype: string; configuration?: Record<string, unknown> }[];
+      /*
+       * The whole graph, not just the steps.
+       *
+       * This listed only the three fields the old stacked builder sent, so a
+       * canvas saved on its first write would arrive without positions, without
+       * parentage, and with both arms of a branch collapsed onto the main path
+       * — the endpoint has always accepted them.
+       */
+      nodes?: {
+        id?: string;
+        nodeType: string;
+        subtype: string;
+        configuration?: Record<string, unknown>;
+        position?: { x: number; y: number };
+        parentId?: string | null;
+        branchKey?: string | null;
+        order?: number;
+      }[];
     },
   ): Promise<AutomationRule> =>
     apiClient.post<AutomationRule>(base(workspaceId, projectId), payload),

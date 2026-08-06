@@ -127,7 +127,9 @@ export function SectionAutomationPopover({
                       {rule.status.toLowerCase()}
                     </SemanticBadge>
                     <span className="text-[11px] text-muted-foreground">
-                      {rule.lastRunAt ? `Last run ${formatRelativeTime(rule.lastRunAt)}` : 'Never run'}
+                      {rule.lastRunAt
+                        ? `Last run ${formatRelativeTime(rule.lastRunAt)}`
+                        : 'Never run'}
                     </span>
                     {rule.failureCount > 0 && (
                       <span className="inline-flex items-center gap-1 text-[11px] text-destructive">
@@ -150,9 +152,9 @@ export function SectionAutomationPopover({
           */}
           <Button asChild variant="ghost" size="sm" className="flex-1 justify-start">
             <Link
-              to="/projects/$projectId/automations"
+              to="/projects/$projectId/automations/new"
               params={{ projectId }}
-              search={{ sectionId, new: true }}
+              search={{ sectionId }}
             >
               <Plus className="size-4" aria-hidden="true" />
               Add rule

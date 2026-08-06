@@ -20,7 +20,25 @@ import type { CanvasNode } from './graph-edits';
  * id would make a broken rule look merely technical, when what it needs is for
  * somebody to notice the section was deleted.
  */
-export function summarise(node: CanvasNode, metadata: AutomationMetadata | undefined): string {
+export interface SummarySegment {
+  text: string;
+  /** Rendered as a token on the card: the value, not the sentence around it. */
+  chip?: boolean;
+}
+
+/**
+ * The same sentence, in pieces.
+ *
+ * The card sets the value apart from the words describing it, which is what
+ * makes a rule scannable at a glance rather than something to read. Splitting it
+ * here rather than in the component keeps one place that knows what a step says
+ * — the string below is these parts joined, so the label a screen reader hears
+ * and the label somebody sees cannot drift apart.
+ */
+export function summariseParts(
+  node: CanvasNode,
+  metadata: AutomationMetadata | undefined,
+): SummarySegment[] {
   const config = node.configuration;
 
   const name = (
@@ -34,14 +52,23 @@ export function summarise(node: CanvasNode, metadata: AutomationMetadata | undef
 
   switch (node.type) {
     case 'TRIGGER': {
+      // A new rule opens with the trigger already on the canvas and nothing
+      // chosen in it. An empty card would read as a rendering fault; this reads
+      // as the first thing to do.
+      if (node.subtype === '') return [{ text: 'Choose what starts this rule' }];
+
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
       const sectionId = config['sectionId'];
 
       if (typeof sectionId === 'string' && sectionId !== '') {
-        return `${label} — ${name(metadata?.sections, sectionId, 'any section')}`;
+        return [
+          { text: label },
+          { text: '—' },
+          { text: name(metadata?.sections, sectionId, 'any section'), chip: true },
+        ];
       }
 
-      return label;
+      return [{ text: label }];
     }
 
     case 'CONDITION':
@@ -53,36 +80,46 @@ export function summarise(node: CanvasNode, metadata: AutomationMetadata | undef
     case 'BRANCH': {
       // A split says what it splits on, or asks — "Split the path" tells
       // somebody nothing they cannot already see.
-      const summary = conditionSummary(config, metadata);
-      return summary === 'Choose what to check' ? 'Split on — choose what to check' : summary;
+      const parts = conditionSummary(config, metadata);
+
+      return parts.length === 1 && parts[0]!.text === 'Choose what to check'
+        ? [{ text: 'Split on — choose what to check' }]
+        : parts;
     }
 
     case 'DELAY':
-      return 'Wait';
+      return [{ text: 'Wait' }];
 
     default:
-      return 'Choose a step';
+      return [{ text: 'Choose a step' }];
   }
+}
+
+/** The whole sentence, for an aria-label and anywhere plain text is wanted. */
+export function summarise(node: CanvasNode, metadata: AutomationMetadata | undefined): string {
+  return summariseParts(node, metadata)
+    .map((part) => part.text)
+    .join(' ');
 }
 
 function conditionSummary(
   config: Record<string, unknown>,
   metadata: AutomationMetadata | undefined,
-): string {
+): SummarySegment[] {
   const field = config['field'];
   const operator = config['operator'];
 
-  if (typeof field !== 'string' || field === '') return 'Choose what to check';
+  if (typeof field !== 'string' || field === '') return [{ text: 'Choose what to check' }];
 
   const definition = metadata?.conditionFields.find((entry) => entry.field === field);
   const label = definition?.label ?? field;
 
-  if (typeof operator !== 'string' || operator === '') return `${label} …`;
+  if (typeof operator !== 'string' || operator === '') return [{ text: `${label} …` }];
 
   // An emptiness check reads as a sentence on its own; anything else needs the
   // value it is being compared against.
-  if (operator === 'IS_EMPTY') return `${label} is empty`;
-  if (operator === 'IS_NOT_EMPTY') return `${label} is set`;
+  if (operator === 'IS_EMPTY') return [{ text: `${label} is empty` }];
+  if (operator === 'IS_NOT_EMPTY') return [{ text: `${label} is set` }];
 
   const raw = config['value'];
   const option = definition?.options?.find((entry) => entry.value === raw);
@@ -108,7 +145,10 @@ function conditionSummary(
     AFTER: 'is after',
   };
 
-  return `${label} ${verb[operator] ?? operator.toLowerCase()} ${value}`;
+  return [
+    { text: `${label} ${verb[operator] ?? operator.toLowerCase()}` },
+    { text: value, chip: true },
+  ];
 }
 
 /** `IN_PROGRESS` -> `In progress`. Left alone when it is not an enum token. */
@@ -124,7 +164,7 @@ function actionSummary(
   subtype: string,
   config: Record<string, unknown>,
   metadata: AutomationMetadata | undefined,
-): string {
+): SummarySegment[] {
   const label = ACTION_LABEL[subtype as AutomationAction] ?? subtype;
 
   const person = (id: unknown) => {
@@ -142,35 +182,46 @@ function actionSummary(
   switch (subtype) {
     case 'ASSIGN_USER': {
       const who = person(config['userId']);
-      return who ? `Assign to ${who}` : 'Assign — choose somebody';
+      return who
+        ? [{ text: 'Assign to' }, { text: who, chip: true }]
+        : [{ text: 'Assign — choose somebody' }];
     }
 
     case 'MOVE_TO_SECTION': {
       const where = section(config['sectionId']);
-      return where ? `Move to ${where}` : 'Move — choose a section';
+      return where
+        ? [{ text: 'Move to' }, { text: where, chip: true }]
+        : [{ text: 'Move — choose a section' }];
     }
 
     case 'UPDATE_STATUS': {
       const status = config['statusDefinitionId'] ?? config['status'];
       const found = metadata?.statuses.find((entry) => entry.id === status)?.name;
-      return found ? `Set status to ${found}` : 'Set status — choose one';
+      return found
+        ? [{ text: 'Set status to' }, { text: found, chip: true }]
+        : [{ text: 'Set status — choose one' }];
     }
 
     case 'UPDATE_PRIORITY': {
       const priority = config['priorityDefinitionId'] ?? config['priority'];
       const found = metadata?.priorities.find((entry) => entry.id === priority)?.name;
-      return found ? `Set priority to ${found}` : 'Set priority — choose one';
+      return found
+        ? [{ text: 'Set priority to' }, { text: found, chip: true }]
+        : [{ text: 'Set priority — choose one' }];
     }
 
     case 'ADD_COMMENT': {
       const body = config['body'];
       return typeof body === 'string' && body.trim() !== ''
-        ? `Comment: “${body.slice(0, 40)}${body.length > 40 ? '…' : ''}”`
-        : 'Comment — write what it says';
+        ? [
+            { text: 'Comment:' },
+            { text: `“${body.slice(0, 40)}${body.length > 40 ? '…' : ''}”`, chip: true },
+          ]
+        : [{ text: 'Comment — write what it says' }];
     }
 
     default:
-      return label;
+      return [{ text: label }];
   }
 }
 
@@ -186,6 +237,9 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
    * the two happened to share a name — the check has to know what kind of step
    * it is looking at before it can know what that step needs.
    */
+  // The trigger a new rule starts with, before anybody has said what it is.
+  if (node.type === 'TRIGGER') return node.subtype === '';
+
   if (node.type === 'CONDITION') {
     if (!has('field') || !has('operator')) return true;
 

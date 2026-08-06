@@ -12,7 +12,7 @@ import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
-import { AutomationBuilderPage } from '@/features/automations/builder/components/automation-builder-page';
+import { AutomationBuilderDialog } from '@/features/automations/builder/components/automation-builder-dialog';
 import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectListPage } from '@/features/projects/pages/project-list-page';
@@ -254,6 +254,37 @@ const projectAutomationsRoute = createRoute({
 });
 
 /**
+ * A rule that does not exist yet.
+ *
+ * Declared before the `$ruleId` route below so the literal wins the match —
+ * rule ids are uuids, so nothing real can collide with it.
+ *
+ * `?sectionId=` is what makes this different from an empty canvas: it arrives
+ * from a section's lightning menu and the builder opens with "when a task moves
+ * here" already answered, because the click said so.
+ */
+const projectAutomationNewRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/automations/new',
+  validateSearch: (search: Record<string, unknown>): { sectionId?: string } =>
+    typeof search['sectionId'] === 'string' && UUID_PATTERN.test(search['sectionId'])
+      ? { sectionId: search['sectionId'] }
+      : {},
+  component: function AutomationNewRoute() {
+    const { projectId } = projectAutomationNewRoute.useParams();
+    const { sectionId } = projectAutomationNewRoute.useSearch();
+
+    return (
+      <AutomationBuilderDialog
+        projectId={projectId}
+        ruleId={null}
+        {...(sectionId ? { sectionId } : {})}
+      />
+    );
+  },
+});
+
+/**
  * The visual builder, on its own address.
  *
  * A rule now has a URL that can be pasted to a colleague, and Back is the rule
@@ -266,7 +297,7 @@ const projectAutomationBuilderRoute = createRoute({
   component: function AutomationBuilderRoute() {
     const { projectId, ruleId } = projectAutomationBuilderRoute.useParams();
 
-    return <AutomationBuilderPage projectId={projectId} ruleId={ruleId} />;
+    return <AutomationBuilderDialog projectId={projectId} ruleId={ruleId} />;
   },
 });
 
@@ -348,6 +379,7 @@ const routeTree = rootRoute.addChildren([
       projectListRoute,
       projectBoardRoute,
       projectAutomationsRoute,
+      projectAutomationNewRoute,
       projectAutomationBuilderRoute,
       ...projectPlaceholderRoutes,
     ]),

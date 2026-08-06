@@ -13,11 +13,15 @@ import {
 
 import { cn } from '@/lib/utils';
 
+import type { SummarySegment } from '../lib/node-summary';
+
 /** What the canvas hands each node. */
 export interface AutomationNodeData extends Record<string, unknown> {
   category: AutomationNodeType | 'PLACEHOLDER';
-  /** One line saying what this step does, already resolved to real names. */
-  summary: string;
+  /** What this step does, resolved to real names and split for display. */
+  summary: SummarySegment[];
+  /** The same sentence as one string, for the accessible name. */
+  label: string;
   /** True when this step is missing something it needs. */
   invalid: boolean;
   onOpen?: () => void;
@@ -33,28 +37,20 @@ const ICON: Record<string, LucideIcon> = {
 };
 
 /**
- * The accent, applied to a strip and an icon rather than the whole card.
+ * The accent, on the icon's tile rather than the card.
  *
- * A node filled edge to edge with saturated colour makes its own text the
- * least readable thing on the canvas, and six of them side by side stop being
- * distinguishable at all.
+ * A node filled edge to edge with saturated colour makes its own text the least
+ * readable thing on the canvas, and six of them side by side stop being
+ * distinguishable at all. A small tile carries the same signal at a size where
+ * the colour stays decoration instead of becoming the background.
  */
-const ACCENT: Record<string, string> = {
-  TRIGGER: 'bg-primary',
-  CONDITION: 'bg-violet-500',
-  ACTION: 'bg-emerald-500',
-  BRANCH: 'bg-cyan-500',
-  DELAY: 'bg-amber-500',
-  PLACEHOLDER: 'bg-muted-foreground/40',
-};
-
-const ICON_TONE: Record<string, string> = {
-  TRIGGER: 'text-primary',
-  CONDITION: 'text-violet-500',
-  ACTION: 'text-emerald-500',
-  BRANCH: 'text-cyan-500',
-  DELAY: 'text-amber-500',
-  PLACEHOLDER: 'text-muted-foreground',
+const ICON_TILE: Record<string, string> = {
+  TRIGGER: 'bg-primary/15 text-primary',
+  CONDITION: 'bg-violet-500/15 text-violet-500',
+  ACTION: 'bg-emerald-500/15 text-emerald-500',
+  BRANCH: 'bg-cyan-500/15 text-cyan-500',
+  DELAY: 'bg-amber-500/15 text-amber-500',
+  PLACEHOLDER: 'bg-muted text-muted-foreground',
 };
 
 /**
@@ -74,45 +70,77 @@ export function AutomationNode({ data, selected }: NodeProps) {
   const Icon = ICON[category] ?? ArrowRight;
   const isPlaceholder = category === 'PLACEHOLDER';
 
+  /*
+   * One name, used by the card and by the label read aloud.
+   *
+   * These were two expressions with two different fallbacks, so a placeholder
+   * showed "Add a step" and announced itself as "Add" — the accessible name has
+   * to contain the visible one, and somebody navigating by voice asking for
+   * "add a step" would not have found it.
+   */
+  const heading = NODE_CATEGORY_LABEL[category as AutomationNodeType] ?? 'Add a step';
+
   return (
     <button
       type="button"
       onClick={node.onOpen}
-      aria-label={`${NODE_CATEGORY_LABEL[category as AutomationNodeType] ?? 'Add'} — ${node.summary}`}
+      aria-label={`${heading} — ${node.label}`}
       className={cn(
-        'relative flex w-[380px] cursor-pointer items-stretch overflow-hidden rounded-lg border bg-card text-left shadow-sm transition-colors',
+        'flex w-[380px] cursor-pointer items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left shadow-sm transition-colors',
         'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
         selected ? 'border-primary' : 'border-border hover:border-muted-foreground/40',
         // A step that cannot run says so in its border as well as its badge, so
         // it is findable while scanning rather than only on inspection.
         node.invalid && 'border-destructive/60',
-        isPlaceholder && 'border-dashed bg-transparent shadow-none',
+        isPlaceholder && 'border-dashed bg-transparent shadow-none hover:bg-muted/40',
       )}
     >
-      {/* The accent strip. Decorative — the category is in the text beside it. */}
-      <span aria-hidden="true" className={cn('w-1 shrink-0', ACCENT[category])} />
-
-      <span className="flex min-w-0 flex-1 items-start gap-3 px-4 py-3">
-        <Icon className={cn('mt-0.5 size-4 shrink-0', ICON_TONE[category])} aria-hidden="true" />
-
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-medium text-muted-foreground">
-            {NODE_CATEGORY_LABEL[category as AutomationNodeType] ?? 'Add a step'}
-          </span>
-          <span
-            className={cn(
-              'block truncate text-sm',
-              isPlaceholder ? 'text-muted-foreground' : 'font-medium text-foreground',
-            )}
-          >
-            {node.summary}
-          </span>
-        </span>
-
-        {node.invalid && (
-          <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+      <span
+        aria-hidden="true"
+        className={cn(
+          'flex size-8 shrink-0 items-center justify-center rounded-lg',
+          ICON_TILE[category],
         )}
+      >
+        <Icon className="size-4" />
       </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs text-muted-foreground">{heading}</span>
+
+        {/*
+          The value is set apart from the sentence around it — "Section is
+          `Incoming Request`" — so a rule can be read at a glance instead of
+          word by word. Which parts are values is decided where the sentence is
+          built, not here, so the card cannot disagree with the name a screen
+          reader is given for the same step.
+        */}
+        <span
+          className={cn(
+            'flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm',
+            isPlaceholder ? 'text-muted-foreground' : 'text-foreground',
+          )}
+        >
+          {node.summary.map((part, index) =>
+            part.chip ? (
+              <span
+                key={index}
+                className="max-w-[210px] truncate rounded bg-muted px-1.5 py-0.5 text-[13px] text-foreground"
+              >
+                {part.text}
+              </span>
+            ) : (
+              <span key={index} className="truncate">
+                {part.text}
+              </span>
+            ),
+          )}
+        </span>
+      </span>
+
+      {node.invalid && (
+        <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+      )}
 
       {/*
         Handles are the anchors edges attach to. Hidden rather than absent:

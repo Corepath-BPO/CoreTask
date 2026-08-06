@@ -145,7 +145,21 @@ test.describe('the automation builder', () => {
         const rect = element.getBoundingClientRect();
 
         return {
-          label: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          /*
+           * The accessible name, not the raw text.
+           *
+           * A card renders its value as a separate chip, so `textContent` runs
+           * the pieces together — "Priority isHigh" — while the card itself
+           * spaces them with flex gap. The name is the one place the whole
+           * sentence exists as a sentence, which is what is being asserted.
+           */
+          label: (
+            element.querySelector('button')?.getAttribute('aria-label') ??
+            element.textContent ??
+            ''
+          )
+            .replace(/\s+/g, ' ')
+            .trim(),
           x: Math.round(rect.x),
           y: Math.round(rect.y),
           width: Math.round(rect.width),
@@ -291,7 +305,9 @@ test.describe('the automation builder', () => {
 
     await page.locator('.react-flow__node').first().click();
 
-    const sheet = page.getByRole('dialog');
+    // By slot, not by role: the builder itself is a dialog now, so the role
+    // alone matches two things and says nothing about which one opened.
+    const sheet = page.locator('[data-slot="sheet-content"]');
     await expect(sheet).toBeVisible();
 
     // The canvas is the context that makes the step make sense; a full-screen

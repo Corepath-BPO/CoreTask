@@ -26,16 +26,66 @@ export interface GraphEdits {
   removed: string[];
   moved: Record<string, { x: number; y: number }>;
   configured: Record<string, Record<string, unknown>>;
+  /**
+   * Steps whose *kind* changed — picking the trigger of a new rule, mostly.
+   *
+   * Separate from `configured` because the two do not travel together: changing
+   * what a step is makes its old settings meaningless, so a retype clears them
+   * rather than carrying a section id onto a trigger that has no section.
+   */
+  retyped: Record<string, string>;
+  /**
+   * Steps whose place in the rule changed — what runs after what.
+   *
+   * Needed because a step can be added *between* two others, not only at the
+   * end: the new step takes the parent, and whatever used to follow that parent
+   * now follows the new step. Without this the only possible edit is "append",
+   * and a control offering to insert here would be quietly lying about where the
+   * step lands.
+   */
+  reparented: Record<string, { parentId: string | null; branchKey: string | null }>;
 }
 
-export const NO_EDITS: GraphEdits = { added: [], removed: [], moved: {}, configured: {} };
+/**
+ * Where the children of `parentId` have to move when a step is inserted.
+ *
+ * Only the ones on the same arm: inserting into the "otherwise" side of a split
+ * must not drag the matching side along with it.
+ */
+export function adoptChildren(
+  inserted: CanvasNode,
+  nodes: readonly CanvasNode[],
+): GraphEdits['reparented'] {
+  const moved: GraphEdits['reparented'] = {};
+
+  for (const node of nodes) {
+    if (node.id === inserted.id) continue;
+    if (node.parentId !== inserted.parentId) continue;
+    if (node.branchKey !== inserted.branchKey) continue;
+
+    moved[node.id] = { parentId: inserted.id, branchKey: null };
+  }
+
+  return moved;
+}
+
+export const NO_EDITS: GraphEdits = {
+  added: [],
+  removed: [],
+  moved: {},
+  configured: {},
+  retyped: {},
+  reparented: {},
+};
 
 export function hasEdits(edits: GraphEdits): boolean {
   return (
     edits.added.length > 0 ||
     edits.removed.length > 0 ||
     Object.keys(edits.moved).length > 0 ||
-    Object.keys(edits.configured).length > 0
+    Object.keys(edits.configured).length > 0 ||
+    Object.keys(edits.retyped).length > 0 ||
+    Object.keys(edits.reparented).length > 0
   );
 }
 
@@ -43,21 +93,16 @@ export function hasEdits(edits: GraphEdits): boolean {
 export function applyEdits(serverNodes: readonly CanvasNode[], edits: GraphEdits): CanvasNode[] {
   const removed = new Set(edits.removed);
 
-  const kept = serverNodes
-    .filter((node) => !removed.has(node.id))
-    .map((node) => ({
-      ...node,
-      position: edits.moved[node.id] ?? node.position,
-      configuration: edits.configured[node.id] ?? node.configuration,
-    }));
+  const overlay = (node: CanvasNode): CanvasNode => ({
+    ...node,
+    subtype: edits.retyped[node.id] ?? node.subtype,
+    position: edits.moved[node.id] ?? node.position,
+    configuration: edits.configured[node.id] ?? node.configuration,
+    ...(edits.reparented[node.id] ?? {}),
+  });
 
-  const added = edits.added
-    .filter((node) => !removed.has(node.id))
-    .map((node) => ({
-      ...node,
-      position: edits.moved[node.id] ?? node.position,
-      configuration: edits.configured[node.id] ?? node.configuration,
-    }));
+  const kept = serverNodes.filter((node) => !removed.has(node.id)).map(overlay);
+  const added = edits.added.filter((node) => !removed.has(node.id)).map(overlay);
 
   /*
    * A node whose parent was removed is re-parented rather than dropped.
@@ -189,6 +234,30 @@ function columnOf(node: CanvasNode, nodes: readonly CanvasNode[]): number {
   }
 
   return depth;
+}
+
+/**
+ * The single trigger a rule that does not exist yet starts from.
+ *
+ * A brand-new rule is drawn from a graph held in the browser, not fetched — it
+ * has no id until somebody saves it. Giving it a trigger node straight away is
+ * what makes the canvas show a rule taking shape rather than an empty grid with
+ * a toolbar above it, and the trigger is the one step every rule must have.
+ *
+ * `subtype` is empty when nobody has chosen yet, which the validator and the
+ * card both treat as "not answered" rather than as a trigger named "".
+ */
+export function makeTrigger(subtype = '', configuration: Record<string, unknown> = {}): CanvasNode {
+  return {
+    id: `new-${crypto.randomUUID()}`,
+    type: 'TRIGGER',
+    subtype,
+    configuration,
+    position: defaultPosition(0, 0),
+    parentId: null,
+    branchKey: null,
+    order: 0,
+  };
 }
 
 /** A new step, attached to the end of the rule. */
