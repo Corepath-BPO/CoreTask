@@ -207,4 +207,111 @@ describe('condition configuration', () => {
 
     expect(issues[0]?.path).toBe('operator');
   });
+
+  it('refuses a condition nobody has answered', () => {
+    /*
+     * The default shape of a new rule. It used to publish cleanly and then skip
+     * every event for the rest of its life, because a missing operator reads as
+     * an unknown one and an unknown one is false.
+     */
+    const issues = validateGraphStructure(
+      [
+        {
+          id: 't',
+          type: 'TRIGGER',
+          subtype: 'TASK_CREATED',
+          configuration: {},
+          parentId: null,
+          branchKey: null,
+        },
+        {
+          id: 'c',
+          type: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: {},
+          parentId: 't',
+          branchKey: null,
+        },
+        {
+          id: 'a',
+          type: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: {},
+          parentId: 'c',
+          branchKey: null,
+        },
+      ],
+      'A rule',
+    );
+
+    expect(issues.some((issue) => issue.nodeId === 'c' && issue.path === 'field')).toBe(true);
+  });
+
+  it('refuses a condition with a field but no comparison', () => {
+    const issues = validateGraphStructure(
+      [
+        {
+          id: 't',
+          type: 'TRIGGER',
+          subtype: 'TASK_CREATED',
+          configuration: {},
+          parentId: null,
+          branchKey: null,
+        },
+        {
+          id: 'c',
+          type: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'status' },
+          parentId: 't',
+          branchKey: null,
+        },
+        {
+          id: 'a',
+          type: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: {},
+          parentId: 'c',
+          branchKey: null,
+        },
+      ],
+      'A rule',
+    );
+
+    expect(issues.some((issue) => issue.nodeId === 'c' && issue.path === 'operator')).toBe(true);
+  });
+
+  it('accepts a condition that was answered', () => {
+    const issues = validateGraphStructure(
+      [
+        {
+          id: 't',
+          type: 'TRIGGER',
+          subtype: 'TASK_CREATED',
+          configuration: {},
+          parentId: null,
+          branchKey: null,
+        },
+        {
+          id: 'c',
+          type: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'status', operator: 'EQUALS', value: 'DONE' },
+          parentId: 't',
+          branchKey: null,
+        },
+        {
+          id: 'a',
+          type: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: {},
+          parentId: 'c',
+          branchKey: null,
+        },
+      ],
+      'A rule',
+    );
+
+    expect(issues.filter((issue) => issue.nodeId === 'c')).toEqual([]);
+  });
 });

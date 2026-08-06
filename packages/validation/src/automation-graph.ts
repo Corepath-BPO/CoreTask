@@ -200,6 +200,37 @@ export function validateGraphStructure(
     }
   }
 
+  /*
+   * A question nobody answered.
+   *
+   * The builder starts a rule with a condition card already on the canvas, so
+   * "there is a condition" went true the moment the page opened while "somebody
+   * said what to check" was still false. Nothing else catches it: the counts
+   * above only count, and the evaluator treats a missing operator as an unknown
+   * one and returns false. The result was a rule that published cleanly, went
+   * ACTIVE, and recorded a skipped execution for every matching event forever.
+   *
+   * A branch is the same node in a different hat — its comparison chooses which
+   * arm runs, so an unanswered one silently takes the otherwise side every time.
+   */
+  for (const node of [
+    ...conditions,
+    ...nodes.filter((n) => n.type === AutomationNodeType.BRANCH),
+  ]) {
+    const configuration = node.configuration ?? {};
+    const field = configuration['field'];
+    const operator = configuration['operator'];
+
+    if (typeof field !== 'string' || field.trim() === '') {
+      error('Choose what this step checks.', node.id, 'field');
+      continue;
+    }
+
+    if (typeof operator !== 'string' || operator.trim() === '') {
+      error('Choose how to compare it.', node.id, 'operator');
+    }
+  }
+
   if (conditions.length === 0 && actions.length > 0) {
     warn('No condition is set, so this rule runs every time its trigger fires.');
   }
