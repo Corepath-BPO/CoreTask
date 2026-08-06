@@ -336,7 +336,9 @@ describe('a condition above the chain', () => {
     const { branches } = convert(gated());
 
     expect(branches[1]?.type).toBe(AutomationBranchType.OTHERWISE_IF);
-    expect(branches[1]?.conditionGroup?.conditions.map((it) => it.fieldKey)).toEqual(['assigneeId']);
+    expect(branches[1]?.conditionGroup?.conditions.map((it) => it.fieldKey)).toEqual([
+      'assigneeId',
+    ]);
     expect(branches[1]?.actions.map((it) => it.actionType)).toEqual(['UNASSIGN_USER']);
   });
 });
@@ -346,7 +348,13 @@ describe('an action above the chain', () => {
   it('is prepended to every branch, ahead of that branch’s own actions', () => {
     const { branches } = convert([
       node({ id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', position: 0 }),
-      node({ id: 'a0', nodeType: 'ACTION', subtype: 'CLEAR_DUE_DATE', parentNodeId: 't', position: 0 }),
+      node({
+        id: 'a0',
+        nodeType: 'ACTION',
+        subtype: 'CLEAR_DUE_DATE',
+        parentNodeId: 't',
+        position: 0,
+      }),
       node({
         id: 'b1',
         nodeType: 'BRANCH',
@@ -394,7 +402,13 @@ describe('a chained rule with no branch', () => {
         parentNodeId: 't',
         position: 0,
       }),
-      node({ id: 'a', nodeType: 'ACTION', subtype: 'CLEAR_DUE_DATE', parentNodeId: 'c', position: 0 }),
+      node({
+        id: 'a',
+        nodeType: 'ACTION',
+        subtype: 'CLEAR_DUE_DATE',
+        parentNodeId: 'c',
+        position: 0,
+      }),
     ]);
 
     expect(branches).toHaveLength(1);

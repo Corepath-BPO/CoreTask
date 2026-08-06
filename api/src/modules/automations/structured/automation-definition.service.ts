@@ -23,6 +23,7 @@ import { ProjectsService } from '../../projects/projects.service';
 
 import {
   definitionInclude,
+  toBranchCopyInputs,
   toBranchCreateInputs,
   toDefinition,
   type VersionRow,
@@ -34,7 +35,6 @@ import {
   collectReferences,
   type CheckableDefinition,
   type DefinitionIssue,
-  type DefinitionReference,
   type ReferenceKind,
 } from './automation-definition.references';
 import { convertLegacyRule } from './automation-legacy.converter';
@@ -139,7 +139,10 @@ export class AutomationDefinitionService {
     }
 
     const branches = parsed.data.branches.map(toBranchDefinition);
-    const trigger = { type: parsed.data.trigger.type, configuration: parsed.data.trigger.configuration };
+    const trigger = {
+      type: parsed.data.trigger.type,
+      configuration: parsed.data.trigger.configuration,
+    };
     const candidate: CheckableDefinition = { trigger, branches };
 
     const issues = [
@@ -148,56 +151,61 @@ export class AutomationDefinitionService {
       ...(await this.checkReferences(workspaceId, projectId, candidate)),
     ];
 
-    this.refuseIf(issues.filter((issue) => issue.blocksDraft), 'This rule could not be saved.');
+    this.refuseIf(
+      issues.filter((issue) => issue.blocksDraft),
+      'This rule could not be saved.',
+    );
 
     /* Ensure there is a draft before the write, so a rule that has never been
      * opened can still be saved into — the conversion is what gives it one. */
     await this.requireDraft(rule);
 
-    const saved = await this.prisma.$transaction(async (tx) => {
-      /*
-       * The draft pointer is re-read inside the transaction and checked against
-       * the published one. A publish that landed between this request loading
-       * the rule and writing it will have moved the pointer, and writing to the
-       * id we started with would edit the version that is now live — the exact
-       * thing versions exist to prevent.
-       */
-      const fresh = await tx.automationRule.findUniqueOrThrow({ where: { id: rule.id } });
+    const saved = await this.prisma
+      .$transaction(async (tx) => {
+        /*
+         * The draft pointer is re-read inside the transaction and checked against
+         * the published one. A publish that landed between this request loading
+         * the rule and writing it will have moved the pointer, and writing to the
+         * id we started with would edit the version that is now live — the exact
+         * thing versions exist to prevent.
+         */
+        const fresh = await tx.automationRule.findUniqueOrThrow({ where: { id: rule.id } });
 
-      if (!fresh.draftVersionId || fresh.draftVersionId === fresh.publishedVersionId) {
-        throw AppException.conflict(
-          'RESOURCE_CONFLICT',
-          'This rule was published while you were editing. Reload it and try again.',
-        );
-      }
+        if (!fresh.draftVersionId || fresh.draftVersionId === fresh.publishedVersionId) {
+          throw AppException.conflict(
+            'RESOURCE_CONFLICT',
+            'This rule was published while you were editing. Reload it and try again.',
+          );
+        }
 
-      await tx.automationBranch.deleteMany({ where: { ruleVersionId: fresh.draftVersionId } });
+        await tx.automationBranch.deleteMany({ where: { ruleVersionId: fresh.draftVersionId } });
 
-      await tx.automationRuleVersion.update({
-        where: { id: fresh.draftVersionId },
-        data: {
-          triggerType: trigger.type,
-          triggerConfig: trigger.configuration as Prisma.InputJsonValue,
-          branches: { create: toBranchCreateInputs(branches) },
-        },
-      });
+        await tx.automationRuleVersion.update({
+          where: { id: fresh.draftVersionId },
+          data: {
+            triggerType: trigger.type,
+            triggerConfig: trigger.configuration as Prisma.InputJsonValue,
+            branches: { create: toBranchCreateInputs(branches) },
+          },
+        });
 
-      /*
-       * The rule's own trigger columns are deliberately not touched. They are
-       * how the matcher finds candidate rules with one indexed query, so they
-       * describe what is *running* — moving them here would make a live rule
-       * start firing on a different event the moment somebody typed, without
-       * anybody publishing anything. Only `publish` moves them.
-       */
-      return tx.automationRule.update({
-        where: { id: rule.id },
-        data: {
-          name: parsed.data.name,
-          description: parsed.data.description ?? null,
-          ...(parsed.data.nameMode ? { nameMode: parsed.data.nameMode } : {}),
-        },
-      });
-    }, TRANSACTION_OPTIONS).catch(rethrowDuplicateId);
+        /*
+         * The rule's own trigger columns are deliberately not touched. They are
+         * how the matcher finds candidate rules with one indexed query, so they
+         * describe what is *running* — moving them here would make a live rule
+         * start firing on a different event the moment somebody typed, without
+         * anybody publishing anything. Only `publish` moves them.
+         */
+        return tx.automationRule.update({
+          where: { id: rule.id },
+          data: {
+            name: parsed.data.name,
+            description: parsed.data.description ?? null,
+            ...(parsed.data.nameMode ? { nameMode: parsed.data.nameMode } : {}),
+          },
+        });
+      }, TRANSACTION_OPTIONS)
+      .catch(rethrowDuplicateId);
 
     return this.resultFor(saved, await this.loadVersion(saved.draftVersionId));
   }
@@ -238,46 +246,49 @@ export class AutomationDefinitionService {
 
     this.refuseIf(issues, 'This rule is not ready to publish.');
 
-    const published = await this.prisma.$transaction(async (tx) => {
-      const fresh = await tx.automationRule.findUniqueOrThrow({ where: { id: rule.id } });
+    const published = await this.prisma
+      .$transaction(async (tx) => {
+        const fresh = await tx.automationRule.findUniqueOrThrow({ where: { id: rule.id } });
 
-      if (fresh.draftVersionId !== draft.id) {
-        throw AppException.conflict(
-          'RESOURCE_CONFLICT',
-          'This rule changed while it was being published. Reload it and try again.',
-        );
-      }
+        if (fresh.draftVersionId !== draft.id) {
+          throw AppException.conflict(
+            'RESOURCE_CONFLICT',
+            'This rule changed while it was being published. Reload it and try again.',
+          );
+        }
 
-      const nextDraft = await tx.automationRuleVersion.create({
-        data: {
-          ruleId: rule.id,
-          version: draft.version + 1,
-          triggerType: draft.triggerType,
-          triggerConfig: draft.triggerConfig as Prisma.InputJsonValue,
-          createdById: userId,
-          branches: { create: toBranchCreateInputs(definition.branches) },
-        },
-      });
+        const nextDraft = await tx.automationRuleVersion.create({
+          data: {
+            ruleId: rule.id,
+            version: draft.version + 1,
+            triggerType: draft.triggerType,
+            triggerConfig: draft.triggerConfig as Prisma.InputJsonValue,
+            createdById: userId,
+            /* A copy alongside the rows it was copied from, so every id is new. */
+            branches: { create: toBranchCopyInputs(definition.branches) },
+          },
+        });
 
-      return tx.automationRule.update({
-        where: { id: rule.id },
-        data: {
-          status: AutomationRuleStatus.ACTIVE,
-          publishedAt: new Date(),
-          publishedVersionId: draft.id,
-          draftVersionId: nextDraft.id,
-          version: nextDraft.version,
-          /*
-           * The denormalised trigger follows the *published* version and only
-           * moves here. It is what the matcher's indexed query reads, so it has
-           * to describe the version that is running — left behind, a republished
-           * rule would keep firing on the trigger it used to have.
-           */
-          triggerType: draft.triggerType,
-          triggerConfig: draft.triggerConfig as Prisma.InputJsonValue,
-        },
-      });
-    }, TRANSACTION_OPTIONS).catch(rethrowDuplicateId);
+        return tx.automationRule.update({
+          where: { id: rule.id },
+          data: {
+            status: AutomationRuleStatus.ACTIVE,
+            publishedAt: new Date(),
+            publishedVersionId: draft.id,
+            draftVersionId: nextDraft.id,
+            version: nextDraft.version,
+            /*
+             * The denormalised trigger follows the *published* version and only
+             * moves here. It is what the matcher's indexed query reads, so it has
+             * to describe the version that is running — left behind, a republished
+             * rule would keep firing on the trigger it used to have.
+             */
+            triggerType: draft.triggerType,
+            triggerConfig: draft.triggerConfig as Prisma.InputJsonValue,
+          },
+        });
+      }, TRANSACTION_OPTIONS)
+      .catch(rethrowDuplicateId);
 
     return this.resultFor(published, await this.loadVersion(published.draftVersionId));
   }
@@ -324,7 +335,10 @@ export class AutomationDefinitionService {
         branchKey: node.branchKey,
         position: node.position,
       })),
-      { triggerType: rule.triggerType, triggerConfig: rule.triggerConfig as Record<string, unknown> },
+      {
+        triggerType: rule.triggerType,
+        triggerConfig: rule.triggerConfig as Record<string, unknown>,
+      },
       randomUUID,
     );
 
@@ -332,9 +346,7 @@ export class AutomationDefinitionService {
       /* Logged rather than returned: the person opening the builder cannot act
        * on "a delay was dropped" mid-edit, and whoever is running the migration
        * needs to know which rules did not survive it intact. */
-      this.logger.warn(
-        `Rule ${rule.id} converted with losses: ${converted.notes.join(' ')}`,
-      );
+      this.logger.warn(`Rule ${rule.id} converted with losses: ${converted.notes.join(' ')}`);
     }
 
     try {

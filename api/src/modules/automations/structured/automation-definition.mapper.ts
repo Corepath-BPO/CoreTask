@@ -90,9 +90,7 @@ export function toDefinition(
       type: version.triggerType,
       configuration: asRecord(version.triggerConfig),
     },
-    branches: [...version.branches]
-      .sort(byPosition)
-      .map((branch) => toBranchDefinition(branch)),
+    branches: [...version.branches].sort(byPosition).map((branch) => toBranchDefinition(branch)),
     publishedAt: rule.publishedAt?.toISOString() ?? null,
     createdAt: rule.createdAt.toISOString(),
     /*
@@ -111,14 +109,12 @@ function toBranchDefinition(branch: BranchRow): AutomationBranchDefinition {
     type: branch.type as AutomationBranchType,
     position: branch.position,
     conditionGroup: branch.conditionGroup ? toGroupDefinition(branch.conditionGroup) : null,
-    actions: [...branch.actions].sort(byPosition).map(
-      (action): AutomationActionDefinition => ({
-        id: action.id,
-        actionType: action.actionType,
-        configuration: asRecord(action.configuration),
-        position: action.position,
-      }),
-    ),
+    actions: [...branch.actions].sort(byPosition).map((action): AutomationActionDefinition => ({
+      id: action.id,
+      actionType: action.actionType,
+      configuration: asRecord(action.configuration),
+      position: action.position,
+    })),
   };
 }
 
@@ -126,15 +122,15 @@ function toGroupDefinition(group: ConditionGroupRow): AutomationConditionGroupDe
   return {
     id: group.id,
     operator: group.operator as ConditionGroupOperator,
-    conditions: [...group.conditions].sort(byPosition).map(
-      (condition): AutomationConditionDefinition => ({
+    conditions: [...group.conditions]
+      .sort(byPosition)
+      .map((condition): AutomationConditionDefinition => ({
         id: condition.id,
         fieldKey: condition.fieldKey,
         operator: condition.operator,
         value: condition.value as unknown,
         position: condition.position,
-      }),
-    ),
+      })),
   };
 }
 
@@ -143,7 +139,7 @@ function toGroupDefinition(group: ConditionGroupRow): AutomationConditionGroupDe
 /* -------------------------------------------------------------------------- */
 
 /**
- * The branch writes for one version, in position order.
+ * The branch writes for a version whose old rows are being deleted first.
  *
  * Ids are kept when the caller supplied a real one and minted otherwise. Kept,
  * because the builder holds a selection against them and regenerating on every
@@ -159,16 +155,39 @@ function toGroupDefinition(group: ConditionGroupRow): AutomationConditionGroupDe
 export function toBranchCreateInputs(
   branches: readonly AutomationBranchDefinition[],
 ): Prisma.AutomationBranchCreateWithoutRuleVersionInput[] {
+  return branchWrites(branches, keyFor);
+}
+
+/**
+ * The branch writes for a version being copied while the original stays.
+ *
+ * Every id is fresh. A copy is what publishing leaves behind for continued
+ * editing, and the rows it was copied from are still there — reusing their ids
+ * collides on the primary key, so the copy has to be a new set of rows that
+ * happen to say the same thing.
+ */
+export function toBranchCopyInputs(
+  branches: readonly AutomationBranchDefinition[],
+): Prisma.AutomationBranchCreateWithoutRuleVersionInput[] {
+  return branchWrites(branches, () => randomUUID());
+}
+
+type KeyStrategy = (id: string) => string;
+
+function branchWrites(
+  branches: readonly AutomationBranchDefinition[],
+  key: KeyStrategy,
+): Prisma.AutomationBranchCreateWithoutRuleVersionInput[] {
   return [...branches].sort(byPosition).map((branch) => ({
-    id: keyFor(branch.id),
+    id: key(branch.id),
     type: branch.type,
     position: branch.position,
     conditionGroup: branch.conditionGroup
-      ? { create: toGroupCreate(branch.conditionGroup) }
+      ? { create: toGroupCreate(branch.conditionGroup, key) }
       : undefined,
     actions: {
       create: [...branch.actions].sort(byPosition).map((action) => ({
-        id: keyFor(action.id),
+        id: key(action.id),
         actionType: action.actionType,
         configuration: action.configuration as Prisma.InputJsonValue,
         position: action.position,
@@ -179,13 +198,14 @@ export function toBranchCreateInputs(
 
 function toGroupCreate(
   group: AutomationConditionGroupDefinition,
+  key: KeyStrategy,
 ): Prisma.AutomationConditionGroupCreateWithoutBranchInput {
   return {
-    id: keyFor(group.id),
+    id: key(group.id),
     operator: group.operator,
     conditions: {
       create: [...group.conditions].sort(byPosition).map((condition) => ({
-        id: keyFor(condition.id),
+        id: key(condition.id),
         fieldKey: condition.fieldKey,
         operator: condition.operator,
         /*

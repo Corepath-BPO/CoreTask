@@ -31,12 +31,7 @@ function action(actionType: string, configuration: Record<string, unknown> = {},
   return { id: id(), actionType, configuration, position };
 }
 
-function condition(
-  fieldKey: string,
-  operator: string,
-  value: unknown = null,
-  position = 0,
-) {
+function condition(fieldKey: string, operator: string, value: unknown = null, position = 0) {
   return { id: id(), fieldKey, operator, value, position };
 }
 
@@ -219,9 +214,7 @@ describe('what a step may be', () => {
   it('accepts an action configured with what the runner reads', () => {
     expect(
       checkShapes(
-        definition([
-          branch({ actions: [action('MOVE_TO_SECTION', { sectionId: UUID.section })] }),
-        ]),
+        definition([branch({ actions: [action('MOVE_TO_SECTION', { sectionId: UUID.section })] })]),
       ),
     ).toEqual([]);
   });
@@ -233,7 +226,9 @@ describe('what a step may be', () => {
     ['a section that is not an id', 'MOVE_TO_SECTION', { sectionId: 'the-first-one' }],
     ['a day count that is not a number', 'SET_DUE_DATE', { daysFromNow: 'tomorrow' }],
   ])('refuses %s on the draft', (_name, actionType, configuration) => {
-    const issues = checkShapes(definition([branch({ actions: [action(actionType, configuration)] })]));
+    const issues = checkShapes(
+      definition([branch({ actions: [action(actionType, configuration)] })]),
+    );
 
     expect(draftBlockers(issues)).toHaveLength(1);
   });
@@ -350,9 +345,7 @@ describe('what a rule points at', () => {
     const found = collectReferences(
       definition([
         branch({
-          conditionGroup: group(
-            condition('sectionId', 'IS_ONE_OF', [UUID.section, UUID.member]),
-          ),
+          conditionGroup: group(condition('sectionId', 'IS_ONE_OF', [UUID.section, UUID.member])),
         }),
       ]),
     );

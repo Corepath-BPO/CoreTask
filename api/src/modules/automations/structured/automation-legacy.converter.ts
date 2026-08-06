@@ -425,15 +425,13 @@ function groupOf(
   return {
     id: newId(),
     operator: ConditionGroupOperator.ALL,
-    conditions: comparisons.map(
-      (comparison, index): AutomationConditionDefinition => ({
-        id: newId(),
-        fieldKey: comparison.fieldKey,
-        operator: comparison.operator,
-        value: comparison.value,
-        position: index,
-      }),
-    ),
+    conditions: comparisons.map((comparison, index): AutomationConditionDefinition => ({
+      id: newId(),
+      fieldKey: comparison.fieldKey,
+      operator: comparison.operator,
+      value: comparison.value,
+      position: index,
+    })),
   };
 }
 

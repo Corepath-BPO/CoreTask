@@ -107,14 +107,21 @@ interface ConfigField {
  * fired.
  */
 const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
-  ASSIGN_USER: [{ key: 'userId', aliases: ['assigneeId'], kind: ConfigKind.MEMBER, required: true }],
+  ASSIGN_USER: [
+    { key: 'userId', aliases: ['assigneeId'], kind: ConfigKind.MEMBER, required: true },
+  ],
   UNASSIGN_USER: [],
   MOVE_TO_SECTION: [{ key: 'sectionId', kind: ConfigKind.SECTION, required: true }],
   UPDATE_STATUS: [
     { key: 'statusDefinitionId', aliases: ['status'], kind: ConfigKind.STATUS, required: true },
   ],
   UPDATE_PRIORITY: [
-    { key: 'priorityDefinitionId', aliases: ['priority'], kind: ConfigKind.PRIORITY, required: true },
+    {
+      key: 'priorityDefinitionId',
+      aliases: ['priority'],
+      kind: ConfigKind.PRIORITY,
+      required: true,
+    },
   ],
   SET_DUE_DATE: [{ key: 'daysFromNow', kind: ConfigKind.NUMBER, required: false }],
   CLEAR_DUE_DATE: [],
@@ -241,7 +248,12 @@ function addConditionReferences(
      * existing is the check that matters: a condition on a deleted field never
      * matches, whatever it was compared against.
      */
-    add(ConfigKind.CUSTOM_FIELD, condition.fieldKey.slice(CUSTOM_FIELD_PREFIX.length), branchId, path);
+    add(
+      ConfigKind.CUSTOM_FIELD,
+      condition.fieldKey.slice(CUSTOM_FIELD_PREFIX.length),
+      branchId,
+      path,
+    );
     return;
   }
 
@@ -306,7 +318,10 @@ export function checkWritable(branches: readonly AutomationBranchDefinition[]): 
     refuse('A rule can only have one “Otherwise” branch.', otherwises[1]?.id ?? null);
   }
 
-  if (otherwises.length === 1 && ordered[ordered.length - 1]?.type !== AutomationBranchType.OTHERWISE) {
+  if (
+    otherwises.length === 1 &&
+    ordered[ordered.length - 1]?.type !== AutomationBranchType.OTHERWISE
+  ) {
     refuse('The “Otherwise” branch has to come last.', otherwises[0]?.id ?? null);
   }
 
@@ -413,16 +428,24 @@ function checkCondition(
      * vocabulary has no word for, and it has to be openable to be corrected.
      */
     issues.push(
-      error('This is not a comparison the engine understands.', branch.id, `${path}.operator`, false),
+      error(
+        'This is not a comparison the engine understands.',
+        branch.id,
+        `${path}.operator`,
+        false,
+      ),
     );
 
     return issues;
   }
 
-  const hasValue = condition.value !== null && condition.value !== undefined && condition.value !== '';
+  const hasValue =
+    condition.value !== null && condition.value !== undefined && condition.value !== '';
 
   if (operatorNeedsValue(operator) && !hasValue) {
-    issues.push(error('Choose what this condition compares against.', branch.id, `${path}.value`, false));
+    issues.push(
+      error('Choose what this condition compares against.', branch.id, `${path}.value`, false),
+    );
   }
 
   if (!operatorNeedsValue(operator) && hasValue) {
@@ -517,7 +540,9 @@ function checkKind(
     case ConfigKind.SECTION:
     case ConfigKind.MEMBER:
     case ConfigKind.CUSTOM_FIELD:
-      return isUuid(value) ? [] : [error('This setting has to name a real one.', branchId, path, true)];
+      return isUuid(value)
+        ? []
+        : [error('This setting has to name a real one.', branchId, path, true)];
 
     /*
      * Status and priority are the two settings that can arrive either way: the
@@ -554,7 +579,8 @@ function valueOf(configuration: Record<string, unknown>, field: ConfigField): un
 /** A value, or the values inside it, as the strings a lookup can take. */
 function idsIn(value: unknown): string[] {
   if (typeof value === 'string') return value === '' ? [] : [value];
-  if (Array.isArray(value)) return value.filter((it): it is string => typeof it === 'string' && it !== '');
+  if (Array.isArray(value))
+    return value.filter((it): it is string => typeof it === 'string' && it !== '');
 
   return [];
 }
