@@ -161,28 +161,29 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  refreshTokens      RefreshToken[]
-  memberships        WorkspaceMember[]
-  invitedMembers     WorkspaceMember[]      @relation("MemberInvitedBy")
-  createdWorkspaces  Workspace[]            @relation("WorkspaceCreatedBy")
-  ledProjects        Project[]              @relation("ProjectLead")
-  createdTasks       Task[]                 @relation("TaskCreatedBy")
-  assignedTasks      Task[]                 @relation("TaskAssignee")
-  reportedTickets    Ticket[]               @relation("TicketReporter")
-  assignedTickets    Ticket[]               @relation("TicketAssignee")
-  comments           Comment[]
-  attachments        Attachment[]
-  mentionedIn        CommentMention[]
-  sentInvitations    WorkspaceInvitation[]  @relation("InvitationSentBy")
-  teamMemberships    TeamMember[]
-  ledTeams           Team[]                 @relation("TeamLead")
-  activityLogs       ActivityLog[]
-  notifications      Notification[]
-  createdFields      CustomField[]          @relation("CustomFieldCreatedBy")
-  updatedFieldValues TaskCustomFieldValue[] @relation("CustomFieldValueUpdatedBy")
-  ownedViews         ProjectView[]          @relation("ProjectViewOwner")
-  createdViews       ProjectView[]          @relation("ProjectViewCreatedBy")
-  createdAutomations AutomationRule[]       @relation("AutomationCreatedBy")
+  refreshTokens             RefreshToken[]
+  memberships               WorkspaceMember[]
+  invitedMembers            WorkspaceMember[]       @relation("MemberInvitedBy")
+  createdWorkspaces         Workspace[]             @relation("WorkspaceCreatedBy")
+  ledProjects               Project[]               @relation("ProjectLead")
+  createdTasks              Task[]                  @relation("TaskCreatedBy")
+  assignedTasks             Task[]                  @relation("TaskAssignee")
+  reportedTickets           Ticket[]                @relation("TicketReporter")
+  assignedTickets           Ticket[]                @relation("TicketAssignee")
+  comments                  Comment[]
+  attachments               Attachment[]
+  mentionedIn               CommentMention[]
+  sentInvitations           WorkspaceInvitation[]   @relation("InvitationSentBy")
+  teamMemberships           TeamMember[]
+  ledTeams                  Team[]                  @relation("TeamLead")
+  activityLogs              ActivityLog[]
+  notifications             Notification[]
+  createdFields             CustomField[]           @relation("CustomFieldCreatedBy")
+  updatedFieldValues        TaskCustomFieldValue[]  @relation("CustomFieldValueUpdatedBy")
+  ownedViews                ProjectView[]           @relation("ProjectViewOwner")
+  createdViews              ProjectView[]           @relation("ProjectViewCreatedBy")
+  createdAutomations        AutomationRule[]        @relation("AutomationCreatedBy")
+  createdAutomationVersions AutomationRuleVersion[] @relation("AutomationVersionCreatedBy")
 
   @@index([isActive])
   @@map("users")
@@ -327,32 +328,32 @@ model WorkspaceInvitation {
 // ---------------------------------------------------------------------------
 
 model Project {
-  id          String        @id @default(uuid(7)) @db.Uuid
-  workspaceId String        @db.Uuid
-  name        String        @db.VarChar(120)
+  id                  String                @id @default(uuid(7)) @db.Uuid
+  workspaceId         String                @db.Uuid
+  name                String                @db.VarChar(120)
   /// Short uppercase code, unique within the workspace.
-  key         String        @db.VarChar(8)
-  description String?
-  status      ProjectStatus @default(PLANNING)
-  color       String        @default("#6366F1") @db.VarChar(9)
+  key                 String                @db.VarChar(8)
+  description         String?
+  status              ProjectStatus         @default(PLANNING)
+  color               String                @default("#6366F1") @db.VarChar(9)
   /// What the "+ Add" control creates without being asked. Backfilled from
   /// each project's own mix of tasks and tickets — see the migration.
   defaultWorkItemType CreatableWorkItemType @default(TASK)
-  leadId      String?       @db.Uuid
-  startDate   DateTime?
-  dueDate     DateTime?
-  completedAt DateTime?
-  archivedAt  DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  leadId              String?               @db.Uuid
+  startDate           DateTime?
+  dueDate             DateTime?
+  completedAt         DateTime?
+  archivedAt          DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   /// Which team owns this project. Optional: plenty of work belongs to the
   /// workspace at large, and a project outlives the team that started it.
   teamId String? @db.Uuid
 
-  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lead         User?              @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
-  team         Team?              @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead         User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  team         Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
   sections     Section[]
   tasks        Task[]
   tickets      Ticket[]
@@ -983,39 +984,48 @@ enum AutomationExecutionStatus {
 /// — is a rule that exists but does nothing, which is what makes pausing a
 /// misbehaving rule safe and instant.
 model AutomationRule {
-  id            String               @id @default(uuid(7)) @db.Uuid
-  workspaceId   String               @db.Uuid
-  projectId     String               @db.Uuid
-  name          String               @db.VarChar(120)
-  description   String?
-  status        AutomationRuleStatus @default(DRAFT)
+  id                 String                 @id @default(uuid(7)) @db.Uuid
+  workspaceId        String                 @db.Uuid
+  projectId          String                 @db.Uuid
+  name               String                 @db.VarChar(120)
+  description        String?
+  status             AutomationRuleStatus   @default(DRAFT)
   /// Denormalised from the trigger node so matching an event is one indexed
   /// query rather than a join through every rule's nodes.
-  triggerType   String               @db.VarChar(60)
+  triggerType        String                 @db.VarChar(60)
   /// Trigger scoping — the section id for TASK_MOVED_TO_SECTION, and so on.
-  triggerConfig Json                 @default("{}")
-  version       Int                  @default(1)
+  triggerConfig      Json                   @default("{}")
+  version            Int                    @default(1)
+  /// How the name is maintained. See `AutomationRuleNameMode`.
+  nameMode           AutomationRuleNameMode @default(MANUAL)
+  /// The version being edited, and the one running. Different rows on purpose:
+  /// editing a live rule must not change what it does until somebody publishes.
+  draftVersionId     String?                @unique @db.Uuid
+  publishedVersionId String?                @unique @db.Uuid
   /// Whether this rule may run on an event another rule caused.
   ///
   /// Rules legitimately cascade — one moves a task, another reacts to the move
   /// — but a rule meant to answer only what people do should say so, and the
   /// depth limit is a backstop rather than an expression of intent. Defaults to
   /// true so every existing rule keeps behaving exactly as it did.
-  allowChaining Boolean              @default(true)
-  createdById   String?              @db.Uuid
-  publishedAt   DateTime?
-  lastRunAt     DateTime?
-  lastRunStatus String?              @db.VarChar(30)
-  runCount      Int                  @default(0)
-  failureCount  Int                  @default(0)
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  allowChaining      Boolean                @default(true)
+  createdById        String?                @db.Uuid
+  publishedAt        DateTime?
+  lastRunAt          DateTime?
+  lastRunStatus      String?                @db.VarChar(30)
+  runCount           Int                    @default(0)
+  failureCount       Int                    @default(0)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
-  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy  User?                 @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  nodes      AutomationNode[]
-  executions AutomationExecution[]
+  workspace        Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  nodes            AutomationNode[]
+  executions       AutomationExecution[]
+  versions         AutomationRuleVersion[] @relation("RuleVersions")
+  draftVersion     AutomationRuleVersion?  @relation("RuleDraft", fields: [draftVersionId], references: [id], onDelete: SetNull)
+  publishedVersion AutomationRuleVersion?  @relation("RulePublished", fields: [publishedVersionId], references: [id], onDelete: SetNull)
 
   /// The matcher's query: active rules for a project on a given trigger.
   @@index([projectId, status, triggerType])
@@ -1029,6 +1039,127 @@ model AutomationRule {
 /// models cannot coexist without one of them being a lie, and a tree is what a
 /// visual builder edits — branches need a parent and an ordinal, which normalised
 /// tables would have to reinvent anyway.
+/// How a rule's name is maintained.
+enum AutomationRuleNameMode {
+  /// Derived from the trigger, and re-derived when the trigger changes.
+  AUTO
+  /// Somebody typed it. Never overwritten.
+  MANUAL
+}
+
+/// Which of a rule's ordered alternatives a branch is.
+enum AutomationBranchType {
+  /// The first one, with the rule's opening condition.
+  PRIMARY
+  /// A further alternative, with its own condition.
+  OTHERWISE_IF
+  /// The fallback. No condition, last, at most one.
+  OTHERWISE
+}
+
+/// Whether every condition in a group must hold, or any one of them.
+enum ConditionGroupOperator {
+  ALL
+  ANY
+}
+
+/// One editable or published state of a rule.
+///
+/// A rule points at a draft and at a published version, and they are different
+/// rows — which is what lets somebody edit a live rule without the edits taking
+/// effect. Publishing does not mutate what is running; it points the rule at a
+/// new row.
+model AutomationRuleVersion {
+  id      String @id @default(uuid(7)) @db.Uuid
+  ruleId  String @db.Uuid
+  /// Monotonic within a rule. The draft carries the next number.
+  version Int
+
+  /// The trigger, denormalised onto the version rather than a table of one row.
+  triggerType   String @db.VarChar(60)
+  triggerConfig Json   @default("{}")
+
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rule        AutomationRule     @relation("RuleVersions", fields: [ruleId], references: [id], onDelete: Cascade)
+  createdBy   User?              @relation("AutomationVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  branches    AutomationBranch[]
+  draftOf     AutomationRule?    @relation("RuleDraft")
+  publishedOf AutomationRule?    @relation("RulePublished")
+
+  @@unique([ruleId, version])
+  @@index([ruleId])
+  @@map("automation_rule_versions")
+}
+
+/// One of a rule's ordered alternatives.
+///
+/// Ordered by an integer rather than by parentage, so moving a branch is one
+/// column write instead of rewriting a chain of links — and so "which branch is
+/// third" is a question the database can answer.
+model AutomationBranch {
+  id            String               @id @default(uuid(7)) @db.Uuid
+  ruleVersionId String               @db.Uuid
+  type          AutomationBranchType
+  position      Int
+
+  ruleVersion    AutomationRuleVersion     @relation(fields: [ruleVersionId], references: [id], onDelete: Cascade)
+  conditionGroup AutomationConditionGroup?
+  actions        AutomationAction[]
+
+  @@unique([ruleVersionId, position])
+  @@index([ruleVersionId])
+  @@map("automation_branches")
+}
+
+/// The conditions a branch is chosen by, and how they combine.
+model AutomationConditionGroup {
+  id       String                 @id @default(uuid(7)) @db.Uuid
+  branchId String                 @unique @db.Uuid
+  operator ConditionGroupOperator @default(ALL)
+
+  branch     AutomationBranch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  conditions AutomationCondition[]
+
+  @@map("automation_condition_groups")
+}
+
+/// One comparison inside a group.
+model AutomationCondition {
+  id               String @id @default(uuid(7)) @db.Uuid
+  conditionGroupId String @db.Uuid
+  /// What is being compared — `status`, `sectionId`, `customField:<id>`.
+  fieldKey         String @db.VarChar(120)
+  operator         String @db.VarChar(40)
+  /// Shape depends on the operator: a scalar, or a list for the `one of` forms.
+  value            Json   @default("null")
+  position         Int
+
+  group AutomationConditionGroup @relation(fields: [conditionGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([conditionGroupId, position])
+  @@index([conditionGroupId])
+  @@map("automation_conditions")
+}
+
+/// One thing a branch does, in the order it does it.
+model AutomationAction {
+  id            String @id @default(uuid(7)) @db.Uuid
+  branchId      String @db.Uuid
+  actionType    String @db.VarChar(60)
+  /// Validated per action type before it is written — never arbitrary JSON.
+  configuration Json   @default("{}")
+  position      Int
+
+  branch AutomationBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, position])
+  @@index([branchId])
+  @@map("automation_actions")
+}
+
 model AutomationNode {
   id            String             @id @default(uuid(7)) @db.Uuid
   ruleId        String             @db.Uuid

@@ -1,5 +1,6 @@
 export type * from './activity.js';
 export type * from './automation-graph.js';
+export type * from './automation-rule.js';
 export type * from './api.js';
 export type * from './attachment.js';
 export type * from './auth.js';

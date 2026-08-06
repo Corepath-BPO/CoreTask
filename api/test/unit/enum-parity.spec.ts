@@ -2,6 +2,9 @@ import {
   ACTIVITY_ACTIONS,
   ACTIVITY_ENTITIES,
   ATTACHMENT_STATUSES,
+  AUTOMATION_BRANCH_TYPE_VALUES,
+  AUTOMATION_RULE_NAME_MODE_VALUES,
+  CONDITION_GROUP_OPERATOR_VALUES,
   CREATABLE_WORK_ITEM_TYPES,
   AUTOMATION_EXECUTION_STATUSES,
   AUTOMATION_NODE_TYPES,
@@ -50,6 +53,9 @@ describe('shared enums match the Prisma schema', () => {
     ['ProjectViewType', PROJECT_VIEW_TYPES],
     ['ProjectViewScope', PROJECT_VIEW_SCOPES],
     ['CreatableWorkItemType', CREATABLE_WORK_ITEM_TYPES],
+    ['AutomationRuleNameMode', AUTOMATION_RULE_NAME_MODE_VALUES],
+    ['AutomationBranchType', AUTOMATION_BRANCH_TYPE_VALUES],
+    ['ConditionGroupOperator', CONDITION_GROUP_OPERATOR_VALUES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {
