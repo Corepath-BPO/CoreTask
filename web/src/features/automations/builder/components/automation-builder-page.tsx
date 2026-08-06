@@ -25,8 +25,8 @@ import {
   applyEdits,
   hasEdits,
   makeBranch,
+  makeDefaultNodes,
   makeNodeUnder,
-  makeTrigger,
   NO_EDITS,
   readPlaceholderId,
   withPlaceholder,
@@ -49,9 +49,7 @@ import { AutomationValidationBanner } from './automation-validation-banner';
  * the click, and asking again would be asking somebody to repeat themselves.
  */
 function blankRule(projectId: string, sectionId: string | undefined): AutomationRuleGraph {
-  const trigger: CanvasNode = sectionId
-    ? makeTrigger('TASK_MOVED_TO_SECTION', { sectionId })
-    : makeTrigger();
+  const nodes = makeDefaultNodes(sectionId);
 
   return {
     id: '',
@@ -68,7 +66,7 @@ function blankRule(projectId: string, sectionId: string | undefined): Automation
     publishedAt: null,
     // The widening is the safe direction: a `CanvasNode` is a stored node plus
     // one type the database has no row for, and this one is a plain trigger.
-    graph: { nodes: [trigger as AutomationGraphNode], edges: [] },
+    graph: { nodes: nodes as AutomationGraphNode[], edges: [] },
     createdAt: '',
     updatedAt: '',
   };
@@ -167,8 +165,34 @@ export function AutomationBuilderPage({
    */
   const [rail, setRail] = useState<RailMode>({ kind: 'closed' });
 
+  /*
+   * A name for a rule started from a section.
+   *
+   * Derived rather than written into state: the section's *name* is not in the
+   * URL — only its id — so there is nothing to suggest until the metadata that
+   * resolves ids to names arrives, and an effect that filled the field in
+   * afterwards could land on top of what somebody had already typed.
+   *
+   * Only with a section to name it after. "Untitled rule" is a name nobody
+   * chose, which then has to be found again in a list, so an empty field that
+   * asks is the better default.
+   */
+  const suggestedName =
+    isNew && sectionId
+      ? (metadata?.sections.find((entry) => entry.id === sectionId)?.name ?? '')
+      : '';
+
   const settings: RuleSettings = {
-    name: settingsEdits.name ?? rule?.name ?? '',
+    /*
+     * `||` on the stored name, not `??`.
+     *
+     * A blank rule carries `''`, which is not nullish, so `??` stopped there and
+     * the suggestion below was never reached. A saved rule cannot have an empty
+     * name — the endpoint requires one — so falling through on empty only ever
+     * affects the rule that has not been saved yet.
+     */
+    name:
+      settingsEdits.name ?? (rule?.name || (suggestedName ? `When moved to ${suggestedName}` : '')),
     description: settingsEdits.description ?? rule?.description ?? '',
     allowChaining: settingsEdits.allowChaining ?? rule?.allowChaining ?? true,
   };

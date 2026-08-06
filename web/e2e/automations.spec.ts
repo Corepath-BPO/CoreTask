@@ -51,6 +51,29 @@ test.describe('automations', () => {
     await page.getByRole('link', { name: /add rule/i }).click();
 
     await expect(page).toHaveURL(/\/automations\/new\?.*sectionId=[0-9a-f-]+/);
+
+    /*
+     * And opens as a sentence somebody can edit rather than compose.
+     *
+     * Three cards: when this happens, if this is true, do this. The check is
+     * filled in from the section the click came from — a rule that opens with
+     * its own first question already answered is the point of starting from a
+     * section at all.
+     */
+    const labels = await page.evaluate(() =>
+      [...document.querySelectorAll('.react-flow__node')].map(
+        (node) => node.querySelector('button')?.getAttribute('aria-label') ?? '',
+      ),
+    );
+
+    // Named after the section too, so a rule arrives with something a person
+    // would recognise in a list rather than a blank field to fill in.
+    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(/^When moved to \S/);
+
+    expect(labels).toHaveLength(3);
+    expect(labels[0]).toMatch(/^When/);
+    expect(labels[1]).toMatch(/^Check if — Section is \S/);
+    expect(labels[2]).toMatch(/^Add a step/);
   });
 
   test('Manage all reaches the rules page', async ({ page }) => {

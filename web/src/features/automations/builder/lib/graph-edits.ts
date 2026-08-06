@@ -260,6 +260,35 @@ export function makeTrigger(subtype = '', configuration: Record<string, unknown>
   };
 }
 
+/**
+ * The shape a new rule opens with: a trigger, a check, and a space for an action.
+ *
+ * Three cards rather than one, because a rule is a sentence — when this happens,
+ * if this is true, do this — and starting from a single trigger makes somebody
+ * work out the sentence before they can begin writing it. The empty action is
+ * the placeholder the canvas derives, so only two are built here.
+ *
+ * A section fills the check in. Coming from that section's menu means "when a
+ * task lands here" was the whole point of the click, and a rule that opens with
+ * the answer already written is one somebody can edit rather than compose.
+ */
+export function makeDefaultNodes(sectionId?: string): CanvasNode[] {
+  const trigger = makeTrigger(
+    sectionId ? 'TASK_MOVED_TO_SECTION' : '',
+    sectionId ? { sectionId } : {},
+  );
+
+  const condition = makeNodeUnder('CONDITION', 'FIELD_COMPARISON', trigger.id, null, [trigger]);
+
+  return [
+    trigger,
+    {
+      ...condition,
+      configuration: sectionId ? { field: 'sectionId', operator: 'EQUALS', value: sectionId } : {},
+    },
+  ];
+}
+
 /** A new step, attached to the end of the rule. */
 export function makeNode(
   type: AutomationNodeType,
