@@ -6,6 +6,7 @@ import {
   AutomationNodeType,
   AutomationRuleStatus,
   BLOCK_SELF_RETRIGGER,
+  BranchKey,
   FilterOperator,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
@@ -118,7 +119,13 @@ export class AutomationRunnerService {
   }
 
   private async runRule(
-    rule: { id: string; name: string; workspaceId: string; projectId: string; nodes: AutomationNode[] },
+    rule: {
+      id: string;
+      name: string;
+      workspaceId: string;
+      projectId: string;
+      nodes: AutomationNode[];
+    },
     event: AutomationEvent,
   ): Promise<boolean> {
     const started = Date.now();
@@ -152,20 +159,17 @@ export class AutomationRunnerService {
     // Conditions are all-or-nothing: a rule whose conditions do not hold has
     // not failed, it simply does not apply. Recorded as SKIPPED with a reason
     // so the history distinguishes "did not match" from "went wrong".
-    const conditions = rule.nodes.filter((node) => node.nodeType === AutomationNodeType.CONDITION);
-    const unmet = conditions.find((node) => !this.conditionHolds(node, task, event));
+    const plan = this.plan(rule.nodes, task, event);
 
-    if (unmet) {
+    if (plan.skippedBy) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
-        skippedReason: `Condition not met: ${unmet.subtype}.`,
+        skippedReason: `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
       return false;
     }
 
-    const actions = rule.nodes
-      .filter((node) => node.nodeType === AutomationNodeType.ACTION)
-      .slice(0, MAX_ACTIONS_PER_EXECUTION);
+    const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
 
     let failures = 0;
 
@@ -242,11 +246,97 @@ export class AutomationRunnerService {
   }
 
   /** Evaluates one condition against the task the event is about. */
-  private conditionHolds(
-    node: AutomationNode,
+  /**
+   * Which actions this event should run, and what stopped it if none.
+   *
+   * Two shapes of rule exist and both have to keep working.
+   *
+   * A rule authored before the canvas has no parentage at all — every node's
+   * `parentNodeId` is null — and its meaning is "every condition must hold,
+   * then every action runs". Walking that as a tree would treat each node as
+   * its own root and change what nine live rules do, so it keeps the flat
+   * evaluation it has always had.
+   *
+   * A rule built on the canvas has parentage, and its meaning is the path: a
+   * condition that does not hold stops everything under it, and a branch sends
+   * execution down one arm. The presence of a single parent link is what tells
+   * the two apart, because that is the only thing that actually differs.
+   */
+  private plan(
+    nodes: AutomationNode[],
     task: Task,
     event: AutomationEvent,
-  ): boolean {
+  ): { actions: AutomationNode[]; skippedBy: string | null } {
+    const isTree = nodes.some((node) => node.parentNodeId !== null);
+
+    if (!isTree) {
+      const unmet = nodes
+        .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
+        .find((node) => !this.conditionHolds(node, task, event));
+
+      if (unmet) return { actions: [], skippedBy: unmet.subtype };
+
+      return {
+        actions: nodes.filter((node) => node.nodeType === AutomationNodeType.ACTION),
+        skippedBy: null,
+      };
+    }
+
+    const trigger = nodes.find((node) => node.nodeType === AutomationNodeType.TRIGGER);
+    if (!trigger) return { actions: [], skippedBy: 'no trigger' };
+
+    const actions: AutomationNode[] = [];
+    let skippedBy: string | null = null;
+
+    const childrenOf = (parentId: string, arm: string | null) =>
+      nodes
+        .filter((node) => node.parentNodeId === parentId)
+        .filter((node) => (arm === null ? true : node.branchKey === arm))
+        .sort((a, b) => a.position - b.position);
+
+    /*
+     * Depth-limited on purpose. A cycle is refused at validation, but the
+     * runner reads rows that may have been written by an older client, and a
+     * loop here would hang the worker rather than produce a wrong answer.
+     */
+    const walk = (nodeId: string, arm: string | null, depth: number): void => {
+      if (depth > 50) return;
+
+      for (const node of childrenOf(nodeId, arm)) {
+        if (node.nodeType === AutomationNodeType.CONDITION) {
+          // A condition governs what follows it, not the whole rule. Its
+          // siblings on another path are unaffected.
+          if (!this.conditionHolds(node, task, event)) {
+            skippedBy ??= node.subtype;
+            continue;
+          }
+
+          walk(node.id, null, depth + 1);
+          continue;
+        }
+
+        if (node.nodeType === AutomationNodeType.BRANCH) {
+          const matched = this.conditionHolds(node, task, event);
+
+          walk(node.id, matched ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          continue;
+        }
+
+        if (node.nodeType === AutomationNodeType.ACTION) {
+          actions.push(node);
+          walk(node.id, null, depth + 1);
+        }
+      }
+    };
+
+    walk(trigger.id, null, 0);
+
+    // "Nothing ran" is only a skip when something stopped it. A rule whose
+    // branch legitimately led nowhere has run and done nothing.
+    return { actions, skippedBy: actions.length === 0 ? skippedBy : null };
+  }
+
+  private conditionHolds(node: AutomationNode, task: Task, event: AutomationEvent): boolean {
     const config = (node.configuration ?? {}) as {
       field?: string;
       operator?: FilterOperator;
@@ -262,9 +352,13 @@ export class AutomationRunnerService {
       case FilterOperator.NOT_EQUALS:
         return String(actual ?? '') !== String(expected ?? '');
       case FilterOperator.CONTAINS:
-        return String(actual ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase());
+        return String(actual ?? '')
+          .toLowerCase()
+          .includes(String(expected ?? '').toLowerCase());
       case FilterOperator.NOT_CONTAINS:
-        return !String(actual ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase());
+        return !String(actual ?? '')
+          .toLowerCase()
+          .includes(String(expected ?? '').toLowerCase());
       case FilterOperator.IS_EMPTY:
         return actual === null || actual === undefined || actual === '';
       case FilterOperator.IS_NOT_EMPTY:
@@ -470,7 +564,10 @@ export class AutomationRunnerService {
       default:
         // An action the engine does not implement fails loudly rather than
         // reporting success for something that did not happen.
-        return { succeeded: false, message: `"${node.subtype}" is not an action this engine runs.` };
+        return {
+          succeeded: false,
+          message: `"${node.subtype}" is not an action this engine runs.`,
+        };
     }
   }
 

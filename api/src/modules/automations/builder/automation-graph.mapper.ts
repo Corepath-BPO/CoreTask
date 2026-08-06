@@ -63,8 +63,7 @@ function placementFor(
     return { x: node.positionX, y: node.positionY };
   }
 
-  const column =
-    node.nodeType === 'TRIGGER' ? 0 : node.nodeType === 'CONDITION' ? 1 : 2;
+  const column = node.nodeType === 'TRIGGER' ? 0 : node.nodeType === 'CONDITION' ? 1 : 2;
 
   // Nodes sharing a column stack downwards so a rule with three actions reads
   // as three steps rather than one.

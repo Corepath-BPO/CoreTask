@@ -42,10 +42,12 @@ export class AutomationEventPublisher {
 
   constructor(@InjectQueue(QueueName.AUTOMATION) private readonly queue: Queue) {}
 
-  async publish(event: Omit<AutomationEvent, 'correlationId' | 'depth'> & {
-    correlationId?: string;
-    depth?: number;
-  }): Promise<void> {
+  async publish(
+    event: Omit<AutomationEvent, 'correlationId' | 'depth'> & {
+      correlationId?: string;
+      depth?: number;
+    },
+  ): Promise<void> {
     const payload: AutomationEvent = {
       ...event,
       // A fresh id means a user action; an inherited one means this is a

@@ -85,11 +85,14 @@ export class AutomationGraphValidatorService {
       }
 
       /*
-       * BRANCH and DELAY exist in the schema and the runner does not read them.
-       * Refused rather than silently ignored: a published rule containing one
-       * would look like it splits and would run straight through.
+       * DELAY is in the schema and nothing executes it. Refused rather than
+       * silently ignored: a published rule containing one would look like it
+       * waits and would run straight through.
+       *
+       * BRANCH used to be refused for the same reason and no longer is — the
+       * runner walks the tree and takes one arm. See the branching document.
        */
-      if (node.type === AutomationNodeType.BRANCH || node.type === AutomationNodeType.DELAY) {
+      if (node.type === AutomationNodeType.DELAY) {
         issues.push({
           level: GraphIssueLevel.ERROR,
           nodeId: node.id,

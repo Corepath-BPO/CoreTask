@@ -152,6 +152,239 @@ describe('Automations (e2e)', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('running a rule with parentage', () => {
+    /*
+     * The runner reads two shapes and both have to keep working.
+     *
+     * A rule written before the canvas has no parentage — every `parentNodeId`
+     * is null — and means "all conditions must hold, then all actions run".
+     * A rule built on the canvas means the path. The presence of a single
+     * parent link is what tells them apart, so these tests pin both.
+     */
+    const publishGraph = async (scope: Scope, nodes: Record<string, unknown>[]) => {
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Graph rule',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.sectionId },
+          nodes,
+        })
+        .expect(201);
+
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      return created.body.data.id as string;
+    };
+
+    const assigneeAfterRun = async (scope: Scope) => {
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      return task?.assigneeId ?? null;
+    };
+
+    it('still runs a flat rule exactly as it always did', async () => {
+      // The regression that matters: nine rules exist with no parentage, and a
+      // tree walk would treat each of their nodes as its own root.
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('still skips a flat rule whose condition does not hold', async () => {
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'priority', operator: 'EQUALS', value: 'CRITICAL' },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBeNull();
+    });
+
+    it('runs the actions under a condition that holds', async () => {
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'c',
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration: { field: 'priority', operator: 'NOT_EQUALS', value: 'CRITICAL' },
+        },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          parentId: 'c',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('stops only what hangs off a condition that does not', async () => {
+      /*
+       * The difference a tree makes. Flat, one failing condition skips the
+       * whole rule; on a path, it stops what follows *it* and leaves a sibling
+       * path alone.
+       */
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'c',
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration: { field: 'priority', operator: 'EQUALS', value: 'CRITICAL' },
+        },
+        {
+          id: 'blocked',
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          parentId: 'c',
+          configuration: { userId: scope.owner.userId },
+        },
+        {
+          id: 'sibling',
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          parentId: 't',
+          configuration: { priority: 'HIGH' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+      expect(task?.assigneeId).toBeNull();
+      expect(task?.priority).toBe('HIGH');
+    });
+
+    it('takes the matching arm of a branch', async () => {
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'b',
+          nodeType: 'BRANCH',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration: { field: 'priority', operator: 'NOT_EQUALS', value: 'CRITICAL' },
+        },
+        {
+          id: 'match',
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          parentId: 'b',
+          branchKey: 'match',
+          configuration: { userId: scope.owner.userId },
+        },
+        {
+          id: 'else',
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          parentId: 'b',
+          branchKey: 'else',
+          configuration: { priority: 'LOW' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+      expect(task?.assigneeId).toBe(scope.owner.userId);
+      expect(task?.priority).not.toBe('LOW');
+    });
+
+    it('takes the else arm when the branch does not match', async () => {
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'b',
+          nodeType: 'BRANCH',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration: { field: 'priority', operator: 'EQUALS', value: 'CRITICAL' },
+        },
+        {
+          id: 'match',
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          parentId: 'b',
+          branchKey: 'match',
+          configuration: { userId: scope.owner.userId },
+        },
+        {
+          id: 'else',
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          parentId: 'b',
+          branchKey: 'else',
+          configuration: { priority: 'LOW' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+      expect(task?.assigneeId).toBeNull();
+      expect(task?.priority).toBe('LOW');
+    });
+
+    it('runs sequential actions in order down a path', async () => {
+      const scope = await setupScope();
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a1',
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          parentId: 't',
+          configuration: { userId: scope.owner.userId },
+        },
+        {
+          id: 'a2',
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          parentId: 'a1',
+          configuration: { priority: 'HIGH' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+      expect(task?.assigneeId).toBe(scope.owner.userId);
+      expect(task?.priority).toBe('HIGH');
+    });
+  });
+
   describe('the graph endpoints', () => {
     const draftWithNodes = async (scope: Scope, nodes: Record<string, unknown>[]) => {
       const created = await request(server())
@@ -282,12 +515,32 @@ describe('Automations (e2e)', () => {
       );
     });
 
-    it('refuses a step type the runner cannot execute', async () => {
+    it('refuses a step type nothing executes', async () => {
       /*
-       * BRANCH and DELAY are in the schema and the runner never reads them. A
-       * published rule containing one would look like it splits and would run
-       * straight through — worse than not offering it at all.
+       * DELAY is in the schema and nothing runs it. A published rule containing
+       * one would look like it waits and would run straight through — worse
+       * than not offering it at all. BRANCH was refused for the same reason
+       * until the runner learned to walk the tree.
        */
+      const scope = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, {
+        name: 'Has a delay',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+          { id: 'd', nodeType: 'DELAY', subtype: 'WAIT', parentId: 't' },
+          { id: 'a', nodeType: 'ACTION', subtype: 'ASSIGN_USER', parentId: 'd' },
+        ],
+      });
+
+      expect(result.publishable).toBe(false);
+      expect(result.issues.map((issue) => issue.message)).toContain(
+        'This step type cannot run yet.',
+      );
+    });
+
+    it('accepts a branch, now that the runner takes one arm', async () => {
       const scope = await setupScope();
       const ruleId = await draftWithNodes(scope, []);
 
@@ -295,19 +548,25 @@ describe('Automations (e2e)', () => {
         name: 'Has a branch',
         nodes: [
           { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
-          { id: 'b', nodeType: 'BRANCH', subtype: 'IF_ELSE', parentId: 't' },
           {
-            id: 'a',
+            id: 'b',
+            nodeType: 'BRANCH',
+            subtype: 'FIELD_COMPARISON',
+            parentId: 't',
+            configuration: { field: 'priority', operator: 'EQUALS', value: 'HIGH' },
+          },
+          {
+            id: 'm',
             nodeType: 'ACTION',
             subtype: 'ASSIGN_USER',
             parentId: 'b',
             branchKey: 'match',
+            configuration: { userId: scope.owner.userId },
           },
         ],
       });
 
-      expect(result.publishable).toBe(false);
-      expect(result.issues.map((issue) => issue.message)).toContain(
+      expect(result.issues.map((issue) => issue.message)).not.toContain(
         'This step type cannot run yet.',
       );
     });
