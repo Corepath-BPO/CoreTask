@@ -64,11 +64,11 @@ describe('deriving edges from parentage', () => {
 
     expect(edges.find((edge) => edge.target === 'm')).toMatchObject({
       kind: 'MATCH',
-      label: 'Match',
+      label: 'If it matches',
     });
     expect(edges.find((edge) => edge.target === 'e')).toMatchObject({
       kind: 'ELSE',
-      label: 'Else',
+      label: 'Otherwise',
     });
   });
 

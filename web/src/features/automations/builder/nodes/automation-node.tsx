@@ -25,6 +25,8 @@ export interface AutomationNodeData extends Record<string, unknown> {
   /** True when this step is missing something it needs. */
   invalid: boolean;
   onOpen?: () => void;
+  /** Add a step straight after this one. Absent where that makes no sense. */
+  onAddAfter?: () => void;
 }
 
 const ICON: Record<string, LucideIcon> = {
@@ -81,87 +83,122 @@ export function AutomationNode({ data, selected }: NodeProps) {
   const heading = NODE_CATEGORY_LABEL[category as AutomationNodeType] ?? 'Add a step';
 
   return (
-    <button
-      type="button"
-      onClick={node.onOpen}
-      aria-label={`${heading} — ${node.label}`}
-      className={cn(
-        'flex w-[380px] cursor-pointer items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left shadow-sm transition-colors',
-        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
-        selected ? 'border-primary' : 'border-border hover:border-muted-foreground/40',
-        // A step that cannot run says so in its border as well as its badge, so
-        // it is findable while scanning rather than only on inspection.
-        node.invalid && 'border-destructive/60',
-        isPlaceholder && 'border-dashed bg-transparent shadow-none hover:bg-muted/40',
-      )}
-    >
-      <span
-        aria-hidden="true"
+    /*
+     * A wrapper, because the card is a button and the add control is another
+     * one — nesting them would be invalid markup and the inner click would
+     * never be the one that fired.
+     */
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={node.onOpen}
+        aria-label={`${heading} — ${node.label}`}
         className={cn(
-          'flex size-8 shrink-0 items-center justify-center rounded-lg',
-          ICON_TILE[category],
+          'flex w-[380px] cursor-pointer items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left shadow-sm transition-colors',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+          selected ? 'border-primary' : 'border-border hover:border-muted-foreground/40',
+          // A step that cannot run says so in its border as well as its badge, so
+          // it is findable while scanning rather than only on inspection.
+          node.invalid && 'border-destructive/60',
+          isPlaceholder && 'border-dashed bg-transparent shadow-none hover:bg-muted/40',
         )}
       >
-        <Icon className="size-4" />
-      </span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex size-8 shrink-0 items-center justify-center rounded-lg',
+            ICON_TILE[category],
+          )}
+        >
+          <Icon className="size-4" />
+        </span>
 
-      <span className="min-w-0 flex-1">
-        <span className="block text-xs text-muted-foreground">{heading}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs text-muted-foreground">{heading}</span>
 
-        {/*
+          {/*
           The value is set apart from the sentence around it — "Section is
           `Incoming Request`" — so a rule can be read at a glance instead of
           word by word. Which parts are values is decided where the sentence is
           built, not here, so the card cannot disagree with the name a screen
           reader is given for the same step.
         */}
-        <span
-          className={cn(
-            'flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm',
-            isPlaceholder ? 'text-muted-foreground' : 'text-foreground',
-          )}
-        >
-          {node.summary.map((part, index) =>
-            part.chip ? (
-              <span
-                key={index}
-                className="max-w-[210px] truncate rounded bg-muted px-1.5 py-0.5 text-[13px] text-foreground"
-              >
-                {part.text}
-              </span>
-            ) : (
-              <span key={index} className="truncate">
-                {part.text}
-              </span>
-            ),
-          )}
+          <span
+            className={cn(
+              'flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm',
+              isPlaceholder ? 'text-muted-foreground' : 'text-foreground',
+            )}
+          >
+            {node.summary.map((part, index) =>
+              part.chip ? (
+                <span
+                  key={index}
+                  className="max-w-[210px] truncate rounded bg-muted px-1.5 py-0.5 text-[13px] text-foreground"
+                >
+                  {part.text}
+                </span>
+              ) : (
+                <span key={index} className="truncate">
+                  {part.text}
+                </span>
+              ),
+            )}
+          </span>
         </span>
-      </span>
 
-      {node.invalid && (
-        <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
-      )}
+        {node.invalid && (
+          <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+        )}
 
-      {/*
+        {/*
         Handles are the anchors edges attach to. Hidden rather than absent:
         React Flow needs them positioned to route an edge, and a visible dot on
         every node reads as something to drag when connections are made by
         adding steps, not by drawing lines.
       */}
-      <Handle type="target" position={Position.Left} className="!opacity-0" isConnectable={false} />
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!opacity-0"
-        isConnectable={false}
-      />
-      <Handle
-        type="source"
-        id="branch"
-        position={Position.Bottom}
-        className="!opacity-0"
-        isConnectable={false}
-      />
-    </button>
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!opacity-0"
+          isConnectable={false}
+        />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!opacity-0"
+          isConnectable={false}
+        />
+        <Handle
+          type="source"
+          id="branch"
+          position={Position.Bottom}
+          className="!opacity-0"
+          isConnectable={false}
+        />
+      </button>
+
+      {/*
+        Revealed on hover, and on keyboard focus.
+        
+        A permanent button on every card is a second thing to read on every
+        step; one that only ever appears on hover cannot be reached without a
+        mouse. `group-focus-within` covers both, so tabbing through the rule
+        surfaces the same control a pointer does.
+      */}
+      {node.onAddAfter && (
+        <button
+          type="button"
+          aria-label={`Add a step after: ${node.label}`}
+          onClick={node.onAddAfter}
+          className={cn(
+            'absolute -right-3 top-1/2 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-opacity',
+            'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+            'hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+          )}
+        >
+          <Plus className="size-3.5" aria-hidden="true" />
+        </button>
+      )}
+    </div>
   );
 }

@@ -92,7 +92,18 @@ export function deriveEdges(nodes: readonly EdgeSource[]): DerivedEdge[] {
         source: node.parentId as string,
         target: node.id,
         kind,
-        label: !fromBranch ? null : node.branchKey === BranchKey.ELSE ? 'Else' : 'Match',
+        /*
+         * Plain words, not the enum.
+         *
+         * "Match" and "Else" are the keys the engine walks; on a canvas they
+         * read as jargon, and an unlabelled pair of arms reads as two identical
+         * paths. "Otherwise" is what somebody would say out loud.
+         */
+        label: !fromBranch
+          ? null
+          : node.branchKey === BranchKey.ELSE
+            ? 'Otherwise'
+            : 'If it matches',
       };
     });
 }

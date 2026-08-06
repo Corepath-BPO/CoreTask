@@ -27,6 +27,7 @@ export interface AutomationEdgeData extends Record<string, unknown> {
  */
 export function AutomationEdge({
   id,
+  label,
   source,
   sourceX,
   sourceY,
@@ -62,6 +63,24 @@ export function AutomationEdge({
           className="nodrag nopan pointer-events-none absolute"
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
         >
+          {/*
+            Which arm this is, beside the control rather than above it.
+
+            Two arms leaving a split look like two identical paths until one of
+            them says "otherwise" — and the wording comes from the same function
+            the API uses, so a rule cannot be described one way on the canvas and
+            another way in a response.
+
+            To the left because above is where the card is: an arm rising back
+            towards the split put its label underneath that card, where the only
+            labelled arm was the one going the other way.
+          */}
+          {label && (
+            <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {label}
+            </span>
+          )}
+
           <button
             type="button"
             aria-label="Add a step here"

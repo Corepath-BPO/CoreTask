@@ -69,6 +69,18 @@ function Canvas({
 }: Props) {
   const { fitView } = useReactFlow();
 
+  /*
+   * Which steps already have something after them.
+   *
+   * Placeholders count: a card inviting somebody to choose an action *is* the
+   * add control for that spot, so a plus beside its parent would be a second
+   * one pointing at the same place.
+   */
+  const hasFollower = useMemo(
+    () => new Set(graph.nodes.map((node) => node.parentId).filter(Boolean) as string[]),
+    [graph.nodes],
+  );
+
   const nodes = useMemo<Node<AutomationNodeData>[]>(
     () =>
       graph.nodes.map((node) => ({
@@ -82,9 +94,23 @@ function Canvas({
           label: summarise(node, metadata),
           invalid: isNodeIncomplete(node),
           onOpen: () => onOpenNode(node.id),
+          /*
+           * Only where nothing follows yet.
+           *
+           * The plus means "and then", so on a step that already leads
+           * somewhere it would have to mean "insert between" instead — which is
+           * what the control on the connection itself does. Two controls a few
+           * pixels apart doing subtly different things is how somebody ends up
+           * with a step in the wrong place.
+           *
+           * Never on a placeholder either: that card is already the invitation.
+           */
+          ...(node.type === 'PLACEHOLDER' || hasFollower.has(node.id)
+            ? {}
+            : { onAddAfter: () => onInsertStep(node.id) }),
         },
       })),
-    [graph.nodes, metadata, selectedId, onOpenNode],
+    [graph.nodes, metadata, selectedId, onOpenNode, onInsertStep, hasFollower],
   );
 
   const edges = useMemo<Edge[]>(
