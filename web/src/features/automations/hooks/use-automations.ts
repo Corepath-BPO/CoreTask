@@ -6,14 +6,27 @@ import { queryClient } from '@/lib/api/query-client';
 
 import { automationsApi } from '../api/automations.api';
 
-const keys = {
-  all: (workspaceId: string, projectId: string) =>
-    ['automations', workspaceId, projectId] as const,
+/**
+ * One key family for everything automation.
+ *
+ * Exported so the builder uses the same prefixes the rule list does — a second
+ * factory is how a save refreshes one screen and leaves the other showing what
+ * was there before.
+ */
+export const automationKeys = {
+  all: (workspaceId: string, projectId: string) => ['automations', workspaceId, projectId] as const,
+  graph: (workspaceId: string, projectId: string, ruleId: string) =>
+    ['automations', workspaceId, projectId, ruleId, 'graph'] as const,
+  metadata: (workspaceId: string, projectId: string) =>
+    ['automations', workspaceId, projectId, 'metadata'] as const,
   forSection: (workspaceId: string, projectId: string, sectionId: string) =>
     ['automations', workspaceId, projectId, 'section', sectionId] as const,
   executions: (workspaceId: string, projectId: string, ruleId: string) =>
     ['automations', workspaceId, projectId, ruleId, 'executions'] as const,
 };
+
+/** Kept for the call sites in this file. */
+const keys = automationKeys;
 
 function reportError(error: unknown, fallback: string) {
   /*

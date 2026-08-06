@@ -12,6 +12,7 @@ import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
+import { AutomationBuilderPage } from '@/features/automations/builder/components/automation-builder-page';
 import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page';
 import { ProjectListPage } from '@/features/projects/pages/project-list-page';
@@ -252,9 +253,34 @@ const projectAutomationsRoute = createRoute({
   }),
 });
 
+/**
+ * The visual builder, on its own address.
+ *
+ * A rule now has a URL that can be pasted to a colleague, and Back is the rule
+ * list rather than whatever the list happened to be showing. The old builder
+ * lived behind `?new=true` on the list route, so neither was true.
+ */
+const projectAutomationBuilderRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/automations/$ruleId',
+  component: function AutomationBuilderRoute() {
+    const { projectId, ruleId } = projectAutomationBuilderRoute.useParams();
+
+    return <AutomationBuilderPage projectId={projectId} ruleId={ruleId} />;
+  },
+});
+
 const projectPlaceholderRoutes = [
-  { segment: 'activity', title: 'Activity', plannedFor: 'This project’s slice of the activity feed.' },
-  { segment: 'settings', title: 'Settings', plannedFor: 'Statuses, fields and project preferences.' },
+  {
+    segment: 'activity',
+    title: 'Activity',
+    plannedFor: 'This project’s slice of the activity feed.',
+  },
+  {
+    segment: 'settings',
+    title: 'Settings',
+    plannedFor: 'Statuses, fields and project preferences.',
+  },
 ].map((tab) =>
   createRoute({
     getParentRoute: () => projectDetailRoute,
@@ -322,6 +348,7 @@ const routeTree = rootRoute.addChildren([
       projectListRoute,
       projectBoardRoute,
       projectAutomationsRoute,
+      projectAutomationBuilderRoute,
       ...projectPlaceholderRoutes,
     ]),
     myTasksRoute,
