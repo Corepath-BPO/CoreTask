@@ -34,7 +34,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { TaskCardPreview } from '@/features/tasks/components/task-card';
 import { groupTasksBySection } from '@/features/tasks/hooks/use-tasks';
 import { useProject } from '../hooks/use-projects';
@@ -45,12 +44,7 @@ import {
 import { resolveTaskDrop, type TaskDropTarget } from '@/features/tasks/lib/resolve-task-drop';
 import { cn } from '@/lib/utils';
 
-import {
-  useCreateSection,
-  useDeleteSection,
-  useMoveSection,
-  useRenameSection,
-} from '../hooks/use-projects';
+import { useDeleteSection, useMoveSection, useRenameSection } from '../hooks/use-projects';
 import { resolveDropPlan } from '../lib/resolve-drop';
 
 import { SectionColumn } from './section-column';
@@ -64,6 +58,8 @@ interface SectionBoardProps {
   canEdit: boolean;
   canDelete: boolean;
   onOpenTask: (taskId: string) => void;
+  /** Opens the shared section dialog. Omitted hides the trailing column. */
+  onAddSection?: (() => void) | undefined;
 }
 
 export function SectionBoard({
@@ -75,8 +71,8 @@ export function SectionBoard({
   canEdit,
   canDelete,
   onOpenTask,
+  onAddSection,
 }: SectionBoardProps) {
-  const createSection = useCreateSection(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveSection = useMoveSection(workspaceId, projectId);
   const deleteSection = useDeleteSection(workspaceId, projectId);
@@ -86,8 +82,6 @@ export function SectionBoard({
   const defaultType: CreatableWorkItemType = project?.defaultWorkItemType ?? 'TASK';
   const moveWorkItem = useMoveProjectWorkItem(workspaceId, projectId);
 
-  const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<Section | null>(null);
   const [dragging, setDragging] = useState<Task | null>(null);
 
@@ -156,18 +150,6 @@ export function SectionBoard({
     });
   };
 
-  const submitNewSection = () => {
-    const name = newName.trim();
-    if (name === '') {
-      setAdding(false);
-      return;
-    }
-
-    createSection.mutate({ name });
-    setNewName('');
-    setAdding(false);
-  };
-
   const atLimit = sections.length >= MAX_SECTIONS_PER_PROJECT;
   const withheld = Math.max(0, totalTaskCount - tasks.length);
 
@@ -206,41 +188,24 @@ export function SectionBoard({
             ))}
           </SortableContext>
 
-          {canEdit && (
+          {canEdit && onAddSection && (
             <div className="w-72 shrink-0">
-              {adding ? (
-                <div className="rounded-xl border border-dashed p-3">
-                  <Input
-                    autoFocus
-                    value={newName}
-                    onChange={(event) => setNewName(event.target.value)}
-                    onBlur={submitNewSection}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') submitNewSection();
-                      if (event.key === 'Escape') {
-                        setNewName('');
-                        setAdding(false);
-                      }
-                    }}
-                    placeholder="Section name"
-                    aria-label="New section name"
-                    className="h-8"
-                  />
-                  <p className="mt-1.5 text-[11px] text-muted-foreground">
-                    Enter to add · Escape to cancel
-                  </p>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => setAdding(true)}
-                  disabled={atLimit || createSection.isPending}
-                  className="h-11 w-full justify-start border-dashed text-muted-foreground"
-                >
-                  <Plus />
-                  {atLimit ? `Limit of ${MAX_SECTIONS_PER_PROJECT} reached` : 'Add section'}
-                </Button>
-              )}
+              {/*
+                A column at the end of the row is the natural place to reach for
+                one more, so the affordance stays. What went is the inline field
+                behind it: it took a name and nothing else, while the same action
+                from the split menu offered a default status and a position. Two
+                entry points are fine; two behaviours are not.
+              */}
+              <Button
+                variant="outline"
+                onClick={onAddSection}
+                disabled={atLimit}
+                className="h-11 w-full cursor-pointer justify-start border-dashed text-muted-foreground"
+              >
+                <Plus />
+                {atLimit ? `Limit of ${MAX_SECTIONS_PER_PROJECT} reached` : 'Add section'}
+              </Button>
             </div>
           )}
         </div>

@@ -15,12 +15,25 @@ export const createSectionSchema = z.object({
    * that collides with, or sorts oddly against, its neighbours.
    */
   afterSectionId: z.uuid().nullable().optional(),
+  /**
+   * Applied to a task moved into this section, and to nothing else.
+   *
+   * Optional and null by default on purpose: a section is a workflow column and
+   * a status is task state, and coupling them silently is how "drag a card"
+   * becomes an unexplained status change. Opting in makes the coupling a choice.
+   */
+  defaultStatusId: z.uuid().nullable().optional(),
 });
 export type CreateSectionInput = z.input<typeof createSectionSchema>;
 
-export const updateSectionSchema = z.object({
-  name: sectionNameSchema,
-});
+export const updateSectionSchema = z
+  .object({
+    name: sectionNameSchema.optional(),
+    defaultStatusId: z.uuid().nullable().optional(),
+  })
+  .refine((values) => Object.keys(values).length > 0, {
+    message: 'Provide at least one field to update.',
+  });
 export type UpdateSectionInput = z.input<typeof updateSectionSchema>;
 
 export const moveSectionSchema = z.object({

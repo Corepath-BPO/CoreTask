@@ -62,13 +62,21 @@ export class SectionsService {
       this.assertSibling(siblings, dto.afterSectionId);
     }
 
+    await this.assertStatusBelongsHere(workspaceId, projectId, dto.defaultStatusId);
+
     const plan = planPlacement(siblings, dto.afterSectionId);
 
     const created = await this.prisma.$transaction(async (tx) => {
       await this.applyRebalance(tx, plan.rebalance);
 
       return tx.section.create({
-        data: { workspaceId, projectId, name: dto.name, position: plan.position },
+        data: {
+          workspaceId,
+          projectId,
+          name: dto.name,
+          position: plan.position,
+          ...(dto.defaultStatusId ? { defaultStatusId: dto.defaultStatusId } : {}),
+        },
         include: sectionInclude,
       });
     });
@@ -98,9 +106,14 @@ export class SectionsService {
   ): Promise<Section> {
     const existing = await this.requireSection(workspaceId, projectId, sectionId);
 
+    await this.assertStatusBelongsHere(workspaceId, projectId, dto.defaultStatusId);
+
     const updated = await this.prisma.section.update({
       where: { id: sectionId },
-      data: { name: dto.name },
+      data: {
+        ...(dto.name === undefined ? {} : { name: dto.name }),
+        ...(dto.defaultStatusId === undefined ? {} : { defaultStatusId: dto.defaultStatusId }),
+      },
       include: sectionInclude,
     });
 
@@ -110,7 +123,10 @@ export class SectionsService {
       action: ActivityAction.UPDATED,
       entity: ActivityEntity.SECTION,
       entityId: sectionId,
-      summary: `Renamed section "${existing.name}" to "${updated.name}"`,
+      summary:
+        existing.name === updated.name
+          ? `Updated section "${updated.name}"`
+          : `Renamed section "${existing.name}" to "${updated.name}"`,
       metadata: { projectId },
     });
 
@@ -118,6 +134,36 @@ export class SectionsService {
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.SECTION_UPDATED, section);
 
     return section;
+  }
+
+  /**
+   * The default status must belong to this workspace, and to this project or to
+   * the workspace-wide set.
+   *
+   * Without it, a section could point at another project's status: every task
+   * dragged in would silently take a state its own project does not define, and
+   * the board would show a status nobody there can select.
+   */
+  private async assertStatusBelongsHere(
+    workspaceId: string,
+    projectId: string,
+    statusId: string | null | undefined,
+  ): Promise<void> {
+    if (!statusId) return;
+
+    const status = await this.prisma.statusDefinition.findFirst({
+      where: {
+        id: statusId,
+        workspaceId,
+        // Null projectId is the workspace-wide set, which every project may use.
+        OR: [{ projectId }, { projectId: null }],
+      },
+      select: { id: true },
+    });
+
+    if (!status) {
+      throw AppException.badRequest('BAD_REQUEST', 'That status is not available in this project.');
+    }
   }
 
   /** Repositions a section relative to a sibling; returns the whole ordered list. */

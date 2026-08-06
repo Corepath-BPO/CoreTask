@@ -16,7 +16,7 @@ import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { cn, formatDate } from '@/lib/utils';
 
 import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/use-project-views';
-import { useProject, useRenameSection } from '../hooks/use-projects';
+import { useCreateSection, useProject, useRenameSection } from '../hooks/use-projects';
 import {
   ADD_COLUMN_WIDTH,
   columnWidth,
@@ -28,6 +28,7 @@ import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-sec
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
 import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
+import { CreateSectionDialog } from './create-section-dialog';
 import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
 import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
 import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
@@ -106,6 +107,8 @@ export function ProjectListView({
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveTask = useMoveTaskToSection(workspaceId);
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const createSection = useCreateSection(workspaceId, projectId);
+  const [addingSection, setAddingSection] = useState(false);
   const { data: project } = useProject(workspaceId, projectId);
 
   // `TASK` until the project loads, which is what it was before this existed.
@@ -281,6 +284,7 @@ export function ProjectListView({
           context={{ projectId, sourceView: 'LIST' }}
           pending={createWorkItem.isPending}
           onCreate={(type) => setComposing({ type: type as CreatableWorkItemType })}
+          onCreateSection={() => setAddingSection(true)}
         />
 
         <ColumnManager
@@ -492,6 +496,14 @@ export function ProjectListView({
         it opens from, so reopening it for a different section builds a fresh
         form instead of carrying the last one's answers across.
       */}
+      <CreateSectionDialog
+        open={addingSection}
+        onOpenChange={setAddingSection}
+        metadata={metadata}
+        pending={createSection.isPending}
+        onSubmit={(payload) => createSection.mutateAsync(payload)}
+      />
+
       <CreateWorkItemDialog
         open={composing !== null}
         onOpenChange={(next) => !next && setComposing(null)}

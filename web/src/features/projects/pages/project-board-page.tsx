@@ -16,10 +16,11 @@ import {
 import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
+import { CreateSectionDialog } from '../components/create-section-dialog';
 import { SectionBoard } from '../components/section-board';
 import { ViewToolbar } from '../components/view-toolbar-slot';
 import { useFieldMetadata } from '../hooks/use-project-views';
-import { useProject } from '../hooks/use-projects';
+import { useCreateSection, useProject } from '../hooks/use-projects';
 
 /**
  * The Board tab — the Kanban that used to be the whole project page.
@@ -51,6 +52,8 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
   const [composing, setComposing] = useState<CreatableWorkItemType | null>(null);
 
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const createSection = useCreateSection(workspaceId, projectId);
+  const [addingSection, setAddingSection] = useState(false);
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
 
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
@@ -70,6 +73,7 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
           context={{ projectId, sourceView: 'BOARD' }}
           pending={createWorkItem.isPending}
           onCreate={(type) => setComposing(type as CreatableWorkItemType)}
+          onCreateSection={() => setAddingSection(true)}
         />
       </ViewToolbar>
 
@@ -115,8 +119,17 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
           canEdit={canEdit && !archived}
           canDelete={canManage && !archived}
           onOpenTask={setOpenTaskId}
+          onAddSection={() => setAddingSection(true)}
         />
       )}
+
+      <CreateSectionDialog
+        open={addingSection}
+        onOpenChange={setAddingSection}
+        metadata={metadata}
+        pending={createSection.isPending}
+        onSubmit={(payload) => createSection.mutateAsync(payload)}
+      />
 
       <CreateWorkItemDialog
         open={composing !== null}

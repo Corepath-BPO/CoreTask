@@ -27,14 +27,33 @@ export class CreateSectionDto {
   @ValidateIf((_, value) => value !== null)
   @IsUUID()
   afterSectionId?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Applied to a task moved into this section, and to nothing else. Null — the default — ' +
+      'means moving a card here changes only where it sits.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  defaultStatusId?: string | null;
 }
 
 export class UpdateSectionDto {
-  @ApiProperty({ example: 'Ready for QA' })
+  @ApiPropertyOptional({ example: 'Ready for QA' })
+  @IsOptional()
   @trim()
   @IsString()
   @Length(SECTION_NAME_MIN_LENGTH, SECTION_NAME_MAX_LENGTH)
-  name!: string;
+  name?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  defaultStatusId?: string | null;
 }
 
 export class MoveSectionDto {

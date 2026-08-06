@@ -104,12 +104,30 @@ function patchSections(
   );
 }
 
+/**
+ * Everything that draws this project's sections, refreshed together.
+ *
+ * The Board reads them from the project detail; the List reads them from field
+ * metadata, under an unrelated key. Only `useRenameSection` ever invalidated
+ * both, so adding, deleting or reordering a section updated the Board and left
+ * the List showing the arrangement from before — the same one-sided staleness
+ * this whole upgrade is about, in a corner nobody had checked.
+ */
+async function invalidateProjectSections(workspaceId: string, projectId: string): Promise<void> {
+  await Promise.all([
+    invalidateProjects(workspaceId),
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.projectViews.metadata(workspaceId, projectId),
+    }),
+  ]);
+}
+
 export function useCreateSection(workspaceId: string | undefined, projectId: string) {
   return useMutation({
     mutationFn: (payload: CreateSectionPayload) =>
       sectionsApi.create(workspaceId as string, projectId, payload),
     onSuccess: async () => {
-      await invalidateProjects(workspaceId as string);
+      await invalidateProjectSections(workspaceId as string, projectId);
     },
     onError: (error) => reportError(error, 'Could not add the section.'),
   });
@@ -143,7 +161,7 @@ export function useDeleteSection(workspaceId: string | undefined, projectId: str
     mutationFn: (sectionId: string) =>
       sectionsApi.remove(workspaceId as string, projectId, sectionId),
     onSuccess: async (result) => {
-      await invalidateProjects(workspaceId as string);
+      await invalidateProjectSections(workspaceId as string, projectId);
       toast.success(
         result.reassignedTaskCount > 0
           ? `Section deleted · ${result.reassignedTaskCount} task${result.reassignedTaskCount === 1 ? '' : 's'} moved to the first column`
@@ -193,8 +211,14 @@ export function useMoveSection(workspaceId: string | undefined, projectId: strin
 
     // The server's positions are authoritative — a rebalance may have renumbered
     // siblings the optimistic update left alone.
-    onSuccess: (sections) => {
+    onSuccess: async (sections) => {
       patchSections(workspaceId as string, projectId, () => sections);
+
+      // The List reads its groups from field metadata, so patching the project
+      // detail alone reorders the Board and leaves the List as it was.
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projectViews.metadata(workspaceId as string, projectId),
+      });
     },
   });
 }

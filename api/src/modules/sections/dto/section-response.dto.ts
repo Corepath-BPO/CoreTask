@@ -19,6 +19,15 @@ export class SectionDto {
   })
   position!: number;
 
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Applied to a task moved into this section. Null means moving a card here changes only ' +
+      'where it sits.',
+  })
+  defaultStatusId!: string | null;
+
   @ApiProperty({ example: 3 })
   taskCount!: number;
 

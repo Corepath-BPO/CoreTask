@@ -110,6 +110,117 @@ describe('Sections (e2e)', () => {
     });
   });
 
+  describe('default status', () => {
+    /*
+     * The column existed and was read by the move logic, but nothing could ever
+     * set it — so it only ever held null and the feature was dead. These cover
+     * the write side that makes it real.
+     */
+    const firstStatusId = async (scope: Scope): Promise<string> => {
+      const response = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/field-metadata`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      return response.body.data.statuses[0].id as string;
+    };
+
+    it('is null unless somebody asks for one', async () => {
+      // A section is a workflow column and a status is task state. Coupling them
+      // by default is how "drag a card" becomes an unexplained status change.
+      const scope = await setupScope();
+
+      const response = await request(server())
+        .post(sectionsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Archive' })
+        .expect(201);
+
+      expect(response.body.data.defaultStatusId).toBeNull();
+    });
+
+    it('is stored and returned when one is chosen', async () => {
+      const scope = await setupScope();
+      const statusId = await firstStatusId(scope);
+
+      const created = await request(server())
+        .post(sectionsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Ready for QA', defaultStatusId: statusId })
+        .expect(201);
+
+      expect(created.body.data.defaultStatusId).toBe(statusId);
+
+      const listed = await request(server())
+        .get(sectionsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const section = (listed.body.data as { name: string; defaultStatusId: string | null }[]).find(
+        (entry) => entry.name === 'Ready for QA',
+      );
+
+      expect(section?.defaultStatusId).toBe(statusId);
+    });
+
+    it('can be set and cleared afterwards', async () => {
+      const scope = await setupScope();
+      const statusId = await firstStatusId(scope);
+      const sectionId = scope.sections[0]!.id;
+      const sectionUrl = `${sectionsUrl(scope)}/${sectionId}`;
+
+      const set = await request(server())
+        .patch(sectionUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ defaultStatusId: statusId })
+        .expect(200);
+      expect(set.body.data.defaultStatusId).toBe(statusId);
+
+      const cleared = await request(server())
+        .patch(sectionUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ defaultStatusId: null })
+        .expect(200);
+      expect(cleared.body.data.defaultStatusId).toBeNull();
+    });
+
+    it('refuses a status this project cannot use', async () => {
+      /*
+       * Otherwise a section could point at another project's status, and every
+       * task dragged in would silently take a state its own project does not
+       * define — showing a status nobody there can select.
+       */
+      const scope = await setupScope();
+
+      await request(server())
+        .post(sectionsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Bad', defaultStatusId: '019fc8d5-0000-7000-8000-000000000000' })
+        .expect(400);
+    });
+
+    it('still renames without touching the status', async () => {
+      const scope = await setupScope();
+      const statusId = await firstStatusId(scope);
+      const sectionUrl = `${sectionsUrl(scope)}/${scope.sections[0]!.id}`;
+
+      await request(server())
+        .patch(sectionUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ defaultStatusId: statusId })
+        .expect(200);
+
+      const renamed = await request(server())
+        .patch(sectionUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Renamed' })
+        .expect(200);
+
+      expect(renamed.body.data.name).toBe('Renamed');
+      expect(renamed.body.data.defaultStatusId).toBe(statusId);
+    });
+  });
+
   describe('creation', () => {
     it('appends by default', async () => {
       const scope = await setupScope();

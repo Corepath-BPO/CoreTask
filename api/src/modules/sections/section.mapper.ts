@@ -20,6 +20,7 @@ export function toSectionDto(section: SectionWithCount): Section {
     projectId: section.projectId,
     name: section.name,
     position: section.position,
+    defaultStatusId: section.defaultStatusId,
     taskCount: section._count.tasks,
     createdAt: section.createdAt.toISOString(),
     updatedAt: section.updatedAt.toISOString(),

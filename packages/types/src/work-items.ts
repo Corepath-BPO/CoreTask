@@ -99,6 +99,11 @@ export interface Section {
   name: string;
   /** Fractional; only meaningful relative to sibling sections. */
   position: number;
+  /**
+   * Applied to a task moved into this section. Null means moving a card here
+   * changes nothing but where it sits, which is the default.
+   */
+  defaultStatusId: string | null;
   taskCount: number;
   createdAt: string;
   updatedAt: string;
@@ -108,10 +113,12 @@ export interface CreateSectionPayload {
   name: string;
   /** Insert after this sibling. `null` places it first; omitted appends. */
   afterSectionId?: string | null;
+  defaultStatusId?: string | null;
 }
 
 export interface UpdateSectionPayload {
-  name: string;
+  name?: string;
+  defaultStatusId?: string | null;
 }
 
 export interface MoveSectionPayload {
