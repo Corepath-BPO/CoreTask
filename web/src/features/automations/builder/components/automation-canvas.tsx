@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css';
 import { AutomationEdge } from '../nodes/automation-edge';
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
 import type { CanvasNode } from '../lib/graph-edits';
+import { layoutGraph } from '../lib/layout';
 import { isNodeIncomplete, summarise, summariseParts } from '../lib/node-summary';
 
 /** Registered once, outside render: a new object each time remounts every node. */
@@ -30,7 +31,6 @@ interface Props {
   selectedId: string | null;
   onSelect: (nodeId: string | null) => void;
   onOpenNode: (nodeId: string) => void;
-  onMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
   /** Add a step directly after `parentId`, before whatever follows it. */
   onInsertStep: (parentId: string) => void;
   /** Split the rule directly after `parentId`. */
@@ -63,7 +63,6 @@ function Canvas({
   selectedId,
   onSelect,
   onOpenNode,
-  onMoveNode,
   onInsertStep,
   onInsertBranch,
 }: Props) {
@@ -82,12 +81,22 @@ function Canvas({
     [graph.nodes],
   );
 
+  /*
+   * Positions come from the shape, not from the stored coordinates.
+   *
+   * A rule's meaning is what follows what, so the drawing has to be derived
+   * from that or it describes a different rule than the one that will run —
+   * insert a step in the middle and every stored position after it is recording
+   * where things used to be.
+   */
+  const placement = useMemo(() => layoutGraph(graph.nodes), [graph.nodes]);
+
   const nodes = useMemo<Node<AutomationNodeData>[]>(
     () =>
       graph.nodes.map((node) => ({
         id: node.id,
         type: 'automation',
-        position: node.position,
+        position: placement.get(node.id) ?? node.position,
         selected: node.id === selectedId,
         data: {
           category: node.type,
@@ -111,7 +120,7 @@ function Canvas({
             : { onAddAfter: () => onInsertStep(node.id) }),
         },
       })),
-    [graph.nodes, metadata, selectedId, onOpenNode, onInsertStep, hasFollower],
+    [graph.nodes, metadata, selectedId, onOpenNode, onInsertStep, hasFollower, placement],
   );
 
   const edges = useMemo<Edge[]>(
@@ -232,8 +241,16 @@ function Canvas({
         // Connections are made by adding steps, never by dragging between dots.
         // This is a workflow builder, not a diagram editor.
         nodesConnectable={false}
+        /*
+         * And steps are not dragged either.
+         *
+         * The arrangement is what says which arm a step is on and what follows
+         * what, so a step dragged somewhere else would be drawing a rule that
+         * does not exist. Position is a consequence of the rule here rather
+         * than a property of it, which also means it can never be saved wrong.
+         */
+        nodesDraggable={false}
         edgesFocusable={false}
-        onNodeDragStop={(_event, node) => onMoveNode(node.id, node.position)}
         onNodeClick={(_event, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}
         proOptions={{ hideAttribution: false }}

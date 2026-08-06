@@ -179,8 +179,15 @@ export const GRAPH_LAYOUT = {
   NODE_HEIGHT: 96,
   /** Gap between one column of the main path and the next. */
   COLUMN_GAP: 90,
-  /** Gap between a branch arm and the one above it. */
-  BRANCH_GAP: 120,
+  /**
+   * Distance from one line of the rule to the next.
+   *
+   * Comfortably more than a node is tall, because the gap is not empty: the
+   * control for adding a step and the label saying which arm this is both live
+   * on the connector between two lines, and at 120 against a 96-tall card they
+   * were drawn on top of the card above.
+   */
+  BRANCH_GAP: 190,
   ORIGIN_X: 40,
   ORIGIN_Y: 140,
 } as const;

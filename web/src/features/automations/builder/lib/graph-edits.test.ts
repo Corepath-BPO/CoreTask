@@ -39,16 +39,15 @@ describe('unsaved edits over the server’s copy', () => {
     expect(hasEdits(NO_EDITS)).toBe(false);
   });
 
-  it('lays a move and a configuration over the stored node', () => {
+  it('lays a configuration over the stored node', () => {
+    // Position used to be laid over here too. It is worked out from the rule's
+    // shape now, so there is nothing to overlay — see `layoutGraph`.
     const result = applyEdits(chain(), {
       ...NO_EDITS,
-      moved: { a: { x: 99, y: 11 } },
       configured: { a: { userId: 'u-1' } },
     });
 
-    const action = result.find((n) => n.id === 'a');
-    expect(action?.position).toEqual({ x: 99, y: 11 });
-    expect(action?.configuration).toEqual({ userId: 'u-1' });
+    expect(result.find((n) => n.id === 'a')?.configuration).toEqual({ userId: 'u-1' });
   });
 
   it('closes the gap when a step in the middle is removed', () => {

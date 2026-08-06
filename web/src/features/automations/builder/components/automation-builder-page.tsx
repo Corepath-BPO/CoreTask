@@ -643,12 +643,6 @@ export function AutomationBuilderPage({
           }}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
           onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
-          onMoveNode={(nodeId, position) =>
-            setEdits((previous) => ({
-              ...previous,
-              moved: { ...previous.moved, [nodeId]: position },
-            }))
-          }
         />
 
         {/*

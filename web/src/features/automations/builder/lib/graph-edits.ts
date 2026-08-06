@@ -20,11 +20,14 @@ export type CanvasNode = Omit<AutomationGraphNode, 'type'> & {
  * leaves nothing behind and one save writes the whole canvas. `removed` is a
  * list of ids rather than a filtered array for the same reason — the server's
  * nodes stay untouched until the draft is written.
+ *
+ * There is no `moved` here any more. Where a step sits is worked out from the
+ * rule's shape rather than remembered, so a position is a consequence of an
+ * edit rather than one of its own — see `layoutGraph`.
  */
 export interface GraphEdits {
   added: CanvasNode[];
   removed: string[];
-  moved: Record<string, { x: number; y: number }>;
   configured: Record<string, Record<string, unknown>>;
   /**
    * Steps whose *kind* changed — picking the trigger of a new rule, mostly.
@@ -72,7 +75,6 @@ export function adoptChildren(
 export const NO_EDITS: GraphEdits = {
   added: [],
   removed: [],
-  moved: {},
   configured: {},
   retyped: {},
   reparented: {},
@@ -82,7 +84,6 @@ export function hasEdits(edits: GraphEdits): boolean {
   return (
     edits.added.length > 0 ||
     edits.removed.length > 0 ||
-    Object.keys(edits.moved).length > 0 ||
     Object.keys(edits.configured).length > 0 ||
     Object.keys(edits.retyped).length > 0 ||
     Object.keys(edits.reparented).length > 0
@@ -96,7 +97,6 @@ export function applyEdits(serverNodes: readonly CanvasNode[], edits: GraphEdits
   const overlay = (node: CanvasNode): CanvasNode => ({
     ...node,
     subtype: edits.retyped[node.id] ?? node.subtype,
-    position: edits.moved[node.id] ?? node.position,
     configuration: edits.configured[node.id] ?? node.configuration,
     ...(edits.reparented[node.id] ?? {}),
   });
