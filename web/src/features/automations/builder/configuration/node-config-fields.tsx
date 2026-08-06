@@ -1,16 +1,9 @@
-import type { AutomationNodeType } from '@coretask/contracts';
-import {
-  NODE_CATEGORY_LABEL,
-  OPERATORS_BY_VALUE_KIND,
-  operatorTakesValue,
-} from '@coretask/contracts';
+import { OPERATORS_BY_VALUE_KIND, operatorTakesValue } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
 import type { CanvasNode } from '../lib/graph-edits';
-import { useState } from 'react';
 
 import { Field } from '@/components/forms/field';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -19,114 +12,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 
 /** Radix `Select` treats `''` as "no value", so absence needs a real token. */
 const NONE = '__none__';
 
-interface Props {
-  node: CanvasNode | null;
-  metadata: AutomationMetadata | undefined;
-  onClose: () => void;
-  onSave: (nodeId: string, configuration: Record<string, unknown>) => void;
-}
-
 /**
- * Editing one step, beside the rule rather than instead of it.
+ * The settings one step needs, and nothing else.
  *
- * A sheet, not a full-screen form: the point of a canvas is seeing the shape,
- * and replacing it while somebody configures a step takes away the context that
- * makes the step make sense.
- *
- * Mounted only while a node is selected and keyed by its id, so its fields are
- * initialised from that node rather than reset by an effect that exists to undo
- * the render before it.
+ * No save button: every change is applied as it is made, the same way moving a
+ * node on the canvas is. Nothing here reaches the database until the rule is
+ * saved, so a second commit step would only be a chance to lose an edit by
+ * clicking away — and the card behind the panel updating as you type is what
+ * tells you the change landed.
  */
-export function NodeConfigurationSheet({ node, metadata, onClose, onSave }: Props) {
-  return (
-    <Sheet open={node !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent aria-describedby={undefined}>
-        {node && (
-          <NodeForm
-            key={node.id}
-            node={node}
-            metadata={metadata}
-            onClose={onClose}
-            onSave={onSave}
-          />
-        )}
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function NodeForm({
+export function NodeConfigFields({
   node,
   metadata,
-  onClose,
-  onSave,
+  onChange,
 }: {
   node: CanvasNode;
   metadata: AutomationMetadata | undefined;
-  onClose: () => void;
-  onSave: (nodeId: string, configuration: Record<string, unknown>) => void;
+  onChange: (configuration: Record<string, unknown>) => void;
 }) {
-  const [config, setConfig] = useState<Record<string, unknown>>(node.configuration);
+  const config = node.configuration;
 
-  const set = (key: string, value: unknown) =>
-    setConfig((previous) => ({ ...previous, [key]: value }));
+  const set = (key: string, value: unknown) => onChange({ ...config, [key]: value });
 
   const read = (key: string): string => {
     const value = config[key];
     return typeof value === 'string' ? value : '';
   };
 
-  return (
-    <>
-      <SheetHeader>
-        <SheetTitle>{NODE_CATEGORY_LABEL[node.type as AutomationNodeType] ?? 'Step'}</SheetTitle>
-        <SheetDescription>{node.subtype.replace(/_/g, ' ').toLowerCase()}</SheetDescription>
-      </SheetHeader>
-
-      <div className="grid gap-4">
-        {/* A branch holds the comparison that chooses its arm, so it is
-            configured exactly as a condition is — one decision, one node. */}
-        {node.type === 'CONDITION' || node.type === 'BRANCH' ? (
-          <ConditionFields config={config} metadata={metadata} set={set} read={read} />
-        ) : (
-          <StepFields
-            subtype={node.subtype}
-            isTrigger={node.type === 'TRIGGER'}
-            metadata={metadata}
-            set={set}
-            read={read}
-          />
-        )}
-      </div>
-
-      <SheetFooter>
-        <Button variant="outline" className="cursor-pointer" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          className="cursor-pointer"
-          onClick={() => {
-            onSave(node.id, config);
-            onClose();
-          }}
-        >
-          Save step
-        </Button>
-      </SheetFooter>
-    </>
+  /* A branch holds the comparison that chooses its arm, so it is configured
+     exactly as a condition is — one decision, one node. */
+  return node.type === 'CONDITION' || node.type === 'BRANCH' ? (
+    <ConditionFields
+      config={config}
+      metadata={metadata}
+      set={set}
+      read={read}
+      onChange={onChange}
+    />
+  ) : (
+    <StepFields
+      subtype={node.subtype}
+      isTrigger={node.type === 'TRIGGER'}
+      metadata={metadata}
+      set={set}
+      read={read}
+    />
   );
 }
 
@@ -143,11 +78,13 @@ function ConditionFields({
   metadata,
   set,
   read,
+  onChange,
 }: {
   config: Record<string, unknown>;
   metadata: AutomationMetadata | undefined;
   set: (key: string, value: unknown) => void;
   read: (key: string) => string;
+  onChange: (configuration: Record<string, unknown>) => void;
 }) {
   const fields = metadata?.conditionFields ?? [];
   const definition = fields.find((entry) => entry.field === read('field'));
@@ -159,13 +96,18 @@ function ConditionFields({
       <Field label="Field" htmlFor="condition-field">
         <Select
           value={read('field') || NONE}
-          onValueChange={(value) => {
-            set('field', value);
-            // The operator and value belong to the old field. Keeping them
-            // would leave "Due date contains High" sitting in the form.
-            set('operator', '');
-            set('value', undefined);
-          }}
+          onValueChange={(value) =>
+            /*
+             * One write, not three.
+             *
+             * The operator and value belong to the old field — keeping them
+             * leaves "Due date contains High" sitting in the form. They have to
+             * be cleared in the same object as the new field, because each call
+             * builds on the configuration this render was given and three of
+             * them in a row would keep only the last.
+             */
+            onChange({ ...config, field: value, operator: '', value: undefined })
+          }
         >
           <SelectTrigger id="condition-field" className="w-full">
             <SelectValue placeholder="Choose what to check" />

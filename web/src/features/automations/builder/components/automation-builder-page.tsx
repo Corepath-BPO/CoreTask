@@ -18,7 +18,7 @@ import {
   useSaveGraph,
 } from '../hooks/use-automation-graph';
 
-import { NodeConfigurationSheet } from '../configuration/node-configuration-sheet';
+import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
 import {
   adoptChildren,
   applyEdits,
@@ -32,7 +32,6 @@ import {
   type CanvasNode,
   type GraphEdits,
 } from '../lib/graph-edits';
-import { StepSelector } from '../selectors/step-selector';
 
 import { AutomationCanvas } from './automation-canvas';
 import { AutomationValidationBanner } from './automation-validation-banner';
@@ -144,12 +143,15 @@ export function AutomationBuilderPage({
   const [edits, setEdits] = useState<GraphEdits>(NO_EDITS);
   /** Where a chosen action will land: the end of the rule, or one arm of a split. */
   const [addingAt, setAddingAt] = useState<{ parentId: string; arm: string | null } | null>(null);
-  /** Whether the trigger list is open — the first thing a new rule needs. */
-  const [choosingTrigger, setChoosingTrigger] = useState(false);
 
-  /** Which step's settings are open. Separate from selection: clicking a node
-      on the canvas highlights it; opening it is a deliberate second act. */
-  const [editingId, setEditingId] = useState<string | null>(null);
+  /*
+   * What the rail is showing.
+   *
+   * One piece of state rather than three booleans, because the panel can only
+   * ever be doing one of these things and separate flags made states that
+   * cannot exist representable — a trigger list open behind an action form.
+   */
+  const [rail, setRail] = useState<RailMode>({ kind: 'closed' });
 
   const currentName = name ?? rule?.name ?? '';
 
@@ -183,16 +185,14 @@ export function AutomationBuilderPage({
     return realNodes.filter((node) => !hasChild.has(node.id)).at(-1)?.id ?? null;
   }, [realNodes]);
 
-  const addAction = (subtype: string) => {
+  /** Answers with the step it added, so the caller can go on to set it up. */
+  const addAction = (subtype: string): CanvasNode => {
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
+    const node = makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes);
 
-    setEdits((previous) => ({
-      ...previous,
-      added: [
-        ...previous.added,
-        makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
-      ],
-    }));
+    setEdits((previous) => ({ ...previous, added: [...previous.added, node] }));
+
+    return node;
   };
 
   const addBranch = () =>
@@ -222,10 +222,55 @@ export function AutomationBuilderPage({
     }));
 
     // A step with no action chosen is not a step yet, so the list opens on it.
-    if (type === 'ACTION') setAddingAt({ parentId, arm: null });
+    if (type === 'ACTION') openActionPicker({ parentId, arm: null });
   };
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
+
+  const openActionPicker = (target: { parentId: string; arm: string | null }) => {
+    setAddingAt(target);
+    setRail({
+      kind: 'choose',
+      title: 'Do this…',
+      description: 'Add an action that happens as a result of the rule.',
+      entries: metadata?.actions ?? [],
+    });
+  };
+
+  const openTriggerPicker = () =>
+    setRail({
+      kind: 'choose',
+      title: 'When this happens…',
+      description: 'Choose what starts this rule.',
+      entries: metadata?.triggers ?? [],
+    });
+
+  /*
+   * One list, two meanings, decided by where it was opened from.
+   *
+   * The rail does not know whether it is offering triggers or actions — it was
+   * handed a list of entries. What a chosen one means is a property of the
+   * click that opened it, which is exactly what `addingAt` records.
+   */
+  const chooseFromRail = (subtype: string) => {
+    if (!addingAt) {
+      setTrigger(subtype);
+      return;
+    }
+
+    /*
+     * Straight on to setting it up.
+     *
+     * Choosing "add a comment" and being handed a closed panel leaves somebody
+     * with a step that says "write what it says" and no obvious way to. The
+     * choice and the settings are two halves of one act, so the panel carries
+     * on into the second.
+     */
+    const added = addAction(subtype);
+    setAddingAt(null);
+    setSelectedId(added.id);
+    setRail({ kind: 'configure', nodeId: added.id });
+  };
 
   /**
    * Choosing what starts the rule.
@@ -243,7 +288,7 @@ export function AutomationBuilderPage({
       configured: { ...previous.configured, [triggerNode.id]: {} },
     }));
 
-    setEditingId(triggerNode.id);
+    setRail({ kind: 'configure', nodeId: triggerNode.id });
   };
 
   /*
@@ -425,45 +470,25 @@ export function AutomationBuilderPage({
           what the existing card says rather than putting a new one beside it,
           which is why it is worded as a choice and not as a "+".
         */}
-        <StepSelector
-          entries={metadata?.triggers ?? []}
-          open={choosingTrigger}
-          onOpenChange={setChoosingTrigger}
-          onChoose={setTrigger}
-          placeholder="Search triggers"
-          trigger={
-            <Button
-              variant={triggerNode?.subtype ? 'outline' : 'default'}
-              size="sm"
-              className="cursor-pointer"
-              onClick={() => setChoosingTrigger(true)}
-            >
-              <Zap className="size-4" aria-hidden="true" />
-              {triggerNode?.subtype ? 'Change trigger' : 'Choose trigger'}
-            </Button>
-          }
-        />
+        <Button
+          variant={triggerNode?.subtype ? 'outline' : 'default'}
+          size="sm"
+          className="cursor-pointer"
+          onClick={openTriggerPicker}
+        >
+          <Zap className="size-4" aria-hidden="true" />
+          {triggerNode?.subtype ? 'Change trigger' : 'Choose trigger'}
+        </Button>
 
-        <StepSelector
-          entries={metadata?.actions ?? []}
-          open={addingAt !== null}
-          onOpenChange={(open) =>
-            setAddingAt(open ? (addingAt ?? { parentId: lastNodeId ?? '', arm: null }) : null)
-          }
-          onChoose={addAction}
-          placeholder="Search actions"
-          trigger={
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer"
-              onClick={() => setAddingAt({ parentId: lastNodeId ?? '', arm: null })}
-            >
-              <Plus className="size-4" aria-hidden="true" />
-              Add action
-            </Button>
-          }
-        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          onClick={() => openActionPicker({ parentId: lastNodeId ?? '', arm: null })}
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          Add action
+        </Button>
 
         {/* A split is added, then filled: both arms appear as placeholders, so
             the choice is visible before either side has anything in it. */}
@@ -511,7 +536,8 @@ export function AutomationBuilderPage({
         the canvas can simply take the remainder — and it is right at every
         window size rather than at the one the guess was tuned for.
       */}
-      <div className="min-h-0 w-full flex-1">
+      {/* A row: the canvas takes what the rail does not. */}
+      <div className="flex min-h-0 w-full flex-1">
         <AutomationCanvas
           graph={graph}
           metadata={metadata}
@@ -528,7 +554,7 @@ export function AutomationBuilderPage({
             const target = readPlaceholderId(nodeId);
 
             if (target) {
-              setAddingAt(target);
+              openActionPicker(target);
               return;
             }
 
@@ -538,11 +564,11 @@ export function AutomationBuilderPage({
              * is which trigger, so that is the list that opens.
              */
             if (nodeId === triggerNode?.id && triggerNode.subtype === '') {
-              setChoosingTrigger(true);
+              openTriggerPicker();
               return;
             }
 
-            setEditingId(nodeId);
+            setRail({ kind: 'configure', nodeId });
           }}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
           onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
@@ -553,19 +579,36 @@ export function AutomationBuilderPage({
             }))
           }
         />
-      </div>
 
-      <NodeConfigurationSheet
-        node={graph.nodes.find((node) => node.id === editingId) ?? null}
-        metadata={metadata}
-        onClose={() => setEditingId(null)}
-        onSave={(nodeId, configuration) =>
-          setEdits((previous) => ({
-            ...previous,
-            configured: { ...previous.configured, [nodeId]: configuration },
-          }))
-        }
-      />
+        {/*
+          Beside the canvas rather than over it.
+          
+          A step only makes sense in the shape it sits in, so covering the rule
+          to configure one takes away the thing that explains what is being
+          edited. The canvas is a flex sibling, so opening the panel narrows the
+          drawing rather than hiding part of it.
+        */}
+        <NodeConfigRail
+          mode={rail}
+          nodes={graph.nodes}
+          metadata={metadata}
+          onClose={() => {
+            setRail({ kind: 'closed' });
+            setAddingAt(null);
+          }}
+          onChange={(nodeId, configuration) =>
+            setEdits((previous) => ({
+              ...previous,
+              configured: { ...previous.configured, [nodeId]: configuration },
+            }))
+          }
+          onDelete={(nodeId) => {
+            setEdits((previous) => ({ ...previous, removed: [...previous.removed, nodeId] }));
+            setRail({ kind: 'closed' });
+          }}
+          onChoose={chooseFromRail}
+        />
+      </div>
     </div>
   );
 }

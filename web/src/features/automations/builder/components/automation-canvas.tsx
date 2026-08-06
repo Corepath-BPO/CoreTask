@@ -9,7 +9,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
@@ -68,6 +68,7 @@ function Canvas({
   onInsertBranch,
 }: Props) {
   const { fitView } = useReactFlow();
+  const wrapper = useRef<HTMLDivElement>(null);
 
   /*
    * Which steps already have something after them.
@@ -145,28 +146,106 @@ function Canvas({
     return () => cancelAnimationFrame(frame);
   }, [graph.nodes.length, fitView]);
 
+  /*
+   * And again whenever the canvas itself changes size.
+   *
+   * Opening the side panel takes 360px off the drawing surface without changing
+   * the rule, so nothing about the graph says to look again and the last step
+   * ends up behind the panel. Watching the element rather than the thing that
+   * moved it means this is right for a resized window too, and it cannot fire
+   * before the new width exists — which is what made keying it on the panel's
+   * own state measure the layout one frame too early.
+   */
+  useEffect(() => {
+    const element = wrapper.current;
+    if (!element) return;
+
+    let frame = 0;
+    let first = true;
+
+    const observer = new ResizeObserver(() => {
+      // The observer fires once on attach, which would refit for no reason.
+      if (first) {
+        first = false;
+        return;
+      }
+
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        void fitView({ padding: 0.2, maxZoom: 1, duration: 200 });
+      });
+    });
+
+    observer.observe(element);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [fitView]);
+
+  /*
+   * And again whenever the canvas itself changes size.
+   *
+   * Opening the side panel takes 360px off the drawing surface without changing
+   * the rule, so nothing about the graph says to look again and the last step
+   * ends up behind the panel. Watching the element rather than the thing that
+   * moved it means this is right for a resized window too, and it cannot fire
+   * before the new width exists — which is what made keying it on the panel's
+   * own state measure the layout one frame too early.
+   */
+  useEffect(() => {
+    const element = wrapper.current;
+    if (!element) return;
+
+    let frame = 0;
+    let first = true;
+
+    const observer = new ResizeObserver(() => {
+      // The observer fires once on attach, which would refit for no reason.
+      if (first) {
+        first = false;
+        return;
+      }
+
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        void fitView({ padding: 0.2, maxZoom: 1, duration: 200 });
+      });
+    });
+
+    observer.observe(element);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [fitView]);
+
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      // Connections are made by adding steps, never by dragging between dots.
-      // This is a workflow builder, not a diagram editor.
-      nodesConnectable={false}
-      edgesFocusable={false}
-      onNodeDragStop={(_event, node) => onMoveNode(node.id, node.position)}
-      onNodeClick={(_event, node) => onSelect(node.id)}
-      onPaneClick={() => onSelect(null)}
-      proOptions={{ hideAttribution: false }}
-      minZoom={0.3}
-      maxZoom={1.5}
-      className="bg-background"
-    >
-      {/* A very faint grid: enough to say the surface pans, quiet enough that
+    <div ref={wrapper} className="h-full w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        // Connections are made by adding steps, never by dragging between dots.
+        // This is a workflow builder, not a diagram editor.
+        nodesConnectable={false}
+        edgesFocusable={false}
+        onNodeDragStop={(_event, node) => onMoveNode(node.id, node.position)}
+        onNodeClick={(_event, node) => onSelect(node.id)}
+        onPaneClick={() => onSelect(null)}
+        proOptions={{ hideAttribution: false }}
+        minZoom={0.3}
+        maxZoom={1.5}
+        className="bg-background"
+      >
+        {/* A very faint grid: enough to say the surface pans, quiet enough that
           the nodes stay the thing being read. */}
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-40" />
-      <Controls showInteractive={false} className="!shadow-sm" />
-    </ReactFlow>
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-40" />
+        <Controls showInteractive={false} className="!shadow-sm" />
+      </ReactFlow>
+    </div>
   );
 }

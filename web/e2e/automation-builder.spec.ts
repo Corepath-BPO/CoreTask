@@ -305,14 +305,72 @@ test.describe('the automation builder', () => {
 
     await page.locator('.react-flow__node').first().click();
 
-    // By slot, not by role: the builder itself is a dialog now, so the role
-    // alone matches two things and says nothing about which one opened.
-    const sheet = page.locator('[data-slot="sheet-content"]');
-    await expect(sheet).toBeVisible();
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
 
     // The canvas is the context that makes the step make sense; a full-screen
     // form takes it away.
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
+  });
+
+  test('a change in the panel shows on the card as it is typed', async ({ page }) => {
+    /*
+     * There is no save button on the panel, so the card updating is the only
+     * thing that says an edit landed. If that stopped working, the form would
+     * look like it does nothing.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^Add action$/i }).click();
+    await page.getByRole('option', { name: /add a comment/i }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+
+    await rail.getByRole('textbox').fill('Thanks for filing this.');
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('Thanks for filing this.');
+  });
+
+  test('deletes a step from the panel', async ({ page }) => {
+    await openBuilder(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    // The condition, which is the one step here that may be removed.
+    await page
+      .locator('.react-flow__node')
+      .filter({ hasText: /Check if/ })
+      .first()
+      .click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await rail.getByRole('button', { name: /delete this step/i }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBeLessThan(before);
+
+    const labels = (await nodeBoxes(page)).map((box) => box.label).join(' | ');
+    expect(labels).not.toContain('Check if');
+    // The trigger survives, and so does whatever followed the removed step.
+    expect(labels).toContain('When');
+  });
+
+  test('the trigger cannot be deleted', async ({ page }) => {
+    // A rule with nothing to start it is not a rule; the way to change what
+    // starts one is to choose a different trigger.
+    await openBuilder(page);
+
+    await page.locator('.react-flow__node').filter({ hasText: /When/ }).first().click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole('button', { name: /delete this step/i })).toHaveCount(0);
   });
 
   test('saves a draft and keeps it across a reload', async ({ page }) => {

@@ -93,7 +93,15 @@ export class AutomationMetadataService {
     return AUTOMATION_TRIGGERS.map((subtype) => ({
       subtype,
       label: TRIGGER_LABEL[subtype],
-      description: TRIGGER_LABEL[subtype],
+      /*
+       * Empty rather than a copy of the label.
+       *
+       * This repeated the label verbatim, which was invisible while the picker
+       * showed only one of them and reads as a stutter now that it shows both —
+       * "Assign a person / Assign a person". Nothing useful is known to say
+       * here yet, and saying nothing is the honest version of that.
+       */
+      description: '',
       category: this.triggerCategory(subtype),
       available: true,
     }));
@@ -103,7 +111,7 @@ export class AutomationMetadataService {
     return AUTOMATION_ACTIONS.map((subtype) => ({
       subtype,
       label: ACTION_LABEL[subtype],
-      description: ACTION_LABEL[subtype],
+      description: '',
       category: this.actionCategory(subtype),
       available: true,
     }));
