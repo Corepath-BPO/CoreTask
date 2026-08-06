@@ -126,6 +126,48 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return { left: true };
   }
 
+  /**
+   * A project room, so a tab watching one project is not woken by every other.
+   *
+   * Authorised through the project's workspace rather than the project id
+   * alone: a project id is guessable and a room name is not a permission. The
+   * lookup does both jobs at once — it fails if the project does not exist, and
+   * it fails if the caller is not a member of the workspace holding it.
+   */
+  @SubscribeMessage(ClientEvent.PROJECT_JOIN)
+  async onProjectJoin(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { projectId?: string },
+  ): Promise<{ joined: boolean }> {
+    const { userId } = client.data;
+    const projectId = body?.projectId;
+
+    if (!userId || !projectId) return { joined: false };
+
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, workspace: { members: { some: { userId } } } },
+      select: { id: true },
+    });
+
+    if (!project) {
+      client.emit(ServerEvent.ERROR, { code: 'PROJECT_ACCESS_DENIED', projectId });
+      return { joined: false };
+    }
+
+    await client.join(projectRoom(projectId));
+    return { joined: true };
+  }
+
+  @SubscribeMessage(ClientEvent.PROJECT_LEAVE)
+  async onProjectLeave(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { projectId?: string },
+  ): Promise<{ left: boolean }> {
+    if (!body?.projectId) return { left: false };
+    await client.leave(projectRoom(body.projectId));
+    return { left: true };
+  }
+
   @SubscribeMessage(ClientEvent.PING)
   onPing(): { event: string; at: string } {
     return { event: ServerEvent.PONG, at: new Date().toISOString() };

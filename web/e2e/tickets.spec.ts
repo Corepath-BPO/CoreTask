@@ -1,3 +1,5 @@
+import { request as apiRequest } from '@playwright/test';
+
 import { expect, test } from './fixtures';
 
 /**
@@ -49,6 +51,14 @@ test.describe('tickets', () => {
     await page.getByLabel(/filter by status/i).click();
     await page.getByRole('option', { name: /all statuses/i }).click();
 
+    /*
+     * Searched for rather than scanned for.
+     *
+     * Widening the filter shows every closed ticket too, so this assertion was
+     * really "CORE-1004 is on the first page" — true only while the workspace
+     * stayed small. Searching asks the question the test actually means.
+     */
+    await page.getByLabel(/search tickets/i).fill('CORE-1004');
     await expect(page.getByText('CORE-1004')).toBeVisible();
   });
 
@@ -101,6 +111,55 @@ test.describe('tickets', () => {
 
     await expect(dialog).toBeHidden();
     await expect(page.getByText(title)).toBeVisible();
+  });
+
+  /*
+   * Every run reported a ticket and left it there.
+   *
+   * Harmless once, and after two dozen runs the seeded tickets had been pushed
+   * off the first page by sheer volume — four unrelated tests in three files
+   * started failing on data none of them created. A test that adds a row has to
+   * take it away again.
+   *
+   * Removed through the API rather than the UI: this has to run even when the
+   * test above failed part-way, and driving a broken screen to tidy up is how
+   * one failure becomes a suite that can never pass again.
+   */
+  test.afterAll(async () => {
+    const request = await apiRequest.newContext({
+      baseURL: process.env['E2E_API_ORIGIN'] ?? 'http://localhost:3010',
+    });
+
+    const login = await request.post('/api/v1/auth/login', {
+      data: {
+        email: process.env['SEED_USER_EMAIL'] ?? 'demo@coretask.dev',
+        password: process.env['SEED_USER_PASSWORD'] ?? 'CoreTask!2024',
+      },
+    });
+
+    if (login.ok()) {
+      const headers = { authorization: `Bearer ${(await login.json()).data.accessToken}` };
+      const workspaces = await (await request.get('/api/v1/workspaces', { headers })).json();
+
+      for (const workspace of workspaces.data ?? []) {
+        const tickets = await (
+          await request.get(`/api/v1/workspaces/${workspace.id}/tickets?limit=100`, { headers })
+        ).json();
+
+        for (const ticket of tickets.data ?? []) {
+          if (!String(ticket.title).startsWith('Playwright probe')) continue;
+
+          // Closed rather than deleted: tickets have no delete route, and the
+          // list this pollutes shows open ones.
+          await request.patch(`/api/v1/workspaces/${workspace.id}/tickets/${ticket.id}`, {
+            headers,
+            data: { status: 'CLOSED' },
+          });
+        }
+      }
+    }
+
+    await request.dispose();
   });
 
   test('validates an empty summary rather than submitting', async ({ page }) => {

@@ -13,6 +13,7 @@ import { ApiError } from '@/lib/api/api-error';
 import { queryClient, queryKeys } from '@/lib/api/query-client';
 
 import { workItemsApi } from '../api/work-items.api';
+import { nextCorrelationId } from '../lib/correlation';
 
 function reportError(error: unknown, fallback: string) {
   toast.error(error instanceof ApiError ? error.message : fallback);
@@ -82,8 +83,16 @@ export function useProjectWorkItem(
  */
 export function useCreateProjectWorkItem(workspaceId: string | undefined, projectId: string) {
   return useMutation({
+    /*
+     * Stamped here rather than by the caller. Every write needs one, and the
+     * server echoes it on the broadcast so this client can recognise its own
+     * change and skip refetching what it already has — see `useProjectRealtime`.
+     */
     mutationFn: (payload: CreateWorkItemPayload) =>
-      workItemsApi.create(workspaceId as string, projectId, payload),
+      workItemsApi.create(workspaceId as string, projectId, {
+        correlationId: nextCorrelationId(),
+        ...payload,
+      }),
     onSuccess: async () => {
       await invalidateProjectWork(workspaceId as string, projectId);
     },
@@ -111,7 +120,10 @@ export function useUpdateProjectWorkItem(workspaceId: string | undefined, projec
 export function useMoveProjectWorkItem(workspaceId: string | undefined, projectId: string) {
   return useMutation({
     mutationFn: ({ workItemId, payload }: { workItemId: string; payload: MoveWorkItemPayload }) =>
-      workItemsApi.move(workspaceId as string, projectId, workItemId, payload),
+      workItemsApi.move(workspaceId as string, projectId, workItemId, {
+        correlationId: nextCorrelationId(),
+        ...payload,
+      }),
     onSuccess: async () => {
       await invalidateProjectWork(workspaceId as string, projectId);
     },

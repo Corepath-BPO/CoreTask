@@ -50,4 +50,16 @@ export function leaveWorkspaceRoom(workspaceId: string): void {
   socket?.emit(ClientEvent.WORKSPACE_LEAVE, { workspaceId });
 }
 
+/**
+ * Joins the room for one project, so a tab watching it is not woken by churn in
+ * every other project in the workspace. Membership is re-checked server-side.
+ */
+export function joinProjectRoom(projectId: string): void {
+  socket?.emit(ClientEvent.PROJECT_JOIN, { projectId });
+}
+
+export function leaveProjectRoom(projectId: string): void {
+  socket?.emit(ClientEvent.PROJECT_LEAVE, { projectId });
+}
+
 export { ClientEvent, ServerEvent };

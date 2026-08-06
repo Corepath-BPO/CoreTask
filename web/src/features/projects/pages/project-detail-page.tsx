@@ -19,6 +19,7 @@ import { ProjectFormDialog } from '../components/project-form-dialog';
 import { ProjectStatusBadge } from '../components/project-status-badge';
 import { ProjectViewTabs } from '../components/project-view-tabs';
 import { ViewToolbarProvider, ViewToolbarSlot } from '../components/view-toolbar-slot';
+import { useProjectRealtime } from '@/features/work-items/hooks/use-project-realtime';
 import { useArchiveProject, useProject } from '../hooks/use-projects';
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
@@ -26,6 +27,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const workspaceId = workspace?.id;
 
   const { data: project, isLoading, isError, error } = useProject(workspaceId, projectId);
+
+  /*
+   * Mounted on the page that owns the project rather than in each view, so
+   * switching between List and Board does not leave and rejoin the room — and
+   * so a change that arrives mid-switch is not missed by both.
+   */
+  useProjectRealtime(workspaceId, projectId);
   const archiveProject = useArchiveProject(workspaceId);
   const [editOpen, setEditOpen] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -131,7 +139,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
         <div className="flex min-w-48 flex-1 items-center gap-2">
           <span className="text-xs text-muted-foreground">Progress</span>
-          <Progress value={progress} className="h-1.5 flex-1" aria-label={`${progress}% complete`} />
+          <Progress
+            value={progress}
+            className="h-1.5 flex-1"
+            aria-label={`${progress}% complete`}
+          />
           <span className="text-xs font-semibold tabular-nums">{progress}%</span>
           <span className="whitespace-nowrap text-xs text-muted-foreground">
             {project.completedTaskCount}/{project.taskCount} tasks
