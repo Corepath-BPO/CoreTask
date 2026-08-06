@@ -1,4 +1,5 @@
 export * from './attachment.js';
+export * from './automation-graph.js';
 export * from './auth.js';
 export * from './comment.js';
 export * from './custom-field-settings.js';

@@ -75,6 +75,7 @@ describe('projectFormSchema', () => {
     description: '',
     status: 'ACTIVE',
     color: '#6366F1',
+    defaultWorkItemType: 'TASK' as const,
     // `''` is "no team", which is what the form sends. Omitting it made every
     // case below fail on a missing key before reaching what it meant to test.
     teamId: '',

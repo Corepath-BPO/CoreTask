@@ -1,5 +1,6 @@
 export * from './api-routes.js';
 export * from './automation.js';
+export * from './automation-graph.js';
 export * from './colors.js';
 export * from './enums.js';
 export * from './error-codes.js';
