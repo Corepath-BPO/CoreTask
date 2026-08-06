@@ -159,3 +159,37 @@ describe('which nodes are flagged incomplete', () => {
     ).toBe(false);
   });
 });
+
+describe('values that match no option', () => {
+  it('humanises a legacy enum rather than shouting it', () => {
+    /*
+     * The metadata offers definition ids, and a condition may legitimately hold
+     * an enum — that is what the runner compares against for a task the
+     * definition backfill has not reached. "Priority is HIGH" is the card
+     * shouting an implementation detail.
+     */
+    const summary = summarise(
+      node({
+        type: 'CONDITION',
+        subtype: 'FIELD_COMPARISON',
+        configuration: { field: 'priority', operator: 'EQUALS', value: 'IN_PROGRESS' },
+      }),
+      metadata,
+    );
+
+    expect(summary).toBe('Priority is In progress');
+  });
+
+  it('leaves ordinary text alone', () => {
+    const summary = summarise(
+      node({
+        type: 'CONDITION',
+        subtype: 'FIELD_COMPARISON',
+        configuration: { field: 'title', operator: 'CONTAINS', value: 'urgent fix' },
+      }),
+      metadata,
+    );
+
+    expect(summary).toContain('urgent fix');
+  });
+});

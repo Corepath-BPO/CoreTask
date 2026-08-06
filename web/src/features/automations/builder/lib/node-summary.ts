@@ -86,7 +86,17 @@ function conditionSummary(
 
   const raw = config['value'];
   const option = definition?.options?.find((entry) => entry.value === raw);
-  const value = option?.label ?? (typeof raw === 'string' && raw !== '' ? raw : '…');
+
+  /*
+   * A value that matches no option is not necessarily wrong.
+   *
+   * The metadata offers definition ids, but a condition may legitimately hold a
+   * legacy enum — that is what the runner compares against for any task the
+   * definition backfill has not reached. So an unmatched ALL_CAPS token is
+   * humanised rather than printed, because "Priority is HIGH" is the card
+   * shouting an implementation detail at somebody.
+   */
+  const value = option?.label ?? (typeof raw === 'string' && raw !== '' ? humaniseEnum(raw) : '…');
 
   const verb: Record<string, string> = {
     EQUALS: 'is',
@@ -99,6 +109,15 @@ function conditionSummary(
   };
 
   return `${label} ${verb[operator] ?? operator.toLowerCase()} ${value}`;
+}
+
+/** `IN_PROGRESS` -> `In progress`. Left alone when it is not an enum token. */
+function humaniseEnum(value: string): string {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(value)) return value;
+
+  const words = value.toLowerCase().replace(/_/g, ' ');
+
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function actionSummary(

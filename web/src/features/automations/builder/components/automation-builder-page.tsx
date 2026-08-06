@@ -1,4 +1,4 @@
-import { validateGraphStructure } from '@coretask/validation';
+import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, GitBranch, Loader2, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -90,7 +90,18 @@ export function AutomationBuilderPage({
 
     // The placeholder is derived last and never saved: it is the *absence* of
     // an action, and the API refuses the type for exactly that reason.
-    return { ...rule.graph, nodes: withPlaceholder(applyEdits(rule.graph.nodes, edits)) };
+    const nodes = withPlaceholder(applyEdits(rule.graph.nodes, edits));
+
+    /*
+     * Edges are re-derived here rather than taken from the response.
+     *
+     * The server's list describes the stored rule, which knows nothing about a
+     * step added a moment ago or a placeholder that exists only on screen — so
+     * using it left every unsaved node floating, connected to nothing. Deriving
+     * from the nodes actually being drawn is the only version that can be
+     * right, and it is the same function the API uses.
+     */
+    return { nodes, edges: deriveEdges(nodes) };
   }, [rule, edits]);
 
   /** What the canvas can actually save — the placeholders are not among them. */
