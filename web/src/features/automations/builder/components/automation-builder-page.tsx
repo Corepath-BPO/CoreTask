@@ -2,13 +2,10 @@ import { AutomationRuleStatus, BranchKey, type AutomationNodeType } from '@coret
 import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, GitBranch, Loader2, Plus, Settings2, Zap } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useProject } from '@/features/projects/hooks/use-projects';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { useCreateRule, usePublishRule } from '../../hooks/use-automations';
@@ -34,8 +31,8 @@ import {
   type GraphEdits,
 } from '../lib/graph-edits';
 
+import { AutomationBuilderHeader, type SaveState } from './automation-builder-header';
 import { AutomationCanvas } from './automation-canvas';
-import { AutomationValidationBanner } from './automation-validation-banner';
 
 /**
  * The rule a blank canvas starts from.
@@ -72,14 +69,6 @@ function blankRule(projectId: string, sectionId: string | undefined): Automation
   };
 }
 
-const STATUS_TONE: Record<string, 'muted' | 'success' | 'warning' | 'destructive'> = {
-  DRAFT: 'muted',
-  ACTIVE: 'success',
-  PAUSED: 'warning',
-  DISABLED: 'muted',
-  ARCHIVED: 'muted',
-};
-
 /**
  * The rule builder, on its own full-width page.
  *
@@ -110,6 +99,9 @@ export function AutomationBuilderPage({
 
   const { data: fetched, isLoading } = useAutomationGraph(workspaceId, projectId, ruleId);
   const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
+  /* The same query the project pages use, so the name in the header comes from
+     the cache they have already filled rather than from a request of its own. */
+  const { data: project } = useProject(workspaceId, projectId);
   const saveGraph = useSaveGraph(workspaceId, projectId);
   const createRule = useCreateRule(workspaceId, projectId);
   const publishRule = usePublishRule(workspaceId, projectId);
@@ -238,9 +230,6 @@ export function AutomationBuilderPage({
 
     return node;
   };
-
-  const addBranch = () =>
-    setEdits((previous) => ({ ...previous, added: [...previous.added, makeBranch(realNodes)] }));
 
   /**
    * A copy of a step, running immediately after the one it came from.
@@ -447,9 +436,31 @@ export function AutomationBuilderPage({
   /*
    * A rule cannot be created without a name — the endpoint requires one, and
    * "Untitled rule" is a name nobody chose that then has to be found again in a
-   * list. So the button says why it is off rather than letting the save fail.
+   * list. The validator reports it as a problem of its own, so the count beside
+   * Publish says why rather than a save being allowed to fail.
    */
   const unnamed = currentName.trim() === '';
+
+  /*
+   * What the header reports about the last write.
+   *
+   * Derived from the mutations rather than tracked: they already know whether a
+   * request is in flight, whether it landed and whether it failed, and a second
+   * copy of that in state is a second thing that can disagree with the first.
+   *
+   * "Saved" needs `!dirty` as well as success — otherwise a rule edited straight
+   * after a save would go on claiming to be written while it no longer was.
+   *
+   * TODO(M8): debounced autosave lands in milestone 8. Nothing here starts a
+   * save; this only surfaces the state the existing one already has.
+   */
+  const saveState: SaveState = saving
+    ? 'saving'
+    : saveGraph.isError || createRule.isError
+      ? 'error'
+      : (saveGraph.isSuccess || createRule.isSuccess) && !dirty
+        ? 'saved'
+        : 'idle';
 
   /**
    * Writes the canvas and answers with the rule's real id.
@@ -533,6 +544,39 @@ export function AutomationBuilderPage({
     if (isNew) await goToSaved(savedId);
   };
 
+  /*
+   * Saving lost its button, so it needs a key.
+   *
+   * Held in a ref rather than closed over by the listener: the handler depends
+   * on the whole canvas, so naming it as a dependency would tear down and
+   * re-attach a window listener on every keystroke somebody types into a step.
+   *
+   * TODO(M8): debounced autosave lands in milestone 8, after which this is a
+   * shortcut rather than the only way to write a draft.
+   */
+  const requestSave = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    requestSave.current = () => {
+      if (!dirty || saving || unnamed) return;
+      void saveDraft();
+    };
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 's' || !(event.metaKey || event.ctrlKey)) return;
+
+      // Always, even when there is nothing to write: otherwise the browser's own
+      // "save this page" dialog opens over the builder.
+      event.preventDefault();
+      requestSave.current();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   if (isLoading || !rule) {
     return <Skeleton className="h-[70vh] w-full" />;
   }
@@ -541,139 +585,33 @@ export function AutomationBuilderPage({
     // `h-full` and `min-h-0`: the canvas below grows into whatever is left, and
     // without the minimum a flex child refuses to shrink past its content.
     <div className="flex h-full min-h-0 w-full flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-        <Button variant="ghost" size="sm" className="cursor-pointer" onClick={onClose}>
-          <ArrowLeft className="size-4" aria-hidden="true" />
-          Back
-        </Button>
-
-        {/* Editable in place: a rule's name is the one thing everybody changes
-            first, and sending them to a settings panel for it is a detour. */}
-        <Input
-          value={currentName}
-          onChange={(event) =>
-            setSettingsEdits((previous) => ({ ...previous, name: event.target.value }))
-          }
-          placeholder="Name this rule"
-          aria-label="Rule name"
-          aria-invalid={currentName.trim() === ''}
-          className="h-8 w-72 border-transparent bg-transparent px-2 text-base font-semibold hover:border-border focus-visible:border-border"
-        />
-
-        <Badge variant={STATUS_TONE[rule.status] ?? 'muted'}>
-          {rule.status.charAt(0) + rule.status.slice(1).toLowerCase()}
-        </Badge>
-
-        <div className="ml-auto flex items-center gap-2">
-          {/* The rule's own settings — what it is called, what it is for, and
-              whether other rules may set it off. */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 cursor-pointer"
-            aria-label="Rule settings"
-            aria-pressed={rail.kind === 'settings'}
-            onClick={() =>
-              setRail((previous) =>
-                previous.kind === 'settings' ? { kind: 'closed' } : { kind: 'settings' },
-              )
-            }
-          >
-            <Settings2 className="size-4" aria-hidden="true" />
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            disabled={!dirty || saving || unnamed}
-            title={unnamed ? 'Give the rule a name first' : undefined}
-            onClick={() => void saveDraft()}
-          >
-            {saving && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-            Save draft
-          </Button>
-
-          {/*
-            Publish is disabled while anything blocks it, and the banner below
-            says what — a disabled button with no explanation is a dead end.
-            Wired to the endpoint in M5, once nodes can be configured.
-          */}
-          <Button
-            size="sm"
-            className="cursor-pointer"
-            disabled={blocking.length > 0 || publishRule.isPending || saving}
-            title={blocking.length > 0 ? 'Fix the problems listed above first' : undefined}
-            onClick={() => void publish()}
-          >
-            {publishRule.isPending && (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            )}
-            Publish rule
-          </Button>
-        </div>
-      </header>
-
-      <div className="flex items-center gap-2 px-4 pt-3">
-        {/*
-          The trigger is picked, never added — every rule has exactly one, and
-          it is on the canvas from the moment the page opens. So this changes
-          what the existing card says rather than putting a new one beside it,
-          which is why it is worded as a choice and not as a "+".
-        */}
-        <Button
-          variant={triggerNode?.subtype ? 'outline' : 'default'}
-          size="sm"
-          className="cursor-pointer"
-          onClick={openTriggerPicker}
-        >
-          <Zap className="size-4" aria-hidden="true" />
-          {triggerNode?.subtype ? 'Change trigger' : 'Choose trigger'}
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          onClick={() => openActionPicker({ parentId: lastNodeId ?? '', arm: null })}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Add action
-        </Button>
-
-        {/* A split is added, then filled: both arms appear as placeholders, so
-            the choice is visible before either side has anything in it. */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          disabled={!lastNodeId}
-          onClick={addBranch}
-        >
-          <GitBranch className="size-4" aria-hidden="true" />
-          Add branch
-        </Button>
-      </div>
-
       {/*
-        Not on an untouched new rule.
-        
-        A canvas that opens by announcing "this rule cannot be published yet —
-        give it a name, add an action" is telling somebody off for not having
-        finished something they have not started. The list is accurate and it is
-        the wrong moment. Once they have done anything at all it becomes what it
-        is for: the remaining work, in order. Publish stays disabled and says why
-        on hover throughout, so nothing is hidden that would let a broken rule
-        go live.
+        One bar, and then the canvas.
+
+        The row of Change trigger / Add action / Add branch that used to sit
+        under this is gone: each of those is on the drawing itself, so the row
+        was a second route to things somebody was already pointing at, and it
+        cost the rule a strip of the only screen it has.
       */}
-      {(!isNew || dirty) && (
-        <div className="px-4">
-          <AutomationValidationBanner
-            issues={issues}
-            onFocusNode={(nodeId) => setSelectedId(nodeId)}
-          />
-        </div>
-      )}
+      <AutomationBuilderHeader
+        projectName={project?.name}
+        status={rule.status}
+        name={currentName}
+        onNameChange={(name) => setSettingsEdits((previous) => ({ ...previous, name }))}
+        settingsOpen={rail.kind === 'settings'}
+        onToggleSettings={() =>
+          setRail((previous) =>
+            previous.kind === 'settings' ? { kind: 'closed' } : { kind: 'settings' },
+          )
+        }
+        save={saveState}
+        issues={issues}
+        onFocusIssue={(nodeId) => setSelectedId(nodeId)}
+        publishing={publishRule.isPending}
+        canPublish={blocking.length === 0 && !saving}
+        onPublish={() => void publish()}
+        onClose={onClose}
+      />
 
       {/*
         `flex-1`, now that there is a flex line to grow along.

@@ -136,6 +136,28 @@ test.describe('the automation builder', () => {
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
   };
 
+  /**
+   * The connector furthest along the rule — the end of the main path.
+   *
+   * Chosen by position rather than by index. Every connector renders its
+   * controls through a portal into one shared layer, so their order in the DOM
+   * is the order they happened to mount in and not the order they appear on
+   * screen; `.last()` was picking a different arm depending on what had been
+   * added before it.
+   */
+  const endConnector = async (page: Page) => {
+    const dots = page.getByRole('button', { name: /add a step here/i });
+    await expect(dots.first()).toBeVisible();
+
+    // All of them in one pass. Measuring them one at a time answered `null` for
+    // any that had not settled yet, which silently fell back to the first.
+    const xs = await dots.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().x),
+    );
+
+    return dots.nth(xs.indexOf(Math.max(...xs)));
+  };
+
   /** Every node's box, from the browser rather than from the model. */
   const nodeBoxes = async (page: Page) =>
     page.evaluate(() =>
@@ -247,15 +269,24 @@ test.describe('the automation builder', () => {
   test('says what is missing, and refuses to publish until it is not', async ({ page }) => {
     await openBuilder(page);
 
-    // The rule has no action yet.
-    await expect(page.getByText('Add at least one action.')).toBeVisible();
+    /*
+     * The count sits beside Publish rather than in a banner over the canvas, so
+     * the reason the button is off is one click from the button itself. A
+     * disabled control with nothing next to it is the dead end this replaced.
+     */
     await expect(page.getByRole('button', { name: /publish rule/i })).toBeDisabled();
+
+    // The rule has no action yet.
+    await page.getByRole('button', { name: /^\d+ problems?$/ }).click();
+    await expect(page.getByText('Add at least one action.')).toBeVisible();
   });
 
   test('adds an action from the selector, and it appears on the canvas', async ({ page }) => {
     await openBuilder(page);
 
-    await page.getByRole('button', { name: /^Add action$/i }).click();
+    // From the placeholder on the canvas: the card that says "choose a step" is
+    // the invitation, so pressing it is how an action gets chosen.
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
     await page.getByRole('option', { name: /add a comment/i }).click();
 
     /*
@@ -281,7 +312,10 @@ test.describe('the automation builder', () => {
      */
     await openBuilder(page);
 
-    await page.getByRole('button', { name: /^Add branch$/i }).click();
+    // Split from the connector at the end of the rule — the point on the
+    // drawing where "and then it goes two ways" is actually being decided.
+    await (await endConnector(page)).click();
+    await page.getByRole('button', { name: /^Add branch$/ }).click();
 
     await expect
       .poll(
@@ -300,6 +334,7 @@ test.describe('the automation builder', () => {
 
   test('chains another question onto the otherwise arm', async ({ page }) => {
     await openBuilder(page);
+    await (await endConnector(page)).click();
     await page.getByRole('button', { name: /^Add branch$/ }).click();
 
     await expect
@@ -408,7 +443,7 @@ test.describe('the automation builder', () => {
      */
     await openBuilder(page);
 
-    await page.getByRole('button', { name: /^Add action$/i }).click();
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
     await page.getByRole('option', { name: /add a comment/i }).click();
 
     const rail = page.getByRole('complementary', { name: /step settings/i });
@@ -472,16 +507,16 @@ test.describe('the automation builder', () => {
     await expect(rail.getByText(/rule owner/i)).toBeVisible();
 
     /*
-     * The title here and the one in the header are the same field.
+     * The title here and the heading in the header are the same field.
      *
-     * They are two inputs over one piece of state, which is exactly the shape
+     * They are two controls over one piece of state, which is exactly the shape
      * that drifts: typing in one and reading the other is the only way to know
      * they have not become two separate drafts of the name.
      */
     await rail.getByLabel('Title').fill('Renamed from the panel');
-    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(
-      'Renamed from the panel',
-    );
+    await expect(
+      page.getByRole('button', { name: 'Rule name: Renamed from the panel' }),
+    ).toBeVisible();
 
     await rail.getByLabel('Description').fill('Explains itself.');
 
@@ -491,8 +526,15 @@ test.describe('the automation builder', () => {
     await chaining.click();
     await expect(chaining).toHaveAttribute('aria-checked', 'false');
 
-    await page.getByRole('button', { name: /save draft/i }).click();
-    await expect(page.getByRole('button', { name: /save draft/i })).toBeDisabled();
+    /*
+     * Written with the keyboard, because there is no Save button any more.
+     *
+     * The header reports what the save did rather than offering to start one,
+     * so the shortcut is the whole path — and a path with no control on screen
+     * is exactly the one that has to be covered here.
+     */
+    await page.keyboard.press('Control+s');
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
     await page.reload();
     await page.getByRole('button', { name: /^Rule settings$/ }).click();
@@ -505,17 +547,51 @@ test.describe('the automation builder', () => {
     ).toHaveAttribute('aria-checked', 'false');
   });
 
-  test('saves a draft and keeps it across a reload', async ({ page }) => {
+  test('renames in place, and keeps it across a reload', async ({ page }) => {
     await openBuilder(page);
 
     const renamed = `${RULE_NAME} saved`;
-    await page.getByRole('textbox', { name: 'Rule name' }).fill(renamed);
-    await page.getByRole('button', { name: /save draft/i }).click();
 
-    await expect(page.getByRole('button', { name: /save draft/i })).toBeDisabled();
+    /*
+     * The name is a heading until it is pressed.
+     *
+     * A field sitting in the header permanently made the one line that says
+     * what the rule *is* look like something to fill in, so the input only
+     * exists while somebody is typing — and this is the round trip that proves
+     * the swap actually commits rather than only looking edited.
+     */
+    await page.getByRole('button', { name: /^Rule name:/ }).click();
+    await page.getByRole('textbox', { name: 'Rule name' }).fill(renamed);
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('button', { name: `Rule name: ${renamed}` })).toBeVisible();
+
+    await page.keyboard.press('Control+s');
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
     await page.reload();
-    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(renamed);
+    await expect(page.getByRole('button', { name: `Rule name: ${renamed}` })).toBeVisible();
+  });
+
+  test('abandons a rename on Escape without leaving the builder', async ({ page }) => {
+    /*
+     * Escape has two meanings here and only one of them can win.
+     *
+     * The builder is a dialog, so a loose Escape closes it — which would make
+     * backing out of a typo also throw away the rule. The name has to swallow
+     * its own key.
+     */
+    await openBuilder(page);
+
+    const heading = page.getByRole('button', { name: /^Rule name:/ });
+    const before = (await heading.textContent()) ?? '';
+
+    await heading.click();
+    await page.getByRole('textbox', { name: 'Rule name' }).fill('Typed by mistake');
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: `Rule name: ${before}` })).toBeVisible();
   });
 
   test('renders in dark mode too', async ({ page }) => {

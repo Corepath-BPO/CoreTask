@@ -73,6 +73,19 @@ export function AutomationBuilderDialog({
         // Both routed through the same question, rather than dismissing.
         onEscapeKeyDown={(event) => {
           event.preventDefault();
+
+          /*
+           * Except where something on screen already means something by it.
+           *
+           * The rule name reverts on Escape, and this listener runs on the
+           * document in the capture phase — so it sees the press before the
+           * field does and cannot be talked out of it from there. A marked
+           * element is the only order-independent way to tell the two meanings
+           * apart; without it, backing out of a typo in the title also closes
+           * the rule and asks about discarding work nobody was discarding.
+           */
+          if ((event.target as HTMLElement | null)?.closest('[data-escape-handled]')) return;
+
           tryLeave();
         }}
         onPointerDownOutside={(event) => event.preventDefault()}

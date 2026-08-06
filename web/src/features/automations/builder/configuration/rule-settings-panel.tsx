@@ -39,7 +39,13 @@ export function RuleSettingsPanel({
 
   return (
     <>
-      <div role="tablist" aria-label="Rule settings" className="flex border-b border-border px-2">
+      {/* `shrink-0`, like the heading above it: the way between the two halves
+          of this panel cannot be the part that scrolls out of reach. */}
+      <div
+        role="tablist"
+        aria-label="Rule settings"
+        className="flex shrink-0 border-b border-border px-2"
+      >
         {(['general', 'permissions'] as const).map((entry) => (
           <button
             key={entry}
@@ -60,7 +66,7 @@ export function RuleSettingsPanel({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {tab === 'general' ? (
           <div className="grid gap-5">
             <Owner rule={rule} />

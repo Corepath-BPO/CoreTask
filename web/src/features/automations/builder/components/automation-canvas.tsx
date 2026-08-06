@@ -238,44 +238,6 @@ function Canvas({
     };
   }, [fitView]);
 
-  /*
-   * And again whenever the canvas itself changes size.
-   *
-   * Opening the side panel takes 360px off the drawing surface without changing
-   * the rule, so nothing about the graph says to look again and the last step
-   * ends up behind the panel. Watching the element rather than the thing that
-   * moved it means this is right for a resized window too, and it cannot fire
-   * before the new width exists — which is what made keying it on the panel's
-   * own state measure the layout one frame too early.
-   */
-  useEffect(() => {
-    const element = wrapper.current;
-    if (!element) return;
-
-    let frame = 0;
-    let first = true;
-
-    const observer = new ResizeObserver(() => {
-      // The observer fires once on attach, which would refit for no reason.
-      if (first) {
-        first = false;
-        return;
-      }
-
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        void fitView({ padding: 0.2, maxZoom: 1, duration: 200 });
-      });
-    });
-
-    observer.observe(element);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [fitView]);
-
   return (
     <div ref={wrapper} className="h-full w-full">
       <ReactFlow

@@ -67,8 +67,9 @@ test.describe('automations', () => {
     );
 
     // Named after the section too, so a rule arrives with something a person
-    // would recognise in a list rather than a blank field to fill in.
-    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(/^When moved to \S/);
+    // would recognise in a list rather than a blank field to fill in. A heading
+    // rather than an input: the name is only a field while it is being typed.
+    await expect(page.getByRole('button', { name: /^Rule name: When moved to \S/ })).toBeVisible();
 
     expect(labels).toHaveLength(3);
     expect(labels[0]).toMatch(/^When/);
