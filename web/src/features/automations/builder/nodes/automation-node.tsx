@@ -4,13 +4,22 @@ import {
   AlertCircle,
   ArrowRight,
   Clock,
+  Copy,
   GitBranch,
   ListFilter,
+  MoreHorizontal,
   Plus,
+  Trash2,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 import type { SummarySegment } from '../lib/node-summary';
@@ -27,6 +36,10 @@ export interface AutomationNodeData extends Record<string, unknown> {
   onOpen?: () => void;
   /** Add a step straight after this one. Absent where that makes no sense. */
   onAddAfter?: () => void;
+  /** A copy of this step, running immediately after it. */
+  onDuplicate?: () => void;
+  /** Absent on the trigger: a rule with nothing to start it is not a rule. */
+  onDelete?: () => void;
 }
 
 const ICON: Record<string, LucideIcon> = {
@@ -88,7 +101,8 @@ export function AutomationNode({ data, selected }: NodeProps) {
      * one — nesting them would be invalid markup and the inner click would
      * never be the one that fired.
      */
-    <div className="group relative">
+    // `nodrag nopan` so a click on a menu is not read as a gesture on the canvas.
+    <div className="nodrag nopan group relative">
       <button
         type="button"
         onClick={node.onOpen}
@@ -147,7 +161,7 @@ export function AutomationNode({ data, selected }: NodeProps) {
         </span>
 
         {node.invalid && (
-          <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <AlertCircle className="mr-6 size-4 shrink-0 text-destructive" aria-hidden="true" />
         )}
 
         {/*
@@ -176,6 +190,49 @@ export function AutomationNode({ data, selected }: NodeProps) {
           isConnectable={false}
         />
       </button>
+
+      {/*
+        The step's own menu, on the card rather than only in the side panel.
+        
+        Deleting the third of five steps means finding it, opening it, then
+        deleting it — three acts for one intention. Here it is where the step
+        is, which is where somebody already is when they decide.
+      */}
+      {(node.onDuplicate || node.onDelete) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`More for: ${node.label}`}
+              className={cn(
+                'absolute right-2 top-1/2 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-opacity',
+                'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
+                'hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+              )}
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent align="end">
+            {node.onDuplicate && (
+              <DropdownMenuItem className="cursor-pointer" onSelect={node.onDuplicate}>
+                <Copy className="size-4" aria-hidden="true" />
+                Duplicate
+              </DropdownMenuItem>
+            )}
+            {node.onDelete && (
+              <DropdownMenuItem
+                className="cursor-pointer text-destructive focus:text-destructive"
+                onSelect={node.onDelete}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                Delete
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       {/*
         Revealed on hover, and on keyboard focus.

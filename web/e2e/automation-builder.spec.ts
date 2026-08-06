@@ -344,6 +344,49 @@ test.describe('the automation builder', () => {
     expect(splits[0]!.y).not.toBe(splits[1]!.y);
   });
 
+  test('duplicates and deletes a step from its own card', async ({ page }) => {
+    await openBuilder(page);
+
+    const condition = page.getByRole('button', { name: /^More for: Priority is/ });
+    const before = (await nodeBoxes(page)).length;
+
+    await condition.click();
+    await page.getByRole('menuitem', { name: /duplicate/i }).click();
+
+    /*
+     * The copy runs after the original, not beside it.
+     *
+     * Two steps sharing a parent are two paths from one point — a branch — and
+     * duplicating an action means "do that again", not "fork the rule here".
+     */
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 1);
+
+    const copies = (await nodeBoxes(page)).filter((box) => box.label.includes('Priority is'));
+    expect(copies).toHaveLength(2);
+    expect(copies[0]!.y).toBe(copies[1]!.y);
+    expect(copies[0]!.x).not.toBe(copies[1]!.x);
+
+    // And the copy goes away again from the same place.
+    await page
+      .getByRole('button', { name: /^More for: Priority is/ })
+      .last()
+      .click();
+    await page.getByRole('menuitem', { name: /delete/i }).click();
+
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
+  });
+
+  test('the trigger has no delete in its menu', async ({ page }) => {
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^More for: When a task/ }).click();
+
+    await expect(page.getByRole('menuitem', { name: /duplicate/i })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
+  });
+
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {
     await openBuilder(page);
 

@@ -1,4 +1,4 @@
-import { AutomationRuleStatus, BranchKey } from '@coretask/contracts';
+import { AutomationRuleStatus, BranchKey, type AutomationNodeType } from '@coretask/contracts';
 import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
@@ -241,6 +241,49 @@ export function AutomationBuilderPage({
 
   const addBranch = () =>
     setEdits((previous) => ({ ...previous, added: [...previous.added, makeBranch(realNodes)] }));
+
+  /**
+   * A copy of a step, running immediately after the one it came from.
+   *
+   * After rather than beside it: two steps sharing a parent are two paths from
+   * the same point, which is a branch — and duplicating an action is almost
+   * always "do that again with one thing changed", not "fork the rule here".
+   *
+   * Its settings come along. A copy that arrived empty would be a new step with
+   * extra steps, and the reason to duplicate is that most of the answers are
+   * already right.
+   */
+  const duplicateNode = (nodeId: string) => {
+    const original = realNodes.find((node) => node.id === nodeId);
+    if (!original) return;
+
+    const copy: CanvasNode = {
+      ...makeNodeUnder(
+        original.type as AutomationNodeType,
+        original.subtype,
+        original.id,
+        null,
+        realNodes,
+      ),
+      configuration: { ...original.configuration },
+    };
+
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, copy],
+      reparented: { ...previous.reparented, ...adoptChildren(copy, realNodes) },
+    }));
+
+    setSelectedId(copy.id);
+    setRail({ kind: 'configure', nodeId: copy.id });
+  };
+
+  const deleteNode = (nodeId: string) => {
+    setEdits((previous) => ({ ...previous, removed: [...previous.removed, nodeId] }));
+    setRail((previous) =>
+      previous.kind === 'configure' && previous.nodeId === nodeId ? { kind: 'closed' } : previous,
+    );
+  };
 
   /**
    * Another question on the "otherwise" side of a split.
@@ -679,6 +722,8 @@ export function AutomationBuilderPage({
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
+          onDuplicateNode={duplicateNode}
+          onDeleteNode={deleteNode}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
           onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
         />
@@ -705,10 +750,7 @@ export function AutomationBuilderPage({
               configured: { ...previous.configured, [nodeId]: configuration },
             }))
           }
-          onDelete={(nodeId) => {
-            setEdits((previous) => ({ ...previous, removed: [...previous.removed, nodeId] }));
-            setRail({ kind: 'closed' });
-          }}
+          onDelete={deleteNode}
           onChoose={chooseFromRail}
           rule={rule}
           settings={settings}

@@ -38,6 +38,8 @@ interface Props {
   onInsertBranch: (parentId: string) => void;
   /** Add another question on this split's "otherwise" arm. */
   onAddElseIf: (branchId: string) => void;
+  onDuplicateNode: (nodeId: string) => void;
+  onDeleteNode: (nodeId: string) => void;
 }
 
 /**
@@ -69,6 +71,8 @@ function Canvas({
   onInsertStep,
   onInsertBranch,
   onAddElseIf,
+  onDuplicateNode,
+  onDeleteNode,
 }: Props) {
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -122,9 +126,33 @@ function Canvas({
           ...(node.type === 'PLACEHOLDER' || hasFollower.has(node.id)
             ? {}
             : { onAddAfter: () => onInsertStep(node.id) }),
+
+          /*
+           * No menu on a placeholder: there is nothing yet to copy or remove,
+           * and the card already offers the only thing that applies to it.
+           */
+          ...(node.type === 'PLACEHOLDER'
+            ? {}
+            : {
+                onDuplicate: () => onDuplicateNode(node.id),
+                // Every step but the trigger. A rule with nothing to start it
+                // is not a rule; the way to change what starts one is to pick a
+                // different trigger.
+                ...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDeleteNode(node.id) }),
+              }),
         },
       })),
-    [graph.nodes, metadata, selectedId, onOpenNode, onInsertStep, hasFollower, placement],
+    [
+      graph.nodes,
+      metadata,
+      selectedId,
+      onOpenNode,
+      onInsertStep,
+      hasFollower,
+      placement,
+      onDuplicateNode,
+      onDeleteNode,
+    ],
   );
 
   const edges = useMemo<Edge[]>(
