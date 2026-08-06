@@ -1,3 +1,4 @@
+import { BranchKey } from '@coretask/contracts';
 import type { AutomationGraphEdge, AutomationMetadata } from '@coretask/types';
 import {
   Background,
@@ -35,6 +36,8 @@ interface Props {
   onInsertStep: (parentId: string) => void;
   /** Split the rule directly after `parentId`. */
   onInsertBranch: (parentId: string) => void;
+  /** Add another question on this split's "otherwise" arm. */
+  onAddElseIf: (branchId: string) => void;
 }
 
 /**
@@ -65,6 +68,7 @@ function Canvas({
   onOpenNode,
   onInsertStep,
   onInsertBranch,
+  onAddElseIf,
 }: Props) {
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -133,9 +137,22 @@ function Canvas({
         ...(edge.label ? { label: edge.label } : {}),
         type: 'automation',
         animated: false,
-        data: { onInsertStep, onInsertBranch },
+        data: {
+          onInsertStep,
+          onInsertBranch,
+          /*
+           * Only on the "otherwise" arm, because that is the only place the
+           * offer means anything: an else-if extends the fallback, and offering
+           * it on the matching arm would read as "if this matched, then ask a
+           * different question", which is not what it does.
+           *
+           * Keyed on the arm the edge carries rather than on its label — the
+           * label is words for people and will be reworded.
+           */
+          ...(edge.branchKey === BranchKey.ELSE ? { onAddElseIf } : {}),
+        },
       })),
-    [graph.edges, onInsertStep, onInsertBranch],
+    [graph.edges, onInsertStep, onInsertBranch, onAddElseIf],
   );
 
   /*

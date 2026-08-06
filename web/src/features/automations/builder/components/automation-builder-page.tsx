@@ -1,4 +1,4 @@
-import { AutomationRuleStatus } from '@coretask/contracts';
+import { AutomationRuleStatus, BranchKey } from '@coretask/contracts';
 import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
@@ -241,6 +241,43 @@ export function AutomationBuilderPage({
 
   const addBranch = () =>
     setEdits((previous) => ({ ...previous, added: [...previous.added, makeBranch(realNodes)] }));
+
+  /**
+   * Another question on the "otherwise" side of a split.
+   *
+   * This is what an else-if *is* in this model: a second branch hanging off the
+   * first one's otherwise arm. The engine already walks it — a branch takes one
+   * arm and keeps going — so nothing new had to be taught to the runner.
+   *
+   * Whatever was on that arm becomes the new question's own otherwise, which is
+   * the only reading that preserves what the rule already said: "otherwise if X
+   * do A, otherwise <what was there before>".
+   */
+  const addElseIf = (branchId: string) => {
+    const branch = realNodes.find((node) => node.id === branchId);
+    if (!branch) return;
+
+    const inserted = makeNodeUnder(
+      'BRANCH',
+      'FIELD_COMPARISON',
+      branchId,
+      BranchKey.ELSE,
+      realNodes,
+    );
+
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, inserted],
+      reparented: {
+        ...previous.reparented,
+        ...adoptChildren(inserted, realNodes, BranchKey.ELSE),
+      },
+    }));
+
+    // Straight into its condition: an unanswered question is not a step yet.
+    setSelectedId(inserted.id);
+    setRail({ kind: 'configure', nodeId: inserted.id });
+  };
 
   /*
    * Adding a step in the middle of a rule rather than at the end.
@@ -641,6 +678,7 @@ export function AutomationBuilderPage({
 
             setRail({ kind: 'configure', nodeId });
           }}
+          onAddElseIf={addElseIf}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
           onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
         />

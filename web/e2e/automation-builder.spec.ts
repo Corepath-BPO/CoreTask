@@ -298,6 +298,52 @@ test.describe('the automation builder', () => {
     expect(arms[0]!.y).not.toBe(arms[1]!.y);
   });
 
+  test('chains another question onto the otherwise arm', async ({ page }) => {
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add branch$/ }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBeGreaterThan(2);
+
+    /*
+     * The offer belongs to the otherwise arm and nowhere else.
+     *
+     * On the matching arm it would read as "if this matched, then ask a
+     * different question", which is not what it does — so exactly one of the
+     * connectors on screen may carry it.
+     */
+    const dots = page.getByRole('button', { name: /add a step here/i });
+    let found = -1;
+
+    for (let index = 0; index < (await dots.count()); index += 1) {
+      await dots.nth(index).click();
+
+      if ((await page.getByRole('button', { name: /^Otherwise if…$/ }).count()) > 0) {
+        found = index;
+        break;
+      }
+
+      await dots.nth(index).click();
+    }
+
+    expect(found, 'no connector offered to chain another question').toBeGreaterThanOrEqual(0);
+    await page.getByRole('button', { name: /^Otherwise if…$/ }).click();
+
+    // Two questions, stacked in one column, each with its own answer beside it.
+    await expect
+      .poll(
+        async () => (await nodeBoxes(page)).filter((box) => box.label.includes('Split on')).length,
+        { timeout: 5000 },
+      )
+      .toBe(2);
+
+    const splits = (await nodeBoxes(page)).filter((box) => box.label.includes('Split on'));
+
+    expect(splits[0]!.x).toBe(splits[1]!.x);
+    expect(splits[0]!.y).not.toBe(splits[1]!.y);
+  });
+
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {
     await openBuilder(page);
 

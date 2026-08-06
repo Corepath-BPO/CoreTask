@@ -1,5 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-import { GitBranch, MoreHorizontal, Plus } from 'lucide-react';
+import { CornerDownRight, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -10,6 +10,8 @@ export interface AutomationEdgeData extends Record<string, unknown> {
   onInsertStep?: (parentId: string) => void;
   /** Split the rule at this point, so what follows becomes one of two paths. */
   onInsertBranch?: (parentId: string) => void;
+  /** Present only on an "otherwise" arm: ask another question before falling back. */
+  onAddElseIf?: (branchId: string) => void;
 }
 
 /**
@@ -113,14 +115,31 @@ export function AutomationEdge({
                     actions.onInsertStep?.(source);
                   }}
                 />
-                <EdgeAction
-                  icon={GitBranch}
-                  label="Add branch"
-                  onClick={() => {
-                    setOpen(false);
-                    actions.onInsertBranch?.(source);
-                  }}
-                />
+                {/*
+                  Offered instead of a plain split, not beside it. On the
+                  otherwise arm "add a branch" and "ask another question" are
+                  the same act, and two entries doing one thing is how somebody
+                  ends up choosing the wrong one.
+                */}
+                {actions.onAddElseIf ? (
+                  <EdgeAction
+                    icon={CornerDownRight}
+                    label="Otherwise if…"
+                    onClick={() => {
+                      setOpen(false);
+                      actions.onAddElseIf?.(source);
+                    }}
+                  />
+                ) : (
+                  <EdgeAction
+                    icon={GitBranch}
+                    label="Add branch"
+                    onClick={() => {
+                      setOpen(false);
+                      actions.onInsertBranch?.(source);
+                    }}
+                  />
+                )}
               </div>
             </div>
           )}

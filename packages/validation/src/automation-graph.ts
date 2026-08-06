@@ -59,6 +59,14 @@ interface DerivedEdge {
   target: string;
   kind: (typeof AutomationEdgeKind)[keyof typeof AutomationEdgeKind];
   label: string | null;
+  /**
+   * Which arm of a split this leaves by, null on the main path.
+   *
+   * Carried rather than inferred from the label: the label is words for people
+   * and will be reworded, and a canvas deciding what a control does by matching
+   * display text breaks silently the first time somebody improves the wording.
+   */
+  branchKey: string | null;
 }
 
 /**
@@ -99,6 +107,7 @@ export function deriveEdges(nodes: readonly EdgeSource[]): DerivedEdge[] {
          * read as jargon, and an unlabelled pair of arms reads as two identical
          * paths. "Otherwise" is what somebody would say out loud.
          */
+        branchKey: node.branchKey,
         label: !fromBranch
           ? null
           : node.branchKey === BranchKey.ELSE

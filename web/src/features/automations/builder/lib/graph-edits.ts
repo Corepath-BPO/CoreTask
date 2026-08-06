@@ -54,10 +54,16 @@ export interface GraphEdits {
  *
  * Only the ones on the same arm: inserting into the "otherwise" side of a split
  * must not drag the matching side along with it.
+ *
+ * `onto` is which arm of the *new* step they land on. It is the main path for
+ * an ordinary insertion, and the "otherwise" arm when the new step is another
+ * question — because "otherwise if X do A, otherwise do B" means the fallback
+ * that was there moves to after the new question, not in front of it.
  */
 export function adoptChildren(
   inserted: CanvasNode,
   nodes: readonly CanvasNode[],
+  onto: string | null = null,
 ): GraphEdits['reparented'] {
   const moved: GraphEdits['reparented'] = {};
 
@@ -66,7 +72,7 @@ export function adoptChildren(
     if (node.parentId !== inserted.parentId) continue;
     if (node.branchKey !== inserted.branchKey) continue;
 
-    moved[node.id] = { parentId: inserted.id, branchKey: null };
+    moved[node.id] = { parentId: inserted.id, branchKey: onto };
   }
 
   return moved;

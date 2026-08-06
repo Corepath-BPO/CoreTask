@@ -41,8 +41,10 @@ export interface AutomationGraphEdge {
   source: string;
   target: string;
   kind: AutomationEdgeKind;
-  /** Drawn on the edge when it leaves a branch — "Match", "Else". */
+  /** Drawn on the edge when it leaves a branch. */
   label: string | null;
+  /** Which arm of a split this leaves by, null on the main path. */
+  branchKey: string | null;
 }
 
 export interface AutomationGraph {
