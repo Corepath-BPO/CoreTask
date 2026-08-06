@@ -1,16 +1,24 @@
-import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
+import { WorkspaceRole, hasAtLeastRole, type CreatableWorkItemType } from '@coretask/contracts';
 import { FolderKanban } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
-import { useBoardTasks } from '@/features/tasks/hooks/use-tasks';
+import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
+import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
+import {
+  useCreateProjectWorkItem,
+  useProjectWorkItems,
+} from '@/features/work-items/hooks/use-project-work-items';
+import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { SectionBoard } from '../components/section-board';
+import { ViewToolbar } from '../components/view-toolbar-slot';
+import { useFieldMetadata } from '../hooks/use-project-views';
 import { useProject } from '../hooks/use-projects';
 
 /**
@@ -24,13 +32,26 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
   const workspaceId = workspace?.id;
 
   const { data: project, isLoading } = useProject(workspaceId, projectId);
+  /*
+   * The same query the List reads, so both views draw the same set.
+   *
+   * The Board used to read a task-only endpoint under its own cache key, which
+   * is why a ticket filed from the List never appeared here and why creating on
+   * the Board left the List stale. One query, one key, one answer.
+   */
   const {
-    data: boardTasks,
+    data: workItems,
     isError: tasksFailed,
     error: tasksError,
     refetch: refetchTasks,
-  } = useBoardTasks(workspaceId, projectId);
+  } = useProjectWorkItems(workspaceId, projectId, { includeCustomFields: true });
+
+  const tasks = useMemo(() => (workItems?.items ?? []).map(toWorkItemRow), [workItems]);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [composing, setComposing] = useState<CreatableWorkItemType | null>(null);
+
+  const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const { data: metadata } = useFieldMetadata(workspaceId, projectId);
 
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const canEdit = hasAtLeastRole(role, WorkspaceRole.MEMBER);
@@ -41,6 +62,17 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-3">
+      {/* The same control the List carries, in the same place — see
+          `view-toolbar-slot`. Both views offer one way to add to a project. */}
+      <ViewToolbar>
+        <ProjectWorkItemCreateButton
+          defaultType={project.defaultWorkItemType}
+          context={{ projectId, sourceView: 'BOARD' }}
+          pending={createWorkItem.isPending}
+          onCreate={(type) => setComposing(type as CreatableWorkItemType)}
+        />
+      </ViewToolbar>
+
       {canEdit && (
         <p className="text-xs text-muted-foreground">
           Drag a column by its handle to reorder · click a name to rename
@@ -78,13 +110,22 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
           workspaceId={workspaceId}
           projectId={project.id}
           sections={project.sections}
-          tasks={boardTasks?.items ?? []}
-          totalTaskCount={boardTasks?.meta.summary.total ?? 0}
+          tasks={tasks}
+          totalTaskCount={tasks.length}
           canEdit={canEdit && !archived}
           canDelete={canManage && !archived}
           onOpenTask={setOpenTaskId}
         />
       )}
+
+      <CreateWorkItemDialog
+        open={composing !== null}
+        onOpenChange={(next) => !next && setComposing(null)}
+        initialType={composing ?? project.defaultWorkItemType}
+        metadata={metadata}
+        pending={createWorkItem.isPending}
+        onSubmit={(payload) => createWorkItem.mutateAsync(payload)}
+      />
 
       <TaskDetailDialog
         workspaceId={workspaceId}

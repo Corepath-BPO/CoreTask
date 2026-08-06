@@ -14,7 +14,11 @@ import {
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
-import { BOARD_TASK_LIMIT, MAX_SECTIONS_PER_PROJECT } from '@coretask/contracts';
+import {
+  BOARD_TASK_LIMIT,
+  MAX_SECTIONS_PER_PROJECT,
+  type CreatableWorkItemType,
+} from '@coretask/contracts';
 import type { Section, Task } from '@coretask/types';
 import { Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -32,7 +36,12 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TaskCardPreview } from '@/features/tasks/components/task-card';
-import { groupTasksBySection, useCreateTask, useMoveTask } from '@/features/tasks/hooks/use-tasks';
+import { groupTasksBySection } from '@/features/tasks/hooks/use-tasks';
+import { useProject } from '../hooks/use-projects';
+import {
+  useCreateProjectWorkItem,
+  useMoveProjectWorkItem,
+} from '@/features/work-items/hooks/use-project-work-items';
 import { resolveTaskDrop, type TaskDropTarget } from '@/features/tasks/lib/resolve-task-drop';
 import { cn } from '@/lib/utils';
 
@@ -71,8 +80,11 @@ export function SectionBoard({
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveSection = useMoveSection(workspaceId, projectId);
   const deleteSection = useDeleteSection(workspaceId, projectId);
-  const createTask = useCreateTask(workspaceId);
-  const moveTask = useMoveTask(workspaceId, projectId);
+  const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const { data: project } = useProject(workspaceId, projectId);
+
+  const defaultType: CreatableWorkItemType = project?.defaultWorkItemType ?? 'TASK';
+  const moveWorkItem = useMoveProjectWorkItem(workspaceId, projectId);
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
@@ -132,10 +144,15 @@ export function SectionBoard({
     const plan = resolveTaskDrop(groups, String(active.id), target);
     if (!plan) return;
 
-    moveTask.mutate({
-      taskId: String(active.id),
-      payload: { sectionId: plan.sectionId, afterTaskId: plan.afterTaskId },
-      groups: plan.groups,
+    /*
+     * The shared move, so a card dragged here lands exactly where a row dragged
+     * in the List would. The plan itself still comes from `resolveTaskDrop` —
+     * both views have always shared that arithmetic, and duplicating it is how
+     * "dropped onto the third card" comes to mean two different positions.
+     */
+    moveWorkItem.mutate({
+      workItemId: String(active.id),
+      payload: { targetSectionId: plan.sectionId, afterId: plan.afterTaskId },
     });
   };
 
@@ -177,11 +194,14 @@ export function SectionBoard({
                 tasks={groups[section.id] ?? []}
                 canEdit={canEdit}
                 canDelete={canDelete}
-                creatingTask={createTask.isPending}
                 onRename={(sectionId, name) => renameSection.mutate({ sectionId, name })}
                 onRequestDelete={setPendingDelete}
                 onOpenTask={onOpenTask}
-                onCreateTask={(sectionId, title) => createTask.mutate({ title, sectionId })}
+                defaultType={defaultType}
+                creating={createWorkItem.isPending}
+                onCreateWorkItem={(sectionId, type, title) =>
+                  createWorkItem.mutateAsync({ type, title, sectionId })
+                }
               />
             ))}
           </SortableContext>

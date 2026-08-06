@@ -27,6 +27,7 @@ import {
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
+import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
 import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
 import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
 import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
@@ -404,6 +405,7 @@ export function ProjectListView({
                         <span className="sticky left-3 flex w-fit items-center gap-1.5">
                           <SectionHeader
                             group={group}
+                            projectId={projectId}
                             collapsed={collapsed.has(group.id)}
                             canEdit={canEdit}
                             onToggle={() => toggle(group.id)}
@@ -685,12 +687,14 @@ function Row({
  */
 function SectionHeader({
   group,
+  projectId,
   collapsed,
   canEdit,
   onToggle,
   onRename,
 }: {
   group: Group;
+  projectId: string;
   collapsed: boolean;
   canEdit: boolean;
   onToggle: () => void;
@@ -719,6 +723,23 @@ function SectionHeader({
 
   return (
     <>
+      {/*
+        What runs when something lands in this section — the same control the
+        Board column header carries, in the same place. It was on the Board only,
+        which meant the answer to "why did this get assigned?" was visible in one
+        view and invisible in the other.
+
+        Not on the orphan bucket: that is a synthetic group for items whose
+        section was removed, and there is no section for a rule to belong to.
+      */}
+      {isRealSection && (
+        <SectionAutomationPopover
+          projectId={projectId}
+          sectionId={group.id}
+          sectionName={group.name}
+        />
+      )}
+
       <button
         type="button"
         onClick={onToggle}

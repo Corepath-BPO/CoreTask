@@ -6,6 +6,8 @@ import { CalendarClock, ListChecks, MessageSquareText } from 'lucide-react';
 
 import { TaskPriorityBadge } from '@/components/data-display/status-badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { WorkItemTypeIcon } from '@/features/work-items/components/work-item-type-icon';
+import { isTicketRow } from '@/features/work-items/lib/work-item-row';
 import { cn, daysUntil, formatDate, formatDueDate, initials } from '@/lib/utils';
 
 interface TaskCardProps {
@@ -51,11 +53,27 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
       >
         <p
           className={cn(
-            'text-sm leading-snug',
+            'flex items-start gap-1.5 text-sm leading-snug',
             done && 'text-muted-foreground line-through decoration-muted-foreground/50',
           )}
         >
-          {task.title}
+          {/*
+            A board column now holds both kinds, so the card has to say which it
+            is. The key comes with it for a ticket: `CORE-1042` is what somebody
+            quotes in an email, and a card that hides it makes the board useless
+            for finding the thing they were sent.
+          */}
+          {isTicketRow(task) && (
+            <>
+              <WorkItemTypeIcon type="TICKET" className="mt-0.5" />
+              {task.workItem.details.kind === 'TICKET' && (
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                  {task.workItem.details.key}
+                </span>
+              )}
+            </>
+          )}
+          <span className="min-w-0 flex-1">{task.title}</span>
         </p>
       </button>
 

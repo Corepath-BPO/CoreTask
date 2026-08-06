@@ -1,3 +1,4 @@
+import { type CreatableWorkItemType, type WorkItemType } from '@coretask/contracts';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -15,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { TaskCard } from '@/features/tasks/components/task-card';
-import { TaskComposer } from '@/features/tasks/components/task-composer';
+import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
 import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
 import { cn } from '@/lib/utils';
 
@@ -32,9 +33,10 @@ interface SectionColumnProps {
   canDelete: boolean;
   onRename: (sectionId: string, name: string) => void;
   onRequestDelete: (section: Section) => void;
-  onCreateTask: (sectionId: string, title: string) => void;
+  defaultType: CreatableWorkItemType;
+  onCreateWorkItem: (sectionId: string, type: WorkItemType, title: string) => Promise<unknown>;
   onOpenTask: (taskId: string) => void;
-  creatingTask?: boolean;
+  creating?: boolean;
 }
 
 export function SectionColumn({
@@ -44,9 +46,10 @@ export function SectionColumn({
   canDelete,
   onRename,
   onRequestDelete,
-  onCreateTask,
+  defaultType,
+  onCreateWorkItem,
   onOpenTask,
-  creatingTask = false,
+  creating = false,
 }: SectionColumnProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -199,9 +202,18 @@ export function SectionColumn({
 
       {canEdit && (
         <footer className="border-t p-2">
-          <TaskComposer
-            pending={creatingTask}
-            onCreate={(title) => onCreateTask(section.id, title)}
+          {/*
+            The same control the List puts at the foot of every section, so a
+            column and a section card offer the same thing in the same words.
+            The board-only composer it replaces could create tasks and nothing
+            else, which is how the Board and List came to disagree about what a
+            project can hold.
+          */}
+          <QuickCreateWorkItemRow
+            defaultType={defaultType}
+            sectionName={section.name}
+            pending={creating}
+            onCreate={({ type, title }) => onCreateWorkItem(section.id, type, title)}
           />
         </footer>
       )}

@@ -1,11 +1,4 @@
-import { BOARD_TASK_LIMIT } from '@coretask/contracts';
-import type {
-  CreateTaskPayload,
-  MoveTaskPayload,
-  Task,
-  TaskListMeta,
-  UpdateTaskPayload,
-} from '@coretask/types';
+import type { CreateTaskPayload, MoveTaskPayload, Task, UpdateTaskPayload } from '@coretask/types';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -34,21 +27,6 @@ export function useTasks(workspaceId: string | undefined, params: TaskListParams
     queryFn: () => tasksApi.list(workspaceId as string, params),
     enabled: Boolean(workspaceId),
     placeholderData: keepPreviousData,
-  });
-}
-
-/**
- * Every task on a project's board, in one request.
- *
- * A board is a direct-manipulation surface, so it loads the whole set rather
- * than paging — capped, with the cap surfaced to the caller so the UI can say
- * how many were withheld instead of silently truncating.
- */
-export function useBoardTasks(workspaceId: string | undefined, projectId: string) {
-  return useQuery({
-    queryKey: queryKeys.tasks.board(workspaceId ?? '', projectId),
-    queryFn: () => tasksApi.list(workspaceId as string, { projectId, limit: BOARD_TASK_LIMIT }),
-    enabled: Boolean(workspaceId) && Boolean(projectId),
   });
 }
 
@@ -97,49 +75,6 @@ export function useArchiveTask(workspaceId: string | undefined) {
 }
 
 /**
- * Moves a task, applying the new board layout optimistically.
- *
- * A card that snaps back to its old column before the request lands reads as a
- * failed drag, so the cache is rewritten first and rolled back only on error.
- */
-export function useMoveTask(workspaceId: string | undefined, projectId: string) {
-  const boardKey = queryKeys.tasks.board(workspaceId ?? '', projectId);
-
-  return useMutation({
-    mutationFn: ({
-      taskId,
-      payload,
-    }: {
-      taskId: string;
-      payload: MoveTaskPayload;
-      groups: TaskGroups;
-    }) => tasksApi.move(workspaceId as string, taskId, payload),
-
-    onMutate: async ({ groups }) => {
-      await queryClient.cancelQueries({ queryKey: boardKey });
-      const previous = queryClient.getQueryData<{ items: Task[]; meta: TaskListMeta }>(boardKey);
-
-      queryClient.setQueryData<{ items: Task[]; meta: TaskListMeta }>(boardKey, (current) =>
-        current ? { ...current, items: flattenGroups(groups) } : current,
-      );
-
-      return { previous };
-    },
-
-    onError: (error, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(boardKey, context.previous);
-      reportError(error, 'Could not move the task.');
-    },
-
-    // The server's positions are authoritative: a rebalance can renumber
-    // siblings the optimistic update left untouched.
-    onSettled: async () => {
-      await invalidateTasks(workspaceId as string);
-    },
-  });
-}
-
-/**
  * Moves a task without an optimistic board update.
  *
  * Used by the detail dialog's Section control, where there is no drag to keep
@@ -174,12 +109,4 @@ export function groupTasksBySection(tasks: Task[], sectionIds: string[]): TaskGr
   }
 
   return groups;
-}
-
-function flattenGroups(groups: TaskGroups): Task[] {
-  return Object.entries(groups).flatMap(([sectionId, list]) =>
-    // Positions are re-derived by the server; the index keeps the optimistic
-    // ordering stable until the refetch replaces it.
-    list.map((task, index) => ({ ...task, sectionId, position: index })),
-  );
 }
