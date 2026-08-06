@@ -2,7 +2,7 @@ import { AutomationRuleStatus } from '@coretask/contracts';
 import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, GitBranch, Loader2, Plus, Zap } from 'lucide-react';
+import { ArrowLeft, GitBranch, Loader2, Plus, Settings2, Zap } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ import {
 } from '../hooks/use-automation-graph';
 
 import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
+import type { RuleSettings } from '../configuration/rule-settings-panel';
 import {
   adoptChildren,
   applyEdits,
@@ -59,6 +60,11 @@ function blankRule(projectId: string, sectionId: string | undefined): Automation
     description: null,
     status: AutomationRuleStatus.DRAFT,
     version: 0,
+    // Chaining allowed by default, matching the column: a new rule behaves the
+    // same way every existing one does until somebody says otherwise.
+    allowChaining: true,
+    // Nobody owns it yet — the panel says so rather than showing a blank row.
+    createdBy: null,
     publishedAt: null,
     // The widening is the safe direction: a `CanvasNode` is a stored node plus
     // one type the database has no row for, and this one is a plain trigger.
@@ -129,7 +135,15 @@ export function AutomationBuilderPage({
   const rule = fetched ?? blank;
   const isNew = ruleId === null;
 
-  const [name, setName] = useState<string | null>(null);
+  /*
+   * The rule's own settings, overlaid on the stored ones.
+   *
+   * The same shape as the node edits below and for the same reason: what
+   * somebody typed lives apart from what was saved, so closing without saving
+   * leaves nothing behind. Only the keys they touched are here, so a field they
+   * never opened cannot be written back as an empty string.
+   */
+  const [settingsEdits, setSettingsEdits] = useState<Partial<RuleSettings>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /*
@@ -153,7 +167,13 @@ export function AutomationBuilderPage({
    */
   const [rail, setRail] = useState<RailMode>({ kind: 'closed' });
 
-  const currentName = name ?? rule?.name ?? '';
+  const settings: RuleSettings = {
+    name: settingsEdits.name ?? rule?.name ?? '',
+    description: settingsEdits.description ?? rule?.description ?? '',
+    allowChaining: settingsEdits.allowChaining ?? rule?.allowChaining ?? true,
+  };
+
+  const currentName = settings.name;
 
   const graph = useMemo(() => {
     if (!rule) return { nodes: [], edges: [] };
@@ -315,7 +335,7 @@ export function AutomationBuilderPage({
   );
 
   const blocking = issues.filter((issue) => issue.level === 'ERROR');
-  const dirty = name !== null || hasEdits(edits);
+  const dirty = Object.keys(settingsEdits).length > 0 || hasEdits(edits);
   const saving = saveGraph.isPending || createRule.isPending;
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
@@ -354,6 +374,7 @@ export function AutomationBuilderPage({
       ? (
           await createRule.mutateAsync({
             name: currentName.trim(),
+            description: settings.description,
             // The row's own trigger columns; the server keeps them in step with
             // the trigger node from here on, but a create has to state them.
             triggerType: triggerNode?.subtype ?? '',
@@ -361,9 +382,16 @@ export function AutomationBuilderPage({
             nodes,
           })
         ).id
-      : (await saveGraph.mutateAsync({ ruleId: rule.id, name: currentName, nodes }), rule.id);
+      : (await saveGraph.mutateAsync({
+          ruleId: rule.id,
+          name: currentName,
+          description: settings.description,
+          allowChaining: settings.allowChaining,
+          nodes,
+        }),
+        rule.id);
 
-    setName(null);
+    setSettingsEdits({});
     setEdits(NO_EDITS);
 
     return saved;
@@ -419,7 +447,9 @@ export function AutomationBuilderPage({
             first, and sending them to a settings panel for it is a detour. */}
         <Input
           value={currentName}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) =>
+            setSettingsEdits((previous) => ({ ...previous, name: event.target.value }))
+          }
           placeholder="Name this rule"
           aria-label="Rule name"
           aria-invalid={currentName.trim() === ''}
@@ -431,6 +461,23 @@ export function AutomationBuilderPage({
         </Badge>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* The rule's own settings — what it is called, what it is for, and
+              whether other rules may set it off. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 cursor-pointer"
+            aria-label="Rule settings"
+            aria-pressed={rail.kind === 'settings'}
+            onClick={() =>
+              setRail((previous) =>
+                previous.kind === 'settings' ? { kind: 'closed' } : { kind: 'settings' },
+              )
+            }
+          >
+            <Settings2 className="size-4" aria-hidden="true" />
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -607,6 +654,9 @@ export function AutomationBuilderPage({
             setRail({ kind: 'closed' });
           }}
           onChoose={chooseFromRail}
+          rule={rule}
+          settings={settings}
+          onSettingsChange={(next) => setSettingsEdits((previous) => ({ ...previous, ...next }))}
         />
       </div>
     </div>

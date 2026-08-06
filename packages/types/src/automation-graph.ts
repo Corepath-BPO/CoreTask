@@ -58,6 +58,9 @@ export interface AutomationRuleGraph {
   description: string | null;
   status: AutomationRuleStatus;
   version: number;
+  /** Whether this rule may run on an event another rule caused. */
+  allowChaining: boolean;
+  createdBy: { id: string; name: string; email: string; avatarUrl: string | null } | null;
   publishedAt: string | null;
   graph: AutomationGraph;
   createdAt: string;

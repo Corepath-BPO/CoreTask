@@ -73,9 +73,19 @@ export function useValidateGraph(workspaceId: string | undefined, projectId: str
 /** Saves the canvas as a draft. Never publishes — that is a separate act. */
 export function useSaveGraph(workspaceId: string | undefined, projectId: string) {
   return useMutation({
-    mutationFn: ({ ruleId, name, nodes }: { ruleId: string; name: string; nodes: unknown[] }) =>
+    mutationFn: ({
+      ruleId,
+      nodes,
+      ...settings
+    }: {
+      ruleId: string;
+      name: string;
+      description: string;
+      allowChaining: boolean;
+      nodes: unknown[];
+    }) =>
       apiClient.patch<unknown>(`${base(workspaceId as string, projectId)}/${ruleId}`, {
-        name,
+        ...settings,
         nodes,
       }),
     onSuccess: async (_result, variables) => {

@@ -2,6 +2,7 @@ import {
   ACTIVITY_ACTIONS,
   ACTIVITY_ENTITIES,
   ATTACHMENT_STATUSES,
+  CREATABLE_WORK_ITEM_TYPES,
   AUTOMATION_EXECUTION_STATUSES,
   AUTOMATION_NODE_TYPES,
   AUTOMATION_RULE_STATUSES,
@@ -48,6 +49,7 @@ describe('shared enums match the Prisma schema', () => {
     ['CustomFieldType', CUSTOM_FIELD_TYPES],
     ['ProjectViewType', PROJECT_VIEW_TYPES],
     ['ProjectViewScope', PROJECT_VIEW_SCOPES],
+    ['CreatableWorkItemType', CREATABLE_WORK_ITEM_TYPES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

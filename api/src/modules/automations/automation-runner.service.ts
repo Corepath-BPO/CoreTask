@@ -84,6 +84,19 @@ export class AutomationRunnerService {
         continue;
       }
 
+      /*
+       * A rule that only wants to answer people, not other rules.
+       *
+       * `depth` is above zero exactly when something else in this chain caused
+       * the event, so it is the whole test. The depth limit already stops a
+       * runaway; this is different — it is somebody saying "this one runs when
+       * a person does it", which no amount of loop protection can express.
+       */
+      if (!rule.allowChaining && event.depth > 0) {
+        skipped += 1;
+        continue;
+      }
+
       if (!this.triggerMatches(rule.triggerConfig, event)) {
         skipped += 1;
         continue;

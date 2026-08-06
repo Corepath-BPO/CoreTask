@@ -118,6 +118,10 @@ export class AutomationsController {
       description: rule.description,
       status: rule.status,
       version: rule.version,
+      allowChaining: rule.allowChaining,
+      // Who to ask about it. The rule settings panel shows this, and a rule
+      // nobody can be asked about is one nobody dares change.
+      createdBy: rule.createdBy,
       publishedAt: rule.publishedAt?.toISOString() ?? null,
       graph: toGraph(rule.nodes),
       createdAt: rule.createdAt.toISOString(),

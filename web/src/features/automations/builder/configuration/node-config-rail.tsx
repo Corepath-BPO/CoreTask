@@ -1,5 +1,9 @@
 import { NODE_CATEGORY_LABEL, type AutomationNodeType } from '@coretask/contracts';
-import type { AutomationCatalogEntry, AutomationMetadata } from '@coretask/types';
+import type {
+  AutomationCatalogEntry,
+  AutomationMetadata,
+  AutomationRuleGraph,
+} from '@coretask/types';
 import { PanelRightClose, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -11,6 +15,7 @@ import type { CanvasNode } from '../lib/graph-edits';
 import { summarise } from '../lib/node-summary';
 
 import { NodeConfigFields } from './node-config-fields';
+import { RuleSettingsPanel, type RuleSettings } from './rule-settings-panel';
 
 /**
  * What the rail is showing, if anything.
@@ -22,7 +27,8 @@ import { NodeConfigFields } from './node-config-fields';
 export type RailMode =
   | { kind: 'closed' }
   | { kind: 'configure'; nodeId: string }
-  | { kind: 'choose'; title: string; description: string; entries: AutomationCatalogEntry[] };
+  | { kind: 'choose'; title: string; description: string; entries: AutomationCatalogEntry[] }
+  | { kind: 'settings' };
 
 interface Props {
   mode: RailMode;
@@ -32,6 +38,9 @@ interface Props {
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
   onChoose: (subtype: string) => void;
+  rule: AutomationRuleGraph;
+  settings: RuleSettings;
+  onSettingsChange: (next: Partial<RuleSettings>) => void;
 }
 
 /**
@@ -53,15 +62,25 @@ export function NodeConfigRail({
   onChange,
   onDelete,
   onChoose,
+  rule,
+  settings,
+  onSettingsChange,
 }: Props) {
   if (mode.kind === 'closed') return null;
 
   return (
     <aside
-      aria-label="Step settings"
+      // Named for what it is showing: "Step settings" while a step is open is
+      // wrong when the panel holds the rule's own settings.
+      aria-label={mode.kind === 'settings' ? 'Rule settings' : 'Step settings'}
       className="flex w-[360px] shrink-0 flex-col border-l border-border bg-background"
     >
-      {mode.kind === 'choose' ? (
+      {mode.kind === 'settings' ? (
+        <>
+          <RailHeader title="Settings" onClose={onClose} />
+          <RuleSettingsPanel rule={rule} settings={settings} onChange={onSettingsChange} />
+        </>
+      ) : mode.kind === 'choose' ? (
         <ChoosePanel
           title={mode.title}
           description={mode.description}

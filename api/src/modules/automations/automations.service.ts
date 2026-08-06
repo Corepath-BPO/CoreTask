@@ -119,6 +119,7 @@ export class AutomationsService {
     const data: Prisma.AutomationRuleUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.description !== undefined) data.description = dto.description;
+    if (dto.allowChaining !== undefined) data.allowChaining = dto.allowChaining;
     if (dto.triggerType !== undefined) data.triggerType = dto.triggerType;
     if (dto.triggerConfig !== undefined) {
       data.triggerConfig = dto.triggerConfig as Prisma.InputJsonValue;

@@ -188,6 +188,45 @@ describe('Automations (e2e)', () => {
       return task?.assigneeId ?? null;
     };
 
+    it('skips a rule that will not chain when another rule caused the event', async () => {
+      /*
+       * The whole point of the setting.
+       *
+       * A depth above zero means something else in this chain raised the event,
+       * which is exactly the case somebody is turning off when they say this
+       * rule answers people rather than other rules. Asserted through the
+       * runner rather than by reading the column, because a stored flag nothing
+       * consults is the failure being guarded against.
+       */
+      const scope = await setupScope();
+      const ruleId = await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      await request(server())
+        .patch(`${rulesUrl(scope)}/${ruleId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ allowChaining: false })
+        .expect(200);
+
+      await runner.handle(moveEvent(scope, { depth: 1 }));
+
+      const afterChained = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(afterChained?.assigneeId).toBeNull();
+
+      // And still runs when a person did it, which is the half that would make
+      // a too-eager guard look like a broken rule.
+      await runner.handle(moveEvent(scope, { depth: 0 }));
+
+      const afterDirect = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(afterDirect?.assigneeId).toBe(scope.owner.userId);
+    });
+
     it('still runs a flat rule exactly as it always did', async () => {
       // The regression that matters: nine rules exist with no parentage, and a
       // tree walk would treat each of their nodes as its own root.

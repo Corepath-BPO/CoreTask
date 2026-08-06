@@ -995,6 +995,13 @@ model AutomationRule {
   /// Trigger scoping — the section id for TASK_MOVED_TO_SECTION, and so on.
   triggerConfig Json                 @default("{}")
   version       Int                  @default(1)
+  /// Whether this rule may run on an event another rule caused.
+  ///
+  /// Rules legitimately cascade — one moves a task, another reacts to the move
+  /// — but a rule meant to answer only what people do should say so, and the
+  /// depth limit is a backstop rather than an expression of intent. Defaults to
+  /// true so every existing rule keeps behaving exactly as it did.
+  allowChaining Boolean              @default(true)
   createdById   String?              @db.Uuid
   publishedAt   DateTime?
   lastRunAt     DateTime?

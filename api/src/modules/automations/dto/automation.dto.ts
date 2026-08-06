@@ -4,6 +4,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsNumber,
   IsObject,
@@ -123,6 +124,13 @@ export class UpdateRuleDto {
   @IsString()
   @MaxLength(500)
   description?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether this rule may run on an event another rule caused.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowChaining?: boolean;
 
   @ApiPropertyOptional({ enum: AUTOMATION_TRIGGERS })
   @IsOptional()

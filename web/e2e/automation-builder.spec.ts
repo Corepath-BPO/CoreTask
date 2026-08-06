@@ -124,17 +124,15 @@ test.describe('the automation builder', () => {
   /*
    * Waits for the builder to be ready, not for a particular name.
    *
-   * These run in order and one of them renames the rule, so asserting the
-   * original name here made every later test depend on which had run before it
-   * — a failure that says "dark mode is broken" when the truth is "the name was
-   * changed two tests ago".
+   * These run in order and two of them rename the rule, so asserting any
+   * particular name here made every later test depend on which had run before
+   * it — a failure that says "dark mode is broken" when the truth is "the name
+   * was changed two tests ago". A drawn node is the real signal anyway: it
+   * means the rule loaded and the canvas measured it.
    */
   const openBuilder = async (page: Page) => {
     await page.goto(`/projects/${api.projectId}/automations/${api.ruleId}`);
 
-    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(
-      new RegExp(RULE_NAME),
-    );
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
   };
 
@@ -371,6 +369,51 @@ test.describe('the automation builder', () => {
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();
     await expect(rail.getByRole('button', { name: /delete this step/i })).toHaveCount(0);
+  });
+
+  test('the rule settings panel edits the rule itself', async ({ page }) => {
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^Rule settings$/ }).click();
+
+    const rail = page.getByRole('complementary', { name: /rule settings/i });
+    await expect(rail).toBeVisible();
+
+    // The owner, so somebody knows who to ask before changing a live rule.
+    await expect(rail.getByText(/rule owner/i)).toBeVisible();
+
+    /*
+     * The title here and the one in the header are the same field.
+     *
+     * They are two inputs over one piece of state, which is exactly the shape
+     * that drifts: typing in one and reading the other is the only way to know
+     * they have not become two separate drafts of the name.
+     */
+    await rail.getByLabel('Title').fill('Renamed from the panel');
+    await expect(page.getByRole('textbox', { name: 'Rule name' })).toHaveValue(
+      'Renamed from the panel',
+    );
+
+    await rail.getByLabel('Description').fill('Explains itself.');
+
+    // Only a control the engine honours is offered, so this one has to persist.
+    const chaining = rail.getByRole('switch', { name: /trigger via other rules/i });
+    await expect(chaining).toHaveAttribute('aria-checked', 'true');
+    await chaining.click();
+    await expect(chaining).toHaveAttribute('aria-checked', 'false');
+
+    await page.getByRole('button', { name: /save draft/i }).click();
+    await expect(page.getByRole('button', { name: /save draft/i })).toBeDisabled();
+
+    await page.reload();
+    await page.getByRole('button', { name: /^Rule settings$/ }).click();
+
+    const reopened = page.getByRole('complementary', { name: /rule settings/i });
+    await expect(reopened.getByLabel('Title')).toHaveValue('Renamed from the panel');
+    await expect(reopened.getByLabel('Description')).toHaveValue('Explains itself.');
+    await expect(
+      reopened.getByRole('switch', { name: /trigger via other rules/i }),
+    ).toHaveAttribute('aria-checked', 'false');
   });
 
   test('saves a draft and keeps it across a reload', async ({ page }) => {
