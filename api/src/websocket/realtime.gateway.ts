@@ -184,6 +184,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitToUser(userId: string, event: string, payload: unknown): void {
     this.server?.to(userRoom(userId)).emit(event, payload);
   }
+
+  /**
+   * Takes somebody out of a workspace's room, on every device at once.
+   *
+   * Membership is checked when a socket joins and never again, so removing
+   * someone left their open tabs in the room — still receiving every task,
+   * section, ticket and comment payload for a workspace they had been thrown
+   * out of. Their REST calls started failing immediately, so the screen looked
+   * broken while the data kept arriving.
+   *
+   * Addressed through the user's own room rather than by tracking socket ids,
+   * because one person may have several tabs and two laptops, and the room is
+   * the only place that already knows about all of them.
+   */
+  async evictFromWorkspace(workspaceId: string, userId: string): Promise<void> {
+    await this.server?.in(userRoom(userId)).socketsLeave(workspaceRoom(workspaceId));
+
+    this.logger.log({ workspaceId, userId }, 'Evicted a user from a workspace room');
+  }
 }
 
 /** Accepts the token from the handshake auth payload or an Authorization header. */

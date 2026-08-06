@@ -14,6 +14,7 @@ import type { WorkspaceMember } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
+import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
@@ -39,6 +40,7 @@ export class MembersService {
     private readonly members: WorkspaceMembersService,
     private readonly activity: ActivityLogsService,
     private readonly notifications: NotificationDispatcher,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   /**
@@ -172,6 +174,21 @@ export class MembersService {
         teamsLeft: teams.count,
       };
     });
+
+    /*
+     * And cut off their live connection.
+     *
+     * Membership is checked when a socket joins a room and never again, so
+     * without this their open tabs kept receiving every task, section, ticket
+     * and comment in a workspace they are no longer in — full payloads, not
+     * ids. Deleting the row stops the next request and does nothing about the
+     * stream already flowing.
+     *
+     * After the transaction, deliberately. Evicting first would leave a window
+     * where the write could still roll back and the person would be cut off
+     * from a workspace they are in fact still a member of.
+     */
+    await this.realtime.evictFromWorkspace(workspaceId, target.userId);
 
     await this.activity.record({
       workspaceId,

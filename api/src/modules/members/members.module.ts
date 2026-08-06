@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
+import { WebsocketModule } from '../../websocket/websocket.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
@@ -12,7 +13,12 @@ import { MembersService } from './members.service';
  * closing a cycle back through the guard every other module needs.
  */
 @Module({
-  imports: [WorkspaceMembersModule, ActivityLogsModule, NotificationsIntegrationModule],
+  imports: [
+    WorkspaceMembersModule,
+    ActivityLogsModule,
+    NotificationsIntegrationModule,
+    WebsocketModule,
+  ],
   controllers: [MembersController],
   providers: [MembersService],
 })

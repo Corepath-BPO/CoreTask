@@ -8,6 +8,7 @@ import { queryClient } from '@/lib/api/query-client';
 import {
   connectSocket,
   disconnectSocket,
+  getSocket,
   joinWorkspaceRoom,
   leaveWorkspaceRoom,
 } from '@/lib/socket/socket-client';
@@ -76,6 +77,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       // A move or a status change alters the project's completed count, which
       // the header and Overview both show.
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      /*
+       * And the Board, which reads work items rather than tasks.
+       *
+       * Editing a task through the task endpoints emits only `TASK_UPDATED`, so
+       * without this a second person watching the same board saw the old value
+       * for as long as they left the page open — there is no polling and no
+       * refetch on focus, so "for as long as" means forever. Only edits made
+       * through the work-item endpoints refreshed it, because those emit a
+       * second event the Board does listen for. Two doors to one room, and one
+       * of them did not ring the bell.
+       */
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] });
     };
 
     const TASK_EVENTS = [
@@ -94,12 +107,37 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated]);
 
-  // Room membership follows the workspace switcher.
+  /*
+   * Room membership follows the workspace switcher — and every reconnect.
+   *
+   * Rooms are per-connection, so a dropped socket comes back in none of them.
+   * This effect's dependencies are the workspace and the session, neither of
+   * which changes when the network blips, so the room was joined once and never
+   * again: close a laptop lid, and the tab looked healthy while silently
+   * receiving nothing about tasks, sections, comments or tickets for the rest
+   * of its life.
+   *
+   * The refetch matters as much as the rejoin. Events sent while the socket was
+   * down are gone — nothing replays them — so rejoining without refetching
+   * leaves the screen confidently wrong until the next edit happens to arrive.
+   */
   useEffect(() => {
     if (!isAuthenticated || !workspaceId) return;
 
+    const socket = getSocket();
+
+    const rejoin = () => {
+      joinWorkspaceRoom(workspaceId);
+      void queryClient.invalidateQueries();
+    };
+
     joinWorkspaceRoom(workspaceId);
-    return () => leaveWorkspaceRoom(workspaceId);
+    socket?.on('connect', rejoin);
+
+    return () => {
+      socket?.off('connect', rejoin);
+      leaveWorkspaceRoom(workspaceId);
+    };
   }, [isAuthenticated, workspaceId]);
 
   // Tear the connection down when the whole app unmounts.
