@@ -5,7 +5,7 @@
 
 ## Context
 
-CoreTask shipped with the Kanban board *as* the project page. `/projects/:id`
+CoreTask shipped with the Kanban board _as_ the project page. `/projects/:id`
 rendered a header and `SectionBoard`, and there was no other way to look at a
 project's tasks.
 
@@ -34,7 +34,7 @@ Concretely:
 
 - each view is a route under `/projects/:id/…`; the bare path redirects to
   `/board`
-- `ProjectView` stores *presentation only* — columns, filters, sorts, grouping,
+- `ProjectView` stores _presentation only_ — columns, filters, sorts, grouping,
   density. It never stores tasks.
 - every view reads the same rows through `POST /projects/:id/tasks/query`, which
   lives on `TasksService`, so there is exactly one task read path
@@ -45,7 +45,7 @@ Good:
 
 - the selected view survives a refresh and can be pasted to a colleague
 - deleting a view loses an arrangement, never any work
-- a task edited in one view *is* the same task in the other; there is no
+- a task edited in one view _is_ the same task in the other; there is no
   reconciliation step because there is nothing to reconcile
 - Calendar, Timeline and Dashboard can be added as routes without touching how
   tasks are stored or read

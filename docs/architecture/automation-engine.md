@@ -35,11 +35,11 @@ the same reason: a queue outage degrades automation, it does not break editing.
 
 Three modules where one would seem simpler:
 
-| Module | Depends on | Used by |
-| --- | --- | --- |
-| `AutomationEventsModule` | the queue only | `TasksModule` — anything that changes a task |
-| `AutomationRunnerModule` | Prisma only | `WorkerModule` |
-| `AutomationsModule` | Projects, workspace members | the API, for rule CRUD |
+| Module                   | Depends on                  | Used by                                      |
+| ------------------------ | --------------------------- | -------------------------------------------- |
+| `AutomationEventsModule` | the queue only              | `TasksModule` — anything that changes a task |
+| `AutomationRunnerModule` | Prisma only                 | `WorkerModule`                               |
+| `AutomationsModule`      | Projects, workspace members | the API, for rule CRUD                       |
 
 The split is not tidiness. Importing a full domain module into the worker stopped
 it booting during the attachments milestone — `TasksService` pulls in
@@ -98,12 +98,12 @@ be indistinguishable from a rule that never matched.
 
 ## Outcomes
 
-| Status | Meaning |
-| --- | --- |
-| `COMPLETED` | every action succeeded |
-| `PARTIALLY_FAILED` | some actions failed; the log says which |
-| `FAILED` | every action failed |
-| `SKIPPED` | conditions did not hold, or a guard stopped it |
+| Status             | Meaning                                        |
+| ------------------ | ---------------------------------------------- |
+| `COMPLETED`        | every action succeeded                         |
+| `PARTIALLY_FAILED` | some actions failed; the log says which        |
+| `FAILED`           | every action failed                            |
+| `SKIPPED`          | conditions did not hold, or a guard stopped it |
 
 `SKIPPED` is deliberately not `FAILED`. A rule that does not apply has not gone
 wrong, and a history that conflates the two is useless for diagnosis.

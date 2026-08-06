@@ -45,10 +45,10 @@ so there is one canonical URL per view and existing bookmarks still land.
 
 ## Scope
 
-| Scope | Owner | Visible to |
-| --- | --- | --- |
-| `PROJECT` | nobody | every project member |
-| `PERSONAL` | one user | that user only |
+| Scope      | Owner    | Visible to           |
+| ---------- | -------- | -------------------- |
+| `PROJECT`  | nobody   | every project member |
+| `PERSONAL` | one user | that user only       |
 
 A shared view has **no owner at all**, which is what stops it disappearing when
 its author leaves. Someone else's personal view returns **404, not 403** —

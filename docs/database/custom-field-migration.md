@@ -9,14 +9,14 @@ It is written to be lossless, guarded, and verifiable — in that order.
 
 ## What changes
 
-| Before | After |
-| --- | --- |
-| `custom_fields.projectId` names the one project | `project_custom_fields` names every project |
-| `isRequired`, `position` on the definition | on the association |
-| unique `(projectId, name)` | index on `(workspaceId, name)`, **not** unique |
+| Before                                          | After                                          |
+| ----------------------------------------------- | ---------------------------------------------- |
+| `custom_fields.projectId` names the one project | `project_custom_fields` names every project    |
+| `isRequired`, `position` on the definition      | on the association                             |
+| unique `(projectId, name)`                      | index on `(workspaceId, name)`, **not** unique |
 
 `workspaceId` already existed on `custom_fields` before this migration; what
-changes is that it becomes the *only* owner.
+changes is that it becomes the _only_ owner.
 
 ## The decision: preserve every field, no merging
 
@@ -57,7 +57,7 @@ IF field_count <> assoc_count THEN
 ```
 
 - **Count guard** — every field produced exactly one association.
-- **Orphan guard** — every association points at a field *and* a project that
+- **Orphan guard** — every association points at a field _and_ a project that
   exist.
 
 On success it emits a notice:
@@ -74,27 +74,27 @@ migration run.
 
 **Fixture** — deliberately including the case the decision above is about:
 
-| Field | Project | Workspace | `isRequired` |
-| --- | --- | --- | --- |
-| Status (`SINGLE_SELECT`, 2 options) | Alpha | WS One | false |
-| Status (`SINGLE_SELECT`) | Beta | WS One | true |
-| Effort (`NUMBER`) | Alpha | WS One | false |
-| Owner (`TEXT`) | Gamma | WS Two | false |
+| Field                               | Project | Workspace | `isRequired` |
+| ----------------------------------- | ------- | --------- | ------------ |
+| Status (`SINGLE_SELECT`, 2 options) | Alpha   | WS One    | false        |
+| Status (`SINGLE_SELECT`)            | Beta    | WS One    | true         |
+| Effort (`NUMBER`)                   | Alpha   | WS One    | false        |
+| Owner (`TEXT`)                      | Gamma   | WS Two    | false        |
 
 Plus 2 option rows and 2 task values.
 
 **Result**
 
-| Measure | Before | After |
-| --- | --- | --- |
-| Field definitions | 4 | **4** |
-| Project associations | — | **4** |
-| Options | 2 | **2** |
-| Task values | 2 | **2** |
-| `custom_fields.projectId` | present | **dropped** |
-| Same-named pairs in one workspace | 1 | **1, kept separate** |
-| View columns created | — | **0** |
-| Conflicts encountered | — | **0** |
+| Measure                           | Before  | After                |
+| --------------------------------- | ------- | -------------------- |
+| Field definitions                 | 4       | **4**                |
+| Project associations              | —       | **4**                |
+| Options                           | 2       | **2**                |
+| Task values                       | 2       | **2**                |
+| `custom_fields.projectId`         | present | **dropped**          |
+| Same-named pairs in one workspace | 1       | **1, kept separate** |
+| View columns created              | —       | **0**                |
+| Conflicts encountered             | —       | **0**                |
 
 Associations after migration:
 

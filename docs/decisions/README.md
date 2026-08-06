@@ -7,21 +7,21 @@ Records are immutable. When a decision changes, add a new record that supersedes
 the old one and update the status line here — rewriting history hides the reason
 the original choice made sense at the time.
 
-| #                                           | Decision                                        | Status   |
-| ------------------------------------------- | ----------------------------------------------- | -------- |
-| [0001](0001-react-with-vite.md)             | React with Vite, not Next.js, for the dashboard | Accepted |
-| [0002](0002-nestjs-for-the-api.md)          | NestJS for the API                              | Accepted |
-| [0003](0003-postgresql-as-primary-store.md) | PostgreSQL as the primary datastore             | Accepted |
-| [0004](0004-rest-as-primary-api-style.md)   | REST as the primary API style                   | Accepted |
-| [0005](0005-redis-and-bullmq.md)            | Redis and BullMQ for background work            | Accepted |
-| [0006](0006-independent-deployability.md)   | Frontend and backend independently deployable   | Accepted |
-| [0007](0007-uuid-v7-primary-keys.md)        | UUID v7 primary keys                            | Accepted |
-| [0008](0008-refresh-token-rotation.md)      | Rotating refresh tokens in an HTTP-only cookie  | Accepted |
-| [0009](0009-project-is-separate-from-its-views.md) | A project is separate from its views      | Accepted |
-| [0010](0010-custom-field-storage.md)        | Typed columns for custom field values           | Accepted |
-| [0011](0011-automation-loop-prevention.md)  | Automation loop prevention                      | Accepted |
-| [0012](0012-semantic-colour-tokens.md)      | Semantic colour tokens, not CSS classes         | Accepted |
-| [0013](0013-automation-node-tree.md)        | A node tree for automation rules                | Accepted |
+| #                                                  | Decision                                        | Status   |
+| -------------------------------------------------- | ----------------------------------------------- | -------- |
+| [0001](0001-react-with-vite.md)                    | React with Vite, not Next.js, for the dashboard | Accepted |
+| [0002](0002-nestjs-for-the-api.md)                 | NestJS for the API                              | Accepted |
+| [0003](0003-postgresql-as-primary-store.md)        | PostgreSQL as the primary datastore             | Accepted |
+| [0004](0004-rest-as-primary-api-style.md)          | REST as the primary API style                   | Accepted |
+| [0005](0005-redis-and-bullmq.md)                   | Redis and BullMQ for background work            | Accepted |
+| [0006](0006-independent-deployability.md)          | Frontend and backend independently deployable   | Accepted |
+| [0007](0007-uuid-v7-primary-keys.md)               | UUID v7 primary keys                            | Accepted |
+| [0008](0008-refresh-token-rotation.md)             | Rotating refresh tokens in an HTTP-only cookie  | Accepted |
+| [0009](0009-project-is-separate-from-its-views.md) | A project is separate from its views            | Accepted |
+| [0010](0010-custom-field-storage.md)               | Typed columns for custom field values           | Accepted |
+| [0011](0011-automation-loop-prevention.md)         | Automation loop prevention                      | Accepted |
+| [0012](0012-semantic-colour-tokens.md)             | Semantic colour tokens, not CSS classes         | Accepted |
+| [0013](0013-automation-node-tree.md)               | A node tree for automation rules                | Accepted |
 
 ## Template
 

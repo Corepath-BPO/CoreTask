@@ -188,6 +188,38 @@ describe('Automations (e2e)', () => {
       return task?.assigneeId ?? null;
     };
 
+    it('evaluates a date condition instead of quietly never matching', async () => {
+      /*
+       * `BEFORE` and `AFTER` were offered by the builder for every date field
+       * and had no case in the evaluator, so they fell through to "unknown
+       * operator" and returned false. A rule using one published cleanly and
+       * could never fire — the worst shape a bug can take, because nothing
+       * anywhere reports a failure.
+       */
+      const scope = await setupScope();
+
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { dueDate: new Date('2026-01-10T00:00:00.000Z') },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'dueDate', operator: 'BEFORE', value: '2026-02-01' },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.

@@ -8,11 +8,13 @@ that lives in `localStorage`.
 A view's columns live in `ProjectView.settings`, in PostgreSQL:
 
 ```json
-{ "columns": [
-    { "field": "title",       "width": 300, "isPinned": true },
-    { "field": "assigneeId",  "width": 170 },
-    { "field": "custom:019f…","width": 150 }
-] }
+{
+  "columns": [
+    { "field": "title", "width": 300, "isPinned": true },
+    { "field": "assigneeId", "width": 170 },
+    { "field": "custom:019f…", "width": 150 }
+  ]
+}
 ```
 
 `localStorage` was never an option. A shared view whose columns are per-browser
@@ -59,7 +61,7 @@ that column does not move and does not unpin:
 - the header renders it without drag listeners and without a pin control, so the
   UI never offers a rearrangement that the logic will refuse.
 
-It is what every other cell in the row is *about*. Scrolled away, nothing names
+It is what every other cell in the row is _about_. Scrolled away, nothing names
 the task; moved out of first place, it reads as one more attribute of a task the
 grid no longer identifies.
 

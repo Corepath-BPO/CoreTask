@@ -8,7 +8,7 @@ workspace calls something must never determine what the code does with it.
 A `CustomField` belongs to a **workspace**, and a `ProjectCustomField` row says
 which projects use it. Creating one makes it a usable List column and a usable
 filter **immediately** — no frontend change — because operators are declared per
-field *kind* rather than per field.
+field _kind_ rather than per field.
 
 This section is the short version. The full treatment is split across three
 documents:
@@ -21,14 +21,14 @@ documents:
 
 Typed columns on `TaskCustomFieldValue`, not a JSON blob:
 
-| Field type | Column |
-| --- | --- |
-| `TEXT`, `URL`, `EMAIL` | `textValue` |
-| `NUMBER` | `numberValue` (Decimal) |
-| `DATE` | `dateValue` |
-| `CHECKBOX` | `booleanValue` |
-| `SINGLE_SELECT`, `MULTI_SELECT` | `optionIds[]` |
-| `PEOPLE` | `userIds[]` |
+| Field type                      | Column                  |
+| ------------------------------- | ----------------------- |
+| `TEXT`, `URL`, `EMAIL`          | `textValue`             |
+| `NUMBER`                        | `numberValue` (Decimal) |
+| `DATE`                          | `dateValue`             |
+| `CHECKBOX`                      | `booleanValue`          |
+| `SINGLE_SELECT`, `MULTI_SELECT` | `optionIds[]`           |
+| `PEOPLE`                        | `userIds[]`             |
 
 The List has to filter, sort and group by custom fields **server-side** — a
 project with ten thousand tasks must not ship all of them for the browser to hide
@@ -42,20 +42,20 @@ single-select simply holds at most one, and arity is checked in the service.
 ### Validation
 
 Values are validated against the **definition**, not the request. A select value
-must name a live option *of that field* — it cannot borrow an id from another
+must name a live option _of that field_ — it cannot borrow an id from another
 field, or one archived precisely to retire it. A people value must be a member of
 this workspace. Without that, a custom field is a way to store arbitrary ids
 against a task.
 
 ### Destruction
 
-| Situation | Behaviour |
-| --- | --- |
-| field still used by another project | detached |
-| last project, field has values | archived |
-| last project, unused field | deleted |
-| option in use | archived |
-| unused option | deleted |
+| Situation                           | Behaviour |
+| ----------------------------------- | --------- |
+| field still used by another project | detached  |
+| last project, field has values      | archived  |
+| last project, unused field          | deleted   |
+| option in use                       | archived  |
+| unused option                       | deleted   |
 
 A field is easy to recreate; its data is not. An archived option keeps rendering
 its label in cells that still hold it, instead of leaving a dangling id.
@@ -71,7 +71,7 @@ checkbox.
 
 A task may have no project at all, so a workspace-level set has to exist for
 those to point at. A project that has defined none uses the workspace set;
-defining its *first* status copies the whole set forward, because otherwise
+defining its _first_ status copies the whole set forward, because otherwise
 adding one status would silently replace all eight and leave every task pointing
 at something the project no longer offers.
 

@@ -421,7 +421,7 @@ a 2 KB image will accept a gigabyte. This was verified against MinIO rather than
 assumed. Re-reading the object is what makes the recorded size true; a mismatch
 deletes the bytes rather than leaving them to the sweeper.
 
-Content type *is* enforceable, but only if it is signed. By default the AWS SDK
+Content type _is_ enforceable, but only if it is signed. By default the AWS SDK
 signs `host` alone and `ContentType` degrades to a suggestion: a URL signed for
 `image/png` accepted `text/html` and stored it as such. Naming it in
 `signableHeaders` puts it in `SignedHeaders`, and the swap now fails with a 403
@@ -440,7 +440,7 @@ hostname cannot be patched in afterwards without invalidating the signature. A
 second S3 client, pointed at the address the client will actually connect to,
 does the signing. Against real S3 the two addresses are the same and the second
 client is never created. The e2e suite overrides it back to the internal name,
-because there the test process *is* the browser.
+because there the test process _is_ the browser.
 
 ## The inbox
 

@@ -67,6 +67,6 @@ because reading a task's fields would mean six left joins to assemble what is
 conceptually one row, and adding a type would mean a migration plus a query
 change everywhere values are read.
 
-`ProjectView.settings` went the *other* way and is JSON, which is not an
+`ProjectView.settings` went the _other_ way and is JSON, which is not an
 inconsistency: it is read and written whole and never queried by its contents.
 The rule is "index what you filter on", not "avoid JSON".

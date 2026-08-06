@@ -46,12 +46,12 @@ what people actually built; the UI makes accidental duplication take effort.
 `GET …/projects/:projectId/field-catalog` answers one question — "what could I
 put in this view?" — in four groups:
 
-| Group | Contents |
-| --- | --- |
-| `fieldTypes` | the nine types, for creating something new |
-| `systemFields` | built-in task properties, each with `isInView` |
+| Group           | Contents                                               |
+| --------------- | ------------------------------------------------------ |
+| `fieldTypes`    | the nine types, for creating something new             |
+| `systemFields`  | built-in task properties, each with `isInView`         |
 | `projectFields` | fields this project already uses, each with `isInView` |
-| `libraryFields` | fields elsewhere in the workspace, with `usageCount` |
+| `libraryFields` | fields elsewhere in the workspace, with `usageCount`   |
 
 Everything comes back **marked rather than filtered**. A field already on screen
 stays in the results with `isInView: true` and is rendered disabled. Filtering it

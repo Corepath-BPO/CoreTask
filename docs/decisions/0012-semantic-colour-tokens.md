@@ -31,7 +31,7 @@ color-tokens.ts` maps each to three `oklch` values (`solid`, `surface`,
 `onSurface`) applied inline, with **separate tables for light and dark**.
 
 Dark is not the light table dimmed. On a dark surface a tint needs more strength
-to register, and its text goes *lighter* than the accent where on light it goes
+to register, and its text goes _lighter_ than the accent where on light it goes
 darker. A test asserts that direction for all nineteen tokens in both modes.
 
 ## Consequences

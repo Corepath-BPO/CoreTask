@@ -384,6 +384,30 @@ export class AutomationRunnerService {
         return Number(actual) > Number(expected);
       case FilterOperator.LESS_THAN:
         return Number(actual) < Number(expected);
+
+      /*
+       * Dates, compared as dates.
+       *
+       * These were missing entirely while the builder offered them for every
+       * date field, so "due date is before Friday" published cleanly, fell
+       * through to the default below, and could never match. A rule that is
+       * accepted and then silently never fires is worse than one refused.
+       *
+       * Both sides go through `Date` rather than string comparison because the
+       * stored value is an ISO timestamp and the configured one is usually a
+       * plain `YYYY-MM-DD` — comparing those as text puts every timestamp after
+       * every date. An unparseable side fails the check rather than throwing.
+       */
+      case FilterOperator.BEFORE:
+      case FilterOperator.AFTER: {
+        const left = new Date(String(actual ?? '')).getTime();
+        const right = new Date(String(expected ?? '')).getTime();
+
+        if (Number.isNaN(left) || Number.isNaN(right)) return false;
+
+        return config.operator === FilterOperator.BEFORE ? left < right : left > right;
+      }
+
       default:
         // An unknown operator does not silently pass. A condition nobody can
         // evaluate must block the rule, not wave it through.
@@ -407,6 +431,25 @@ export class AutomationRunnerService {
         return task.title;
       case 'completed':
         return task.completedAt !== null;
+
+      /*
+       * The dates, which the condition catalogue has always offered and this
+       * could not read.
+       *
+       * Falling through to the event payload below meant a due-date condition
+       * only worked on an event that happened to carry one — so "due date is
+       * before Friday" on a section move read `undefined` and failed. Together
+       * with the missing date operators, such a rule was broken twice over and
+       * silent both times.
+       *
+       * ISO strings, because that is what the configured side is compared
+       * against and what the operators parse.
+       */
+      case 'dueDate':
+        return task.dueDate?.toISOString() ?? null;
+      case 'startDate':
+        return task.startDate?.toISOString() ?? null;
+
       default:
         return event.after?.[field];
     }

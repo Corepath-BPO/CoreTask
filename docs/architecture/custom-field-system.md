@@ -3,7 +3,7 @@
 How a field gets defined, where its values live, and what happens when somebody
 tries to delete one.
 
-For statuses and priorities — which are user-defined but *not* custom fields —
+For statuses and priorities — which are user-defined but _not_ custom fields —
 see [custom-fields.md](custom-fields.md). For sharing one field across projects,
 see [field-library.md](field-library.md). For how a field becomes a column, see
 [list-view-columns.md](list-view-columns.md).
@@ -11,21 +11,21 @@ see [field-library.md](field-library.md). For how a field becomes a column, see
 ## A field is a definition, not a column
 
 `CustomField` is owned by a **workspace**. It becomes usable on a project
-through a `ProjectCustomField` row, and it becomes *visible* by being named in a
+through a `ProjectCustomField` row, and it becomes _visible_ by being named in a
 view's columns. Three separate facts, deliberately:
 
-| Fact | Where it lives |
-| --- | --- |
-| This field exists, and is a NUMBER called "Effort" | `CustomField` |
-| Project Alpha uses it, and requires it | `ProjectCustomField` |
-| The List view shows it third, 120px wide | `ProjectView.settings` |
+| Fact                                               | Where it lives         |
+| -------------------------------------------------- | ---------------------- |
+| This field exists, and is a NUMBER called "Effort" | `CustomField`          |
+| Project Alpha uses it, and requires it             | `ProjectCustomField`   |
+| The List view shows it third, 120px wide           | `ProjectView.settings` |
 
 Collapsing any two of them loses something. Definition-with-project means the
 same field cannot be reused. Definition-with-column means a field you scroll
 past stops existing.
 
 `isRequired` and `position` sit on the association rather than the definition,
-because they are answers to "how does *this project* use it" — Alpha may require
+because they are answers to "how does _this project_ use it" — Alpha may require
 a field that Beta merely offers.
 
 ## The nine types
@@ -45,14 +45,14 @@ does not lose anybody's data.
 
 Typed columns on `TaskCustomFieldValue`, not a JSON blob:
 
-| Field type | Column |
-| --- | --- |
-| `TEXT`, `URL`, `EMAIL` | `textValue` |
-| `NUMBER` | `numberValue` (Decimal) |
-| `DATE` | `dateValue` |
-| `CHECKBOX` | `booleanValue` |
-| `SINGLE_SELECT`, `MULTI_SELECT` | `optionIds[]` |
-| `PEOPLE` | `userIds[]` |
+| Field type                      | Column                  |
+| ------------------------------- | ----------------------- |
+| `TEXT`, `URL`, `EMAIL`          | `textValue`             |
+| `NUMBER`                        | `numberValue` (Decimal) |
+| `DATE`                          | `dateValue`             |
+| `CHECKBOX`                      | `booleanValue`          |
+| `SINGLE_SELECT`, `MULTI_SELECT` | `optionIds[]`           |
+| `PEOPLE`                        | `userIds[]`             |
 
 The List filters, sorts and groups by custom fields **server-side** — a project
 with ten thousand tasks must not ship all of them for the browser to hide most —
@@ -70,7 +70,7 @@ Each type carries a small settings document — `textMode`, `dateMode`,
 `peopleMode`, `decimalPlaces`, `numberFormat`, `minValue`, `maxValue`,
 `placeholder`, `checkedLabel`, `uncheckedLabel`.
 
-It is stored as JSON but never *accepted* as arbitrary JSON. `@coretask/validation`
+It is stored as JSON but never _accepted_ as arbitrary JSON. `@coretask/validation`
 declares a Zod schema per type, and the service parses against the schema for the
 type being saved. A settings document that names a key belonging to another type,
 or a `decimalPlaces` of `-1`, is a 422 naming the offending path — not a silently
@@ -84,11 +84,11 @@ a default for every key. A field created before a setting existed still renders.
 `DELETE` has three outcomes, chosen from the state rather than from a flag on the
 request:
 
-| Situation | Outcome |
-| --- | --- |
-| Another project still uses it | the association is removed; the field survives |
-| Last project, and values exist | the field is **archived** |
-| Last project, and no values | the field is **deleted** |
+| Situation                      | Outcome                                        |
+| ------------------------------ | ---------------------------------------------- |
+| Another project still uses it  | the association is removed; the field survives |
+| Last project, and values exist | the field is **archived**                      |
+| Last project, and no values    | the field is **deleted**                       |
 
 A field is easy to recreate; the values people typed into it are not. Archiving
 is the honest response to "remove this from my project" when removing it would

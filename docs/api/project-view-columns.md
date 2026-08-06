@@ -10,15 +10,15 @@ uses the standard envelope.
 
 Base: `/api/v1/workspaces/:workspaceId/projects/:projectId/views`
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/` | views visible to the caller |
-| `POST` | `/` | create a view |
-| `GET` | `/:viewId` | one view |
-| `PATCH` | `/:viewId` | rename, or replace `settings` |
-| `POST` | `/:viewId/duplicate` | copy, as a personal view |
-| `POST` | `/:viewId/set-default` | make it the project default |
-| `DELETE` | `/:viewId` | remove it |
+| Method   | Path                   | Purpose                       |
+| -------- | ---------------------- | ----------------------------- |
+| `GET`    | `/`                    | views visible to the caller   |
+| `POST`   | `/`                    | create a view                 |
+| `GET`    | `/:viewId`             | one view                      |
+| `PATCH`  | `/:viewId`             | rename, or replace `settings` |
+| `POST`   | `/:viewId/duplicate`   | copy, as a personal view      |
+| `POST`   | `/:viewId/set-default` | make it the project default   |
+| `DELETE` | `/:viewId`             | remove it                     |
 
 A personal view is returned only to its owner. Deleting the default is refused
 until another view takes over, so a project always has one to land on.
@@ -30,8 +30,8 @@ Columns live in `settings.columns`:
 ```json
 {
   "columns": [
-    { "field": "title",        "width": 300, "isPinned": true },
-    { "field": "assigneeId",   "width": 170 },
+    { "field": "title", "width": 300, "isPinned": true },
+    { "field": "assigneeId", "width": 170 },
     { "field": "custom:019f…", "width": 150 }
   ],
   "groupBy": "sectionId",
@@ -39,10 +39,10 @@ Columns live in `settings.columns`:
 }
 ```
 
-| Key | Rule |
-| --- | --- |
-| `field` | a system field key, or `custom:<uuid>` |
-| `width` | 60–800; the browser clamps to the same bounds |
+| Key        | Rule                                                             |
+| ---------- | ---------------------------------------------------------------- |
+| `field`    | a system field key, or `custom:<uuid>`                           |
+| `width`    | 60–800; the browser clamps to the same bounds                    |
 | `isPinned` | frozen to the left; the pinned block must lead and be contiguous |
 
 Validated with Zod on write. An unknown key, an out-of-range width or a malformed
@@ -63,11 +63,11 @@ archived field is gone for good.
 
 Everything the add-field picker needs, in one response.
 
-| Parameter | Meaning |
-| --- | --- |
-| `search` | matched at word starts, per word, on both sides |
-| `visible` | comma-separated field refs already in the view |
-| `includeArchived` | include archived definitions |
+| Parameter         | Meaning                                         |
+| ----------------- | ----------------------------------------------- |
+| `search`          | matched at word starts, per word, on both sides |
+| `visible`         | comma-separated field refs already in the view  |
+| `includeArchived` | include archived definitions                    |
 
 `visible` is **one comma-separated parameter**, not a repeated one. Axios
 serializes arrays as `visible[]=…`, which strict validation rejects as an unknown
@@ -100,7 +100,7 @@ them is a URL that gets truncated by something in the middle.
 ```json
 {
   "filters": [{ "field": "custom:019f…", "operator": "IS_ANY_OF", "value": ["019f…"] }],
-  "sort":    [{ "field": "dueDate", "direction": "asc" }],
+  "sort": [{ "field": "dueDate", "direction": "asc" }],
   "groupBy": "sectionId"
 }
 ```
@@ -108,15 +108,15 @@ them is a URL that gets truncated by something in the middle.
 Filtering, sorting and grouping all happen in PostgreSQL. A project with ten
 thousand tasks must not ship all of them for the browser to hide most.
 
-Operators are declared per field *kind*, so a new custom field is filterable and
+Operators are declared per field _kind_, so a new custom field is filterable and
 sortable the moment it exists — no frontend change.
 
 ## Supporting reads
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `…/field-metadata` | fields, statuses, priorities, sections, members for rendering cells |
-| `GET` | `…/tasks/:taskId/subtasks` | children, loaded when a row is expanded |
+| Method | Path                       | Purpose                                                             |
+| ------ | -------------------------- | ------------------------------------------------------------------- |
+| `GET`  | `…/field-metadata`         | fields, statuses, priorities, sections, members for rendering cells |
+| `GET`  | `…/tasks/:taskId/subtasks` | children, loaded when a row is expanded                             |
 
 Subtasks are fetched on expand rather than with the parent — a list of two
 hundred rows would otherwise fetch every child nobody looked at.
@@ -126,9 +126,9 @@ badge reading `1/5` on a row that expanded to three.
 
 ## Errors
 
-| Status | When |
-| --- | --- |
-| `403` | not a member; personal view belonging to somebody else |
-| `404` | view or project not in this workspace |
-| `409` | deleting the default while it is still the only one |
-| `422` | settings, filter or column validation failed |
+| Status | When                                                   |
+| ------ | ------------------------------------------------------ |
+| `403`  | not a member; personal view belonging to somebody else |
+| `404`  | view or project not in this workspace                  |
+| `409`  | deleting the default while it is still the only one    |
+| `422`  | settings, filter or column validation failed           |

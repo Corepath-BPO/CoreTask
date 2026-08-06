@@ -26,10 +26,10 @@ the spec names.
 `web/src/features/colors/lib/color-tokens.ts` is the only place a token becomes
 a colour. Each resolves to three values, because a colour is used three ways:
 
-| | Used for |
-| --- | --- |
-| `solid` | dots, bars, node accents |
-| `surface` | the tint behind a badge |
+|             | Used for                      |
+| ----------- | ----------------------------- |
+| `solid`     | dots, bars, node accents      |
+| `surface`   | the tint behind a badge       |
 | `onSurface` | text and borders on that tint |
 
 Built on `oklch` for the same reason the theme is: lightness is perceptually even
@@ -70,7 +70,7 @@ Every component pairs colour with text or an icon:
 - `ColorTokenPicker` labels each swatch with its token name, so violet and purple
   are distinguishable without seeing them
 - the section lightning icon puts its state in the accessible name —
-  *"Automations for In Progress — 2 active rules"* — not only in amber vs blue
+  _"Automations for In Progress — 2 active rules"_ — not only in amber vs blue
 
 A tint rather than a fill, because thirty rows of saturated colour reads as
 thirty alarms.
@@ -88,16 +88,16 @@ concept, a status colour is not.
 
 Seeded from `@coretask/contracts`:
 
-| Status | Token | | Priority | Token |
-| --- | --- | --- | --- | --- |
-| Backlog | slate | | None | gray |
-| To Do | gray | | Low | blue |
-| In Progress | blue | | Medium | amber |
-| In Review | violet | | High | orange |
-| Waiting | amber | | Critical | red |
-| Blocked | red | | | |
-| Done | emerald | | | |
-| Cancelled | gray | | | |
+| Status      | Token   |     | Priority | Token  |
+| ----------- | ------- | --- | -------- | ------ |
+| Backlog     | slate   |     | None     | gray   |
+| To Do       | gray    |     | Low      | blue   |
+| In Progress | blue    |     | Medium   | amber  |
+| In Review   | violet  |     | High     | orange |
+| Waiting     | amber   |     | Critical | red    |
+| Blocked     | red     |     |          |        |
+| Done        | emerald |     |          |        |
+| Cancelled   | gray    |     |          |        |
 
 Automation nodes: trigger blue, condition violet, action emerald, branch cyan,
 delay amber. Run states: active/completed emerald, draft gray, paused amber,
