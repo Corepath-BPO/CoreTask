@@ -368,7 +368,19 @@ export function AutomationBuilderPage({
     setEdits((previous) => ({
       ...previous,
       added: [...previous.added, inserted],
-      reparented: { ...previous.reparented, ...adoptChildren(inserted, realNodes) },
+      reparented: {
+        ...previous.reparented,
+        /*
+         * What already followed becomes the matching arm.
+         *
+         * Left on the main path it belongs to neither side: the split drew with
+         * two empty arms and the original rule carrying on past it, so a rule
+         * that had one path came back with three. Everything built so far is
+         * what happens when the new question holds — the other arm is the part
+         * still to be written.
+         */
+        ...adoptChildren(inserted, realNodes, BranchKey.MATCH),
+      },
     }));
   };
 

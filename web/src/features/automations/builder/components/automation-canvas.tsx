@@ -101,6 +101,11 @@ function Canvas({
    */
   const placement = useMemo(() => layoutGraph(graph.nodes), [graph.nodes]);
 
+  const triggerIds = useMemo(
+    () => new Set(graph.nodes.filter((node) => node.type === 'TRIGGER').map((node) => node.id)),
+    [graph.nodes],
+  );
+
   const nodes = useMemo<Node<AutomationNodeData>[]>(
     () =>
       graph.nodes.map((node) => ({
@@ -184,9 +189,28 @@ function Canvas({
            * label is words for people and will be reworded.
            */
           ...(edge.branchKey === BranchKey.ELSE ? { onAddElseIf } : {}),
+          onDuplicate: onDuplicateNode,
+          onDelete: onDeleteNode,
+
+          /*
+           * Only the trigger's own connection carries the branch controls.
+           *
+           * A branch belongs to the trigger, so there is one place to add one —
+           * and a control between a check and its action would be offering a
+           * branch where none can go.
+           */
+          ...(triggerIds.has(edge.source) ? { isJunction: true } : {}),
         },
       })),
-    [graph.edges, onInsertStep, onInsertBranch, onAddElseIf],
+    [
+      graph.edges,
+      onInsertStep,
+      onInsertBranch,
+      onAddElseIf,
+      onDuplicateNode,
+      onDeleteNode,
+      triggerIds,
+    ],
   );
 
   /*

@@ -155,28 +155,6 @@ test.describe('the automation builder', () => {
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
   };
 
-  /**
-   * The connector furthest along the rule — the end of the main path.
-   *
-   * Chosen by position rather than by index. Every connector renders its
-   * controls through a portal into one shared layer, so their order in the DOM
-   * is the order they happened to mount in and not the order they appear on
-   * screen; `.last()` was picking a different arm depending on what had been
-   * added before it.
-   */
-  const endConnector = async (page: Page) => {
-    const dots = page.getByRole('button', { name: /add a step here/i });
-    await expect(dots.first()).toBeVisible();
-
-    // All of them in one pass. Measuring them one at a time answered `null` for
-    // any that had not settled yet, which silently fell back to the first.
-    const xs = await dots.evaluateAll((elements) =>
-      elements.map((element) => element.getBoundingClientRect().x),
-    );
-
-    return dots.nth(xs.indexOf(Math.max(...xs)));
-  };
-
   /** Every node's box, from the browser rather than from the model. */
   const nodeBoxes = async (page: Page) =>
     page.evaluate(() =>
@@ -331,9 +309,11 @@ test.describe('the automation builder', () => {
      */
     await openBuilder(page);
 
-    // Split from the connector at the end of the rule — the point on the
-    // drawing where "and then it goes two ways" is actually being decided.
-    await (await endConnector(page)).click();
+    /*
+     * From the pill on the trigger's connector, which is the only place a
+     * branch can start — every branch belongs to the same trigger, so offering
+     * it between a check and its action would offer one where none can go.
+     */
     await page.getByRole('button', { name: /^Add branch$/ }).click();
 
     await expect
@@ -353,7 +333,6 @@ test.describe('the automation builder', () => {
 
   test('chains another question onto the otherwise arm', async ({ page }) => {
     await openBuilder(page);
-    await (await endConnector(page)).click();
     await page.getByRole('button', { name: /^Add branch$/ }).click();
 
     await expect
@@ -367,22 +346,11 @@ test.describe('the automation builder', () => {
      * different question", which is not what it does — so exactly one of the
      * connectors on screen may carry it.
      */
-    const dots = page.getByRole('button', { name: /add a step here/i });
-    let found = -1;
+    const chain = page.getByRole('button', { name: /^Otherwise if…$/ });
 
-    for (let index = 0; index < (await dots.count()); index += 1) {
-      await dots.nth(index).click();
-
-      if ((await page.getByRole('button', { name: /^Otherwise if…$/ }).count()) > 0) {
-        found = index;
-        break;
-      }
-
-      await dots.nth(index).click();
-    }
-
-    expect(found, 'no connector offered to chain another question').toBeGreaterThanOrEqual(0);
-    await page.getByRole('button', { name: /^Otherwise if…$/ }).click();
+    // Exactly one arm carries it, and it is on screen rather than behind a dot.
+    await expect(chain).toHaveCount(1);
+    await chain.click();
 
     // Two questions, stacked in one column, each with its own answer beside it.
     await expect
@@ -451,8 +419,14 @@ test.describe('the automation builder', () => {
 
     const before = (await nodeBoxes(page)).length;
 
-    await (await endConnector(page)).click();
-    await page.getByRole('button', { name: /^Add a step$/ }).click();
+    /*
+     * From the placeholder, which is where a fresh rule offers a step.
+     *
+     * No card carries a plus here: every step already leads somewhere, and the
+     * plus means "and then" rather than "insert between". That is the leaf-only
+     * rule doing its job, not a missing control.
+     */
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
 
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();

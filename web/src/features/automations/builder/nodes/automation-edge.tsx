@@ -1,7 +1,19 @@
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-import { CornerDownRight, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
-import { useState } from 'react';
+import {
+  CopyPlus,
+  CornerDownRight,
+  GitBranch,
+  MoreHorizontal,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react';
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 /** What the canvas hands each edge. */
@@ -12,6 +24,19 @@ export interface AutomationEdgeData extends Record<string, unknown> {
   onInsertBranch?: (parentId: string) => void;
   /** Present only on an "otherwise" arm: ask another question before falling back. */
   onAddElseIf?: (branchId: string) => void;
+  /** Copy the step this connector leads to, along with what follows it. */
+  onDuplicate?: (nodeId: string) => void;
+  /** Remove the step this connector leads to. */
+  onDelete?: (nodeId: string) => void;
+  /**
+   * The connection leaving the trigger, which owns the rule's branch line.
+   *
+   * Every branch hangs off the same trigger, so there is one place to start
+   * one. Repeating the control on every connection offered a branch between a
+   * check and its action, where a branch cannot go — and made three identical
+   * dots on a three-step rule, only one of which meant anything.
+   */
+  isJunction?: boolean;
 }
 
 /**
@@ -31,6 +56,7 @@ export function AutomationEdge({
   id,
   label,
   source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -39,7 +65,6 @@ export function AutomationEdge({
   targetPosition,
   data,
 }: EdgeProps) {
-  const [open, setOpen] = useState(false);
   const actions = (data ?? {}) as AutomationEdgeData;
 
   const [path, labelX, labelY] = getSmoothStepPath({
@@ -83,61 +108,93 @@ export function AutomationEdge({
             </span>
           )}
 
-          <button
-            type="button"
-            aria-label="Add a step here"
-            aria-expanded={open}
-            onClick={() => setOpen((previous) => !previous)}
-            className={cn(
-              'pointer-events-auto flex size-6 cursor-pointer items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors',
-              'hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
-              open && 'border-primary text-primary',
-            )}
-          >
-            <MoreHorizontal className="size-3.5" aria-hidden="true" />
-          </button>
+          {/*
+            The connector's own menu: what can be done to the step it leads to.
+            
+            A branch is read along this line rather than on the card — the card
+            says what it checks, the connector says where it sits — so the
+            things that move or remove the whole row belong here.
+          */}
+          {(actions.onAddElseIf || actions.isJunction) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="More for this branch"
+                  className={cn(
+                    'pointer-events-auto flex size-6 cursor-pointer items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors',
+                    'hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+                    'data-[state=open]:border-primary data-[state=open]:text-primary',
+                  )}
+                >
+                  <MoreHorizontal className="size-3.5" aria-hidden="true" />
+                </button>
+              </DropdownMenuTrigger>
 
-          {open && (
-            <div className="pointer-events-auto absolute left-1/2 top-full flex flex-col items-start pt-1">
-              {/* The dashed drop says these belong to the point above rather
-                  than floating loose on the canvas. */}
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onSelect={() => actions.onDuplicate?.(target)}
+                >
+                  <CopyPlus className="size-4" aria-hidden="true" />
+                  Duplicate branch
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onSelect={() => actions.onInsertBranch?.(source)}
+                >
+                  <GitBranch className="size-4" aria-hidden="true" />
+                  Add branch below
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                  onSelect={() => actions.onDelete?.(target)}
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {/*
+            The branch control, always on screen rather than behind the dot.
+            
+            Adding a branch is a thing people come to this canvas to do, and a
+            rule with a single path gives no other hint that it could have
+            more — so hiding it inside a menu meant the feature only existed
+            for somebody who already knew it did.
+            
+            Adding a *step* is not offered here at all any more. That belongs to
+            the steps: the plus on a card, and the "Do this…" placeholder. Two
+            doors into one room, a few pixels apart, is how a step lands
+            somewhere nobody meant.
+          */}
+          {(actions.onAddElseIf || actions.isJunction) && (
+            <div className="pointer-events-auto absolute left-1/2 top-full flex flex-col items-start">
               <span
                 aria-hidden="true"
-                className="ml-0 h-6 w-px border-l border-dashed border-muted-foreground/50"
+                className="h-8 w-px border-l border-dashed border-muted-foreground/50"
               />
 
-              <div className="flex translate-x-[-1px] flex-col items-start gap-1">
-                <EdgeAction
-                  icon={Plus}
-                  label="Add a step"
-                  onClick={() => {
-                    setOpen(false);
-                    actions.onInsertStep?.(source);
-                  }}
-                />
+              <div className="-translate-x-px">
                 {/*
-                  Offered instead of a plain split, not beside it. On the
-                  otherwise arm "add a branch" and "ask another question" are
-                  the same act, and two entries doing one thing is how somebody
-                  ends up choosing the wrong one.
+                  On an "otherwise" arm the same act is asking another question,
+                  so it is worded as that rather than offered twice.
                 */}
                 {actions.onAddElseIf ? (
                   <EdgeAction
                     icon={CornerDownRight}
                     label="Otherwise if…"
-                    onClick={() => {
-                      setOpen(false);
-                      actions.onAddElseIf?.(source);
-                    }}
+                    onClick={() => actions.onAddElseIf?.(source)}
                   />
                 ) : (
                   <EdgeAction
                     icon={GitBranch}
                     label="Add branch"
-                    onClick={() => {
-                      setOpen(false);
-                      actions.onInsertBranch?.(source);
-                    }}
+                    onClick={() => actions.onInsertBranch?.(source)}
                   />
                 )}
               </div>
@@ -154,7 +211,7 @@ function EdgeAction({
   label,
   onClick,
 }: {
-  icon: typeof Plus;
+  icon: LucideIcon;
   label: string;
   onClick: () => void;
 }) {
