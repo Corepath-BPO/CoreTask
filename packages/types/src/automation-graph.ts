@@ -3,6 +3,7 @@ import type {
   AutomationNodeType,
   AutomationRuleStatus,
   ConditionValueKind,
+  ConditionValueType,
   GraphIssueLevel,
 } from '@coretask/contracts';
 
@@ -120,6 +121,19 @@ export interface AutomationGraphValidation {
 export interface AutomationMetadata {
   triggers: AutomationCatalogEntry[];
   actions: AutomationCatalogEntry[];
+  /**
+   * The condition catalogue: what a branch may be asked to check.
+   *
+   * The endpoint has always sent this and this type did not say so, which left
+   * the one client that needed it reading through a cast — and the compiler
+   * unable to notice if the endpoint stopped sending it. Declared beside
+   * `triggers` and `actions` because it is the third of the same thing: the
+   * grouped, searchable list a step is chosen from.
+   *
+   * Distinct from `conditionFields` below, which is not the picker but what a
+   * picked row is then configured with.
+   */
+  conditions: AutomationCatalogEntry[];
   conditionFields: ConditionFieldDefinition[];
   sections: { id: string; name: string }[];
   statuses: { id: string; name: string; colorToken: string }[];
@@ -166,6 +180,16 @@ export interface AutomationCatalogEntry {
    */
   fieldId?: string;
   fieldName?: string;
+  /**
+   * What this row's value is, on the rows that compare one.
+   *
+   * Only the condition entries carry it — the same convention as `fieldId`
+   * above, which is present only on the generated rows. It is what decides the
+   * comparisons the row may use, so choosing a condition can write the field
+   * *and* its first operator in one act rather than leaving a step half
+   * answered.
+   */
+  valueType?: ConditionValueType;
 }
 
 export interface ConditionFieldDefinition {

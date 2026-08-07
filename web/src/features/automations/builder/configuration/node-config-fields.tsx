@@ -226,20 +226,12 @@ function TriggerFields({
  * the same pairs, so the form is a convenience rather than the only thing
  * standing in the way.
  *
- * The field is chosen here rather than in a catalogue of its own. References
- * 08–11 pick it from a searchable list before the inspector opens, and that
- * list is not built — so without this control a condition added on the canvas
- * could never be told what it is about.
+ * The field is *not* chosen here. References 08–11 pick it from a searchable
+ * list before the inspector opens, and that list is now wired up: a row nobody
+ * has answered opens the condition catalogue, which writes the field and its
+ * first comparison, and this panel takes over from there. So this form asks the
+ * second and third questions and assumes the first has been answered.
  */
-/**
- * What a condition checks when nothing says otherwise.
- *
- * The section, because that is what these rules are about: every trigger the
- * builder offers is a move between sections, and a branch asking about anything
- * else would be answering a question the rule was not asked.
- */
-const DEFAULT_CONDITION_FIELD = 'sectionId';
-
 function ConditionFields({
   configuration,
   metadata,
@@ -252,21 +244,20 @@ function ConditionFields({
   const fields = metadata?.conditionFields ?? [];
 
   /*
-   * The field a condition checks, which the panel states rather than asks.
+   * The field a condition checks, taken from the condition rather than assumed.
    *
-   * The reference has no field picker: a condition is a section check, and its
-   * heading already says so — "Check if… / Section is". A select whose only
-   * entry is the one already chosen is a question with one answer, and it read
-   * as the first of three steps when there are two.
+   * It used to fall back to `sectionId` when nothing had been chosen, from when
+   * this panel was the only way to reach a condition at all. With the catalogue
+   * wired up that default would answer the question before it was asked: every
+   * new branch would arrive already reading "Section is", the picker would
+   * never open, and the six other groups of checks would stay unreachable.
    *
-   * Still a real key in the configuration rather than an assumption made at
-   * evaluation, because the runner compares against `field` and a condition
-   * that did not say which one would compare against the node's subtype.
+   * Empty is a real state and the form says so rather than inventing an answer
+   * — no definition means no comparisons, so the select below is disabled. It
+   * is reached by a condition naming a field the project no longer offers, not
+   * by a new one, which goes to the catalogue instead.
    */
-  const field =
-    typeof configuration['field'] === 'string' && configuration['field'] !== ''
-      ? configuration['field']
-      : DEFAULT_CONDITION_FIELD;
+  const field = typeof configuration['field'] === 'string' ? configuration['field'] : '';
   const operator = typeof configuration['operator'] === 'string' ? configuration['operator'] : '';
 
   const definition = fields.find((entry) => entry.field === field);

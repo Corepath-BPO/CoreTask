@@ -8,6 +8,7 @@ import { isNodeIncomplete, nodeCategory, nodeHeading, summarise } from './node-s
 const metadata = {
   triggers: [],
   actions: [],
+  conditions: [],
   conditionFields: [
     {
       field: 'priority',

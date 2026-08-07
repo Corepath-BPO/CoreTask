@@ -3,8 +3,11 @@ import {
   Bell,
   CalendarClock,
   CalendarOff,
+  CalendarPlus,
   CircleCheck,
   CircleDot,
+  CircleSlash,
+  ClipboardList,
   FilePlus,
   Flag,
   FolderInput,
@@ -16,6 +19,7 @@ import {
   MessageSquare,
   MessageSquarePlus,
   MoveRight,
+  Paperclip,
   PencilLine,
   ShieldCheck,
   Shapes,
@@ -26,6 +30,7 @@ import {
   Timer,
   Type,
   UserMinus,
+  UserPen,
   UserPlus,
   Users,
   Webhook,
@@ -80,6 +85,42 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   ADD_COMMENT: glyph(MessageSquarePlus),
   SEND_IN_APP_NOTIFICATION: glyph(Bell),
   CREATE_SUBTASK: glyph(ListPlus),
+
+  /*
+   * Conditions, keyed by the field they check.
+   *
+   * The subtype of a condition row is the field key the runner reads, so these
+   * collide with nothing above — `MOVE_TO_SECTION` is an action and `sectionId`
+   * is the check about the same thing, and they are separate rows in separate
+   * lists. Without them every row in the condition catalogue fell to the
+   * lightning bolt, and thirty identical glyphs down a list is a column of
+   * decoration that makes the list harder to read rather than easier.
+   */
+  sectionId: glyph(MoveRight),
+  status: glyph(CircleDot),
+  priority: glyph(Flag),
+  assigneeId: glyph(UserPlus),
+  createdById: glyph(UserPen),
+  title: glyph(Type),
+  description: glyph(AlignLeft),
+  dueDate: glyph(CalendarClock),
+  startDate: glyph(CalendarPlus),
+  completed: glyph(CircleCheck),
+  // Generated per field, so keyed by the half before the colon — the same
+  // fallback `catalogueIcon` already applies to the action side.
+  customField: glyph(SlidersHorizontal),
+
+  /* Conditions declared but not checkable, greyed with their reason. */
+  AI_CONDITION: glyph(Sparkles),
+  ADDED_BY_FORM: glyph(ClipboardList),
+  ADDED_BY_EMAIL: glyph(Mail),
+  TASK_TYPE: glyph(Shapes),
+  TICKET: glyph(Ticket),
+  APPROVAL_STATUS: glyph(ShieldCheck),
+  NO_LONGER_BLOCKED: glyph(CircleSlash),
+  IN_ANY_PROJECT: glyph(FolderSymlink),
+  HAS_ATTACHMENT: glyph(Paperclip),
+  HAS_COMMENT: glyph(MessageSquare),
 
   /*
    * Declared but not executable, and shown disabled rather than hidden — so

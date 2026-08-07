@@ -4,13 +4,19 @@ import {
   CONDITION_VALUE_TYPE,
   ConditionValueKind,
   OPERATORS_BY_VALUE_TYPE,
+  defaultOperatorForConditionField,
+  isEvaluableOperator,
   operatorsForConditionField,
   operatorNeedsValue,
   operatorTakesMultipleValues,
   type ConditionOperator,
   type ConditionValueType,
 } from '@coretask/contracts';
-import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
+import type {
+  AutomationCatalogEntry,
+  AutomationMetadata,
+  ConditionFieldDefinition,
+} from '@coretask/types';
 
 /**
  * What a condition is comparing, and how that reads.
@@ -38,22 +44,15 @@ const ENUM_TOKEN = /^[A-Z][A-Z0-9_]*$/;
 /**
  * The condition catalogue, which is the one place the endpoint names a type.
  *
- * `AutomationMetadata` does not declare it yet, so it is read through a narrow
- * cast rather than assumed: an entry keyed by the same field key the condition
- * fields use, carrying the `ConditionValueType` the operators follow from.
+ * Keyed by the same field key the condition fields use — that is the whole
+ * reason the picker can write `field` straight from a row's subtype — and
+ * carrying the `ConditionValueType` the operators follow from.
  */
-interface CatalogueCondition {
-  subtype: string;
-  valueType?: string;
-}
-
 function suppliedValueType(
   field: string,
   metadata: AutomationMetadata | undefined,
 ): string | undefined {
-  const catalogue = (metadata as { conditions?: CatalogueCondition[] } | undefined)?.conditions;
-
-  return catalogue?.find((entry) => entry.subtype === field)?.valueType;
+  return metadata?.conditions?.find((entry) => entry.subtype === field)?.valueType;
 }
 
 /**
@@ -90,6 +89,57 @@ export function resolveValueType(
         ? CONDITION_VALUE_TYPE.PEOPLE
         : CONDITION_VALUE_TYPE.SINGLE_SELECT;
   }
+}
+
+/**
+ * The condition a catalogue row becomes when somebody picks it.
+ *
+ * The row's subtype *is* the field key — the endpoint names the hand-written
+ * rows after the keys `readField` switches on, and generates the custom-field
+ * ones through `customFieldKey`, so `customField:<id>` arrives already in the
+ * shape the runner reads. Nothing is translated here, which is what keeps the
+ * two ends of that convention from being two conventions.
+ *
+ * The operator comes with it rather than being left for the form below. A
+ * condition holding a field and no comparison is one the validator refuses and
+ * the runner treats as unknown, so a picker that wrote only half of it would
+ * hand back a step that reads as answered on the card and is not. The first
+ * comparison is the field's commonest, and `defaultOperatorForConditionField`
+ * is the same function the catalogue's `available` is derived from — so a row
+ * that can be picked is a row whose opening comparison the engine performs.
+ *
+ * No value: which section, which person, which words is the next question, and
+ * the rail carries straight on into the form that asks it.
+ */
+export function conditionFromCatalogueEntry(
+  entry: Pick<AutomationCatalogEntry, 'subtype' | 'valueType'>,
+): Record<string, unknown> {
+  /*
+   * Nothing when the row carried no type, which is a metadata response older
+   * than this feature rather than a case anybody meets today.
+   */
+  const operator = entry.valueType
+    ? defaultOperatorForConditionField(entry.subtype, entry.valueType)
+    : null;
+
+  /*
+   * And nothing when the comparison would not survive the trip to the runner.
+   *
+   * The catalogue already refuses to mark such a row available, so this is the
+   * same rule stated twice on purpose: the two are on either side of the wire
+   * and the one that matters is whichever is wrong. A comparison the runner has
+   * no case for is false on every event, so the rule publishes, goes ACTIVE and
+   * does nothing — where a condition with no operator at all is refused at
+   * publish, in words, before it can pretend to work.
+   *
+   * The field is still written either way. That is the useful half: the step
+   * stops being unanswered, the operator select below offers the field's own
+   * comparisons, and the card goes on reporting it incomplete until one is
+   * chosen.
+   */
+  return operator !== null && isEvaluableOperator(operator)
+    ? { field: entry.subtype, operator }
+    : { field: entry.subtype };
 }
 
 /**

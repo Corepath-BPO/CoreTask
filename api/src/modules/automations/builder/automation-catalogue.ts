@@ -13,6 +13,8 @@ import {
   TRIGGER_CONFIG_FORM_LABEL,
   TRIGGER_CONFIG_FORMS_BY_TRIGGER,
   TRIGGER_LABEL,
+  defaultOperatorForConditionField,
+  isEvaluableOperator,
   operatorNeedsValue,
   operatorTakesMultipleValues,
   type ConditionOperator,
@@ -126,6 +128,14 @@ export const READABLE_TASK_FIELDS: readonly string[] = [
   'assigneeId',
   'createdById',
   'title',
+  /*
+   * `description` was added to `readField` and to the metadata's condition
+   * fields without being added here, which greyed a working check out with the
+   * generic "the engine cannot read this" — the mirror of offering one that
+   * does not work, and just as untrue. The spec below calls `readField` for
+   * every name in this list, so the two can only agree.
+   */
+  'description',
   'completed',
   'dueDate',
   'startDate',
@@ -143,6 +153,27 @@ const READABLE = new Set(READABLE_TASK_FIELDS);
  */
 export function runnerCanReadField(fieldKey: string): boolean {
   return READABLE.has(fieldKey);
+}
+
+/**
+ * Whether the comparison this row arrives with is one the engine performs.
+ *
+ * Reading the field is only half of a condition. The other half is the
+ * comparison, and the builder writes a particular one — the first the field
+ * offers — the moment somebody picks the row out of the catalogue. If that
+ * operator has no entry in `FILTER_OPERATOR_BY_CONDITION_OPERATOR` the runner's
+ * switch falls to its default and the condition is false on every event: the
+ * rule saves, publishes, goes ACTIVE and never fires. That is the failure
+ * f428e58 fixed for the operators the panel could reach, and this is the same
+ * check applied one step earlier, where the row is offered in the first place.
+ *
+ * It bites exactly once today. A checkbox offers "is checked" and "is not
+ * checked", neither of which the engine can evaluate, so "Task or all subtasks
+ * completion status is…" was an enabled row whose only possible product was a
+ * rule that does nothing — a name with no working value behind it.
+ */
+function runnerCanCompare(fieldKey: string, valueType: ConditionValueType): boolean {
+  return isEvaluableOperator(defaultOperatorForConditionField(fieldKey, valueType));
 }
 
 /** Whether `AutomationRunnerService.runAction` has a case for this subtype. */
@@ -367,6 +398,10 @@ const TASK_ALONE_REASON =
 /** The generic answer, for a field the runner has no case for. */
 const UNREADABLE_FIELD_REASON =
   'The engine cannot read this on a task, so the check would never match.';
+
+/** The generic answer, for a field the runner has no *comparison* for. */
+const UNCOMPARABLE_FIELD_REASON =
+  'The engine has no comparison for this kind of value yet, so the check would never match.';
 
 /**
  * The hand-written condition rows, in catalogue order.
@@ -619,9 +654,26 @@ export function customFieldKey(fieldId: string): string {
 }
 
 function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
-  // The spec's own reason wins where it has one, because "there are no
-  // approvals" is a better answer than "the engine cannot read this".
-  const available = spec.reason === undefined && runnerCanReadField(spec.subtype);
+  /*
+   * Three answers, most specific first.
+   *
+   * The spec's own reason wins where it has one, because "there are no
+   * approvals" is a better answer than "the engine cannot read this". After
+   * that come the two halves of evaluating a condition — reading the field, and
+   * comparing what was read — because a row that fails either is a row whose
+   * only product is a rule that quietly does nothing.
+   *
+   * Never null while unavailable: the fallbacks are generic, but a generic
+   * explanation is still an explanation, and a greyed row with none is the
+   * thing this catalogue exists to avoid.
+   */
+  const reason =
+    spec.reason ??
+    (!runnerCanReadField(spec.subtype)
+      ? UNREADABLE_FIELD_REASON
+      : !runnerCanCompare(spec.subtype, spec.valueType)
+        ? UNCOMPARABLE_FIELD_REASON
+        : null);
 
   return {
     subtype: spec.subtype,
@@ -629,11 +681,8 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
     description: spec.description ?? '',
     category: spec.category,
     valueType: spec.valueType,
-    available,
-    // Never null while unavailable: the fallback is generic, but a generic
-    // explanation is still an explanation, and a greyed row with none is the
-    // thing this catalogue exists to avoid.
-    reason: available ? null : (spec.reason ?? UNREADABLE_FIELD_REASON),
+    available: reason === null,
+    reason,
   };
 }
 

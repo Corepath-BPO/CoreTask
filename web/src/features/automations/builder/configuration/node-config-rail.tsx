@@ -1,4 +1,4 @@
-import { AUTOMATION_TRIGGERS, TRIGGER_LABEL, type AutomationTrigger } from '@coretask/contracts';
+import { TRIGGER_LABEL, type AutomationTrigger } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationMetadata,
@@ -22,6 +22,19 @@ import { useRailDismiss, useRailFocus } from './rail-behaviour';
 import { RuleSettingsPanel, type RuleSettings } from './rule-settings-panel';
 
 /**
+ * Which of the three catalogues the panel is showing.
+ *
+ * Stated by whoever opened it rather than inferred from the entries. Triggers
+ * used to be told apart by their subtypes — every trigger is a member of
+ * `AUTOMATION_TRIGGERS` and no action ever is — but conditions broke that:
+ * their subtypes are field keys, and the action list carries plenty of subtypes
+ * that are not executable actions either, so no property of the rows separates
+ * the two. The click that opened the panel always knew, which makes saying so
+ * both cheaper and impossible to get wrong.
+ */
+export type CatalogueKind = 'triggers' | 'conditions' | 'actions';
+
+/**
  * What the rail is showing, if anything.
  *
  * One panel with two jobs, because they are two halves of the same act: a step
@@ -31,7 +44,13 @@ import { RuleSettingsPanel, type RuleSettings } from './rule-settings-panel';
 export type RailMode =
   | { kind: 'closed' }
   | { kind: 'configure'; nodeId: string }
-  | { kind: 'choose'; title: string; description: string; entries: AutomationCatalogEntry[] }
+  | {
+      kind: 'choose';
+      catalogue: CatalogueKind;
+      title: string;
+      description: string;
+      entries: AutomationCatalogEntry[];
+    }
   | { kind: 'settings' };
 
 interface Props {
@@ -164,6 +183,7 @@ export function NodeConfigRail({
         </>
       ) : mode.kind === 'choose' ? (
         <ChoosePanel
+          catalogue={mode.catalogue}
           title={mode.title}
           description={mode.description}
           entries={mode.entries}
@@ -344,31 +364,26 @@ function inspectorTitle(node: CanvasNode, metadata: AutomationMetadata | undefin
 /** Which half of the action catalogue is showing. */
 type CatalogueTab = 'actions' | 'external';
 
-/** Every subtype that is a trigger, for telling the two catalogues apart. */
-const TRIGGER_SUBTYPES = new Set<string>(AUTOMATION_TRIGGERS);
-
 /**
- * The catalogue's own subtitle, now that it is more than a list.
+ * Each catalogue's own subtitle, now that they are more than lists.
  *
  * The header, the tabs and the grouped rows are one design, and the sentence
  * under the title is part of it rather than something the page that opened the
- * panel should be deciding. The caller's `description` stays the fallback for a
- * list this does not recognise.
+ * panel should be deciding. Triggers are absent because theirs depends on what
+ * opened it — changing a rule's trigger and choosing one for the first time are
+ * not the same sentence — so that one stays the caller's.
  */
-const ACTION_CATALOGUE_HINT = 'Add an action that occurs as a result of the rule.';
+const CATALOGUE_HINT: Partial<Record<CatalogueKind, string>> = {
+  actions: 'Add an action that occurs as a result of the rule.',
+  conditions: 'Choose what this branch checks before its actions run.',
+};
 
-/**
- * Whether a catalogue is offering triggers or actions.
- *
- * Nothing in `RailMode` says which of the two lists the panel was handed, and
- * the subtypes are the discriminator that cannot drift: every trigger is a
- * member of `AUTOMATION_TRIGGERS` and no action ever is. An empty list is
- * treated as the action catalogue, which is the only one of the two that has
- * anything to show when it has no entries — the External tab.
- */
-function offersTriggers(entries: AutomationCatalogEntry[]): boolean {
-  return entries.length > 0 && entries.every((entry) => TRIGGER_SUBTYPES.has(entry.subtype));
-}
+/** What the search box calls the things it searches. */
+const CATALOGUE_NOUN: Record<CatalogueKind, string> = {
+  triggers: 'triggers',
+  conditions: 'conditions',
+  actions: 'actions',
+};
 
 /**
  * Choosing what a step does.
@@ -384,12 +399,14 @@ function offersTriggers(entries: AutomationCatalogEntry[]): boolean {
  * and it says it is not ready, rather than being quietly removed so nobody asks.
  */
 function ChoosePanel({
+  catalogue,
   title,
   description,
   entries,
   onClose,
   onChoose,
 }: {
+  catalogue: CatalogueKind;
   title: string;
   description: string;
   entries: AutomationCatalogEntry[];
@@ -399,8 +416,14 @@ function ChoosePanel({
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<CatalogueTab>('actions');
 
-  const triggers = offersTriggers(entries);
-  const noun = triggers ? 'triggers' : 'actions';
+  /*
+   * Only the action catalogue has a second surface.
+   *
+   * "External conditions" is not a thing anybody has asked for, and an empty
+   * tab beside a list of conditions would be answering a question nobody put.
+   */
+  const tabbed = catalogue === 'actions';
+  const noun = CATALOGUE_NOUN[catalogue];
 
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -467,11 +490,7 @@ function ChoosePanel({
 
   return (
     <>
-      <RailHeader
-        title={title}
-        hint={triggers ? description : ACTION_CATALOGUE_HINT}
-        onClose={onClose}
-      />
+      <RailHeader title={title} hint={CATALOGUE_HINT[catalogue] ?? description} onClose={onClose} />
 
       {/* `shrink-0` for the same reason as the heading: the search is how a
           long catalogue is navigated, so it cannot be the thing that scrolls
@@ -497,7 +516,7 @@ function ChoosePanel({
         </div>
       </div>
 
-      {triggers ? (
+      {!tabbed ? (
         list
       ) : (
         <TabsPrimitive.Root

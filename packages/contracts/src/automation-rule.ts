@@ -292,6 +292,33 @@ export function operatorsForConditionField(
 }
 
 /**
+ * The comparison a field is given the moment its row is picked from the
+ * catalogue.
+ *
+ * The first, because the lists above are ordered with the commonest comparison
+ * for each type at the front — so a condition arrives reading the way most of
+ * them are meant to and the operator select below it is a correction rather
+ * than a blank.
+ *
+ * Shared rather than an index into `operatorsForConditionField` at each call
+ * site, because the two callers are checking each other: the catalogue only
+ * marks a condition available when *this* operator round-trips through
+ * `toFilterOperator`, and the builder writes *this* operator when the row is
+ * chosen. Two copies of "the first one" would let those drift apart, and the
+ * result of drifting is the failure in `toFilterOperator`'s note — a rule that
+ * publishes cleanly and can never fire.
+ *
+ * Null for a value type with no comparisons at all, which no type has today;
+ * a default would be an invented comparison, which is the thing being avoided.
+ */
+export function defaultOperatorForConditionField(
+  field: string,
+  valueType: ConditionValueType,
+): ConditionOperator | null {
+  return operatorsForConditionField(field, valueType)[0] ?? null;
+}
+
+/**
  * Operators whose value is a list rather than a scalar.
  *
  * `BETWEEN` belongs here even though it is not a "one of" form: its value is

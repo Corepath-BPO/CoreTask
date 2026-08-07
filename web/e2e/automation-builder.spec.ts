@@ -1124,6 +1124,159 @@ test.describe('the automation builder', () => {
     await expect(row.locator('[data-slot="catalogue-reason"]')).toHaveText(entry.reason);
   });
 
+  /**
+   * A branch nobody has answered, with the catalogue open on it.
+   *
+   * "Otherwise if…" is the route the references show it from, and it is the one
+   * that was broken: the row was added and the comparison form opened on it,
+   * asking how to compare a field nobody had named.
+   */
+  const openConditionCatalogue = async (page: Page) => {
+    await openBuilder(page);
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail).toBeVisible();
+
+    return rail;
+  };
+
+  test('“Otherwise if…” opens the condition catalogue, not a comparison', async ({ page }) => {
+    /*
+     * The gap this closes. Both halves existed — the endpoint sent the grouped
+     * catalogue and the panel could draw one — and nothing routed a condition
+     * row to it, so the only thing a new branch could ever be was a section
+     * check with the field already assumed.
+     */
+    const rail = await openConditionCatalogue(page);
+
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Otherwise if…');
+    await expect(rail.getByRole('textbox', { name: /search conditions/i })).toBeVisible();
+
+    // The operator select is the *next* question, and must not be the first.
+    await expect(rail.getByLabel('Choose an option')).toHaveCount(0);
+
+    /*
+     * "Create your own" leads, which is the reason it is declared first: the
+     * widest offer in the list belongs where somebody arriving with a question
+     * no row answers will see it, rather than below six groups already read
+     * past. Taken from the endpoint so renaming a group is not a test to fix.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const expected: string[] = [];
+    for (const entry of metadata.data.conditions) {
+      if (!expected.includes(entry.category)) expected.push(entry.category);
+    }
+
+    expect(expected[0]).toBe('Create your own');
+
+    const rendered = await rail
+      .getByRole('group')
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute('aria-label') ?? ''),
+      );
+
+    expect(rendered).toEqual(expected);
+
+    /* No external tab here: "external conditions" is not a thing anybody asked
+       for, and an empty one would be answering a question nobody put. */
+    await expect(rail.getByRole('tab')).toHaveCount(0);
+  });
+
+  test('a check the engine cannot make is listed with the reason it cannot', async ({ page }) => {
+    /*
+     * The same convention as the action catalogue, and the constraint the whole
+     * feature turns on: availability is the server's answer, derived from what
+     * the runner can read and compare. A row greyed here is one the endpoint
+     * greyed, never one this client decided to withhold.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const blocked = metadata.data.conditions.filter(
+      (entry: { available: boolean }) => !entry.available,
+    );
+
+    expect(
+      blocked.length,
+      'the metadata offered nothing unavailable, so the convention cannot be checked',
+    ).toBeGreaterThan(0);
+
+    const rail = await openConditionCatalogue(page);
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    const entry = blocked[0] as { label: string; reason: string };
+    const row = rail.getByRole('option', { name: entry.label }).first();
+
+    await expect(row).toBeDisabled();
+    await expect(row.locator('[data-slot="catalogue-reason"]')).toHaveText(entry.reason);
+  });
+
+  test('choosing a check leads straight into its comparison and value', async ({ page }) => {
+    /*
+     * The choice and the settings are two halves of one act, so the panel
+     * carries on into the second rather than closing on a step that says
+     * "choose what to check" and offering no obvious way to.
+     *
+     * The comparison is written with the field, because a condition holding one
+     * and not the other is refused at publish — and the card is what says the
+     * edit landed, there being no save button on this panel.
+     */
+    const rail = await openConditionCatalogue(page);
+
+    await rail.getByRole('option', { name: 'Task is in section…' }).click();
+
+    // Same panel, now the comparison form for the field just chosen.
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Section is');
+    await expect(rail.getByText('Otherwise if… /')).toBeVisible();
+
+    const value = rail.getByLabel('Choose a column/section');
+    await value.click();
+
+    const section = ((await page.getByRole('option').first().textContent()) ?? '').trim();
+    await page.getByRole('option').first().click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain(`Otherwise if — Section is ${section}`);
+  });
+
+  test('a check on a field the catalogue only names is not offered as working', async ({
+    page,
+  }) => {
+    /*
+     * The rule the owner set: never an enabled row that creates a name without
+     * functioning task values. "Create conditional check with AI" is the one
+     * every reference screenshot shows and the one nothing stands behind, so it
+     * has to be visible, greyed, and unclickable — visible because absence
+     * reads as "never considered".
+     */
+    const rail = await openConditionCatalogue(page);
+
+    const ai = rail.getByRole('option', { name: /Create conditional check with AI/ });
+
+    await expect(ai).toBeVisible();
+    await expect(ai).toBeDisabled();
+
+    // And a working one beside it, so this is a decision rather than a
+    // catalogue that offers nothing.
+    await expect(rail.getByRole('option', { name: 'Task is in section…' })).toBeEnabled();
+  });
+
   test('searching the catalogue matches the group as well as the row', async ({ page }) => {
     await openBuilder(page);
     await page.getByRole('button', { name: /^Add a step —/ }).click();

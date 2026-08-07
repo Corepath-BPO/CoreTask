@@ -5,6 +5,8 @@ import {
   CONDITION_VALUE_TYPE,
   TRIGGER_CONFIG_FORM,
   WorkspaceRole,
+  defaultOperatorForConditionField,
+  isEvaluableOperator,
 } from '@coretask/contracts';
 import type { Task } from '@prisma/client';
 
@@ -153,7 +155,7 @@ describe('the automation catalogue', () => {
       startDate: new Date('2026-01-01T00:00:00.000Z'),
     } as unknown as Task;
 
-    const probed = [...READABLE_TASK_FIELDS, 'description', customFieldKey('field-risk')];
+    const probed = [...READABLE_TASK_FIELDS, customFieldKey('field-risk')];
 
     const event = {
       workspaceId: 'workspace-1',
@@ -180,7 +182,7 @@ describe('the automation catalogue', () => {
      * comparison reads `undefined`, fails, and the rule never fires and never
      * complains.
      */
-    it.each(['description', customFieldKey('field-risk')])(
+    it.each([customFieldKey('field-risk')])(
       'falls through to the event payload for %s, which is why it is not offered',
       (field) => {
         expect(readField(field, task, event)).toBe(FROM_THE_EVENT);
@@ -196,11 +198,52 @@ describe('the automation catalogue', () => {
       }
     });
 
-    it('does not offer a description check the engine could never satisfy', () => {
+    /*
+     * The other half of a condition, and the half f428e58 was about.
+     *
+     * Reading the field is not enough: the builder writes a comparison the
+     * moment a row is picked, and one the runner's switch has no case for makes
+     * the condition false on every event — a rule that publishes, goes ACTIVE
+     * and never fires. `isEvaluableOperator` is what the runner really consults,
+     * so this asks it rather than restating the table.
+     */
+    it('offers no condition whose first comparison the engine cannot make', () => {
+      const broken = conditions
+        .filter((entry) => entry.available)
+        .filter(
+          (entry) =>
+            !isEvaluableOperator(defaultOperatorForConditionField(entry.subtype, entry.valueType)),
+        );
+
+      expect(broken.map((entry) => entry.subtype)).toEqual([]);
+    });
+
+    /*
+     * The one row that gate takes away, named so the loss is deliberate.
+     *
+     * A checkbox offers "is checked" and "is not checked", and neither has a
+     * comparison behind it — so this was an enabled row whose only product was
+     * a rule that did nothing. Greyed with a reason it reads as "not yet",
+     * which is the truth.
+     */
+    it('greys the completion check, which has no comparison behind it', () => {
+      const completed = conditions.find((entry) => entry.subtype === 'completed');
+
+      expect(completed).toMatchObject({ available: false });
+      expect(completed?.reason).toBeTruthy();
+    });
+
+    /*
+     * `readField` grew a case for the description and this list was not told,
+     * so a working comparison was withheld with the generic "the engine cannot
+     * read this" — the same invisible failure as offering one that does not
+     * work, pointed the other way.
+     */
+    it('offers the description check the engine can now satisfy', () => {
       const description = conditions.find((entry) => entry.subtype === 'description');
 
-      expect(description).toMatchObject({ available: false });
-      expect(description?.reason).toContain('description');
+      expect(description).toMatchObject({ available: true, reason: null });
+      expect(readField('description', task, event)).toBe('A real description');
     });
 
     it('shows the groups in the order the catalogue reads in', () => {

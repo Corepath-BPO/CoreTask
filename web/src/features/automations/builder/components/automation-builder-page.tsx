@@ -19,6 +19,7 @@ import {
   useSaveGraph,
 } from '../hooks/use-automation-graph';
 
+import { conditionFromCatalogueEntry } from '../configuration/condition-value';
 import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
 import type { RuleSettings } from '../configuration/rule-settings-panel';
 import {
@@ -29,6 +30,7 @@ import {
   fallbackRow,
   FALLBACK_CONFIGURATION,
   hasEdits,
+  isUnansweredRow,
   makeBranchRow,
   makeDefaultNodes,
   makeNodeUnder,
@@ -161,6 +163,16 @@ export function AutomationBuilderPage({
     /** Whether what already follows the parent should move after the new step. */
     insert?: boolean;
   } | null>(null);
+  /**
+   * Which branch row a chosen condition answers.
+   *
+   * The mirror of `addingAt`, and separate from it for the same reason: the
+   * rail is handed a list of entries and nothing else, so what a click on one
+   * of them *means* is a property of what opened the panel. A row already
+   * exists here — an unanswered branch — where an action does not exist until
+   * it is chosen, so this is an id rather than a place to put one.
+   */
+  const [answering, setAnswering] = useState<string | null>(null);
 
   /*
    * What the rail is showing.
@@ -382,9 +394,15 @@ export function AutomationBuilderPage({
 
     setEdits((previous) => ({ ...previous, added: [...previous.added, inserted] }));
 
-    // Straight into its condition: an unanswered question is not a step yet.
+    /*
+     * Straight into the catalogue: an unanswered question is not a step yet,
+     * and the first thing it is missing is what it checks. It used to open the
+     * comparison form instead, which asked "is / is not / is one of" about a
+     * field nobody had named — the catalogue existed on the server all along
+     * and nothing routed a condition to it.
+     */
     setSelectedId(inserted.id);
-    setRail({ kind: 'configure', nodeId: inserted.id });
+    openConditionPicker(inserted.id, [...realNodes, inserted]);
   };
 
   /*
@@ -409,31 +427,75 @@ export function AutomationBuilderPage({
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
 
   const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
+    setAnswering(null);
     setAddingAt(target);
     setRail({
       kind: 'choose',
+      catalogue: 'actions',
       title: 'Do this…',
       description: 'Add an action that happens as a result of the rule.',
       entries: metadata?.actions ?? [],
     });
   };
 
-  const openTriggerPicker = () =>
+  const openTriggerPicker = () => {
+    setAnswering(null);
+    setAddingAt(null);
     setRail({
       kind: 'choose',
+      catalogue: 'triggers',
       title: 'When this happens…',
       description: 'Choose what starts this rule.',
       entries: metadata?.triggers ?? [],
     });
+  };
+
+  /**
+   * What a branch checks, chosen from the catalogue rather than assumed.
+   *
+   * The rule's first row and every "Otherwise if…" after it come here while
+   * they are still unanswered, because the question they are asking is which
+   * check — not which comparison, which is the next one. The panel this opens
+   * is the same grouped, searchable one the actions use, and the same
+   * convention runs through it: a check the engine cannot make is shown greyed
+   * with the reason rather than removed.
+   *
+   * Named for where it sits, so the panel and the card that opened it agree.
+   * Only the first row is the rule's own "Check if".
+   *
+   * `nodes` is a parameter because a row added a moment ago is not in
+   * `realNodes` yet — that is a render behind — and a fresh "Otherwise if…"
+   * asked about the saved canvas comes back as index -1, which would title its
+   * own panel "Check if…".
+   */
+  const openConditionPicker = (nodeId: string, nodes: readonly CanvasNode[] = realNodes) => {
+    const alternative = branchRows(nodes).findIndex((row) => row.id === nodeId) > 0;
+
+    setAddingAt(null);
+    setAnswering(nodeId);
+    setRail({
+      kind: 'choose',
+      catalogue: 'conditions',
+      title: alternative ? 'Otherwise if…' : 'Check if…',
+      description: 'Choose what this branch checks.',
+      entries: metadata?.conditions ?? [],
+    });
+  };
 
   /*
-   * One list, two meanings, decided by where it was opened from.
+   * One list, three meanings, decided by where it was opened from.
    *
-   * The rail does not know whether it is offering triggers or actions — it was
-   * handed a list of entries. What a chosen one means is a property of the
-   * click that opened it, which is exactly what `addingAt` records.
+   * The rail does not know whether it is offering triggers, conditions or
+   * actions — it was handed a list of entries. What a chosen one means is a
+   * property of the click that opened it, which is exactly what `answering` and
+   * `addingAt` record.
    */
   const chooseFromRail = (entry: AutomationCatalogEntry) => {
+    if (answering) {
+      answerBranch(answering, entry);
+      return;
+    }
+
     if (!addingAt) {
       setTrigger(entry.subtype);
       return;
@@ -458,6 +520,31 @@ export function AutomationBuilderPage({
     setAddingAt(null);
     setSelectedId(added.id);
     setRail({ kind: 'configure', nodeId: added.id });
+  };
+
+  /**
+   * Answering a branch with the check somebody picked.
+   *
+   * The whole configuration is replaced rather than merged into. A row reaching
+   * the catalogue is one nothing has been chosen for, and the value a previous
+   * answer left behind belongs to the field it was chosen from — a section id
+   * means nothing to "assignee is", and keeping it would leave the form looking
+   * answered while holding something the runner cannot use. The same reasoning
+   * as retyping the trigger below.
+   *
+   * Then straight on to the comparison and the value, which is the rest of the
+   * same act: a step chosen and left unconfigured is one somebody has to find
+   * their way back to.
+   */
+  const answerBranch = (nodeId: string, entry: AutomationCatalogEntry) => {
+    setEdits((previous) => ({
+      ...previous,
+      configured: { ...previous.configured, [nodeId]: conditionFromCatalogueEntry(entry) },
+    }));
+
+    setAnswering(null);
+    setSelectedId(nodeId);
+    setRail({ kind: 'configure', nodeId });
   };
 
   /**
@@ -745,6 +832,22 @@ export function AutomationBuilderPage({
              */
             if (fallbackRow(realNodes)?.id === nodeId) return;
 
+            /*
+             * A branch nobody has answered opens the catalogue, not the form.
+             *
+             * The card reads "+ Otherwise if…" or "Check if — choose what to
+             * check", and both are asking the same thing: which check. The
+             * comparison form cannot answer that — it asks how to compare a
+             * field, and there is no field yet — so this is the one route to
+             * the seven groups of checks the endpoint has always sent.
+             */
+            const row = realNodes.find((node) => node.id === nodeId);
+
+            if (row && isUnansweredRow(row)) {
+              openConditionPicker(nodeId);
+              return;
+            }
+
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
@@ -770,6 +873,10 @@ export function AutomationBuilderPage({
           onClose={() => {
             setRail({ kind: 'closed' });
             setAddingAt(null);
+            /* Closing the catalogue leaves the row unanswered rather than
+               half-answered — the card goes on offering, and the × on it is
+               still the way to take a mis-clicked branch back off. */
+            setAnswering(null);
           }}
           onChange={(nodeId, configuration) =>
             setEdits((previous) => ({
