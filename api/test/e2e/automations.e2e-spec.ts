@@ -398,6 +398,62 @@ describe('Automations (e2e)', () => {
       expect(stamped).toBeLessThanOrEqual(Date.now());
     });
 
+    it('refuses a computed date on a field that cannot hold one', async () => {
+      /*
+       * The panel only offers it for a date, so this is the endpoint agreeing.
+       *
+       * A form is not a check: a token posted onto a text field would otherwise
+       * be stored and published, and only discovered when the action failed at
+       * run time — long after whoever wrote the rule stopped watching.
+       */
+      const scope = await setupScope();
+
+      const text = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Notes',
+          type: 'TEXT',
+          projects: { create: { projectId: scope.projectId } },
+        },
+      });
+
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Token on text',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.sectionId },
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+            {
+              nodeType: 'ACTION',
+              subtype: 'SET_CUSTOM_FIELD',
+              configuration: { customFieldId: text.id, value: { token: 'TRIGGER_DATE' } },
+            },
+          ],
+        })
+        .expect(201);
+
+      /*
+       * Reported by the graph validator, which is what the builder counts as a
+       * problem and disables Publish on.
+       *
+       * Note that `POST /publish` does NOT run this: it calls a separate,
+       * simpler check in `AutomationsService.validate`. So this refusal is the
+       * builder's, and a rule posted straight to the endpoint would still go
+       * ACTIVE. That divergence is worth closing, and is larger than this
+       * check.
+       */
+      const checked = await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/validate`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({})
+        .expect(200);
+
+      expect(JSON.stringify(checked.body)).toContain('date field');
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.

@@ -1,5 +1,7 @@
 import { TaskPriority, TaskStatus } from '@prisma/client';
 import {
+  isTokenValue,
+  tokensForFieldType,
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
   AutomationNodeType,
@@ -197,7 +199,9 @@ export class AutomationGraphValidatorService {
       fieldIds.size
         ? this.prisma.customField.findMany({
             where: { id: { in: [...fieldIds] }, workspaceId, isArchived: false },
-            select: { id: true },
+            // The type as well as the id: a computed value is only meaningful
+            // on some of them, and this is where that is refused.
+            select: { id: true, type: true },
           })
         : [],
     ]);
@@ -207,6 +211,7 @@ export class AutomationGraphValidatorService {
     const liveStatuses = new Set(statuses.map((row) => row.id));
     const livePriorities = new Set(priorities.map((row) => row.id));
     const liveFields = new Set(fields.map((row) => row.id));
+    const fieldType = new Map(fields.map((row) => [row.id, row.type as string]));
 
     for (const node of nodes) {
       const config = node.configuration;
@@ -259,6 +264,30 @@ export class AutomationGraphValidatorService {
           path: 'customFieldId',
           message: 'That field no longer exists.',
         });
+      }
+
+      /*
+       * A computed value, on a field that can hold one.
+       *
+       * The panel only offers "the date this rule is triggered" for a date, so
+       * this is the endpoint agreeing rather than a second opinion — a form is
+       * not a check, and a token posted onto a text field would otherwise be
+       * stored, published, and only discovered when the action failed at run
+       * time. Refused with the field's own type in the sentence, because "not
+       * allowed here" without saying where it is allowed sends somebody
+       * guessing.
+       */
+      if (fieldId && isTokenValue(config['value'])) {
+        const type = fieldType.get(fieldId);
+
+        if (type && tokensForFieldType(type).length === 0) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'value',
+            message: 'A date the rule works out can only be set on a date field.',
+          });
+        }
       }
 
       /*
