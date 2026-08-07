@@ -47,7 +47,15 @@ interface Props {
   onClose: () => void;
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
-  onChoose: (subtype: string) => void;
+  /*
+   * The whole entry, not just its name.
+   *
+   * The custom-field rows all share one subtype and differ only by the field
+   * they name, so passing the subtype alone threw away which field "Change
+   * Effort to…" meant and left the form asking again for something the click
+   * had already said.
+   */
+  onChoose: (entry: AutomationCatalogEntry) => void;
   rule: AutomationRuleGraph;
   settings: RuleSettings;
   onSettingsChange: (next: Partial<RuleSettings>) => void;
@@ -364,7 +372,7 @@ function ChoosePanel({
   description: string;
   entries: AutomationCatalogEntry[];
   onClose: () => void;
-  onChoose: (subtype: string) => void;
+  onChoose: (entry: AutomationCatalogEntry) => void;
 }) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<CatalogueTab>('actions');
@@ -536,7 +544,7 @@ function CatalogueRow({
   onChoose,
 }: {
   entry: AutomationCatalogEntry;
-  onChoose: (subtype: string) => void;
+  onChoose: (entry: AutomationCatalogEntry) => void;
 }) {
   return (
     <button
@@ -544,7 +552,7 @@ function CatalogueRow({
       role="option"
       aria-selected={false}
       disabled={!entry.available}
-      onClick={() => onChoose(entry.subtype)}
+      onClick={() => onChoose(entry)}
       className={cn(
         'flex w-full items-start gap-3 rounded-md px-2 py-2 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',

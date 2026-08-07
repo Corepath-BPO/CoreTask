@@ -1,5 +1,9 @@
 import { AutomationRuleStatus, BranchKey, type AutomationNodeType } from '@coretask/contracts';
-import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
+import type {
+  AutomationCatalogEntry,
+  AutomationGraphNode,
+  AutomationRuleGraph,
+} from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -227,9 +231,12 @@ export function AutomationBuilderPage({
   }, [realNodes]);
 
   /** Answers with the step it added, so the caller can go on to set it up. */
-  const addAction = (subtype: string): CanvasNode => {
+  const addAction = (subtype: string, configuration: Record<string, unknown> = {}): CanvasNode => {
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
-    const node = makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes);
+    const node = {
+      ...makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
+      configuration,
+    };
 
     setEdits((previous) => ({
       ...previous,
@@ -392,9 +399,9 @@ export function AutomationBuilderPage({
    * handed a list of entries. What a chosen one means is a property of the
    * click that opened it, which is exactly what `addingAt` records.
    */
-  const chooseFromRail = (subtype: string) => {
+  const chooseFromRail = (entry: AutomationCatalogEntry) => {
     if (!addingAt) {
-      setTrigger(subtype);
+      setTrigger(entry.subtype);
       return;
     }
 
@@ -406,7 +413,14 @@ export function AutomationBuilderPage({
      * choice and the settings are two halves of one act, so the panel carries
      * on into the second.
      */
-    const added = addAction(subtype);
+    /*
+     * A generated row already knows its field, so the form does not ask again.
+     *
+     * Every "Change ⟨field⟩ to…" shares one subtype and differs only by the
+     * field it names — without carrying that across, choosing one landed on a
+     * form with an empty field picker, which is the click being thrown away.
+     */
+    const added = addAction(entry.subtype, entry.fieldId ? { fieldId: entry.fieldId } : {});
     setAddingAt(null);
     setSelectedId(added.id);
     setRail({ kind: 'configure', nodeId: added.id });

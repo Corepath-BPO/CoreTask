@@ -104,6 +104,25 @@ async function connect(): Promise<Api> {
   );
   expect(created.ok(), `could not create the rule: ${created.status()}`).toBe(true);
 
+  /*
+   * A custom field, so the catalogue has one to generate a row from.
+   *
+   * The generated rows are the whole point of the "Change ⟨field⟩ to…" group,
+   * and a project with no fields produces an empty group that proves nothing.
+   */
+  const field = await request.post(
+    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/custom-fields`,
+    {
+      headers,
+      data: {
+        name: `Effort ${RUN}`,
+        type: 'SINGLE_SELECT',
+        options: [{ label: 'Small' }, { label: 'Large' }],
+      },
+    },
+  );
+  expect(field.ok(), `could not create the field: ${field.status()}`).toBe(true);
+
   return {
     request,
     headers,
@@ -460,6 +479,35 @@ test.describe('the automation builder', () => {
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();
     await expect(rail.getByRole('option').first()).toBeVisible();
+  });
+
+  test('configures a custom field the catalogue row already named', async ({ page }) => {
+    /*
+     * The row says which field it means, so the form must not ask again.
+     *
+     * Every "Change ⟨field⟩ to…" shares one subtype and differs only by the
+     * field, so before the entry was carried through, choosing one landed on a
+     * form with an empty picker — the click thrown away.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+    await page.getByRole('option', { name: /^Change Effort/i }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+
+    // The field is already answered, and its own options are what it offers.
+    await expect(rail.getByLabel('Field')).toContainText(/Effort/);
+
+    await rail.getByLabel('Value').click();
+    await page.getByRole('option', { name: 'Large' }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('Large');
   });
 
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {

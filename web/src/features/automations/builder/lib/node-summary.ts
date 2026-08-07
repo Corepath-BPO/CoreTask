@@ -212,6 +212,33 @@ function actionSummary(
         : [{ text: 'Set priority — choose one' }];
     }
 
+    case 'SET_CUSTOM_FIELD': {
+      /*
+       * Which field, and what to — not "set a custom field".
+       *
+       * Every one of these actions shares a subtype, so the generic label made
+       * three of them on one rule indistinguishable. The field's own name is
+       * the only thing that tells them apart, and the value is what somebody
+       * came to the card to check.
+       */
+      const fieldId = config['fieldId'] ?? config['customFieldId'];
+      const field = metadata?.customFields.find((entry) => entry.id === fieldId);
+
+      if (!field) return [{ text: 'Set a field — choose one' }];
+
+      const raw = config['value'];
+      const chosen = Array.isArray(raw) ? raw.map(String) : raw === undefined ? [] : [String(raw)];
+
+      // Options resolve to their labels; everything else is already readable.
+      const shown = chosen.map(
+        (value) => field.options?.find((option) => option.id === value)?.label ?? value,
+      );
+
+      if (shown.length === 0) return [{ text: `Set ${field.name} — choose a value` }];
+
+      return [{ text: `Set ${field.name} to` }, { text: shown.join(', '), chip: true }];
+    }
+
     case 'ADD_COMMENT': {
       const body = config['body'];
       return typeof body === 'string' && body.trim() !== ''

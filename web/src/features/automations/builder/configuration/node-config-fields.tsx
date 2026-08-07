@@ -540,6 +540,17 @@ function ActionFields({
     case 'UPDATE_PRIORITY':
       return picker('priority', 'Priority', metadata?.priorities, 'Choose a priority');
 
+    case 'SET_CUSTOM_FIELD':
+      return (
+        <CustomFieldAction
+          config={configuration}
+          metadata={metadata}
+          set={set}
+          read={read}
+          onChange={onChange}
+        />
+      );
+
     case 'ADD_COMMENT':
       return (
         <Field label="Comment" htmlFor="step-body">
@@ -556,4 +567,146 @@ function ActionFields({
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;
   }
+}
+
+/**
+ * Setting a custom field: which one, and what to.
+ *
+ * Two questions rather than one, because a rule may be built from the catalogue
+ * — where the row already names the field — or from a step somebody inserted,
+ * where nothing has been chosen yet. The picker is shown either way rather than
+ * hidden once filled, so the field is visible on the form that sets it and can
+ * be corrected without deleting the step.
+ *
+ * The value control follows the field's type, and each one produces exactly the
+ * shape the runner stores for that type. A control that produced a string for a
+ * number field would write `NaN` and report success.
+ */
+function CustomFieldAction({
+  config,
+  metadata,
+  set,
+  read,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  metadata: AutomationMetadata | undefined;
+  set: (key: string, value: unknown) => void;
+  read: (key: string) => string;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const fields = metadata?.customFields ?? [];
+  // Canonical name first, then the one this was written under before the
+  // builder and the runner agreed — see `LEGACY_ACTION_KEYS` on the API side.
+  const fieldId = read('fieldId') || read('customFieldId');
+  const field = fields.find((entry) => entry.id === fieldId);
+
+  const options: ChoiceOption[] = (field?.options ?? []).map((option) => ({
+    value: option.id,
+    label: option.label,
+  }));
+
+  const raw = config['value'];
+  const asList = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' && raw ? [raw] : [];
+
+  return (
+    <>
+      <Field label="Field" htmlFor="step-custom-field">
+        <Select
+          value={fieldId || NONE}
+          onValueChange={(value) =>
+            /*
+             * One write, and the old value goes with it.
+             *
+             * A value belongs to the field it was chosen from — an option id
+             * from one select field means nothing in another, and a date is not
+             * a number. Keeping it would leave the form looking answered while
+             * storing something the runner cannot use.
+             */
+            onChange({ ...config, fieldId: value, customFieldId: undefined, value: undefined })
+          }
+        >
+          <SelectTrigger id="step-custom-field" className="w-full">
+            <SelectValue placeholder="Choose a field" />
+          </SelectTrigger>
+          <SelectContent>
+            {fields.map((entry) => (
+              <SelectItem key={entry.id} value={entry.id}>
+                {entry.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {field && (
+        <Field label="Value" htmlFor="step-custom-value">
+          {field.type === 'CHECKBOX' ? (
+            <Select
+              value={raw === true ? 'true' : raw === false ? 'false' : NONE}
+              onValueChange={(value) => set('value', value === 'true')}
+            >
+              <SelectTrigger id="step-custom-value" className="w-full">
+                <SelectValue placeholder="Checked or not" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">Checked</SelectItem>
+                <SelectItem value="false">Not checked</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : field.type === 'MULTI_SELECT' ? (
+            <MultiSelect
+              id="step-custom-value"
+              options={options}
+              values={asList}
+              onChange={(next) => set('value', next)}
+              placeholder="Choose options"
+            />
+          ) : field.type === 'SINGLE_SELECT' ? (
+            <Select value={read('value') || NONE} onValueChange={(value) => set('value', value)}>
+              <SelectTrigger id="step-custom-value" className="w-full">
+                <SelectValue placeholder="Choose an option" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <OptionFace option={option} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : field.type === 'PEOPLE' ? (
+            <MultiSelect
+              id="step-custom-value"
+              options={(metadata?.members ?? []).map((member) => ({
+                value: member.id,
+                label: member.name,
+              }))}
+              values={asList}
+              onChange={(next) => set('value', next)}
+              placeholder="Choose people"
+            />
+          ) : (
+            <Input
+              id="step-custom-value"
+              // The runner coerces by type, so the control has to produce what
+              // that coercion expects — a date string, a number, or text.
+              type={field.type === 'NUMBER' ? 'number' : field.type === 'DATE' ? 'date' : 'text'}
+              value={typeof raw === 'number' ? String(raw) : read('value')}
+              onChange={(event) =>
+                set(
+                  'value',
+                  field.type === 'NUMBER'
+                    ? event.target.value === ''
+                      ? undefined
+                      : Number(event.target.value)
+                    : event.target.value,
+                )
+              }
+            />
+          )}
+        </Field>
+      )}
+    </>
+  );
 }

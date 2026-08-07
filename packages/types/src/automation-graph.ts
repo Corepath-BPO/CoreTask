@@ -125,7 +125,20 @@ export interface AutomationMetadata {
   statuses: { id: string; name: string; colorToken: string }[];
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
-  customFields: { id: string; name: string; type: string }[];
+  /**
+   * The project's own fields, with the values each one offers.
+   *
+   * `options` is declared here because the endpoint has always returned it and
+   * this type did not say so — which left every form that needed the choices
+   * casting its way to them, and the compiler unable to notice when one of them
+   * was wrong.
+   */
+  customFields: {
+    id: string;
+    name: string;
+    type: string;
+    options?: { id: string; label: string; colorToken: string }[];
+  }[];
 }
 
 /** One offer in the trigger or action selector. */
