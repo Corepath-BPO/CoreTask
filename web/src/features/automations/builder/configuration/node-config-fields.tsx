@@ -525,11 +525,20 @@ function ActionFields({
     case 'MOVE_TO_SECTION':
       return picker('sectionId', 'Section', metadata?.sections, 'Choose a section');
 
+    /*
+     * `status`, not `statusDefinitionId`.
+     *
+     * The runner reads `status`, so a rule built here wrote a key nothing read
+     * and set the status to an empty string on every run. The short name is the
+     * canonical one because the value is a status *id* — a definition's uuid
+     * where a workspace has defined its own, and a legacy enum name where it
+     * has not — so the longer name would be wrong for half of them.
+     */
     case 'UPDATE_STATUS':
-      return picker('statusDefinitionId', 'Status', metadata?.statuses, 'Choose a status');
+      return picker('status', 'Status', metadata?.statuses, 'Choose a status');
 
     case 'UPDATE_PRIORITY':
-      return picker('priorityDefinitionId', 'Priority', metadata?.priorities, 'Choose a priority');
+      return picker('priority', 'Priority', metadata?.priorities, 'Choose a priority');
 
     case 'ADD_COMMENT':
       return (

@@ -195,7 +195,9 @@ function actionSummary(
     }
 
     case 'UPDATE_STATUS': {
-      const status = config['statusDefinitionId'] ?? config['status'];
+      // Canonical first, then the name this used to be written under, so a
+      // rule saved before the two sides agreed still reads as itself.
+      const status = config['status'] ?? config['statusDefinitionId'];
       const found = metadata?.statuses.find((entry) => entry.id === status)?.name;
       return found
         ? [{ text: 'Set status to' }, { text: found, chip: true }]
@@ -203,7 +205,7 @@ function actionSummary(
     }
 
     case 'UPDATE_PRIORITY': {
-      const priority = config['priorityDefinitionId'] ?? config['priority'];
+      const priority = config['priority'] ?? config['priorityDefinitionId'];
       const found = metadata?.priorities.find((entry) => entry.id === priority)?.name;
       return found
         ? [{ text: 'Set priority to' }, { text: found, chip: true }]

@@ -14,10 +14,11 @@ import {
   type AutomationTrigger,
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
-import type { AutomationNode, Prisma, Task } from '@prisma/client';
+import { TaskStatus, type AutomationNode, type Prisma, type Task } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
+import { priorityData, readActionId, statusData } from './action-config';
 import type { AutomationEvent } from './automation-event.publisher';
 
 /** What one action attempt produced, for the log. */
@@ -501,24 +502,32 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.UPDATE_STATUS: {
-        const status = String(config['status'] ?? '');
+        const status = readActionId(config, 'status');
+        if (!status) return { succeeded: false, message: 'No status was chosen.' };
+
+        const data = statusData(status);
+
         await this.updateTask(
           task.id,
           {
-            status: status as Task['status'],
+            ...data,
             // Completion is a fact about the task, not a separate action
             // somebody has to remember to add to the rule.
-            ...(status === 'DONE' ? { completedAt: new Date() } : {}),
+            ...(data.status === TaskStatus.DONE ? { completedAt: new Date() } : {}),
           },
           rule.id,
           event,
         );
+
         return { succeeded: true, before: task.status, after: status };
       }
 
       case AutomationAction.UPDATE_PRIORITY: {
-        const priority = String(config['priority'] ?? '');
-        await this.updateTask(task.id, { priority: priority as Task['priority'] }, rule.id, event);
+        const priority = readActionId(config, 'priority');
+        if (!priority) return { succeeded: false, message: 'No priority was chosen.' };
+
+        await this.updateTask(task.id, priorityData(priority), rule.id, event);
+
         return { succeeded: true, before: task.priority, after: priority };
       }
 
@@ -594,7 +603,7 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.SET_CUSTOM_FIELD: {
-        const fieldId = String(config['fieldId'] ?? '');
+        const fieldId = readActionId(config, 'fieldId') ?? '';
         // Through the association: a rule may only write a field its own
         // project actually uses, even though the definition is shared.
         const field = await this.prisma.customField.findFirst({

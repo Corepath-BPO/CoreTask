@@ -259,6 +259,138 @@ describe('Automations (e2e)', () => {
       expect(afterDirect?.assigneeId).toBe(scope.owner.userId);
     });
 
+    /*
+     * The three actions whose settings the builder and the runner named
+     * differently.
+     *
+     * These are written the way the *builder* writes them and asserted on the
+     * task, so a key nothing reads fails here rather than shipping as a rule
+     * that runs, reports success, and changes nothing. That is what each of
+     * these did: the form stored a definition id under `statusDefinitionId`
+     * while the runner read `status`, so it wrote an empty string.
+     */
+    it('sets a status the builder chose, as a definition', async () => {
+      const scope = await setupScope();
+
+      const definition = await context.prisma.statusDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          name: 'In review',
+          slug: 'in-review',
+          category: 'ACTIVE',
+          position: 1,
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: definition.id } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.statusDefinitionId).toBe(definition.id);
+    });
+
+    it('sets a status the builder chose, as a legacy enum', async () => {
+      // A workspace with no definitions of its own is offered the enums, so the
+      // same key legitimately holds either shape and both have to land.
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: 'DONE' } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.status).toBe('DONE');
+      expect(task?.completedAt).not.toBeNull();
+    });
+
+    it('sets a priority the builder chose', async () => {
+      const scope = await setupScope();
+
+      const definition = await context.prisma.priorityDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Urgent',
+          slug: 'urgent',
+          level: 1,
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          configuration: { priority: definition.id },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.priorityDefinitionId).toBe(definition.id);
+    });
+
+    it('sets a custom field the builder chose', async () => {
+      const scope = await setupScope();
+
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Effort',
+          type: 'TEXT',
+          projects: { create: { projectId: scope.projectId, position: 0 } },
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { fieldId: field.id, value: 'Large' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const stored = await context.prisma.taskCustomFieldValue.findUnique({
+        where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId: field.id } },
+      });
+      expect(stored?.textValue).toBe('Large');
+    });
+
+    it('still honours a rule stored under the old key names', async () => {
+      /*
+       * The migration rewrites what it can reach. This covers what it cannot —
+       * a draft held in a browser, a rule restored from a backup — because
+       * dropping the fallback would break those on exactly the release that
+       * fixed the bug for everybody else.
+       */
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_STATUS',
+          configuration: { statusDefinitionId: 'IN_PROGRESS' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.status).toBe('IN_PROGRESS');
+    });
+
     it('still runs a flat rule exactly as it always did', async () => {
       // The regression that matters: nine rules exist with no parentage, and a
       // tree walk would treat each of their nodes as its own root.

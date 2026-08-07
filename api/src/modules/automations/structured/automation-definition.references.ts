@@ -85,11 +85,14 @@ interface ConfigField {
   /**
    * Other keys that mean the same setting.
    *
-   * Not indulgence: the builder, the runner and the old graph validator each
-   * settled on a different name for the same thing — the inspector writes
-   * `statusDefinitionId` where the runner reads `status`, and the graph
-   * validator checks `customFieldId` where the runner reads `fieldId`. Until
-   * those are reconciled, refusing either name would refuse rules that work.
+   * The three names have since been reconciled — the runner's spelling won, and
+   * a migration rewrote the stored rules — so what remains here is the residue
+   * of that: a rule held in a browser, restored from a backup, or posted by an
+   * integration written against the older shape. Refusing those would break
+   * them on exactly the release that fixed the bug for everybody else.
+   *
+   * `assigneeId` is a different case and stays for good: the runner reads
+   * either, and both spellings are in circulation in stored rules.
    */
   aliases?: readonly string[];
   kind: ConfigKind;
@@ -113,12 +116,12 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
   UNASSIGN_USER: [],
   MOVE_TO_SECTION: [{ key: 'sectionId', kind: ConfigKind.SECTION, required: true }],
   UPDATE_STATUS: [
-    { key: 'statusDefinitionId', aliases: ['status'], kind: ConfigKind.STATUS, required: true },
+    { key: 'status', aliases: ['statusDefinitionId'], kind: ConfigKind.STATUS, required: true },
   ],
   UPDATE_PRIORITY: [
     {
-      key: 'priorityDefinitionId',
-      aliases: ['priority'],
+      key: 'priority',
+      aliases: ['priorityDefinitionId'],
       kind: ConfigKind.PRIORITY,
       required: true,
     },

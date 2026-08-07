@@ -1,3 +1,4 @@
+import { TaskPriority, TaskStatus } from '@prisma/client';
 import {
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
@@ -123,6 +124,7 @@ export class AutomationGraphValidatorService {
     const sectionIds = new Set<string>();
     const userIds = new Set<string>();
     const statusIds = new Set<string>();
+    const priorityIds = new Set<string>();
     const fieldIds = new Set<string>();
 
     const read = (value: unknown): string | null =>
@@ -137,14 +139,28 @@ export class AutomationGraphValidatorService {
       const userId = read(config['userId']) ?? read(config['assigneeId']);
       if (userId) userIds.add(userId);
 
-      const statusId = read(config['statusDefinitionId']);
-      if (statusId) statusIds.add(statusId);
+      /*
+       * Canonical name first, then the one it used to be written under.
+       *
+       * This checked only the long names while the runner read only the short
+       * ones, so it was validating a key nothing executed — a rule could pass
+       * here with a status that does not exist and fail silently at run time,
+       * which is the opposite of what a validator is for.
+       *
+       * A legacy enum name is not a definition id and has nothing to look up,
+       * so it is skipped rather than reported as a missing definition.
+       */
+      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      if (statusId && !(statusId in TaskStatus)) statusIds.add(statusId);
 
-      const fieldId = read(config['customFieldId']);
+      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      if (priorityId && !(priorityId in TaskPriority)) priorityIds.add(priorityId);
+
+      const fieldId = read(config['fieldId'] ?? config['customFieldId']);
       if (fieldId) fieldIds.add(fieldId);
     }
 
-    const [sections, members, statuses, fields] = await Promise.all([
+    const [sections, members, statuses, priorities, fields] = await Promise.all([
       sectionIds.size
         ? this.prisma.section.findMany({
             where: { id: { in: [...sectionIds] }, projectId },
@@ -167,6 +183,14 @@ export class AutomationGraphValidatorService {
             select: { id: true },
           })
         : [],
+      priorityIds.size
+        ? // Priorities are workspace-wide; unlike statuses, a project cannot
+          // define its own, so there is no project arm to check.
+          this.prisma.priorityDefinition.findMany({
+            where: { id: { in: [...priorityIds] }, workspaceId },
+            select: { id: true },
+          })
+        : [],
       fieldIds.size
         ? this.prisma.customField.findMany({
             where: { id: { in: [...fieldIds] }, workspaceId, isArchived: false },
@@ -178,6 +202,7 @@ export class AutomationGraphValidatorService {
     const liveSections = new Set(sections.map((row) => row.id));
     const liveMembers = new Set(members.map((row) => row.userId));
     const liveStatuses = new Set(statuses.map((row) => row.id));
+    const livePriorities = new Set(priorities.map((row) => row.id));
     const liveFields = new Set(fields.map((row) => row.id));
 
     for (const node of nodes) {
@@ -203,8 +228,8 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const statusId = read(config['statusDefinitionId']);
-      if (statusId && !liveStatuses.has(statusId)) {
+      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      if (statusId && !(statusId in TaskStatus) && !liveStatuses.has(statusId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
           nodeId: node.id,
@@ -213,7 +238,17 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const fieldId = read(config['customFieldId']);
+      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      if (priorityId && !(priorityId in TaskPriority) && !livePriorities.has(priorityId)) {
+        issues.push({
+          level: GraphIssueLevel.ERROR,
+          nodeId: node.id,
+          path: 'priority',
+          message: 'That priority is not available in this project.',
+        });
+      }
+
+      const fieldId = read(config['fieldId'] ?? config['customFieldId']);
       if (fieldId && !liveFields.has(fieldId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
