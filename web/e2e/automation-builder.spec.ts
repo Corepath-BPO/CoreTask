@@ -744,9 +744,9 @@ test.describe('the automation builder', () => {
      * two forms, so a "one of" that renders the single picker would be a rule
      * that can only ever name one section however it is labelled.
      */
-    await expect(rail.getByLabel('Choose a section')).toHaveCount(0);
+    await expect(rail.getByLabel('Choose a column/section')).toHaveCount(0);
 
-    const picker = rail.getByLabel('Choose sections');
+    const picker = rail.getByLabel('Choose one or more options for column/section');
     await expect(picker).toBeVisible();
     await picker.click();
 

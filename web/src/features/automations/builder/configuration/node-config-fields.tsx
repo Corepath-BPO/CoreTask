@@ -9,13 +9,7 @@ import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/typ
 
 import { Field } from '@/components/forms/field';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 import type { CanvasNode } from '../lib/graph-edits';
@@ -36,10 +30,20 @@ import {
   readTriggerForm,
   readTriggerSections,
 } from './trigger-forms';
+import { RadioItem } from './radio-item';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
-/** Radix `Select` treats `''` as "no value", so absence needs a real token. */
-const NONE = '__none__';
+/*
+ * Nothing chosen is an empty string, not a token.
+ *
+ * A sentinel like `__none__` matches no item, and a controlled Radix select
+ * holding a value it cannot find renders blank — so every one of these showed
+ * an empty box where its placeholder should have been, and a form that has not
+ * been filled in looked like one that had been filled in with nothing.
+ *
+ * An empty string is what Radix reads as "no selection", which is exactly the
+ * state being described, and it shows the placeholder.
+ */
 
 /**
  * The settings one step needs, and nothing else.
@@ -160,9 +164,9 @@ function TriggerFields({
           </SelectTrigger>
           <SelectContent>
             {forms.map((entry) => (
-              <SelectItem key={entry.form} value={entry.form}>
+              <RadioItem key={entry.form} value={entry.form}>
                 {entry.label}
-              </SelectItem>
+              </RadioItem>
             ))}
           </SelectContent>
         </Select>
@@ -172,7 +176,11 @@ function TriggerFields({
           watches every move and has nothing left to answer. */}
       {form.needsValue &&
         (form.multiple ? (
-          <Field label="Choose sections" htmlFor="trigger-sections">
+          /* The wording is the specification's, and it says "column/section"
+             because a section is a board column and a list group depending on
+             which view somebody came from — naming only one of them makes the
+             field look like it belongs to the other view. */
+          <Field label="Choose one or more options for column/section" htmlFor="trigger-sections">
             <MultiSelect
               id="trigger-sections"
               options={options}
@@ -182,19 +190,19 @@ function TriggerFields({
             />
           </Field>
         ) : (
-          <Field label="Choose a section" htmlFor="trigger-section">
+          <Field label="Choose a column/section" htmlFor="trigger-section">
             <Select
-              value={chosen[0] || NONE}
+              value={chosen[0] ?? ''}
               onValueChange={(next) => onChange(applyTriggerSections(configuration, form, [next]))}
             >
               <SelectTrigger id="trigger-section" className="w-full">
-                <SelectValue placeholder="Choose a section" />
+                <SelectValue placeholder="Choose a column/section" />
               </SelectTrigger>
               <SelectContent>
                 {options.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <RadioItem key={option.value} value={option.value}>
                     {option.label}
-                  </SelectItem>
+                  </RadioItem>
                 ))}
               </SelectContent>
             </Select>
@@ -270,15 +278,15 @@ function ConditionFields({
   return (
     <>
       <Field label="Field" htmlFor="condition-field">
-        <Select value={field || NONE} onValueChange={chooseField}>
+        <Select value={field ?? ''} onValueChange={chooseField}>
           <SelectTrigger id="condition-field" className="w-full">
             <SelectValue placeholder="Choose what to check" />
           </SelectTrigger>
           <SelectContent>
             {fields.map((entry) => (
-              <SelectItem key={entry.field} value={entry.field}>
+              <RadioItem key={entry.field} value={entry.field}>
                 {entry.label}
-              </SelectItem>
+              </RadioItem>
             ))}
           </SelectContent>
         </Select>
@@ -286,7 +294,7 @@ function ConditionFields({
 
       <Field label="Choose an option" htmlFor="condition-operator">
         <Select
-          value={operator || NONE}
+          value={operator ?? ''}
           onValueChange={(next) =>
             /* The value follows the operator's shape: "is" holds one section,
                "is one of" holds a list, "is empty" holds nothing at all. */
@@ -303,9 +311,9 @@ function ConditionFields({
           </SelectTrigger>
           <SelectContent>
             {operators.map((entry) => (
-              <SelectItem key={entry} value={entry}>
+              <RadioItem key={entry} value={entry}>
                 {operatorLabel(entry)}
-              </SelectItem>
+              </RadioItem>
             ))}
           </SelectContent>
         </Select>
@@ -369,15 +377,15 @@ function ConditionValue({
         placeholder="Choose values"
       />
     ) : (
-      <Select value={values[0] || NONE} onValueChange={(next) => onChange([next])}>
+      <Select value={values[0] ?? ''} onValueChange={(next) => onChange([next])}>
         <SelectTrigger id="condition-value" className="w-full">
           <SelectValue placeholder="Choose a value" />
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
+            <RadioItem key={option.value} value={option.value}>
               <OptionFace option={option} />
-            </SelectItem>
+            </RadioItem>
           ))}
         </SelectContent>
       </Select>
@@ -498,15 +506,15 @@ function ActionFields({
     placeholder: string,
   ) => (
     <Field label={label} htmlFor={`step-${key}`}>
-      <Select value={read(key) || NONE} onValueChange={(value) => set(key, value)}>
+      <Select value={read(key)} onValueChange={(value) => set(key, value)}>
         <SelectTrigger id={`step-${key}`} className="w-full">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {(options ?? []).map((option) => (
-            <SelectItem key={option.id} value={option.id}>
+            <RadioItem key={option.id} value={option.id}>
               {option.name}
-            </SelectItem>
+            </RadioItem>
           ))}
         </SelectContent>
       </Select>
@@ -613,7 +621,7 @@ function CustomFieldAction({
     <>
       <Field label="Field" htmlFor="step-custom-field">
         <Select
-          value={fieldId || NONE}
+          value={fieldId}
           onValueChange={(value) =>
             /*
              * One write, and the old value goes with it.
@@ -631,9 +639,9 @@ function CustomFieldAction({
           </SelectTrigger>
           <SelectContent>
             {fields.map((entry) => (
-              <SelectItem key={entry.id} value={entry.id}>
+              <RadioItem key={entry.id} value={entry.id}>
                 {entry.name}
-              </SelectItem>
+              </RadioItem>
             ))}
           </SelectContent>
         </Select>
@@ -643,15 +651,15 @@ function CustomFieldAction({
         <Field label="Value" htmlFor="step-custom-value">
           {field.type === 'CHECKBOX' ? (
             <Select
-              value={raw === true ? 'true' : raw === false ? 'false' : NONE}
+              value={raw === true ? 'true' : raw === false ? 'false' : ''}
               onValueChange={(value) => set('value', value === 'true')}
             >
               <SelectTrigger id="step-custom-value" className="w-full">
                 <SelectValue placeholder="Checked or not" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="true">Checked</SelectItem>
-                <SelectItem value="false">Not checked</SelectItem>
+                <RadioItem value="true">Checked</RadioItem>
+                <RadioItem value="false">Not checked</RadioItem>
               </SelectContent>
             </Select>
           ) : field.type === 'MULTI_SELECT' ? (
@@ -663,15 +671,15 @@ function CustomFieldAction({
               placeholder="Choose options"
             />
           ) : field.type === 'SINGLE_SELECT' ? (
-            <Select value={read('value') || NONE} onValueChange={(value) => set('value', value)}>
+            <Select value={read('value')} onValueChange={(value) => set('value', value)}>
               <SelectTrigger id="step-custom-value" className="w-full">
                 <SelectValue placeholder="Choose an option" />
               </SelectTrigger>
               <SelectContent>
                 {options.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <RadioItem key={option.value} value={option.value}>
                     <OptionFace option={option} />
-                  </SelectItem>
+                  </RadioItem>
                 ))}
               </SelectContent>
             </Select>
