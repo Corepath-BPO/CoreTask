@@ -510,6 +510,37 @@ test.describe('the automation builder', () => {
       .toContain('Large');
   });
 
+  test('the trigger card follows whichever shape was chosen', async ({ page }) => {
+    /*
+     * The card is where a rule is read without opening it, so a trigger that
+     * shows only its kind makes two rules firing on completely different moves
+     * look identical. Each shape has to reach the card, and "is not" has to say
+     * so — a list with no verb reads as the opposite rule.
+     */
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    const trigger = async () => (await nodeBoxes(page))[0]!.label;
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is not…' }).click();
+    await expect.poll(trigger, { timeout: 5000 }).toContain('not Incoming');
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+    await rail.getByLabel('Choose one or more options for column/section').click();
+    await page.getByRole('menuitemcheckbox').nth(1).click();
+    await page.keyboard.press('Escape');
+
+    await expect.poll(trigger, { timeout: 5000 }).toContain('one of');
+
+    // And the shape that names no section says nothing about one.
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is changed' }).click();
+
+    await expect.poll(trigger, { timeout: 5000 }).not.toContain('one of');
+  });
+
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {
     await openBuilder(page);
 
@@ -779,13 +810,15 @@ test.describe('the automation builder', () => {
     await page.getByRole('option', { name: 'Section', exact: true }).click();
 
     await rail.getByLabel('Choose an option').click();
+    // Named with the field, because the option is the whole condition — an
+    // operator on its own is a fragment somebody has to reassemble.
     await expect(page.getByRole('option')).toHaveText([
-      'is',
-      'is not',
-      'is one of',
-      'is not one of',
-      'is empty',
-      'is not empty',
+      'Section is…',
+      'Section is not…',
+      'Section is one of…',
+      'Section is not one of…',
+      'Section is empty',
+      'Section is not empty',
     ]);
     await page.keyboard.press('Escape');
 
@@ -795,8 +828,8 @@ test.describe('the automation builder', () => {
     await rail.getByLabel('Choose an option').click();
     const dates = await page.getByRole('option').allTextContents();
 
-    expect(dates).toContain('is before');
-    expect(dates).toContain('is overdue');
+    expect(dates).toContain('Due date is before…');
+    expect(dates).toContain('Due date is overdue');
     // Nothing on a date contains anything.
     expect(dates).not.toContain('contains');
 
@@ -820,18 +853,33 @@ test.describe('the automation builder', () => {
     const section = ((await page.getByRole('option').first().textContent()) ?? '').trim();
     await page.getByRole('option').first().click();
 
-    await expect(heading).toHaveText(`Section is ${section}`);
+    /*
+     * The heading names the question, and the card names the answer.
+     *
+     * It used to carry the value too, directly above the control holding it —
+     * the same thing twice, and a heading that rewrote itself as somebody typed
+     * into the field beneath it. The value moved to the card, which is where a
+     * rule is read without opening it.
+     */
+    await expect(heading).toHaveText('Section is');
 
     /*
-     * And it follows the operator, live.
+     * And something says the edit landed.
      *
-     * There is no save button on this panel, so the heading changing as the
-     * form is answered is the only thing that says an edit landed.
+     * There is no save button on this panel, so with the value gone from the
+     * heading the card is the only thing left that confirms it — which makes
+     * this worth asserting rather than assuming.
      */
-    await rail.getByLabel('Choose an option').click();
-    await page.getByRole('option', { name: 'is one of', exact: true }).click();
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain(section);
 
-    await expect(heading).toHaveText(`Section is one of ${section}`);
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…', exact: true }).click();
+
+    await expect(heading).toHaveText('Section is one of');
 
     // Never the id behind the name. One on a heading looks like data rather
     // than like a mistake, and the mistake is what needs noticing.

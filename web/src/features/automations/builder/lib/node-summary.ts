@@ -6,7 +6,22 @@ import {
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
+import { readTriggerSections } from '../configuration/trigger-forms';
+
 import type { CanvasNode } from './graph-edits';
+
+/**
+ * How each trigger shape reads on a card.
+ *
+ * An em dash for the plain "moved into this one", because there is no verb to
+ * say and "— Backlog" reads as a caption. The others need their verb or the
+ * card claims the opposite of the rule.
+ */
+const TRIGGER_FORM_VERB: Readonly<Record<string, string>> = {
+  SECTION_CHANGED_TO: '—',
+  SECTION_CHANGED_TO_NOT: '— not',
+  SECTION_CHANGED_TO_ANY_OF: '— one of',
+};
 
 /**
  * What a node says on the canvas.
@@ -58,17 +73,27 @@ export function summariseParts(
       if (node.subtype === '') return [{ text: 'Choose what starts this rule' }];
 
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
-      const sectionId = config['sectionId'];
 
-      if (typeof sectionId === 'string' && sectionId !== '') {
-        return [
-          { text: label },
-          { text: '—' },
-          { text: name(metadata?.sections, sectionId, 'any section'), chip: true },
-        ];
-      }
+      /*
+       * The card says what was chosen, not just what kind of trigger it is.
+       *
+       * The trigger grew four shapes — changed, is, is not, is one of — and this
+       * read a single `sectionId`, so three of them showed nothing at all. Two
+       * rules that fire on completely different moves looked identical on the
+       * canvas, which is the one place somebody checks a rule without opening
+       * it.
+       */
+      const sections = readTriggerSections(config);
+      const form = typeof config['form'] === 'string' ? (config['form'] as string) : '';
 
-      return [{ text: label }];
+      if (sections.length === 0) return [{ text: label }];
+
+      const named = sections.map((id) => name(metadata?.sections, id, 'any section'));
+
+      // The form's own words, so "is not" does not read as "is" with a list.
+      const verb = TRIGGER_FORM_VERB[form] ?? '—';
+
+      return [{ text: label }, { text: verb }, { text: named.join(', '), chip: true }];
     }
 
     case 'CONDITION':

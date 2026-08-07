@@ -313,7 +313,8 @@ function inspectorTitle(node: CanvasNode, metadata: AutomationMetadata | undefin
   }
 
   if (node.type === 'CONDITION' || node.type === 'BRANCH') {
-    return summariseCondition(node.configuration, metadata);
+    // Without the value: it lives in the control immediately below.
+    return summariseCondition(node.configuration, metadata, false);
   }
 
   return summarise(node, metadata);

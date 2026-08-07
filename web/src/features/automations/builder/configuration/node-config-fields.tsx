@@ -15,7 +15,8 @@ import { Textarea } from '@/components/ui/textarea';
 import type { CanvasNode } from '../lib/graph-edits';
 
 import {
-  operatorLabel,
+  canonicalOperator,
+  operatorOptionLabel,
   operatorsFor,
   readConditionValues,
   resolveValueType,
@@ -294,7 +295,7 @@ function ConditionFields({
 
       <Field label="Choose an option" htmlFor="condition-operator">
         <Select
-          value={operator ?? ''}
+          value={canonicalOperator(operator ?? '')}
           onValueChange={(next) =>
             /* The value follows the operator's shape: "is" holds one section,
                "is one of" holds a list, "is empty" holds nothing at all. */
@@ -312,7 +313,7 @@ function ConditionFields({
           <SelectContent>
             {operators.map((entry) => (
               <RadioItem key={entry} value={entry}>
-                {operatorLabel(entry)}
+                {operatorOptionLabel(definition?.label ?? '', entry)}
               </RadioItem>
             ))}
           </SelectContent>

@@ -1,4 +1,5 @@
 import {
+  CONDITION_OPERATOR,
   CONDITION_OPERATOR_LABEL,
   CONDITION_VALUE_TYPE,
   ConditionValueKind,
@@ -103,10 +104,46 @@ export function operatorsFor(
   stored: string,
 ): readonly ConditionOperator[] {
   const allowed = OPERATORS_BY_VALUE_TYPE[valueType];
+  const canonical = canonicalOperator(stored);
 
-  return stored !== '' && !allowed.includes(stored as ConditionOperator)
-    ? [...allowed, stored as ConditionOperator]
+  return canonical !== '' && !allowed.includes(canonical as ConditionOperator)
+    ? [...allowed, canonical as ConditionOperator]
     : allowed;
+}
+
+/**
+ * The operator a stored one means today.
+ *
+ * `EQUALS` and `NOT_EQUALS` are what conditions were written with before the
+ * type-aware lists existed, and they mean exactly what `IS` and `IS_NOT` mean.
+ * Left alone they appeared as a seventh entry called "equals" beside "is",
+ * which asks somebody to choose between two spellings of one thing — and the
+ * one they pick then decides whether the rule reads properly ever again.
+ */
+export function canonicalOperator(operator: string): string {
+  if (operator === 'EQUALS') return CONDITION_OPERATOR.IS;
+  if (operator === 'NOT_EQUALS') return CONDITION_OPERATOR.IS_NOT;
+
+  return operator;
+}
+
+/**
+ * An option in "Choose an option", read as the sentence it will become.
+ *
+ * The reference offers "Section is…" rather than "is", because the field is
+ * chosen elsewhere and an operator on its own is a fragment — a list reading
+ * "is / is not / is one of" makes somebody hold the field in their head to know
+ * what they are answering. With the field in the words, the option is the
+ * condition.
+ */
+export function operatorOptionLabel(fieldLabel: string, operator: string): string {
+  const verb = operatorLabel(operator);
+
+  // The ellipsis promises a second question; the emptiness checks ask nothing
+  // further, so promising one would be a lie.
+  const asks = operatorNeedsValue(operator as ConditionOperator);
+
+  return `${fieldLabel} ${verb}${asks ? '…' : ''}`;
 }
 
 /** How an operator reads. Humanised rather than shouted when it is a stranger. */
@@ -196,6 +233,15 @@ export function retargetValue(configuration: Record<string, unknown>, operator: 
 export function summariseCondition(
   configuration: Record<string, unknown>,
   metadata: AutomationMetadata | undefined,
+  /**
+   * Whether to name the value as well as the question.
+   *
+   * A card is read at a distance and has to say what the rule does, so it needs
+   * the value. The panel's heading sits directly above the control holding that
+   * value — repeating it there says the same thing twice and leaves a heading
+   * that changes as somebody types into the field beneath it.
+   */
+  withValue = true,
 ): string {
   const field = configuration['field'];
   if (typeof field !== 'string' || field === '') return 'Choose what to check';
@@ -206,7 +252,9 @@ export function summariseCondition(
   const operator = configuration['operator'];
   if (typeof operator !== 'string' || operator === '') return `${label} …`;
 
-  const words = operatorLabel(operator);
+  const words = operatorLabel(canonicalOperator(operator));
+
+  if (!withValue) return `${label} ${words}`;
 
   // An emptiness check carries its whole question in the operator, so there is
   // no value to name after it.
