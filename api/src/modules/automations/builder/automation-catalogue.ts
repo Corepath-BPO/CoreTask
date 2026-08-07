@@ -163,13 +163,21 @@ export function runnerCanPerform(subtype: string): boolean {
  * two different jobs is how one of them ends up wrong.
  */
 export const CONDITION_CATEGORY = {
+  /*
+   * First, because the catalogue is iterated in the order this is declared.
+   *
+   * "Create your own" is the widest offer in the list and belongs at the top
+   * where somebody arriving with a question no row answers will see it, rather
+   * than after six groups they have already read past. That it is the one entry
+   * nobody can pick yet is the reason to keep it visible, not to bury it.
+   */
+  CREATE_YOUR_OWN: 'Create your own',
   TASK_MOVED: 'Task moved',
   TASK_FIELD: 'Task field is',
   STATUS: 'Status is',
   TASK_DETAILS: 'Task details',
   CUSTOM_FIELD: 'Custom field is',
   TASK_HAS: 'Task has',
-  CREATE_YOUR_OWN: 'Create your own',
 } as const;
 
 /** The action catalogue's groups, in the order it shows them. */
@@ -416,13 +424,6 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Task description is…',
     category: CONDITION_CATEGORY.TASK_FIELD,
     valueType: CONDITION_VALUE_TYPE.TEXT,
-    /*
-     * The one field in this group the runner cannot reach. `readField` has a
-     * case for the title and none for the description, so the comparison would
-     * read `undefined` and quietly fail on every task — which is why it is
-     * greyed rather than offered and left to disappoint somebody later.
-     */
-    reason: 'The engine reads a task’s name but not its description.',
   },
   {
     subtype: 'dueDate',
