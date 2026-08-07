@@ -4,6 +4,7 @@ import {
   CONDITION_VALUE_TYPE,
   ConditionValueKind,
   OPERATORS_BY_VALUE_TYPE,
+  operatorsForConditionField,
   operatorNeedsValue,
   operatorTakesMultipleValues,
   type ConditionOperator,
@@ -102,8 +103,9 @@ export function resolveValueType(
 export function operatorsFor(
   valueType: ConditionValueType,
   stored: string,
+  field = '',
 ): readonly ConditionOperator[] {
-  const allowed = OPERATORS_BY_VALUE_TYPE[valueType];
+  const allowed = operatorsForConditionField(field, valueType);
   const canonical = canonicalOperator(stored);
 
   return canonical !== '' && !allowed.includes(canonical as ConditionOperator)
@@ -166,7 +168,11 @@ export function valueFieldLabel(
   valueType: ConditionValueType,
   multiple: boolean,
 ): string {
-  if (definition.field === 'sectionId') return 'Choose a column/section';
+  if (definition.field === 'sectionId') {
+    // "is one of" takes a set, and asking for "a column/section" beside a list
+    // of checkboxes tells somebody they may pick one when they may pick several.
+    return multiple ? 'Choose one or more options for column/section' : 'Choose a column/section';
+  }
 
   switch (valueType) {
     case CONDITION_VALUE_TYPE.PEOPLE:

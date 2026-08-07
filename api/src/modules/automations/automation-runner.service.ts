@@ -12,6 +12,7 @@ import {
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
   NotificationType,
+  toFilterOperator,
   type AutomationTrigger,
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
@@ -375,7 +376,7 @@ export class AutomationRunnerService {
   private conditionHolds(node: AutomationNode, task: Task, event: AutomationEvent): boolean {
     const config = (node.configuration ?? {}) as {
       field?: string;
-      operator?: FilterOperator;
+      operator?: string;
       value?: unknown;
     };
 
@@ -392,7 +393,16 @@ export class AutomationRunnerService {
     const actual = this.readField(config.field ?? node.subtype, task, event);
     const expected = config.value;
 
-    switch (config.operator) {
+    /*
+     * The comparison this operator names, whichever vocabulary named it.
+     *
+     * The builder writes the reading names — `IS`, `IS_ONE_OF`, `IS_BEFORE` —
+     * and rules written before those existed hold the query engine's names.
+     * Both spellings mean one comparison, so both are translated to it here
+     * rather than duplicating every case below. An operator with no comparison
+     * still falls to `default` and blocks the rule.
+     */
+    switch (toFilterOperator(config.operator)) {
       case FilterOperator.EQUALS:
         return String(actual ?? '') === String(expected ?? '');
       case FilterOperator.NOT_EQUALS:

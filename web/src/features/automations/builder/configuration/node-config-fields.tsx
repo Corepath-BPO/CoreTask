@@ -231,6 +231,15 @@ function TriggerFields({
  * list is not built — so without this control a condition added on the canvas
  * could never be told what it is about.
  */
+/**
+ * What a condition checks when nothing says otherwise.
+ *
+ * The section, because that is what these rules are about: every trigger the
+ * builder offers is a move between sections, and a branch asking about anything
+ * else would be answering a question the rule was not asked.
+ */
+const DEFAULT_CONDITION_FIELD = 'sectionId';
+
 function ConditionFields({
   configuration,
   metadata,
@@ -242,57 +251,33 @@ function ConditionFields({
 }) {
   const fields = metadata?.conditionFields ?? [];
 
-  const field = typeof configuration['field'] === 'string' ? configuration['field'] : '';
+  /*
+   * The field a condition checks, which the panel states rather than asks.
+   *
+   * The reference has no field picker: a condition is a section check, and its
+   * heading already says so — "Check if… / Section is". A select whose only
+   * entry is the one already chosen is a question with one answer, and it read
+   * as the first of three steps when there are two.
+   *
+   * Still a real key in the configuration rather than an assumption made at
+   * evaluation, because the runner compares against `field` and a condition
+   * that did not say which one would compare against the node's subtype.
+   */
+  const field =
+    typeof configuration['field'] === 'string' && configuration['field'] !== ''
+      ? configuration['field']
+      : DEFAULT_CONDITION_FIELD;
   const operator = typeof configuration['operator'] === 'string' ? configuration['operator'] : '';
 
   const definition = fields.find((entry) => entry.field === field);
   const valueType = definition ? resolveValueType(definition, metadata) : null;
-  const operators = valueType ? operatorsFor(valueType, operator) : [];
+  const operators = valueType ? operatorsFor(valueType, operator, field) : [];
 
   const multiple = operatorTakesMultipleValues(operator as ConditionOperator);
   const values = readConditionValues(configuration);
 
-  /*
-   * One write, not three.
-   *
-   * The operator and value belong to the old field — keeping them leaves "Due
-   * date contains High" sitting in the form. They have to be cleared in the same
-   * object as the new field, because each call builds on the configuration this
-   * render was given and three of them in a row would keep only the last.
-   *
-   * The new field's commonest comparison is filled in rather than left blank:
-   * `OPERATORS_BY_VALUE_TYPE` is ordered so the first is the one almost every
-   * condition wants, and an empty second field is a question whose answer the
-   * panel already knows.
-   */
-  const chooseField = (next: string) => {
-    const chosen = fields.find((entry) => entry.field === next);
-
-    onChange({
-      ...configuration,
-      field: next,
-      operator: chosen ? (operatorsFor(resolveValueType(chosen, metadata), '')[0] ?? '') : '',
-      value: undefined,
-    });
-  };
-
   return (
     <>
-      <Field label="Field" htmlFor="condition-field">
-        <Select value={field ?? ''} onValueChange={chooseField}>
-          <SelectTrigger id="condition-field" className="w-full">
-            <SelectValue placeholder="Choose what to check" />
-          </SelectTrigger>
-          <SelectContent>
-            {fields.map((entry) => (
-              <RadioItem key={entry.field} value={entry.field}>
-                {entry.label}
-              </RadioItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-
       <Field label="Choose an option" htmlFor="condition-operator">
         <Select
           value={canonicalOperator(operator ?? '')}
@@ -301,6 +286,10 @@ function ConditionFields({
                "is one of" holds a list, "is empty" holds nothing at all. */
             onChange({
               ...configuration,
+              // Written alongside the operator, because the picker that used to
+              // write it is gone — a condition saved without one compares
+              // against its subtype and matches nothing.
+              field,
               operator: next,
               value: retargetValue(configuration, next),
             })
@@ -334,7 +323,7 @@ function ConditionFields({
               values={values}
               metadata={metadata}
               onChange={(next) =>
-                onChange({ ...configuration, value: valueForOperator(next, operator) })
+                onChange({ ...configuration, field, value: valueForOperator(next, operator) })
               }
             />
           </Field>

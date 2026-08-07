@@ -220,6 +220,80 @@ describe('Automations (e2e)', () => {
       expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
     });
 
+    it('evaluates a section condition in the words the builder writes', async () => {
+      /*
+       * The builder names comparisons the way a person reads them — `IS`,
+       * `IS_ONE_OF` — and the evaluator only knew the query engine's names.
+       * Rules seeded before the reading names existed hold `EQUALS`, so every
+       * condition that worked kept working and nothing pointed at the hole:
+       * only conditions built or edited in the panel were dead, and they were
+       * dead silently.
+       */
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'sectionId', operator: 'IS', value: scope.sectionId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('evaluates "is one of" against the list it was given', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: {
+            field: 'sectionId',
+            operator: 'IS_ONE_OF',
+            value: [scope.otherSectionId, scope.sectionId],
+          },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('still blocks when the builder’s condition does not hold', async () => {
+      // The other half. A translation that made every operator pass would make
+      // these tests green and every rule fire on everything.
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'sectionId', operator: 'IS_NOT', value: scope.sectionId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBeNull();
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.

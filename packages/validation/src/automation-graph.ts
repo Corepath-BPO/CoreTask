@@ -7,6 +7,7 @@ import {
   isFallbackBranch,
   OPERATORS_BY_VALUE_KIND,
   operatorTakesValue,
+  toFilterOperator,
   PLACEHOLDER_NODE_TYPE,
   type FilterOperator,
   type AutomationNodeType as NodeType,
@@ -407,7 +408,20 @@ function validateBranches(nodes: readonly ValidatableNode[]): GraphIssue[] {
  * is not a check.
  */
 export function operatorFitsValueKind(operator: string, kind: ConditionValueKind): boolean {
-  return OPERATORS_BY_VALUE_KIND[kind].includes(operator as FilterOperator);
+  /*
+   * Translated first, because the builder and this table name the same
+   * comparison differently.
+   *
+   * The panel writes `IS`; the table lists `EQUALS`. Compared as strings, every
+   * section condition the builder can produce was refused with "“IS” cannot be
+   * used with this kind of field" — the panel building something the endpoint
+   * would not accept, which is the disagreement sharing this module exists to
+   * prevent. An operator with no comparison behind it still fails, which is the
+   * check doing its job.
+   */
+  const comparison = toFilterOperator(operator);
+
+  return comparison !== null && OPERATORS_BY_VALUE_KIND[kind].includes(comparison);
 }
 
 export function validateCondition(
@@ -458,7 +472,9 @@ export function validateCondition(
     });
   }
 
-  if (operatorTakesValue(operator as FilterOperator)) {
+  // Also translated: "is one of" with no sections chosen has to be caught as a
+  // missing value, not waved through because the name was unrecognised.
+  if (operatorTakesValue(toFilterOperator(operator) ?? (operator as FilterOperator))) {
     const value = configuration['value'];
 
     if (value === undefined || value === null || value === '') {

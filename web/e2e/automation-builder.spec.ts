@@ -155,6 +155,19 @@ test.describe('the automation builder', () => {
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
   };
 
+  /**
+   * A new rule opened from a section, which is how one is really started.
+   *
+   * The shared fixture rule checks Priority, and with no field picker a
+   * condition's field is now settled when the rule is created — so a test about
+   * the section comparisons has to start from the section.
+   */
+  const openSectionRule = async (page: Page) => {
+    await page.goto(`/projects/${api.projectId}/automations/new?sectionId=${api.sectionId}`);
+
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+  };
+
   /** Every node's box, from the browser rather than from the model. */
   const nodeBoxes = async (page: Page) =>
     page.evaluate(() =>
@@ -917,17 +930,22 @@ test.describe('the automation builder', () => {
     await expect(picker).toContainText(second);
   });
 
-  test('the comparisons on offer follow the field being checked', async ({ page }) => {
+  test('a condition offers the three comparisons a section has', async ({ page }) => {
     /*
-     * "Due date contains High" is the combination this exists to prevent. The
-     * endpoint refuses it too, so the form is a convenience — but a form that
-     * offers it makes somebody build a rule that cannot be saved.
+     * Three, not the six its type would give.
+     *
+     * Every task in a project sits in a section, so "is empty" can never hold;
+     * and "is not one of" asks the same question as "is one of" backwards.
+     * Offering them makes somebody choose between spellings of one thing, and
+     * the one they pick decides whether the rule reads properly afterwards.
+     *
+     * There is no field picker to reach them through — the condition is a
+     * section check and its heading says so.
      */
-    await openBuilder(page);
+    await openSectionRule(page);
     const rail = await openStep(page, /Check if/);
 
-    await rail.getByLabel('Field', { exact: true }).click();
-    await page.getByRole('option', { name: 'Section', exact: true }).click();
+    await expect(rail.getByLabel('Field', { exact: true })).toHaveCount(0);
 
     await rail.getByLabel('Choose an option').click();
     // Named with the field, because the option is the whole condition — an
@@ -936,35 +954,49 @@ test.describe('the automation builder', () => {
       'Section is…',
       'Section is not…',
       'Section is one of…',
-      'Section is not one of…',
-      'Section is empty',
-      'Section is not empty',
     ]);
-    await page.keyboard.press('Escape');
-
-    await rail.getByLabel('Field', { exact: true }).click();
-    await page.getByRole('option', { name: 'Due date' }).click();
-
-    await rail.getByLabel('Choose an option').click();
-    const dates = await page.getByRole('option').allTextContents();
-
-    expect(dates).toContain('Due date is before…');
-    expect(dates).toContain('Due date is overdue');
-    // Nothing on a date contains anything.
-    expect(dates).not.toContain('contains');
 
     await page.keyboard.press('Escape');
   });
 
+  test('“is one of” asks for several sections and names them on the card', async ({ page }) => {
+    /*
+     * The list half of the condition, end to end.
+     *
+     * "Is one of" holds an array where the other two hold a string, and every
+     * layer had to be told: the panel asks for more than one, the card names
+     * what was chosen instead of printing "…", and the operator reads as words
+     * rather than as `is_one_of`.
+     */
+    await openSectionRule(page);
+    const rail = await openStep(page, /Check if/);
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+
+    // The wording changes with the shape: one section, or a set of them.
+    await expect(rail.getByText('Choose one or more options for column/section')).toBeVisible();
+
+    await rail.getByLabel('Choose one or more options for column/section').click();
+    const first = page.getByRole('menuitemcheckbox').first();
+    const chosen = ((await first.textContent()) ?? '').trim();
+    await first.click();
+    await page.keyboard.press('Escape');
+
+    const card = page.locator('.react-flow__node', { hasText: 'Check if' }).first();
+
+    await expect(card).toContainText('Section is one of');
+    await expect(card).toContainText(chosen);
+    // The failure this replaces: the card showed the stored key.
+    await expect(card).not.toContainText('is_one_of');
+  });
+
   test('the condition reads as a sentence, and never as an identifier', async ({ page }) => {
-    await openBuilder(page);
+    await openSectionRule(page);
     const rail = await openStep(page, /Check if/);
     const heading = rail.getByRole('heading', { level: 2 });
 
     await expect(rail.getByText('Check if… /')).toBeVisible();
-
-    await rail.getByLabel('Field', { exact: true }).click();
-    await page.getByRole('option', { name: 'Section', exact: true }).click();
 
     // The section field asks in the words of the thing it is asking about.
     const value = rail.getByLabel('Choose a column/section');

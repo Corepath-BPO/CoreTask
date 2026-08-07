@@ -3,9 +3,13 @@ import {
   NODE_CATEGORY_LABEL,
   TRIGGER_LABEL,
   isFallbackBranch,
+  operatorNeedsValue,
+  toFilterOperator,
   type AutomationAction,
   type AutomationNodeType,
   type AutomationTrigger,
+  type ConditionOperator,
+  type FilterOperator,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -223,7 +227,17 @@ function conditionSummary(
   if (typeof field !== 'string' || field === '') return [{ text: 'Choose what to check' }];
 
   const definition = metadata?.conditionFields.find((entry) => entry.field === field);
-  const label = definition?.label ?? field;
+
+  /*
+   * A name, never the stored key.
+   *
+   * The metadata arrives after the first paint, so for one frame `definition`
+   * is undefined and the card read "sectionId is 019fc8d5-5370-…" — the rule
+   * showing its plumbing to somebody who has just opened it. The fallbacks
+   * cover the fields a rule can actually hold; anything else is humanised
+   * rather than printed raw.
+   */
+  const label = definition?.label ?? SYSTEM_FIELD_LABEL[field] ?? humaniseEnum(field);
 
   if (typeof operator !== 'string' || operator === '') return [{ text: `${label} …` }];
 
@@ -233,6 +247,32 @@ function conditionSummary(
   if (operator === 'IS_NOT_EMPTY') return [{ text: `${label} is set` }];
 
   const raw = config['value'];
+
+  /*
+   * "Is one of" holds a list, and the card has to name what is in it.
+   *
+   * Matched against the same options the panel chose from, so the card says
+   * "Incoming Request" where the configuration holds an id. An unmatched entry
+   * keeps its humanised token rather than being dropped: a chip missing from
+   * the card is somebody believing their rule checks two sections when it
+   * checks three.
+   */
+  if (Array.isArray(raw)) {
+    const chips = raw
+      .filter((entry): entry is string => typeof entry === 'string' && entry !== '')
+      .map((entry) => ({
+        text:
+          definition?.options?.find((option) => option.value === entry)?.label ??
+          readableValue(entry),
+        chip: true,
+      }));
+
+    return [
+      { text: `${label} ${conditionVerb(operator)}` },
+      ...(chips.length > 0 ? chips : [{ text: '…', chip: true }]),
+    ];
+  }
+
   const option = definition?.options?.find((entry) => entry.value === raw);
 
   /*
@@ -244,22 +284,64 @@ function conditionSummary(
    * humanised rather than printed, because "Priority is HIGH" is the card
    * shouting an implementation detail at somebody.
    */
-  const value = option?.label ?? (typeof raw === 'string' && raw !== '' ? humaniseEnum(raw) : '…');
+  const value = option?.label ?? readableValue(raw);
 
-  const verb: Record<string, string> = {
+  return [{ text: `${label} ${conditionVerb(operator)}` }, { text: value, chip: true }];
+}
+
+/**
+ * How an operator reads on a card, in either vocabulary.
+ *
+ * The builder writes `IS_ONE_OF` and older rules hold `IN`; both are one verb.
+ * Keyed on the comparison rather than the spelling so a card never falls back
+ * to printing the key — "Section is_one_of" is the card showing its wiring.
+ */
+function conditionVerb(operator: string): string {
+  const verb: Partial<Record<FilterOperator, string>> = {
     EQUALS: 'is',
     NOT_EQUALS: 'is not',
     CONTAINS: 'contains',
+    NOT_CONTAINS: 'does not contain',
+    IN: 'is one of',
+    NOT_IN: 'is not one of',
     GREATER_THAN: 'is more than',
     LESS_THAN: 'is less than',
     BEFORE: 'is before',
     AFTER: 'is after',
   };
 
-  return [
-    { text: `${label} ${verb[operator] ?? operator.toLowerCase()}` },
-    { text: value, chip: true },
-  ];
+  const comparison = toFilterOperator(operator);
+
+  return (comparison && verb[comparison]) ?? operator.toLowerCase().replace(/_/g, ' ');
+}
+
+/**
+ * What the fields a rule can hold are called, before the metadata says.
+ *
+ * Only the ones a condition is written against. Anything outside this list is
+ * humanised instead, which is still a word rather than a key.
+ */
+const SYSTEM_FIELD_LABEL: Record<string, string> = {
+  sectionId: 'Section',
+  status: 'Status',
+  priority: 'Priority',
+  assigneeId: 'Assignee',
+  dueDate: 'Due date',
+  startDate: 'Start date',
+  title: 'Title',
+};
+
+/**
+ * A value somebody can read, or an ellipsis promising one.
+ *
+ * An id is never shown. Until the metadata arrives there is nothing to match it
+ * against, and "Section is 019fc8d5-5370-7593" is a card that has told somebody
+ * nothing and looks broken doing it — the ellipsis at least reads as loading.
+ */
+function readableValue(raw: unknown): string {
+  if (typeof raw !== 'string' || raw === '') return '…';
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) ? '…' : humaniseEnum(raw);
 }
 
 /** `IN_PROGRESS` -> `In progress`. Left alone when it is not an enum token. */
@@ -392,10 +474,21 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
 
     if (!has('field') || !has('operator')) return true;
 
-    const operator = config['operator'];
-    const needsValue = operator !== 'IS_EMPTY' && operator !== 'IS_NOT_EMPTY';
+    const value = config['value'];
 
-    return needsValue && config['value'] === undefined;
+    if (!operatorNeedsValue(config['operator'] as ConditionOperator)) return false;
+
+    /*
+     * An empty list counts as unanswered.
+     *
+     * "Is one of" writes `[]` when somebody opens the picker and chooses
+     * nothing, which is not `undefined` — so the card read as complete and the
+     * rule published a comparison against no sections, matching nothing for
+     * ever without a word.
+     */
+    if (Array.isArray(value)) return value.length === 0;
+
+    return value === undefined || value === null || value === '';
   }
 
   if (node.type !== 'ACTION') return false;

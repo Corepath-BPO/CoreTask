@@ -113,7 +113,23 @@ export function NodeConfigRail({
          * must agree eventually stop agreeing.
          */
         '[--rail-width:28rem] max-lg:[--rail-width:min(28rem,calc(100vw-3rem))]',
-        'flex w-(--rail-width) shrink-0 flex-col overflow-hidden border-l border-border bg-background',
+        /*
+         * A surface of its own, so the panel is a place rather than an edge.
+         *
+         * The canvas is `background` and so was this, which left a 1px border
+         * doing all the separating — at a glance the form looked like it was
+         * floating on the canvas rather than sitting beside it.
+         *
+         * Two tokens because no single one separates in both themes. `card` is
+         * the same white as `background` in the light theme and would have
+         * vanished there; `muted` in the dark theme is 10% brighter than the
+         * page and reads as a different application. Measured against the
+         * canvas, this pair lands about 3–4% either side in both — recessed
+         * against a white page, raised against a dark one, which is the way
+         * round each theme expects.
+         */
+        'flex w-(--rail-width) shrink-0 flex-col overflow-hidden border-l border-border',
+        'bg-muted dark:bg-card',
         'outline-none',
         /*
          * Over the canvas rather than beside it, once beside stops working.

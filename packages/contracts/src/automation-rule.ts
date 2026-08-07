@@ -1,4 +1,5 @@
 import { AutomationTrigger } from './automation.js';
+import { FILTER_OPERATORS, FilterOperator } from './query.js';
 
 /**
  * The vocabulary of a rule as an ordered list of branches.
@@ -261,6 +262,36 @@ export const VALUELESS_CONDITION_OPERATORS: readonly ConditionOperator[] = [
 ];
 
 /**
+ * Fields that offer fewer comparisons than their type would.
+ *
+ * A section is a `SINGLE_SELECT`, so the type table would offer six — including
+ * "is not one of" and the two emptiness checks. Every task in a project sits in
+ * a section, so "section is empty" is a condition that can never hold, and "is
+ * not one of" is the same question as "is one of" asked backwards. Three is
+ * what the reference offers and all three read as a sentence.
+ *
+ * By field rather than by type, because status and priority are the same type
+ * and do want the full list — a task can genuinely have no priority.
+ */
+export const OPERATORS_BY_CONDITION_FIELD: Partial<Record<string, readonly ConditionOperator[]>> = {
+  sectionId: [CONDITION_OPERATOR.IS, CONDITION_OPERATOR.IS_NOT, CONDITION_OPERATOR.IS_ONE_OF],
+};
+
+/**
+ * The comparisons a field offers, narrowed by field where one is narrower.
+ *
+ * Shared because the API validates what the form builds: a condition the panel
+ * would not let somebody make must also be one the endpoint refuses, or the
+ * restriction is decoration.
+ */
+export function operatorsForConditionField(
+  field: string,
+  valueType: ConditionValueType,
+): readonly ConditionOperator[] {
+  return OPERATORS_BY_CONDITION_FIELD[field] ?? OPERATORS_BY_VALUE_TYPE[valueType] ?? [];
+}
+
+/**
  * Operators whose value is a list rather than a scalar.
  *
  * `BETWEEN` belongs here even though it is not a "one of" form: its value is
@@ -282,6 +313,71 @@ export function operatorNeedsValue(operator: ConditionOperator): boolean {
 /** Whether that value control accepts several values. */
 export function operatorTakesMultipleValues(operator: ConditionOperator): boolean {
   return MULTI_VALUE_CONDITION_OPERATORS.includes(operator);
+}
+
+/**
+ * The comparison a condition operator actually performs.
+ *
+ * Two vocabularies grew up either side of the same stored row. The builder
+ * writes what a person reads — `IS`, `IS_ONE_OF`, `IS_BEFORE` — while the
+ * runner evaluates with the query engine's names — `EQUALS`, `IN`, `BEFORE`.
+ * They overlap only on `CONTAINS` and the emptiness checks, so a condition
+ * built today stored `IS`, reached the runner's switch, matched no case and
+ * returned false: the rule published cleanly and could never fire.
+ *
+ * Kept as a translation rather than by renaming either side. `EQUALS` is what
+ * conditions were written with before the type-aware lists existed and is still
+ * in the database, so the runner has to keep understanding it; and the reading
+ * names are what the panel says out loud. Mapping at evaluation lets both
+ * spellings mean one comparison without a migration.
+ */
+export const FILTER_OPERATOR_BY_CONDITION_OPERATOR: Partial<
+  Record<ConditionOperator, FilterOperator>
+> = {
+  [CONDITION_OPERATOR.IS]: FilterOperator.EQUALS,
+  [CONDITION_OPERATOR.IS_NOT]: FilterOperator.NOT_EQUALS,
+  [CONDITION_OPERATOR.EQUALS]: FilterOperator.EQUALS,
+  [CONDITION_OPERATOR.DOES_NOT_EQUAL]: FilterOperator.NOT_EQUALS,
+  [CONDITION_OPERATOR.IS_ONE_OF]: FilterOperator.IN,
+  [CONDITION_OPERATOR.IS_NOT_ONE_OF]: FilterOperator.NOT_IN,
+  [CONDITION_OPERATOR.INCLUDES]: FilterOperator.IN,
+  [CONDITION_OPERATOR.DOES_NOT_INCLUDE]: FilterOperator.NOT_IN,
+  [CONDITION_OPERATOR.CONTAINS]: FilterOperator.CONTAINS,
+  [CONDITION_OPERATOR.DOES_NOT_CONTAIN]: FilterOperator.NOT_CONTAINS,
+  [CONDITION_OPERATOR.IS_BEFORE]: FilterOperator.BEFORE,
+  [CONDITION_OPERATOR.IS_AFTER]: FilterOperator.AFTER,
+  [CONDITION_OPERATOR.GREATER_THAN]: FilterOperator.GREATER_THAN,
+  [CONDITION_OPERATOR.GREATER_THAN_OR_EQUAL]: FilterOperator.GREATER_THAN_OR_EQUAL,
+  [CONDITION_OPERATOR.LESS_THAN]: FilterOperator.LESS_THAN,
+  [CONDITION_OPERATOR.LESS_THAN_OR_EQUAL]: FilterOperator.LESS_THAN_OR_EQUAL,
+  [CONDITION_OPERATOR.IS_EMPTY]: FilterOperator.IS_EMPTY,
+  [CONDITION_OPERATOR.IS_NOT_EMPTY]: FilterOperator.IS_NOT_EMPTY,
+};
+
+/**
+ * What a stored operator compares with, or null when nothing can compare it.
+ *
+ * Null rather than a default comparison, because the operators with no entry —
+ * `IS_TODAY`, `IS_OVERDUE`, `IS_WITHIN_NEXT`, `CONTAINS_ANY_OF`, `BETWEEN`,
+ * `IS_CHECKED` — are ones the engine genuinely cannot evaluate yet. Guessing
+ * `EQUALS` for them would turn "cannot run this" into "ran it and it was
+ * false", which is the failure this whole translation exists to end.
+ */
+export function toFilterOperator(operator: string | null | undefined): FilterOperator | null {
+  if (!operator) return null;
+
+  // Already a query-engine name: the shape every condition written before the
+  // reading names existed still has in the database.
+  if ((FILTER_OPERATORS as readonly string[]).includes(operator)) {
+    return operator as FilterOperator;
+  }
+
+  return FILTER_OPERATOR_BY_CONDITION_OPERATOR[operator as ConditionOperator] ?? null;
+}
+
+/** Whether the engine can evaluate this operator at all. */
+export function isEvaluableOperator(operator: string | null | undefined): boolean {
+  return toFilterOperator(operator) !== null;
 }
 
 /* -------------------------------------------------------------------------- */
