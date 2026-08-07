@@ -84,10 +84,31 @@ export function toInputValue(iso: string | null | undefined, withTime: boolean):
   return withTime ? iso.slice(0, 16) : iso.slice(0, 10);
 }
 
-/** The reverse: what the input gives back, as something the API will store. */
+/**
+ * The reverse: what the input gives back, as something the API will store.
+ *
+ * Both branches read the input as UTC, because `toInputValue` writes UTC.
+ *
+ * The time branch used to hand `new Date` a bare `yyyy-mm-ddThh:mm`, which the
+ * language parses as *local* time — while the value it was parsing had been
+ * sliced out of a UTC timestamp. So every edit moved the field by the reader's
+ * offset: a 14:30 deadline opened as 14:30, saved as 06:30, and opened as 06:30
+ * the next time. Nothing rejected it, and eight hours is a plausible enough
+ * time that the drift only reads as wrong once it has happened twice.
+ *
+ * UTC on both sides rather than local on both, so this agrees with the
+ * date-only branch below, which has always pinned to UTC midnight. The two must
+ * mean the same thing by the stored instant or switching a field between them
+ * would move it.
+ */
 export function fromInputValue(raw: string, withTime: boolean): string | null {
   if (!raw) return null;
-  return withTime ? new Date(raw).toISOString() : new Date(`${raw}T00:00:00.000Z`).toISOString();
+  if (!withTime) return new Date(`${raw}T00:00:00.000Z`).toISOString();
+
+  // Some browsers include seconds once they have been set; most give minutes.
+  const seconds = raw.length > 16 ? '' : ':00';
+
+  return new Date(`${raw}${seconds}.000Z`).toISOString();
 }
 
 /** The types whose cells are a plain input plus a rendering. */
