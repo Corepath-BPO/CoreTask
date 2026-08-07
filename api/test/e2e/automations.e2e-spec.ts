@@ -294,6 +294,64 @@ describe('Automations (e2e)', () => {
       expect(await assigneeAfterRun(scope)).toBeNull();
     });
 
+    it('evaluates the fields the catalogue newly offers', async () => {
+      /*
+       * Description and task creator, added so the catalogue can offer them.
+       *
+       * The rule the owner set: nothing is offered that does not run. Asserted
+       * through the runner rather than by checking the metadata lists them,
+       * because a field appearing in a dropdown is exactly the symptom this
+       * guards against.
+       */
+      const scope = await setupScope();
+
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { description: 'Needs triage' },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'description', operator: 'CONTAINS', value: 'triage' },
+        },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'createdById', operator: 'IS', value: scope.owner.userId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('blocks on a description that does not match', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'description', operator: 'CONTAINS', value: 'triage' },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBeNull();
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.

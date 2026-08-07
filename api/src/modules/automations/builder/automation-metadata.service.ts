@@ -231,7 +231,22 @@ export class AutomationMetadataService {
         valueKind: ConditionValueKind.REFERENCE,
         options: members.map((row) => ({ value: row.user.id, label: row.user.name })),
       },
+      {
+        /*
+         * Offered because the runner already reads it.
+         *
+         * `createdById` had a case in `readField` and no entry here, so the one
+         * layer that decides what the builder may offer left out a comparison
+         * the engine could have made all along — the mirror of offering one it
+         * cannot, and just as invisible.
+         */
+        field: 'createdById',
+        label: 'Task creator',
+        valueKind: ConditionValueKind.REFERENCE,
+        options: members.map((row) => ({ value: row.user.id, label: row.user.name })),
+      },
       { field: 'title', label: 'Title', valueKind: ConditionValueKind.TEXT },
+      { field: 'description', label: 'Description', valueKind: ConditionValueKind.TEXT },
       { field: 'dueDate', label: 'Due date', valueKind: ConditionValueKind.DATE },
       { field: 'startDate', label: 'Start date', valueKind: ConditionValueKind.DATE },
     ];

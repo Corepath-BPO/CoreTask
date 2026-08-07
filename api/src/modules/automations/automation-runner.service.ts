@@ -472,6 +472,11 @@ export class AutomationRunnerService {
         return task.createdById;
       case 'title':
         return task.title;
+      // Null rather than the empty string, so "description is empty" holds for
+      // a task nobody has described — `IS_EMPTY` tests both, but a comparison
+      // against text would otherwise match '' and read as a real answer.
+      case 'description':
+        return task.description;
       case 'completed':
         return task.completedAt !== null;
 
