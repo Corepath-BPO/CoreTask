@@ -1,13 +1,6 @@
+import { GRAPH_LAYOUT } from '@coretask/contracts';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-import {
-  CopyPlus,
-  CornerDownRight,
-  GitBranch,
-  MoreHorizontal,
-  Plus,
-  Trash2,
-  type LucideIcon,
-} from 'lucide-react';
+import { CopyPlus, GitBranch, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 
 import {
   DropdownMenu,
@@ -19,12 +12,8 @@ import { cn } from '@/lib/utils';
 
 /** What the canvas hands each edge. */
 export interface AutomationEdgeData extends Record<string, unknown> {
-  /** Insert a step between the two ends of this edge. */
-  onInsertStep?: (parentId: string) => void;
-  /** Split the rule at this point, so what follows becomes one of two paths. */
-  onInsertBranch?: (parentId: string) => void;
-  /** Present only on an "otherwise" arm: ask another question before falling back. */
-  onAddElseIf?: (branchId: string) => void;
+  /** Ask another question, on a row of its own under the trigger. */
+  onAddElseIf?: () => void;
   /** Copy the step this connector leads to, along with what follows it. */
   onDuplicate?: (nodeId: string) => void;
   /** Remove the step this connector leads to. */
@@ -38,9 +27,46 @@ export interface AutomationEdgeData extends Record<string, unknown> {
    * dots on a three-step rule, only one of which meant anything.
    */
   isJunction?: boolean;
+  /**
+   * The connection to the last branch, which carries the pill.
+   *
+   * One pill per rule, not one per connection. Every branch is a row hanging
+   * off the same trigger, so with three of them every junction qualified and
+   * the canvas grew three identical "Add branch" buttons stacked down the
+   * spine — three doors into one room, and a rule that reads as a mess.
+   *
+   * The last one, because that is where the branch it adds will appear: the
+   * control sits exactly where its result does.
+   */
+  isBranchTail?: boolean;
   /** The fallback: actions with no question, for when nothing else matched. */
-  onAddOtherwise?: (parentId: string) => void;
+  onAddOtherwise?: () => void;
+  /** Whether the rule already falls back, so the offer is not made twice. */
+  hasFallback?: boolean;
 }
+
+/**
+ * How far below the last branch the pill hangs.
+ *
+ * Half a row down, measured from the connection point rather than from the top
+ * of the card: that clears a card of the usual height with room to spare, and
+ * lands exactly where the next row's own connector will be — so the branch
+ * appears where the control that made it was.
+ */
+const TAIL_DROP = GRAPH_LAYOUT.BRANCH_GAP / 2;
+
+/** The connector dot, in pixels. Keep in step with `size-6` on it below. */
+const DOT_SIZE = 24;
+
+/**
+ * The dashed tail, in the wrapper's own coordinates.
+ *
+ * The wrapper is centred on the dot, so the tail begins one radius down — the
+ * dot's lower edge, with no gap for the eye to catch — and ends where the pill
+ * hangs, half a row below the corner.
+ */
+const TAIL_TOP = DOT_SIZE;
+const TAIL_HEIGHT = TAIL_DROP - DOT_SIZE / 2;
 
 /**
  * The line between two steps, and the place to add one.
@@ -58,7 +84,6 @@ export interface AutomationEdgeData extends Record<string, unknown> {
 export function AutomationEdge({
   id,
   label,
-  source,
   target,
   sourceX,
   sourceY,
@@ -80,6 +105,26 @@ export function AutomationEdge({
     borderRadius: 8,
   });
 
+  /*
+   * A branch's controls sit on the corner its line turns at.
+   *
+   * The path down to the third row is an L: right from the trigger, down the
+   * spine, then right again into the card. Its midpoint — which is what the
+   * path hands back for a label — is halfway down the vertical, level with the
+   * row above; a dot there governs one branch while sitting beside a different
+   * one, and with three rows stacked, guessing wrong deletes the wrong branch.
+   *
+   * The corner is the one point that belongs to this row and no other: where
+   * its own horizontal leaves the shared spine. Derived from the geometry
+   * rather than nudged into place — the vertical runs midway between the two
+   * columns, and it turns at the height of the card it is heading for. A rule
+   * whose branch is level with the trigger has no corner to speak of, and the
+   * same expression gives the midpoint of that straight line.
+   */
+  const onSpine = Boolean(actions.isJunction || actions.isBranchTail);
+  const anchorX = onSpine ? (sourceX + targetX) / 2 : labelX;
+  const anchorY = onSpine ? targetY : labelY;
+
   return (
     <>
       <BaseEdge id={id} path={path} style={{ strokeWidth: 1.5 }} />
@@ -91,7 +136,7 @@ export function AutomationEdge({
         */}
         <div
           className="nodrag nopan pointer-events-none absolute"
-          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          style={{ transform: `translate(-50%, -50%) translate(${anchorX}px, ${anchorY}px)` }}
         >
           {/*
             Which arm this is, beside the control rather than above it.
@@ -118,7 +163,7 @@ export function AutomationEdge({
             says what it checks, the connector says where it sits — so the
             things that move or remove the whole row belong here.
           */}
-          {(actions.onAddElseIf || actions.isJunction) && (
+          {actions.isJunction && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -135,22 +180,28 @@ export function AutomationEdge({
               </DropdownMenuTrigger>
 
               <DropdownMenuContent align="start">
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onSelect={() => actions.onDuplicate?.(target)}
-                >
-                  <CopyPlus className="size-4" aria-hidden="true" />
-                  Duplicate branch
-                </DropdownMenuItem>
+                {/* The whole row — its question and the actions under it — on a
+                    line of its own directly below. Absent on the fallback,
+                    which a rule can only have one of. */}
+                {actions.onDuplicate && (
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onSelect={() => actions.onDuplicate?.(target)}
+                  >
+                    <CopyPlus className="size-4" aria-hidden="true" />
+                    Duplicate branch
+                  </DropdownMenuItem>
+                )}
 
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onSelect={() => actions.onInsertBranch?.(source)}
-                >
-                  <GitBranch className="size-4" aria-hidden="true" />
-                  Add branch below
-                </DropdownMenuItem>
+                {/*
+                  No "add branch below" here any more.
 
+                  The pill immediately beneath this menu is the one place a
+                  branch starts, and an entry doing the same thing four pixels
+                  away was a second door into one room — which is how a branch
+                  lands somewhere nobody meant. It also built the old shape: a
+                  split with two arms rather than a row of its own.
+                */}
                 <DropdownMenuItem
                   className="cursor-pointer text-destructive focus:text-destructive"
                   onSelect={() => actions.onDelete?.(target)}
@@ -163,112 +214,92 @@ export function AutomationEdge({
           )}
 
           {/*
-            The branch control, always on screen rather than behind the dot.
-            
-            Adding a branch is a thing people come to this canvas to do, and a
-            rule with a single path gives no other hint that it could have
-            more — so hiding it inside a menu meant the feature only existed
-            for somebody who already knew it did.
-            
-            Adding a *step* is not offered here at all any more. That belongs to
-            the steps: the plus on a card, and the "Do this…" placeholder. Two
-            doors into one room, a few pixels apart, is how a step lands
-            somewhere nobody meant.
+            The branch control: one per rule, at the foot of the spine.
+
+            Inside this wrapper rather than anchored to the graph on its own,
+            because the wrapper is already centred on the dot — so `left-1/2`
+            here *is* the spine, and the dashed line, the pill and the dot share
+            one centre by construction. Given its own anchor it drifted half a
+            pill-width to the left, which looked like a stub beside the rule.
+
+            And the dot it hangs from is on the corner of the last row, so the
+            tail continues the spine straight down from where the drawn line
+            stops rather than starting somewhere along it.
           */}
-          {(actions.onAddElseIf || actions.isJunction) && (
-            <div className="pointer-events-auto absolute left-1/2 top-full flex flex-col items-start">
+          {actions.isBranchTail && (
+            <div
+              className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 flex-col items-center"
+              style={{ top: `${TAIL_TOP}px` }}
+            >
               <span
                 aria-hidden="true"
-                className="h-8 w-px border-l border-dashed border-muted-foreground/50"
+                style={{ height: `${TAIL_HEIGHT}px` }}
+                className="w-px border-l border-dashed border-muted-foreground/50"
               />
 
-              <div className="-translate-x-px">
-                {/*
-                  On an "otherwise" arm the same act is asking another question,
-                  so it is worded as that rather than offered twice.
+              {/*
+              Two named kinds, asked before anything is built.
+
+              "Add branch" on its own decided for somebody: it made a split with
+              a question on it, when what they wanted may have been the fallback
+              that runs when nothing matched. Those are different things and the
+              words are the only place to tell them apart, so the question comes
+              before the shape.
+            */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="pointer-events-auto flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:border-primary"
+                  >
+                    <GitBranch className="size-3.5" aria-hidden="true" />
+                    Add branch
+                  </button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent align="start" className="w-[300px]">
+                  <DropdownMenuItem
+                    className="cursor-pointer flex-col items-start gap-0.5"
+                    onSelect={() => actions.onAddElseIf?.()}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      Otherwise if…
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Add another set of conditions and actions to this rule.
+                    </span>
+                  </DropdownMenuItem>
+
+                  {/*
+                  Offered while the rule has no fallback, and then not.
+
+                  A rule can only fall back once — the first "otherwise" always
+                  runs when nothing else matched, so a second one is a branch
+                  that never can. Withdrawing the offer says that before anybody
+                  builds one; a validation error afterwards says it too late to
+                  be any help.
                 */}
-                {actions.onAddElseIf ? (
-                  <EdgeAction
-                    icon={CornerDownRight}
-                    label="Otherwise if…"
-                    onClick={() => actions.onAddElseIf?.(source)}
-                  />
-                ) : (
-                  /*
-                    Two named kinds, asked before anything is built.
-                    
-                    "Add branch" on its own decided for somebody: it made a
-                    split with a question on it, when what they wanted may have
-                    been the fallback that runs when nothing matched. Those are
-                    different things and the words are the only place to tell
-                    them apart, so the question comes before the shape.
-                  */
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:border-primary"
-                      >
-                        <GitBranch className="size-3.5" aria-hidden="true" />
-                        Add branch
-                      </button>
-                    </DropdownMenuTrigger>
-
-                    <DropdownMenuContent align="start" className="w-[300px]">
-                      <DropdownMenuItem
-                        className="cursor-pointer flex-col items-start gap-0.5"
-                        onSelect={() => actions.onInsertBranch?.(source)}
-                      >
-                        <span className="flex items-center gap-1.5 text-sm font-medium">
-                          <Plus className="size-3.5" aria-hidden="true" />
-                          Otherwise if…
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Add another set of conditions and actions to this rule.
-                        </span>
-                      </DropdownMenuItem>
-
-                      <DropdownMenuItem
-                        className="cursor-pointer flex-col items-start gap-0.5"
-                        onSelect={() => actions.onAddOtherwise?.(source)}
-                      >
-                        <span className="flex items-center gap-1.5 text-sm font-medium">
-                          <Plus className="size-3.5" aria-hidden="true" />
-                          Otherwise
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Add actions that will run if all other conditions are not met.
-                        </span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
+                  {!actions.hasFallback && (
+                    <DropdownMenuItem
+                      className="cursor-pointer flex-col items-start gap-0.5"
+                      onSelect={() => actions.onAddOtherwise?.()}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-medium">
+                        <Plus className="size-3.5" aria-hidden="true" />
+                        Otherwise
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Add actions that will run if all other conditions are not met.
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
       </EdgeLabelRenderer>
     </>
-  );
-}
-
-function EdgeAction({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
-    >
-      <Icon className="size-3.5" aria-hidden="true" />
-      {label}
-    </button>
   );
 }

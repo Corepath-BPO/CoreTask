@@ -8,6 +8,7 @@ import {
   BLOCK_SELF_RETRIGGER,
   BranchKey,
   FilterOperator,
+  isFallbackBranch,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
   NotificationType,
@@ -275,6 +276,13 @@ export class AutomationRunnerService {
    * condition that does not hold stops everything under it, and a branch sends
    * execution down one arm. The presence of a single parent link is what tells
    * the two apart, because that is the only thing that actually differs.
+   *
+   * The conditions hanging straight off the trigger are that rule's *rows*, and
+   * they are the one place a plain walk would be wrong. Rows are alternatives —
+   * "check if… otherwise if… otherwise" — so visiting every one of them would
+   * run every branch that happened to match rather than the first, which is a
+   * rule doing two contradictory things to the same task. First match wins, and
+   * the rest of the tree is walked exactly as before.
    */
   private plan(
     nodes: AutomationNode[],
@@ -312,12 +320,24 @@ export class AutomationRunnerService {
      * Depth-limited on purpose. A cycle is refused at validation, but the
      * runner reads rows that may have been written by an older client, and a
      * loop here would hang the worker rather than produce a wrong answer.
+     *
+     * `rows` says that the conditions among these children are alternatives to
+     * one another rather than steps on one path. Only the trigger's children
+     * are, which is why it is a parameter rather than the rule everywhere: a
+     * condition further down still governs what follows it, and a rule that
+     * checks two things in sequence must go on doing both.
      */
-    const walk = (nodeId: string, arm: string | null, depth: number): void => {
+    const walk = (nodeId: string, arm: string | null, depth: number, rows = false): void => {
       if (depth > 50) return;
+
+      // Which is to say: a row has already claimed this event. Ordering is by
+      // `position`, so "first" is the row nearest the top of the canvas.
+      let matched = false;
 
       for (const node of childrenOf(nodeId, arm)) {
         if (node.nodeType === AutomationNodeType.CONDITION) {
+          if (rows && matched) continue;
+
           // A condition governs what follows it, not the whole rule. Its
           // siblings on another path are unaffected.
           if (!this.conditionHolds(node, task, event)) {
@@ -325,14 +345,16 @@ export class AutomationRunnerService {
             continue;
           }
 
+          if (rows) matched = true;
+
           walk(node.id, null, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.BRANCH) {
-          const matched = this.conditionHolds(node, task, event);
+          const holds = this.conditionHolds(node, task, event);
 
-          walk(node.id, matched ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          walk(node.id, holds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
           continue;
         }
 
@@ -343,7 +365,7 @@ export class AutomationRunnerService {
       }
     };
 
-    walk(trigger.id, null, 0);
+    walk(trigger.id, null, 0, true);
 
     // "Nothing ran" is only a skip when something stopped it. A rule whose
     // branch legitimately led nowhere has run and done nothing.
@@ -356,6 +378,16 @@ export class AutomationRunnerService {
       operator?: FilterOperator;
       value?: unknown;
     };
+
+    /*
+     * The fallback row holds, always.
+     *
+     * "If all other conditions are not met" is what makes it the last row
+     * rather than a comparison of its own — it has no field and no operator, so
+     * every branch below would read it as an unknown operator and return false,
+     * and the one row somebody added to catch everything would catch nothing.
+     */
+    if (isFallbackBranch(node.configuration)) return true;
 
     const actual = this.readField(config.field ?? node.subtype, task, event);
     const expected = config.value;

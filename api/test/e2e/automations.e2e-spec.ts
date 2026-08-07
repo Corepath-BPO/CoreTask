@@ -586,6 +586,187 @@ describe('Automations (e2e)', () => {
       expect(task?.assigneeId).toBe(scope.owner.userId);
       expect(task?.priority).toBe('HIGH');
     });
+
+    /* ------------------------------------------------------------------ */
+    /* Branch rows                                                         */
+    /* ------------------------------------------------------------------ */
+
+    /*
+     * A rule's branches are the conditions hanging straight off its trigger,
+     * and they are alternatives to one another: "check if… otherwise if…
+     * otherwise". First match wins.
+     *
+     * Every one of these would pass under a plain tree walk *except* by running
+     * more branches than it should, so each asserts on what did not happen as
+     * well as on what did. That is the whole failure: a rule that quietly does
+     * two contradictory things to one task.
+     */
+    describe('branch rows', () => {
+      /** One row: a condition under the trigger, with an action beside it. */
+      const row = (
+        id: string,
+        configuration: Record<string, unknown>,
+        action: Record<string, unknown>,
+        order: number,
+      ) => [
+        {
+          id,
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration,
+          order,
+        },
+        { ...action, id: `${id}-action`, parentId: id, order: order + 0.5 },
+      ];
+
+      const trigger = {
+        id: 't',
+        nodeType: 'TRIGGER',
+        subtype: 'TASK_MOVED_TO_SECTION',
+        parentId: null,
+        order: 0,
+      };
+
+      const assign = (scope: Scope) => ({
+        nodeType: 'ACTION',
+        subtype: 'ASSIGN_USER',
+        configuration: { userId: scope.owner.userId },
+      });
+
+      const setPriority = (priority: string) => ({
+        nodeType: 'ACTION',
+        subtype: 'UPDATE_PRIORITY',
+        configuration: { priority },
+      });
+
+      const matches = { field: 'title', operator: 'CONTAINS', value: 'task' };
+      const misses = { field: 'title', operator: 'EQUALS', value: 'something else' };
+
+      it('runs the first branch that matches and no other', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', matches, setPriority('HIGH'), 1),
+          ...row('r2', matches, assign(scope), 3),
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.priority).toBe('HIGH');
+        // The second row's condition holds just as well, and must not run: two
+        // branches acting on one event is the rule contradicting itself.
+        expect(task?.assigneeId).toBeNull();
+      });
+
+      it('falls through to the next branch when the first does not match', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, setPriority('HIGH'), 1),
+          ...row('r2', matches, assign(scope), 3),
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('HIGH');
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('runs the fallback only when nothing before it matched', async () => {
+        /*
+         * The fallback carries no comparison at all, which every operator in
+         * the evaluator reads as "unknown" and answers false. Without knowing
+         * what the flag means, the one row somebody added to catch everything
+         * would catch nothing.
+         */
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, setPriority('HIGH'), 1),
+          ...row('r2', misses, setPriority('LOW'), 3),
+          ...row('r3', { fallback: true }, assign(scope), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('HIGH');
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('reads the branches in stored order, not in the order they arrived', async () => {
+        // The canvas can add a question in front of the fallback without
+        // rewriting what is already there, so the array a save happens to send
+        // is not the order the rule runs in — `position` is.
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+          ...row('r1', matches, assign(scope), 1),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('does nothing when no branch matches and there is no fallback', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, assign(scope), 1),
+          ...row('r2', misses, setPriority('LOW'), 3),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+        expect(task?.assigneeId).toBeNull();
+        expect(task?.priority).not.toBe('LOW');
+
+        // Recorded as a skip with a reason, so the history says "did not match"
+        // rather than leaving somebody to wonder whether it ran at all.
+        const execution = await context.prisma.automationExecution.findFirst({
+          where: { projectId: scope.projectId },
+        });
+        expect(execution?.status).toBe('SKIPPED');
+      });
+
+      it('leaves a rule with a single branch exactly as it was', async () => {
+        /*
+         * The regression that matters most: every canvas rule written before
+         * branches became rows has one condition under its trigger, and "first
+         * match wins" over a list of one has to mean what it always did.
+         */
+        const scope = await setupScope();
+
+        await publishGraph(scope, [trigger, ...row('r1', matches, assign(scope), 1)]);
+
+        expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+      });
+
+      it('leaves a single branch that does not hold exactly as it was', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [trigger, ...row('r1', misses, assign(scope), 1)]);
+
+        expect(await assigneeAfterRun(scope)).toBeNull();
+      });
+    });
   });
 
   describe('the graph endpoints', () => {

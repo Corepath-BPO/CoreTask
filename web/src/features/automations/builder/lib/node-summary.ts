@@ -1,14 +1,17 @@
 import {
   ACTION_LABEL,
+  NODE_CATEGORY_LABEL,
   TRIGGER_LABEL,
+  isFallbackBranch,
   type AutomationAction,
+  type AutomationNodeType,
   type AutomationTrigger,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
 import { readTriggerSections } from '../configuration/trigger-forms';
 
-import type { CanvasNode } from './graph-edits';
+import { isUnansweredRow, type CanvasNode } from './graph-edits';
 
 /**
  * How each trigger shape reads on a card.
@@ -50,9 +53,66 @@ export interface SummarySegment {
  * — the string below is these parts joined, so the label a screen reader hears
  * and the label somebody sees cannot drift apart.
  */
+/**
+ * Where a step sits, for the words that depend on it.
+ *
+ * A branch row reads differently depending on which row it is: the first is the
+ * rule's own question — "Check if the section is Incoming" — and every one after
+ * it is an alternative to that question. Nothing on the node itself says which,
+ * because being first is a fact about the rule rather than about the step, so
+ * whoever draws the canvas has to say.
+ *
+ * Stated as "alternative" rather than "primary" so that leaving it out is the
+ * safe answer: a caller with no view of the whole rule gets the wording every
+ * condition had before rows existed, rather than every card claiming to be an
+ * afterthought.
+ */
+export interface NodePlace {
+  /** True for a branch row after the first — one somebody added as "otherwise if". */
+  alternative?: boolean;
+}
+
+/**
+ * What kind of step this is — which, for a branch, is a matter of where it sits.
+ *
+ * Only the first branch is the rule's question; every one after it is an
+ * alternative to that question, and the last may be the case where none of them
+ * held. So "Check if" belongs to one row per rule, and a second one appearing
+ * would say two branches lead with the same question rather than that the second
+ * is what to do when the first did not hold.
+ *
+ * Positional rather than stored, because it *is* positional: duplicate the first
+ * branch and the copy is an "otherwise if" by virtue of no longer being first,
+ * with nothing about the node itself having changed.
+ */
+export function nodeCategory(node: CanvasNode, place: NodePlace = {}): string {
+  if (node.type === 'CONDITION') {
+    // Whatever position it holds. A fallback is the case where nothing matched,
+    // which is not a thing that can be asked first or last differently.
+    if (isFallbackBranch(node.configuration)) return 'Otherwise';
+    if (place.alternative) return 'Otherwise if';
+  }
+
+  return NODE_CATEGORY_LABEL[node.type as AutomationNodeType] ?? 'Add a step';
+}
+
+/**
+ * The category line as the card prints it.
+ *
+ * The same words, except on a branch nobody has answered: there the sentence is
+ * "+ Otherwise if…", and a line above it saying "Otherwise if" is the same words
+ * twice on a card whose whole job is to be one line and an offer.
+ */
+export function nodeHeading(node: CanvasNode, place: NodePlace = {}): string {
+  if (place.alternative && isUnansweredRow(node)) return '';
+
+  return nodeCategory(node, place);
+}
+
 export function summariseParts(
   node: CanvasNode,
   metadata: AutomationMetadata | undefined,
+  place: NodePlace = {},
 ): SummarySegment[] {
   const config = node.configuration;
 
@@ -96,8 +156,30 @@ export function summariseParts(
       return [{ text: label }, { text: verb }, { text: named.join(', '), chip: true }];
     }
 
-    case 'CONDITION':
-      return conditionSummary(config, metadata);
+    case 'CONDITION': {
+      /*
+       * The fallback says what it is for, because it has nothing to check.
+       *
+       * "Choose what to check" on this card would be asking for a comparison
+       * that must never exist — the whole of what it means is "none of the
+       * above", and the sentence is the only place that can say so.
+       */
+      if (isFallbackBranch(config)) return [{ text: 'If all other conditions are not met' }];
+
+      const parts = conditionSummary(config, metadata);
+
+      /*
+       * A row nobody has answered yet reads as the offer it is.
+       *
+       * "Check if — choose what to check" is right for the rule's first
+       * question and wrong for the rest: those were added by pressing
+       * "Otherwise if…", and a card that forgets the word somebody clicked
+       * makes the second branch look like a duplicate of the first.
+       */
+      return place.alternative && parts.length === 1 && parts[0]!.text === 'Choose what to check'
+        ? [{ text: '+ Otherwise if…' }]
+        : parts;
+    }
 
     case 'ACTION':
       return actionSummary(node.subtype, config, metadata);
@@ -121,8 +203,12 @@ export function summariseParts(
 }
 
 /** The whole sentence, for an aria-label and anywhere plain text is wanted. */
-export function summarise(node: CanvasNode, metadata: AutomationMetadata | undefined): string {
-  return summariseParts(node, metadata)
+export function summarise(
+  node: CanvasNode,
+  metadata: AutomationMetadata | undefined,
+  place: NodePlace = {},
+): string {
+  return summariseParts(node, metadata, place)
     .map((part) => part.text)
     .join(' ');
 }
@@ -295,6 +381,15 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
   if (node.type === 'TRIGGER') return node.subtype === '';
 
   if (node.type === 'CONDITION') {
+    /*
+     * The fallback has nothing to answer, so it can never be unanswered.
+     *
+     * Flagged, it would put a red border and a warning on the one row that is
+     * complete by definition — and the count beside Publish would insist on a
+     * comparison that must never be set.
+     */
+    if (isFallbackBranch(config)) return false;
+
     if (!has('field') || !has('operator')) return true;
 
     const operator = config['operator'];

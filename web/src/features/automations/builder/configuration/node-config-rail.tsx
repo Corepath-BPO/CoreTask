@@ -1,10 +1,4 @@
-import {
-  AUTOMATION_TRIGGERS,
-  NODE_CATEGORY_LABEL,
-  TRIGGER_LABEL,
-  type AutomationNodeType,
-  type AutomationTrigger,
-} from '@coretask/contracts';
+import { AUTOMATION_TRIGGERS, TRIGGER_LABEL, type AutomationTrigger } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationMetadata,
@@ -18,8 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-import type { CanvasNode } from '../lib/graph-edits';
-import { summarise } from '../lib/node-summary';
+import { branchRows, type CanvasNode } from '../lib/graph-edits';
+import { nodeCategory, summarise } from '../lib/node-summary';
 
 import { catalogueIcon } from './catalogue-icons';
 import { summariseCondition } from './condition-value';
@@ -173,6 +167,14 @@ export function NodeConfigRail({
          */
         <ConfigurePanel
           node={nodes.find((node) => node.id === mode.nodeId) ?? null}
+          /*
+           * Which branch this is, since the breadcrumb names it.
+           *
+           * Only the first branch is the rule's "Check if"; the panel for any
+           * later one has to agree with the card that opened it, or the same
+           * step is called two things a click apart.
+           */
+          alternative={branchRows(nodes).findIndex((row) => row.id === mode.nodeId) > 0}
           metadata={metadata}
           onClose={onClose}
           onChange={onChange}
@@ -235,12 +237,15 @@ function RailHeader({
 
 function ConfigurePanel({
   node,
+  alternative,
   metadata,
   onClose,
   onChange,
   onDelete,
 }: {
   node: CanvasNode | null;
+  /** True for a branch after the first, which reads as "Otherwise if". */
+  alternative: boolean;
   metadata: AutomationMetadata | undefined;
   onClose: () => void;
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
@@ -262,7 +267,7 @@ function ConfigurePanel({
 
   if (!node) return null;
 
-  const category = NODE_CATEGORY_LABEL[node.type as AutomationNodeType] ?? 'Step';
+  const category = nodeCategory(node, { alternative });
 
   return (
     <>

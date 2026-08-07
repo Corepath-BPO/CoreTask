@@ -373,6 +373,7 @@ function toValidatable(node: {
   configuration: unknown;
   parentNodeId: string | null;
   branchKey: string | null;
+  position: number;
 }): AutomationNodeDto & { id: string; parentId: string | null; branchKey: string | null } {
   return {
     id: node.id,
@@ -381,6 +382,10 @@ function toValidatable(node: {
     configuration: (node.configuration ?? {}) as Record<string, unknown>,
     parentId: node.parentNodeId,
     branchKey: node.branchKey,
+    // The column is called `position` in the table and `order` on the wire; the
+    // validator needs it either way, because "the last branch" is a fact about
+    // this number rather than about the order rows came back in.
+    order: node.position,
   };
 }
 
@@ -393,5 +398,6 @@ function toValidatableFromDto(node: AutomationNodeDto) {
     configuration: node.configuration ?? {},
     parentId: node.parentId ?? null,
     branchKey: node.branchKey ?? null,
+    order: node.order,
   };
 }

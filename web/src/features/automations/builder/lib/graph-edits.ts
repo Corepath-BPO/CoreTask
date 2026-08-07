@@ -1,4 +1,10 @@
-import { BranchKey, PLACEHOLDER_NODE_TYPE, defaultPosition } from '@coretask/contracts';
+import {
+  BranchKey,
+  FALLBACK_CONFIG_KEY,
+  PLACEHOLDER_NODE_TYPE,
+  defaultPosition,
+  isFallbackBranch,
+} from '@coretask/contracts';
 import type { AutomationNodeType } from '@coretask/contracts';
 import type { AutomationGraphNode } from '@coretask/types';
 
@@ -161,19 +167,38 @@ function reconnect(
  */
 export function withPlaceholder(nodes: CanvasNode[]): CanvasNode[] {
   const placeholders: CanvasNode[] = [];
+  const claimed = new Set<string>();
 
-  const make = (parent: CanvasNode, arm: string | null, row: number): CanvasNode => ({
+  const make = (parent: CanvasNode, arm: string | null, row: number): void => {
     // The id encodes where it goes, so choosing an action knows which arm it
-    // lands on without the page tracking a separate selection.
-    id: placeholderId(parent.id, arm),
-    type: PLACEHOLDER_NODE_TYPE,
-    subtype: 'ACTION',
-    configuration: {},
-    position: defaultPosition(columnOf(parent, nodes) + 1, row),
-    parentId: parent.id,
-    branchKey: arm,
-    order: nodes.length + placeholders.length,
-  });
+    // lands on without the page tracking a separate selection. It is also what
+    // keeps two rules below from offering the same spot twice.
+    const id = placeholderId(parent.id, arm);
+    if (claimed.has(id)) return;
+    claimed.add(id);
+
+    placeholders.push({
+      id,
+      type: PLACEHOLDER_NODE_TYPE,
+      subtype: 'ACTION',
+      configuration: {},
+      position: defaultPosition(columnOf(parent, nodes) + 1, row),
+      parentId: parent.id,
+      branchKey: arm,
+      order: nodes.length + placeholders.length,
+    });
+  };
+
+  /*
+   * Every branch row gets one while nothing hangs off it.
+   *
+   * A row is a question and the answer beside it, so a new "Otherwise if…" with
+   * no "+ Do this…" is half a row — and the only route to its actions would be
+   * the plus that appears on hover, which nothing on screen says is there.
+   */
+  for (const row of branchRows(nodes)) {
+    if (!nodes.some((node) => node.parentId === row.id)) make(row, null, 0);
+  }
 
   /*
    * Every arm of a branch gets one, filled or not.
@@ -181,13 +206,16 @@ export function withPlaceholder(nodes: CanvasNode[]): CanvasNode[] {
    * A split showing only the path somebody has already built looks like it goes
    * one way. Both arms visible is what makes it read as a choice — and an empty
    * arm is exactly where the next step goes.
+   *
+   * The builder no longer makes these; rules saved before branches became rows
+   * still hold them, and they have to stay drawable.
    */
   for (const branch of nodes.filter((node) => node.type === 'BRANCH')) {
     const arms = [BranchKey.MATCH, BranchKey.ELSE];
 
     arms.forEach((arm, index) => {
       const filled = nodes.some((node) => node.parentId === branch.id && node.branchKey === arm);
-      if (!filled) placeholders.push(make(branch, arm, index));
+      if (!filled) make(branch, arm, index);
     });
   }
 
@@ -196,11 +224,156 @@ export function withPlaceholder(nodes: CanvasNode[]): CanvasNode[] {
   if (!nodes.some((node) => node.type === 'ACTION')) {
     const last = lastOnMainPath(nodes);
 
-    if (last && last.type !== 'BRANCH') placeholders.push(make(last, null, 0));
+    if (last && last.type !== 'BRANCH') make(last, null, 0);
   }
 
   return placeholders.length ? [...nodes, ...placeholders] : nodes;
 }
+
+/**
+ * The rule's rows: the questions hanging straight off the trigger.
+ *
+ * A branch is a row rather than a fork — its own condition card, its own
+ * actions beside it, and the next branch on the line below. They are siblings
+ * of one another for the same reason: the runner takes the first whose
+ * condition holds, and "first" only means anything among siblings in order.
+ */
+export function branchRows(nodes: readonly CanvasNode[]): CanvasNode[] {
+  const trigger = nodes.find((node) => node.type === 'TRIGGER');
+  if (!trigger) return [];
+
+  return nodes
+    .filter((node) => node.type === 'CONDITION' && node.parentId === trigger.id)
+    .sort((a, b) => a.order - b.order);
+}
+
+/** The row that runs when nothing else matched, if the rule has one. */
+export function fallbackRow(nodes: readonly CanvasNode[]): CanvasNode | null {
+  return branchRows(nodes).find((node) => isFallbackBranch(node.configuration)) ?? null;
+}
+
+/**
+ * A branch nobody has said what to check yet.
+ *
+ * The card that reads "+ Otherwise if…", and the one place the × belongs: a
+ * question still in the offer state is very often a mis-click, and the way back
+ * out of it has to be on the card. Once it says something, it is a step like any
+ * other and goes the way every other step does.
+ *
+ * The fallback is never one of these. It asks nothing by definition, so an
+ * "unanswered" fallback is not a state that exists.
+ */
+export function isUnansweredRow(node: CanvasNode): boolean {
+  if (node.type !== 'CONDITION' || isFallbackBranch(node.configuration)) return false;
+
+  const field = node.configuration['field'];
+
+  return typeof field !== 'string' || field === '';
+}
+
+/**
+ * A new row on the rule — one more question hanging off the trigger.
+ *
+ * Ordered in front of the fallback when there is one. "Otherwise" is defined by
+ * running when nothing else did, so a row added after it could never run; the
+ * midpoint keeps the new row last among the real questions without having to
+ * renumber the ones already there, which is an edit the canvas has no way to
+ * express.
+ */
+export function makeBranchRow(
+  nodes: readonly CanvasNode[],
+  triggerId: string,
+  configuration: Record<string, unknown> = {},
+): CanvasNode {
+  const created = {
+    ...makeNodeUnder('CONDITION', 'FIELD_COMPARISON', triggerId, null, nodes),
+    configuration,
+  };
+
+  const fallback = fallbackRow(nodes);
+  if (!fallback || isFallbackBranch(configuration)) return created;
+
+  const previous = branchRows(nodes)
+    .filter((row) => row.id !== fallback.id)
+    .at(-1);
+
+  return { ...created, order: ((previous?.order ?? fallback.order - 1) + fallback.order) / 2 };
+}
+
+/**
+ * A copy of a whole branch: the question, and everything that answers it.
+ *
+ * Every node it touches gets a new id and the originals are left exactly as they
+ * were. Duplicating one node and letting the copy adopt that node's children —
+ * which is what duplicating an ordinary step does, because "do that again" means
+ * carrying on afterwards — would take the actions *off* the branch being copied,
+ * so the rule would end up with two questions and one answer between them.
+ *
+ * It lands directly below the branch it came from, which is where somebody
+ * looking at a row and pressing duplicate expects to find it. Halfway to the next
+ * row rather than at the end: a copy appended after the fallback could never run,
+ * and renumbering the rows to make space is an edit the canvas cannot express.
+ */
+export function copyBranchRow(nodes: readonly CanvasNode[], rowId: string): CanvasNode[] {
+  const row = nodes.find((node) => node.id === rowId);
+  if (!row) return [];
+
+  const copied = withDescendants(nodes, rowId);
+  const renamed = new Map(copied.map((id) => [id, `new-${crypto.randomUUID()}`]));
+
+  const rows = branchRows(nodes);
+  const next = rows[rows.findIndex((entry) => entry.id === rowId) + 1];
+
+  return copied.flatMap((id) => {
+    const source = nodes.find((node) => node.id === id);
+    if (!source) return [];
+
+    return [
+      {
+        ...source,
+        id: renamed.get(id) as string,
+        // A copy, not a reference: editing one must not change the other.
+        configuration: { ...source.configuration },
+        parentId:
+          id === rowId ? row.parentId : (renamed.get(source.parentId ?? '') ?? source.parentId),
+        /*
+         * The row is placed; everything under it keeps the order it had.
+         *
+         * Order only means anything among siblings, and every copied node's
+         * siblings are the other copies — so carrying the original numbers
+         * across reproduces the arrangement exactly.
+         */
+        order: id === rowId ? (next ? (row.order + next.order) / 2 : row.order + 1) : source.order,
+      },
+    ];
+  });
+}
+
+/**
+ * A row and everything it answers.
+ *
+ * Removing a step ordinarily closes the gap — whatever followed it attaches to
+ * what came before, so deleting a step in the middle of a rule does not take the
+ * rest with it. A row is the other case: its actions only make sense under its
+ * question, and re-parenting them onto the trigger would turn "assign Maya when
+ * the priority is high" into "assign Maya", which is a rule nobody wrote.
+ */
+export function withDescendants(nodes: readonly CanvasNode[], nodeId: string): string[] {
+  const ids = [nodeId];
+
+  for (let index = 0; index < ids.length; index += 1) {
+    const parent = ids[index];
+
+    for (const node of nodes) {
+      if (node.parentId === parent && !ids.includes(node.id)) ids.push(node.id);
+    }
+  }
+
+  return ids;
+}
+
+/** The configuration that marks a row as the fallback. */
+export const FALLBACK_CONFIGURATION: Record<string, unknown> = { [FALLBACK_CONFIG_KEY]: true };
 
 /** Where a placeholder puts what replaces it. */
 export function placeholderId(parentId: string, arm: string | null): string {
@@ -331,15 +504,4 @@ export function makeNodeUnder(
     branchKey,
     order: nodes.length,
   };
-}
-
-/**
- * A split, attached to the end of the rule.
- *
- * It carries the comparison itself rather than sitting beside a condition —
- * that is what the runner evaluates to choose an arm, so putting it anywhere
- * else would mean two nodes describing one decision.
- */
-export function makeBranch(nodes: readonly CanvasNode[]): CanvasNode {
-  return makeNode('BRANCH', 'FIELD_COMPARISON', nodes);
 }

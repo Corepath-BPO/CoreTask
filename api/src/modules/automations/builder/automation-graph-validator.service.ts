@@ -5,6 +5,7 @@ import {
   AutomationNodeType,
   ConditionValueKind,
   GraphIssueLevel,
+  isFallbackBranch,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -20,6 +21,8 @@ export interface ValidatableGraphNode {
   configuration: Record<string, unknown>;
   parentId: string | null;
   branchKey: string | null;
+  /** Where this sits among its siblings — what makes "the last row" a fact. */
+  order?: number;
 }
 
 /**
@@ -258,7 +261,14 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      if (node.type === AutomationNodeType.CONDITION) {
+      /*
+       * Every condition but the fallback, which is defined by asking nothing.
+       *
+       * Checking it would report a missing field on the one row that must never
+       * have one — so a rule with an "otherwise" would be refused for being
+       * exactly what somebody built.
+       */
+      if (node.type === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
         issues.push(...validateCondition(config, this.valueKindOf(config['field']), node.id));
       }
     }

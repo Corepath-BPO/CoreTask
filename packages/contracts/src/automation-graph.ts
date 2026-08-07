@@ -37,6 +37,28 @@ export const BranchKey = {
 } as const;
 export type BranchKey = (typeof BranchKey)[keyof typeof BranchKey];
 
+/**
+ * The mark that makes a condition the fallback row — "if all other conditions
+ * are not met".
+ *
+ * A flag on the configuration rather than a node type of its own. `nodeType` is
+ * a database enum the API, the runner and the builder all share, so a new member
+ * would be a migration plus a new case in every switch that reads one — for a
+ * row that behaves exactly like a condition which is always true.
+ *
+ * Defined here because all three sides have to agree on it: the canvas draws a
+ * fallback differently, the validator must not ask it what it checks, and the
+ * runner must treat it as holding without a comparison to evaluate.
+ */
+export const FALLBACK_CONFIG_KEY = 'fallback';
+
+/** Whether a node's configuration marks it as the fallback row. */
+export function isFallbackBranch(configuration: unknown): boolean {
+  if (typeof configuration !== 'object' || configuration === null) return false;
+
+  return (configuration as Record<string, unknown>)[FALLBACK_CONFIG_KEY] === true;
+}
+
 /** What each node category is called in the interface. */
 export const NODE_CATEGORY_LABEL: Record<AutomationNodeType, string> = {
   TRIGGER: 'When',

@@ -1,4 +1,4 @@
-import { AutomationRuleStatus, BranchKey, type AutomationNodeType } from '@coretask/contracts';
+import { AutomationRuleStatus, type AutomationNodeType } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
@@ -24,12 +24,17 @@ import type { RuleSettings } from '../configuration/rule-settings-panel';
 import {
   adoptChildren,
   applyEdits,
+  branchRows,
+  copyBranchRow,
+  fallbackRow,
+  FALLBACK_CONFIGURATION,
   hasEdits,
-  makeBranch,
+  makeBranchRow,
   makeDefaultNodes,
   makeNodeUnder,
   NO_EDITS,
   readPlaceholderId,
+  withDescendants,
   withPlaceholder,
   type CanvasNode,
   type GraphEdits,
@@ -257,6 +262,9 @@ export function AutomationBuilderPage({
     return node;
   };
 
+  /** Whether this step is one of the rule's branches rather than a step on one. */
+  const isBranchRow = (nodeId: string) => branchRows(realNodes).some((row) => row.id === nodeId);
+
   /**
    * A copy of a step, running immediately after the one it came from.
    *
@@ -267,10 +275,26 @@ export function AutomationBuilderPage({
    * Its settings come along. A copy that arrived empty would be a new step with
    * extra steps, and the reason to duplicate is that most of the answers are
    * already right.
+   *
+   * A branch is the exception, and has to be: it is a question *and* the actions
+   * answering it, so the same treatment would hand the copy the original's
+   * actions and leave the original with none — see `copyBranchRow`.
    */
   const duplicateNode = (nodeId: string) => {
     const original = realNodes.find((node) => node.id === nodeId);
     if (!original) return;
+
+    if (isBranchRow(nodeId)) {
+      const copies = copyBranchRow(realNodes, nodeId);
+      const [row] = copies;
+      if (!row) return;
+
+      setEdits((previous) => ({ ...previous, added: [...previous.added, ...copies] }));
+
+      setSelectedId(row.id);
+      setRail({ kind: 'configure', nodeId: row.id });
+      return;
+    }
 
     const copy: CanvasNode = {
       ...makeNodeUnder(
@@ -293,76 +317,70 @@ export function AutomationBuilderPage({
     setRail({ kind: 'configure', nodeId: copy.id });
   };
 
+  /**
+   * Removing a step, and closing the gap it leaves.
+   *
+   * Whatever followed attaches to whatever came before, so deleting the third of
+   * five steps does not take the last two with it.
+   *
+   * A branch again goes as a piece. Its actions exist because of its question,
+   * so re-parenting them onto the trigger would turn "assign Maya when the
+   * priority is high" into "assign Maya" — a rule nobody wrote, arrived at by
+   * removing something. Deciding it here rather than in each control means every
+   * route to it agrees: the × on the card, the connector's menu, the panel.
+   */
   const deleteNode = (nodeId: string) => {
-    setEdits((previous) => ({ ...previous, removed: [...previous.removed, nodeId] }));
+    const removed = isBranchRow(nodeId) ? withDescendants(realNodes, nodeId) : [nodeId];
+
+    setEdits((previous) => ({ ...previous, removed: [...previous.removed, ...removed] }));
     setRail((previous) =>
-      previous.kind === 'configure' && previous.nodeId === nodeId ? { kind: 'closed' } : previous,
+      previous.kind === 'configure' && removed.includes(previous.nodeId)
+        ? { kind: 'closed' }
+        : previous,
     );
   };
 
   /**
    * The fallback: what runs when nothing else matched.
    *
-   * The same split as "otherwise if", differing in what happens next. A branch
-   * is what "otherwise" is made of — the matching side carries on as before and
-   * the other side takes actions with no question of its own — so this opens
-   * the action list on that arm rather than the condition form on the split.
+   * A row like any other — a condition hanging off the trigger — marked as the
+   * one with no question. That mark is the whole difference: the runner takes
+   * the first row whose condition holds and this one always does, so it needs no
+   * comparison and the canvas must not ask for one.
    *
-   * The two menu entries therefore build the same thing and continue
-   * differently, which is exactly the distinction the words draw: one adds
+   * So this opens the action list straight away, where "Otherwise if…" opens the
+   * condition form. That is exactly the distinction the two words draw: one adds
    * another question, the other adds the answer for when none of them held.
    */
-  const addOtherwise = (parentId: string) => {
-    const parent = realNodes.find((node) => node.id === parentId);
-    if (!parent) return;
+  const addOtherwise = () => {
+    if (!triggerNode) return;
 
-    const inserted = { ...makeBranch(realNodes), parentId, branchKey: null };
+    const inserted = makeBranchRow(realNodes, triggerNode.id, FALLBACK_CONFIGURATION);
 
-    setEdits((previous) => ({
-      ...previous,
-      added: [...previous.added, inserted],
-      reparented: {
-        ...previous.reparented,
-        ...adoptChildren(inserted, realNodes, BranchKey.MATCH),
-      },
-    }));
+    setEdits((previous) => ({ ...previous, added: [...previous.added, inserted] }));
 
-    // Straight to the actions for the fallback arm, because that is the whole
-    // of what somebody chose — there is no question to answer first.
-    openActionPicker({ parentId: inserted.id, arm: BranchKey.ELSE });
+    // Straight to the actions, because that is the whole of what somebody
+    // chose — there is no question to answer first.
+    openActionPicker({ parentId: inserted.id, arm: null });
   };
 
   /**
-   * Another question on the "otherwise" side of a split.
+   * Another question, on its own row under the trigger.
    *
-   * This is what an else-if *is* in this model: a second branch hanging off the
-   * first one's otherwise arm. The engine already walks it — a branch takes one
-   * arm and keeps going — so nothing new had to be taught to the runner.
+   * A sibling of the rows already there rather than something nested inside the
+   * last one. Nesting is what made an else-if a split with two arms — a "Split
+   * on" card carrying placeholders for paths nobody asked for — where what
+   * somebody wants is one more line: a question, and what to do when it holds.
    *
-   * Whatever was on that arm becomes the new question's own otherwise, which is
-   * the only reading that preserves what the rule already said: "otherwise if X
-   * do A, otherwise <what was there before>".
+   * The runner reads the siblings in order and takes the first that holds, which
+   * is what makes a list of these behave like the if/else-if chain it reads as.
    */
-  const addElseIf = (branchId: string) => {
-    const branch = realNodes.find((node) => node.id === branchId);
-    if (!branch) return;
+  const addElseIf = () => {
+    if (!triggerNode) return;
 
-    const inserted = makeNodeUnder(
-      'BRANCH',
-      'FIELD_COMPARISON',
-      branchId,
-      BranchKey.ELSE,
-      realNodes,
-    );
+    const inserted = makeBranchRow(realNodes, triggerNode.id);
 
-    setEdits((previous) => ({
-      ...previous,
-      added: [...previous.added, inserted],
-      reparented: {
-        ...previous.reparented,
-        ...adoptChildren(inserted, realNodes, BranchKey.ELSE),
-      },
-    }));
+    setEdits((previous) => ({ ...previous, added: [...previous.added, inserted] }));
 
     // Straight into its condition: an unanswered question is not a step yet.
     setSelectedId(inserted.id);
@@ -376,44 +394,16 @@ export function AutomationBuilderPage({
    * gains a stage instead of growing a second tail. `adoptChildren` works out
    * which nodes that is — only the ones on the same arm, so inserting into one
    * side of a split leaves the other side where it was.
+   *
+   * Nothing exists until the action is chosen. Creating the step first left a
+   * blank card behind whenever somebody closed the list without picking — a step
+   * that is nothing, which forks the rule and refuses to publish.
    */
-  const insertAfter = (type: 'ACTION' | 'BRANCH', parentId: string) => {
+  const insertStepAfter = (parentId: string) => {
     const parent = realNodes.find((node) => node.id === parentId);
     if (!parent) return;
 
-    /*
-     * An action is chosen before it exists; a branch exists before it is set up.
-     *
-     * The difference is what an unfinished one means. A branch with no
-     * comparison is still a split — it draws, it says what it is missing, and
-     * validation refuses to publish it. An action with no subtype is not a step
-     * at all: nothing can say what it does, so it reads as a card that failed
-     * to load and quietly forks the rule.
-     */
-    if (type === 'ACTION') {
-      openActionPicker({ parentId, arm: null, insert: true });
-      return;
-    }
-
-    const inserted = { ...makeBranch(realNodes), parentId, branchKey: null };
-
-    setEdits((previous) => ({
-      ...previous,
-      added: [...previous.added, inserted],
-      reparented: {
-        ...previous.reparented,
-        /*
-         * What already followed becomes the matching arm.
-         *
-         * Left on the main path it belongs to neither side: the split drew with
-         * two empty arms and the original rule carrying on past it, so a rule
-         * that had one path came back with three. Everything built so far is
-         * what happens when the new question holds — the other arm is the part
-         * still to be written.
-         */
-        ...adoptChildren(inserted, realNodes, BranchKey.MATCH),
-      },
-    }));
+    openActionPicker({ parentId, arm: null, insert: true });
   };
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
@@ -506,6 +496,10 @@ export function AutomationBuilderPage({
           configuration: node.configuration,
           parentId: node.parentId,
           branchKey: node.branchKey,
+          // Carried because "the fallback has to come last" is a fact about
+          // this number: a rule that reads correctly down the canvas can still
+          // have a row ordered after the one that catches everything.
+          order: node.order,
         })),
         currentName,
       ),
@@ -742,6 +736,15 @@ export function AutomationBuilderPage({
               return;
             }
 
+            /*
+             * The fallback opens nothing, because there is nothing to set.
+             *
+             * Its form would be the condition form, which offers to give
+             * "otherwise" a comparison — and a fallback with one is a row that
+             * is neither the fallback nor a question.
+             */
+            if (fallbackRow(realNodes)?.id === nodeId) return;
+
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
@@ -749,8 +752,7 @@ export function AutomationBuilderPage({
           onChangeTrigger={openTriggerPicker}
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
-          onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
-          onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
+          onInsertStep={insertStepAfter}
         />
 
         {/*

@@ -302,97 +302,218 @@ test.describe('the automation builder', () => {
     expect(labels).not.toContain('Add a step');
   });
 
-  test('adds a branch, and draws both of its arms', async ({ page }) => {
+  /* ------------------------------------------------------------------ */
+  /* Branches, which are rows                                            */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * A branch is a row: its own question, its own actions beside it, and the
+   * next branch on the line below. It used to be a split — a "Split on" card
+   * with two placeholder arms — which drew a fork where the rule reads as a
+   * list, and made "otherwise if" mean "nest another fork inside the first".
+   */
+
+  /** The menu behind the one pill, opened. */
+  const openBranchMenu = async (page: Page) => {
+    const pill = page.getByRole('button', { name: /^Add branch$/ });
+
+    // One pill per rule. Every branch hangs off the same trigger, so the
+    // version of this that keyed on the connection drew one per branch.
+    await expect(pill).toHaveCount(1);
+    await pill.click();
+  };
+
+  const OTHERWISE = /all other conditions are not met/;
+
+  test('“Otherwise if…” adds one question and one place for its actions', async ({ page }) => {
+    await openBuilder(page);
+    const before = (await nodeBoxes(page)).length;
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+
+    // Two cards and no more: a question, and the invitation beside it. The old
+    // shape added four — a split, two arms, and a card for the question.
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 2);
+
+    const boxes = await nodeBoxes(page);
+    const question = boxes.find((box) => box.label.includes('Otherwise if…'));
+    const first = boxes.find((box) => box.label.includes('Priority is'));
+
+    expect(question, 'the new branch does not read as the offer that made it').toBeDefined();
+
+    // A row of its own, in the same column as the question above it.
+    expect(question!.x).toBe(first!.x);
+    expect(question!.y).toBeGreaterThan(first!.y);
+
+    // And its actions sit beside it, on its line rather than under the rule.
+    const invitations = boxes.filter((box) => box.label.includes('Add a step'));
+    const beside = invitations.find((box) => box.y === question!.y);
+
+    expect(beside, 'the new branch has nowhere to put its actions').toBeDefined();
+    expect(beside!.x).toBeGreaterThan(question!.x);
+  });
+
+  test('“Otherwise” adds the fallback, which asks nothing', async ({ page }) => {
+    await openBuilder(page);
+    const before = (await nodeBoxes(page)).length;
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 2);
+
+    const boxes = await nodeBoxes(page);
+    const fallback = boxes.find((box) => box.label.includes('If all other conditions are not met'));
+
     /*
-     * A split showing only the path somebody built looks like it goes one way.
-     * Both arms have to be on screen, and they must not land on each other.
+     * The card says what it is for rather than asking what to check. It has no
+     * comparison and must never be given one, so "Check if — choose what to
+     * check" would be the canvas insisting on an answer that cannot exist.
+     */
+    expect(fallback?.label).toBe('Otherwise — If all other conditions are not met');
+
+    const beside = boxes
+      .filter((box) => box.label.includes('Add a step'))
+      .find((box) => box.y === fallback!.y);
+    expect(beside, 'the fallback has nowhere to put its actions').toBeDefined();
+  });
+
+  test('offers the fallback once, and then stops offering it', async ({ page }) => {
+    /*
+     * A rule can only fall back once: the first "otherwise" always runs when
+     * nothing else matched, so a second is a branch that never can. Saying so
+     * before anybody builds one beats refusing it at publish.
      */
     await openBuilder(page);
 
-    /*
-     * From the pill on the trigger's connector, which is the only place a
-     * branch can start — every branch belongs to the same trigger, so offering
-     * it between a check and its action would offer one where none can go.
-     */
-    await page.getByRole('button', { name: /^Add branch$/ }).click();
-    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+    await openBranchMenu(page);
+    await expect(page.getByRole('menuitem', { name: OTHERWISE })).toHaveCount(1);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
 
     await expect
       .poll(
         async () =>
-          (await nodeBoxes(page)).filter((box) => box.label.includes('Add a step')).length,
-        {
-          timeout: 5000,
-        },
+          (await nodeBoxes(page)).filter((box) => box.label.includes('Otherwise —')).length,
+        { timeout: 5000 },
       )
-      .toBe(2);
+      .toBe(1);
 
-    const arms = (await nodeBoxes(page)).filter((box) => box.label.includes('Add a step'));
-
-    expect(arms[0]!.y).not.toBe(arms[1]!.y);
+    await openBranchMenu(page);
+    await expect(page.getByRole('menuitem', { name: OTHERWISE })).toHaveCount(0);
+    // The other offer stays: a rule can go on gaining questions.
+    await expect(page.getByRole('menuitem', { name: /^Otherwise if…/ })).toHaveCount(1);
   });
 
-  test('chains another question onto the otherwise arm', async ({ page }) => {
+  test('takes a branch off again from the × on its card', async ({ page }) => {
+    /*
+     * A question nobody has answered is a half-finished thing in the middle of
+     * a rule, so the way back out of it has to be on the card rather than a
+     * hover away — otherwise the only obvious move is to answer a mis-click.
+     */
     await openBuilder(page);
-    await page.getByRole('button', { name: /^Add branch$/ }).click();
+    const before = (await nodeBoxes(page)).length;
+
+    await openBranchMenu(page);
     await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
 
     await expect
       .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
-      .toBeGreaterThan(2);
+      .toBe(before + 2);
 
-    /*
-     * The offer belongs to the otherwise arm and nowhere else.
-     *
-     * On the matching arm it would read as "if this matched, then ask a
-     * different question", which is not what it does — so exactly one of the
-     * connectors on screen may carry it.
-     */
-    const chain = page.getByRole('button', { name: /^Otherwise if…$/ });
+    const remove = page.getByRole('button', { name: /^Remove branch:/ });
+    await expect(remove).toHaveCount(1);
+    await remove.click();
 
-    // Exactly one arm carries it, and it is on screen rather than behind a dot.
-    await expect(chain).toHaveCount(1);
-    await chain.click();
-
-    // Two questions, stacked in one column, each with its own answer beside it.
-    await expect
-      .poll(
-        async () => (await nodeBoxes(page)).filter((box) => box.label.includes('Split on')).length,
-        { timeout: 5000 },
-      )
-      .toBe(2);
-
-    const splits = (await nodeBoxes(page)).filter((box) => box.label.includes('Split on'));
-
-    expect(splits[0]!.x).toBe(splits[1]!.x);
-    expect(splits[0]!.y).not.toBe(splits[1]!.y);
+    // The branch goes, and the invitation beside it goes with it.
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
   });
 
-  test('duplicates and deletes a step from its own card', async ({ page }) => {
+  test('keeps one branch pill, below the last row and clear of everything', async ({ page }) => {
+    /*
+     * The pill used to be drawn by whichever connection carried the branch
+     * controls, and with branches as rows every one of them qualified: three
+     * identical buttons stacked down the spine, and one of them across the card
+     * in between.
+     */
     await openBuilder(page);
 
-    const condition = page.getByRole('button', { name: /^More for: Priority is/ });
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(5);
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(7);
+
+    const pill = page.getByRole('button', { name: /^Add branch$/ });
+    await expect(pill).toHaveCount(1);
+
+    const box = (await pill.boundingBox())!;
+    const boxes = await nodeBoxes(page);
+
+    // Below every card, which is where the branch it adds will appear.
+    for (const card of boxes) {
+      expect(box.y, `the pill overlaps "${card.label}"`).toBeGreaterThan(card.y + card.height);
+    }
+  });
+
+  /** Gives the first branch something to do, and closes the panel behind it. */
+  const addComment = async (page: Page) => {
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
+    await page.keyboard.press('Escape');
+
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(3);
+  };
+
+  test('duplicates a branch with its actions, onto a row of its own', async ({ page }) => {
+    await openBuilder(page);
+    await addComment(page);
+
     const before = (await nodeBoxes(page)).length;
 
-    await condition.click();
+    await page.getByRole('button', { name: /^More for: Priority is/ }).click();
     await page.getByRole('menuitem', { name: /duplicate/i }).click();
 
-    /*
-     * The copy runs after the original, not beside it.
-     *
-     * Two steps sharing a parent are two paths from one point — a branch — and
-     * duplicating an action means "do that again", not "fork the rule here".
-     */
+    // The question and the action answering it — a copy of one without the
+    // other is a branch that asks nothing or answers nothing.
     await expect
       .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
-      .toBe(before + 1);
+      .toBe(before + 2);
 
-    const copies = (await nodeBoxes(page)).filter((box) => box.label.includes('Priority is'));
-    expect(copies).toHaveLength(2);
-    expect(copies[0]!.y).toBe(copies[1]!.y);
-    expect(copies[0]!.x).not.toBe(copies[1]!.x);
+    const boxes = await nodeBoxes(page);
+    const first = boxes.find((box) => box.label.startsWith('Check if — Priority is'));
+    const copy = boxes.find((box) => box.label.startsWith('Otherwise if — Priority is'));
 
-    // And the copy goes away again from the same place.
+    /*
+     * The copy reads as another branch purely by no longer being first. A
+     * second "Check if" would say two branches lead with the same question,
+     * rather than that the second is what to do when the first did not hold.
+     */
+    expect(copy, 'the copy did not read as another branch').toBeDefined();
+
+    // A row of its own, directly below — not a step inside the row it came
+    // from, which is what a copy parented to the question would have been.
+    expect(copy!.x).toBe(first!.x);
+    expect(copy!.y).toBeGreaterThan(first!.y);
+
+    /*
+     * And each row has an action of its own.
+     *
+     * Duplicating an ordinary step lets the copy adopt what followed the
+     * original; doing that here would move the actions off the branch being
+     * copied, leaving two questions with one answer between them.
+     */
+    const comments = boxes.filter((box) => box.label.includes('Comment'));
+    expect(comments).toHaveLength(2);
+    expect(comments.map((box) => box.y).sort()).toEqual([first!.y, copy!.y].sort());
+
+    // It goes away again from the same place, taking its action with it.
     await page
       .getByRole('button', { name: /^More for: Priority is/ })
       .last()
@@ -400,6 +521,29 @@ test.describe('the automation builder', () => {
     await page.getByRole('menuitem', { name: /delete/i }).click();
 
     await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
+  });
+
+  test('duplicates an ordinary step after the one it came from', async ({ page }) => {
+    /*
+     * Not beside it: two steps sharing a parent are two paths from one point,
+     * and duplicating an action means "do that again with one thing changed".
+     */
+    await openBuilder(page);
+    await addComment(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    await page.getByRole('button', { name: /^More for: Comment/ }).click();
+    await page.getByRole('menuitem', { name: /duplicate/i }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 1);
+
+    const copies = (await nodeBoxes(page)).filter((box) => box.label.includes('Comment'));
+    expect(copies).toHaveLength(2);
+    expect(copies[0]!.y).toBe(copies[1]!.y);
+    expect(copies[0]!.x).not.toBe(copies[1]!.x);
   });
 
   test('the trigger has no delete in its menu', async ({ page }) => {

@@ -4,6 +4,7 @@ import {
   AutomationNodeType,
   BranchKey,
   GraphIssueLevel,
+  isFallbackBranch,
   OPERATORS_BY_VALUE_KIND,
   operatorTakesValue,
   PLACEHOLDER_NODE_TYPE,
@@ -135,6 +136,15 @@ interface ValidatableNode {
   configuration: Record<string, unknown>;
   parentId: string | null;
   branchKey: string | null;
+  /**
+   * Where this sits among its siblings.
+   *
+   * Optional because a caller that only knows about a flat list of steps has
+   * nothing to say here — but the fallback check below needs it, since "last"
+   * is a fact about the order the runner reads, not about the order an array
+   * happened to arrive in.
+   */
+  order?: number;
 }
 
 /**
@@ -218,6 +228,16 @@ export function validateGraphStructure(
     ...nodes.filter((n) => n.type === AutomationNodeType.BRANCH),
   ]) {
     const configuration = node.configuration ?? {};
+
+    /*
+     * The fallback row is the exception, and has to be.
+     *
+     * "If all other conditions are not met" has nothing to compare — asking it
+     * what it checks would make every rule with an Otherwise unpublishable, on
+     * the strength of a question it is defined by not asking.
+     */
+    if (isFallbackBranch(configuration)) continue;
+
     const field = configuration['field'];
     const operator = configuration['operator'];
 
@@ -254,6 +274,55 @@ export function validateGraphStructure(
 
   for (const issue of detectCycles(nodes)) issues.push(issue);
   for (const issue of validateBranches(nodes)) issues.push(issue);
+  for (const issue of validateFallback(nodes)) issues.push(issue);
+
+  return issues;
+}
+
+/**
+ * The fallback row: one of it, and last.
+ *
+ * Both halves are about what the runner does. It takes the first row whose
+ * condition holds, and a fallback holds unconditionally — so a fallback with
+ * rows after it makes those rows unreachable, and a second fallback is a row
+ * that can never run. Neither reads as broken on the canvas, which is exactly
+ * why it has to be refused here rather than discovered later.
+ */
+function validateFallback(nodes: readonly ValidatableNode[]): GraphIssue[] {
+  const fallbacks = nodes.filter(
+    (node) => node.type === AutomationNodeType.CONDITION && isFallbackBranch(node.configuration),
+  );
+
+  if (fallbacks.length === 0) return [];
+
+  const issues: GraphIssue[] = [];
+
+  for (const extra of fallbacks.slice(1)) {
+    issues.push({
+      level: GraphIssueLevel.ERROR,
+      nodeId: extra.id,
+      path: null,
+      message: 'A rule can only have one “otherwise”.',
+    });
+  }
+
+  const fallback = fallbacks[0] as ValidatableNode;
+  const after = nodes.filter(
+    (node) =>
+      node.id !== fallback.id &&
+      node.type === AutomationNodeType.CONDITION &&
+      node.parentId === fallback.parentId &&
+      (node.order ?? 0) > (fallback.order ?? 0),
+  );
+
+  if (after.length > 0) {
+    issues.push({
+      level: GraphIssueLevel.ERROR,
+      nodeId: fallback.id,
+      path: null,
+      message: '“Otherwise” has to be the last branch — nothing after it could ever run.',
+    });
+  }
 
   return issues;
 }
