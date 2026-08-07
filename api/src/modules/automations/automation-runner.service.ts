@@ -11,6 +11,8 @@ import {
   isFallbackBranch,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
+  AUTOMATION_VALUE_TOKEN,
+  isTokenValue,
   NotificationType,
   toFilterOperator,
   type AutomationTrigger,
@@ -193,7 +195,7 @@ export class AutomationRunnerService {
       // One failing action does not abandon the rest: a rule that assigns
       // someone and adds a comment should still comment if the assignment
       // fails, and the log says which did what.
-      const outcome = await this.runAction(node, task, rule, event).catch(
+      const outcome = await this.runAction(node, task, rule, event, new Date(started)).catch(
         (error: unknown): ActionOutcome => ({
           succeeded: false,
           message: error instanceof Error ? error.message : 'Action failed.',
@@ -508,6 +510,8 @@ export class AutomationRunnerService {
     task: Task,
     rule: { id: string; workspaceId: string; projectId: string },
     event: AutomationEvent,
+    /* When this execution began, so every action in one run agrees. */
+    at: Date,
   ): Promise<ActionOutcome> {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
@@ -665,12 +669,12 @@ export class AutomationRunnerService {
           create: {
             taskId: task.id,
             customFieldId: field.id,
-            ...customFieldValue(field.type, config['value']),
+            ...customFieldValue(field.type, resolveValue(config['value'], at)),
           },
-          update: customFieldValue(field.type, config['value']),
+          update: customFieldValue(field.type, resolveValue(config['value'], at)),
         });
 
-        return { succeeded: true, after: config['value'] };
+        return { succeeded: true, after: resolveValue(config['value'], at) };
       }
 
       default:
@@ -766,6 +770,30 @@ export class AutomationRunnerService {
 }
 
 /** Maps a configured value onto the column its field type uses. */
+/**
+ * A stored value, with anything the rule computes worked out.
+ *
+ * `at` is the execution's own start rather than "now", so every action in one
+ * run stamps the same instant. Two actions computing their own `now` would
+ * differ by however long the first took, and a later question like "did these
+ * happen together?" would get a subtly wrong answer that nothing would explain.
+ *
+ * An unknown token is left alone rather than guessed at: it falls through to the
+ * coercion below, which turns it into `Invalid Date` and fails the action
+ * loudly. Silently substituting today's date would write a plausible wrong
+ * answer, which is worse than a visible failure.
+ */
+function resolveValue(value: unknown, at: Date): unknown {
+  if (!isTokenValue(value)) return value;
+
+  switch (value.token) {
+    case AUTOMATION_VALUE_TOKEN.TRIGGER_DATE:
+      return at.toISOString();
+    default:
+      return value;
+  }
+}
+
 function customFieldValue(type: string, value: unknown): Record<string, unknown> {
   const blank = {
     textValue: null,

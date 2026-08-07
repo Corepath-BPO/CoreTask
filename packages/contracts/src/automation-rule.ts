@@ -408,6 +408,68 @@ export function isEvaluableOperator(operator: string | null | undefined): boolea
 }
 
 /* -------------------------------------------------------------------------- */
+/* Values an action computes rather than holds                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Values a rule works out when it runs, instead of storing outright.
+ *
+ * "Set Started to the date this rule is triggered" cannot be a stored date: the
+ * whole point is that it is a different date every time the rule fires. So the
+ * configuration holds what to compute and the runner computes it.
+ *
+ * A structured object rather than a magic string like `{{trigger.date}}`.
+ * Somebody can legitimately type that into a text field, and this codebase has
+ * already lost a day to two vocabularies that looked like one — a shape nothing
+ * else can accidentally be is worth more than a shorter spelling.
+ */
+export const AUTOMATION_VALUE_TOKEN = {
+  /** When this execution began. */
+  TRIGGER_DATE: 'TRIGGER_DATE',
+} as const;
+export type AutomationValueToken =
+  (typeof AUTOMATION_VALUE_TOKEN)[keyof typeof AUTOMATION_VALUE_TOKEN];
+
+/** A value the runner computes, as it is stored beside the action. */
+export interface AutomationTokenValue {
+  token: AutomationValueToken;
+}
+
+/**
+ * Whether a stored value is a token, narrowed so callers can read `.token`.
+ *
+ * Deliberately strict about the token being one this file names: an object
+ * carrying an unknown token is not a value the runner can compute, and treating
+ * it as one would stamp `Invalid Date` rather than refusing.
+ */
+export function isTokenValue(value: unknown): value is AutomationTokenValue {
+  if (typeof value !== 'object' || value === null) return false;
+
+  const token = (value as { token?: unknown }).token;
+
+  return (
+    typeof token === 'string' &&
+    (Object.values(AUTOMATION_VALUE_TOKEN) as string[]).includes(token)
+  );
+}
+
+/**
+ * The tokens a field of this type may hold.
+ *
+ * Only dates, for now. A token in a number or a text field is nonsense, and the
+ * validator refuses it there rather than letting the runner discover it — the
+ * endpoint has to refuse what the form would not build.
+ */
+export function tokensForFieldType(type: string): readonly AutomationValueToken[] {
+  return type === 'DATE' ? [AUTOMATION_VALUE_TOKEN.TRIGGER_DATE] : [];
+}
+
+/** How a token reads on a card and in the form that chose it. */
+export const AUTOMATION_VALUE_TOKEN_LABEL: Record<AutomationValueToken, string> = {
+  TRIGGER_DATE: 'the date this rule is triggered',
+};
+
+/* -------------------------------------------------------------------------- */
 /* Trigger configuration forms                                                 */
 /* -------------------------------------------------------------------------- */
 

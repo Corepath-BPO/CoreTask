@@ -352,6 +352,52 @@ describe('Automations (e2e)', () => {
       expect(await assigneeAfterRun(scope)).toBeNull();
     });
 
+    it('stamps a date field with the moment the rule ran', async () => {
+      /*
+       * "Set Started to the date this rule is triggered".
+       *
+       * The value cannot be stored, because the whole point is that it differs
+       * every time the rule fires. Before the token existed the configuration
+       * could only hold a literal, so `new Date('TRIGGER_DATE')` produced an
+       * Invalid Date and the write threw.
+       */
+      const scope = await setupScope();
+
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Started',
+          type: 'DATE',
+          projects: { create: { projectId: scope.projectId } },
+        },
+      });
+
+      const before = Date.now();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { customFieldId: field.id, value: { token: 'TRIGGER_DATE' } },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const stored = await context.prisma.taskCustomFieldValue.findFirst({
+        where: { taskId: scope.taskId, customFieldId: field.id },
+      });
+
+      expect(stored?.dateValue).not.toBeNull();
+
+      // Within the window the run happened in, rather than an exact instant:
+      // asserting equality with a clock the test does not own is a flake.
+      const stamped = stored!.dateValue!.getTime();
+      expect(stamped).toBeGreaterThanOrEqual(before);
+      expect(stamped).toBeLessThanOrEqual(Date.now());
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.
