@@ -1,7 +1,10 @@
 import {
+  AUTOMATION_VALUE_TOKEN_LABEL,
   CONDITION_VALUE_TYPE,
+  isTokenValue,
   operatorNeedsValue,
   operatorTakesMultipleValues,
+  tokensForFieldType,
   type ConditionOperator,
   type ConditionValueType,
 } from '@coretask/contracts';
@@ -45,6 +48,15 @@ import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
  * An empty string is what Radix reads as "no selection", which is exactly the
  * state being described, and it shows the placeholder.
  */
+
+/**
+ * "A specific date", as a value the select can hold.
+ *
+ * Not an empty string, which is what these selects use for "nothing chosen" —
+ * picking a literal date *is* an answer, and an empty value would show the
+ * placeholder as though the question were still open.
+ */
+const LITERAL_VALUE = 'LITERAL';
 
 /**
  * The settings one step needs, and nothing else.
@@ -628,7 +640,41 @@ function CustomFieldAction({
         </Select>
       </Field>
 
-      {field && (
+      {/*
+        A date can be one somebody picks or one the rule works out when it runs.
+
+        Asked before the value rather than beside it, because the two answers
+        need different controls and a date input holding "the date this rule is
+        triggered" has nowhere to put it. Only dates offer this — a token in a
+        number or a text field is nonsense, which is why `tokensForFieldType`
+        decides rather than this component.
+      */}
+      {field && tokensForFieldType(field.type).length > 0 && (
+        <Field label="Set it to" htmlFor="step-custom-mode">
+          <Select
+            value={isTokenValue(raw) ? raw.token : LITERAL_VALUE}
+            onValueChange={(next) =>
+              set('value', next === LITERAL_VALUE ? undefined : { token: next })
+            }
+          >
+            <SelectTrigger id="step-custom-mode" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <RadioItem value={LITERAL_VALUE}>A specific date</RadioItem>
+              {tokensForFieldType(field.type).map((token) => (
+                <RadioItem key={token} value={token}>
+                  {AUTOMATION_VALUE_TOKEN_LABEL[token]}
+                </RadioItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      {/* A computed date has already been answered; the input below would ask
+          for a second date that nothing reads. */}
+      {field && !isTokenValue(raw) && (
         <Field label="Value" htmlFor="step-custom-value">
           {field.type === 'CHECKBOX' ? (
             <Select

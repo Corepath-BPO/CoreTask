@@ -2,7 +2,9 @@ import {
   ACTION_LABEL,
   NODE_CATEGORY_LABEL,
   TRIGGER_LABEL,
+  AUTOMATION_VALUE_TOKEN_LABEL,
   isFallbackBranch,
+  isTokenValue,
   operatorNeedsValue,
   toFilterOperator,
   type AutomationAction,
@@ -420,6 +422,21 @@ function actionSummary(
       if (!field) return [{ text: 'Set a field — choose one' }];
 
       const raw = config['value'];
+
+      /*
+       * A computed value reads as the sentence it is.
+       *
+       * `String({ token: 'TRIGGER_DATE' })` is "[object Object]", so without
+       * this the card announced the shape of the configuration instead of what
+       * the rule does.
+       */
+      if (isTokenValue(raw)) {
+        return [
+          { text: `Set ${field.name} to` },
+          { text: AUTOMATION_VALUE_TOKEN_LABEL[raw.token], chip: true },
+        ];
+      }
+
       const chosen = Array.isArray(raw) ? raw.map(String) : raw === undefined ? [] : [String(raw)];
 
       // Options resolve to their labels; everything else is already readable.
