@@ -422,6 +422,46 @@ test.describe('the automation builder', () => {
     await expect(page.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
   });
 
+  test('leaves nothing behind when an insert is abandoned', async ({ page }) => {
+    /*
+     * The step used to be created before it was chosen, so closing the list
+     * left a card that is nothing — no label, no settings, and a fork in the
+     * rule that refuses to publish. Nothing exists now until somebody picks.
+     */
+    await openBuilder(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    await (await endConnector(page)).click();
+    await page.getByRole('button', { name: /^Add a step$/ }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
+
+    const labels = (await nodeBoxes(page)).map((box) => box.label).join(' | ');
+    expect(labels).not.toContain('Do this — ');
+  });
+
+  test('a chosen trigger can still be swapped', async ({ page }) => {
+    /*
+     * The card opens the picker while nothing is chosen and that step's
+     * settings afterwards, so a set trigger had no route back to the list —
+     * the only way to correct a mis-click was to delete the rule.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^More for: When a task/ }).click();
+    await page.getByRole('menuitem', { name: /change trigger/i }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole('option').first()).toBeVisible();
+  });
+
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {
     await openBuilder(page);
 

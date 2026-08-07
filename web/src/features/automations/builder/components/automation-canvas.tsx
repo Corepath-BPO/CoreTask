@@ -39,6 +39,7 @@ interface Props {
   /** Add another question on this split's "otherwise" arm. */
   onAddElseIf: (branchId: string) => void;
   onDuplicateNode: (nodeId: string) => void;
+  onChangeTrigger: () => void;
   onDeleteNode: (nodeId: string) => void;
 }
 
@@ -73,6 +74,7 @@ function Canvas({
   onAddElseIf,
   onDuplicateNode,
   onDeleteNode,
+  onChangeTrigger,
 }: Props) {
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -135,6 +137,9 @@ function Canvas({
             ? {}
             : {
                 onDuplicate: () => onDuplicateNode(node.id),
+                // Only the trigger can be swapped for a different kind; every
+                // other step is replaced by deleting it and choosing again.
+                ...(node.type === 'TRIGGER' ? { onChangeTrigger } : {}),
                 // Every step but the trigger. A rule with nothing to start it
                 // is not a rule; the way to change what starts one is to pick a
                 // different trigger.
@@ -152,6 +157,7 @@ function Canvas({
       placement,
       onDuplicateNode,
       onDeleteNode,
+      onChangeTrigger,
     ],
   );
 

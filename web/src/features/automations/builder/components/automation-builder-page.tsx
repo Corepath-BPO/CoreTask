@@ -146,7 +146,12 @@ export function AutomationBuilderPage({
    */
   const [edits, setEdits] = useState<GraphEdits>(NO_EDITS);
   /** Where a chosen action will land: the end of the rule, or one arm of a split. */
-  const [addingAt, setAddingAt] = useState<{ parentId: string; arm: string | null } | null>(null);
+  const [addingAt, setAddingAt] = useState<{
+    parentId: string;
+    arm: string | null;
+    /** Whether what already follows the parent should move after the new step. */
+    insert?: boolean;
+  } | null>(null);
 
   /*
    * What the rail is showing.
@@ -226,7 +231,21 @@ export function AutomationBuilderPage({
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
     const node = makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes);
 
-    setEdits((previous) => ({ ...previous, added: [...previous.added, node] }));
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, node],
+      /*
+       * Inserting is decided here rather than when the picker opened.
+       *
+       * Creating the step first and asking afterwards left a blank card behind
+       * whenever somebody closed the list without choosing — a step that is
+       * nothing, which forks the rule and refuses to publish. A step nobody has
+       * chosen is not a step, so now nothing exists until one is.
+       */
+      ...(target.insert
+        ? { reparented: { ...previous.reparented, ...adoptChildren(node, realNodes) } }
+        : {}),
+    }));
 
     return node;
   };
@@ -323,24 +342,32 @@ export function AutomationBuilderPage({
     const parent = realNodes.find((node) => node.id === parentId);
     if (!parent) return;
 
-    const inserted =
-      type === 'BRANCH'
-        ? { ...makeBranch(realNodes), parentId, branchKey: null }
-        : makeNodeUnder('ACTION', '', parentId, null, realNodes);
+    /*
+     * An action is chosen before it exists; a branch exists before it is set up.
+     *
+     * The difference is what an unfinished one means. A branch with no
+     * comparison is still a split — it draws, it says what it is missing, and
+     * validation refuses to publish it. An action with no subtype is not a step
+     * at all: nothing can say what it does, so it reads as a card that failed
+     * to load and quietly forks the rule.
+     */
+    if (type === 'ACTION') {
+      openActionPicker({ parentId, arm: null, insert: true });
+      return;
+    }
+
+    const inserted = { ...makeBranch(realNodes), parentId, branchKey: null };
 
     setEdits((previous) => ({
       ...previous,
       added: [...previous.added, inserted],
       reparented: { ...previous.reparented, ...adoptChildren(inserted, realNodes) },
     }));
-
-    // A step with no action chosen is not a step yet, so the list opens on it.
-    if (type === 'ACTION') openActionPicker({ parentId, arm: null });
   };
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
 
-  const openActionPicker = (target: { parentId: string; arm: string | null }) => {
+  const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
     setAddingAt(target);
     setRail({
       kind: 'choose',
@@ -660,6 +687,7 @@ export function AutomationBuilderPage({
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
+          onChangeTrigger={openTriggerPicker}
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}

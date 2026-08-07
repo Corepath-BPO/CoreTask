@@ -38,6 +38,15 @@ export interface AutomationNodeData extends Record<string, unknown> {
   onAddAfter?: () => void;
   /** A copy of this step, running immediately after it. */
   onDuplicate?: () => void;
+  /**
+   * Pick a different trigger. Present only on the trigger.
+   *
+   * The card opens the picker while nothing is chosen and that step's settings
+   * afterwards, so once a trigger was set there was no way back to the list —
+   * changing it meant deleting the rule, which is not a thing anybody should
+   * have to do to fix a mis-click.
+   */
+  onChangeTrigger?: () => void;
   /** Absent on the trigger: a rule with nothing to start it is not a rule. */
   onDelete?: () => void;
 }
@@ -212,7 +221,7 @@ export function AutomationNode({ data, selected }: NodeProps) {
         deleting it — three acts for one intention. Here it is where the step
         is, which is where somebody already is when they decide.
       */}
-      {(node.onDuplicate || node.onDelete) && (
+      {(node.onDuplicate || node.onDelete || node.onChangeTrigger) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -229,6 +238,12 @@ export function AutomationNode({ data, selected }: NodeProps) {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align="end">
+            {node.onChangeTrigger && (
+              <DropdownMenuItem className="cursor-pointer" onSelect={node.onChangeTrigger}>
+                <Zap className="size-4" aria-hidden="true" />
+                Change trigger
+              </DropdownMenuItem>
+            )}
             {node.onDuplicate && (
               <DropdownMenuItem className="cursor-pointer" onSelect={node.onDuplicate}>
                 <Copy className="size-4" aria-hidden="true" />
