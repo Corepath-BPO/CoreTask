@@ -17,9 +17,27 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  // Each worker signs in once (see `e2e/fixtures.ts`), and `/auth/login` is
-  // rate-limited, so worker count is capped rather than left to core count.
-  workers: process.env.CI ? 1 : 3,
+  /*
+   * One worker, because three cost more than they saved.
+   *
+   * Every test signs in as the same demo owner and works in the one seeded
+   * workspace (see `e2e/fixtures.ts`), so the suite was never as parallel as
+   * the runner assumed. At three workers it lost about seven tests a run —
+   * never the same seven, always a timeout waiting for an element rather than
+   * a wrong value, and every one of them green when its file ran alone.
+   *
+   * Measured rather than guessed: three workers took 2.6 minutes and failed
+   * seven; one takes 3.1 and fails none. Thirty seconds is not worth a suite
+   * nobody can read, and a red run that means nothing costs far more than that
+   * in the time spent re-running it to find out.
+   *
+   * This is a cap, not a diagnosis. What actually breaks under concurrency is
+   * still unknown — cold Vite transforms, within-file collision and API rate
+   * limiting were each tested and ruled out, and refresh-token replay is ruled
+   * out too because revocation is scoped per session rather than per user. The
+   * real fix is a workspace per test; until then the suite tells the truth.
+   */
+  workers: 1,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
   timeout: 30_000,
   expect: { timeout: 7_500 },
