@@ -315,6 +315,7 @@ test.describe('the automation builder', () => {
      * it between a check and its action would offer one where none can go.
      */
     await page.getByRole('button', { name: /^Add branch$/ }).click();
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
 
     await expect
       .poll(
@@ -334,6 +335,7 @@ test.describe('the automation builder', () => {
   test('chains another question onto the otherwise arm', async ({ page }) => {
     await openBuilder(page);
     await page.getByRole('button', { name: /^Add branch$/ }).click();
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
 
     await expect
       .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })

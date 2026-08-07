@@ -4,6 +4,7 @@ import {
   CornerDownRight,
   GitBranch,
   MoreHorizontal,
+  Plus,
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
@@ -37,6 +38,8 @@ export interface AutomationEdgeData extends Record<string, unknown> {
    * dots on a three-step rule, only one of which meant anything.
    */
   isJunction?: boolean;
+  /** The fallback: actions with no question, for when nothing else matched. */
+  onAddOtherwise?: (parentId: string) => void;
 }
 
 /**
@@ -191,11 +194,54 @@ export function AutomationEdge({
                     onClick={() => actions.onAddElseIf?.(source)}
                   />
                 ) : (
-                  <EdgeAction
-                    icon={GitBranch}
-                    label="Add branch"
-                    onClick={() => actions.onInsertBranch?.(source)}
-                  />
+                  /*
+                    Two named kinds, asked before anything is built.
+                    
+                    "Add branch" on its own decided for somebody: it made a
+                    split with a question on it, when what they wanted may have
+                    been the fallback that runs when nothing matched. Those are
+                    different things and the words are the only place to tell
+                    them apart, so the question comes before the shape.
+                  */
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:border-primary"
+                      >
+                        <GitBranch className="size-3.5" aria-hidden="true" />
+                        Add branch
+                      </button>
+                    </DropdownMenuTrigger>
+
+                    <DropdownMenuContent align="start" className="w-[300px]">
+                      <DropdownMenuItem
+                        className="cursor-pointer flex-col items-start gap-0.5"
+                        onSelect={() => actions.onInsertBranch?.(source)}
+                      >
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                          <Plus className="size-3.5" aria-hidden="true" />
+                          Otherwise if…
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Add another set of conditions and actions to this rule.
+                        </span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        className="cursor-pointer flex-col items-start gap-0.5"
+                        onSelect={() => actions.onAddOtherwise?.(source)}
+                      >
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                          <Plus className="size-3.5" aria-hidden="true" />
+                          Otherwise
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Add actions that will run if all other conditions are not met.
+                        </span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
               </div>
             </div>

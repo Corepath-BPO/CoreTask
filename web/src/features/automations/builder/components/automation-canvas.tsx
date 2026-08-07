@@ -38,6 +38,7 @@ interface Props {
   onInsertBranch: (parentId: string) => void;
   /** Add another question on this split's "otherwise" arm. */
   onAddElseIf: (branchId: string) => void;
+  onAddOtherwise: (parentId: string) => void;
   onDuplicateNode: (nodeId: string) => void;
   onChangeTrigger: () => void;
   onDeleteNode: (nodeId: string) => void;
@@ -72,6 +73,7 @@ function Canvas({
   onInsertStep,
   onInsertBranch,
   onAddElseIf,
+  onAddOtherwise,
   onDuplicateNode,
   onDeleteNode,
   onChangeTrigger,
@@ -191,6 +193,7 @@ function Canvas({
           ...(edge.branchKey === BranchKey.ELSE ? { onAddElseIf } : {}),
           onDuplicate: onDuplicateNode,
           onDelete: onDeleteNode,
+          onAddOtherwise,
 
           /*
            * Only the trigger's own connection carries the branch controls.
@@ -207,6 +210,7 @@ function Canvas({
       onInsertStep,
       onInsertBranch,
       onAddElseIf,
+      onAddOtherwise,
       onDuplicateNode,
       onDeleteNode,
       triggerIds,

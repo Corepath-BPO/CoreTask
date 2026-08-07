@@ -301,6 +301,38 @@ export function AutomationBuilderPage({
   };
 
   /**
+   * The fallback: what runs when nothing else matched.
+   *
+   * The same split as "otherwise if", differing in what happens next. A branch
+   * is what "otherwise" is made of — the matching side carries on as before and
+   * the other side takes actions with no question of its own — so this opens
+   * the action list on that arm rather than the condition form on the split.
+   *
+   * The two menu entries therefore build the same thing and continue
+   * differently, which is exactly the distinction the words draw: one adds
+   * another question, the other adds the answer for when none of them held.
+   */
+  const addOtherwise = (parentId: string) => {
+    const parent = realNodes.find((node) => node.id === parentId);
+    if (!parent) return;
+
+    const inserted = { ...makeBranch(realNodes), parentId, branchKey: null };
+
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, inserted],
+      reparented: {
+        ...previous.reparented,
+        ...adoptChildren(inserted, realNodes, BranchKey.MATCH),
+      },
+    }));
+
+    // Straight to the actions for the fallback arm, because that is the whole
+    // of what somebody chose — there is no question to answer first.
+    openActionPicker({ parentId: inserted.id, arm: BranchKey.ELSE });
+  };
+
+  /**
    * Another question on the "otherwise" side of a split.
    *
    * This is what an else-if *is* in this model: a second branch hanging off the
@@ -713,6 +745,7 @@ export function AutomationBuilderPage({
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
+          onAddOtherwise={addOtherwise}
           onChangeTrigger={openTriggerPicker}
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
