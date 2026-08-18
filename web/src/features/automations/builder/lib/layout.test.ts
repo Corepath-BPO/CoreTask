@@ -84,6 +84,31 @@ describe('layoutGraph', () => {
     expect(at(placed, 'a3')).toEqual({ column: 2, row: 2 });
   });
 
+  it('gives every branch row a line of its own, with its actions beside it', () => {
+    /*
+     * The shape the rule builder actually makes now: branches are rows hanging
+     * off the trigger, not arms of a split. Read down the column for the
+     * questions and across for what each one does.
+     */
+    const placed = layoutGraph([
+      node('t', 'TRIGGER', null, null, 0),
+      node('r1', 'CONDITION', 't', null, 1),
+      node('a1', 'ACTION', 'r1', null, 2),
+      node('r2', 'CONDITION', 't', null, 3),
+      node('a2', 'ACTION', 'r2', null, 4),
+      node('r3', 'CONDITION', 't', null, 5),
+      node('a3', 'ACTION', 'r3', null, 6),
+    ]);
+
+    expect(at(placed, 'r1')).toEqual({ column: 1, row: 0 });
+    expect(at(placed, 'r2')).toEqual({ column: 1, row: 1 });
+    expect(at(placed, 'r3')).toEqual({ column: 1, row: 2 });
+
+    expect(at(placed, 'a1')).toEqual({ column: 2, row: 0 });
+    expect(at(placed, 'a2')).toEqual({ column: 2, row: 1 });
+    expect(at(placed, 'a3')).toEqual({ column: 2, row: 2 });
+  });
+
   it('never puts two steps in the same place', () => {
     const placed = layoutGraph([
       node('t', 'TRIGGER', null),

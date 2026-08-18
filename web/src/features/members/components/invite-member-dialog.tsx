@@ -146,7 +146,7 @@ export function InviteMemberDialog({
               label="Team"
               htmlFor="invite-team"
               error={errors.teamId?.message}
-              hint="Optional — they join it on accepting"
+              hint="Optional. They join it on accepting."
             >
               <Controller
                 control={control}

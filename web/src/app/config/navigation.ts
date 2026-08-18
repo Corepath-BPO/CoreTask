@@ -59,13 +59,13 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'insights',
     label: 'Insights',
     items: [
-      { label: 'Calendar', to: '/calendar', icon: CalendarDays, comingSoon: true },
-      { label: 'Reports', to: '/reports', icon: BarChart3, comingSoon: true },
+      { label: 'Calendar', to: '/calendar', icon: CalendarDays },
+      { label: 'Reports', to: '/reports', icon: BarChart3 },
     ],
   },
   {
     id: 'account',
-    items: [{ label: 'Settings', to: '/settings', icon: Settings, comingSoon: true }],
+    items: [{ label: 'Settings', to: '/settings', icon: Settings }],
   },
 ];
 

@@ -111,10 +111,37 @@ describe('graph structure', () => {
     );
   });
 
-  it('refuses a step with no parent', () => {
-    expect(messages([trigger(), node({ id: 'orphan', parentId: null })])).toContain(
+  it('refuses a step with no parent, among steps that have one', () => {
+    /*
+     * The connected `node()` is what makes this a graph with parentage, and it
+     * has to be there for the orphan to be an orphan. With nothing parented the
+     * rule is the flat pre-canvas shape, where the runner runs every action and
+     * an unparented step is not stranded — it is the whole rule.
+     */
+    expect(messages([trigger(), node(), node({ id: 'orphan', parentId: null })])).toContain(
       'This step is not connected to anything.',
     );
+  });
+
+  it('accepts a rule from before the canvas, where nothing is parented', () => {
+    // "Every condition must hold, then every action runs" — still what the
+    // runner does with one, so refusing it here would strand a working rule.
+    const issues = validateGraphStructure(
+      [
+        trigger(),
+        node({
+          id: 'c',
+          type: AutomationNodeType.CONDITION,
+          parentId: null,
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'title', operator: 'CONTAINS', value: 'urgent' },
+        }),
+        node({ id: 'a', parentId: null }),
+      ],
+      'A rule from before the canvas',
+    );
+
+    expect(issues.filter((issue) => issue.level === 'ERROR')).toEqual([]);
   });
 
   it('refuses a step whose parent is gone', () => {
@@ -157,6 +184,71 @@ describe('graph structure', () => {
     expect(messages([trigger(), branch, arm])).toContain(
       'This step is under a split but not on one of its paths.',
     );
+  });
+});
+
+describe('the fallback branch', () => {
+  /** A rule whose rows are conditions hanging off the trigger. */
+  const rule = (rows: Node[]): Node[] => [
+    node({
+      id: 't',
+      type: AutomationNodeType.TRIGGER,
+      subtype: 'TASK_CREATED',
+      parentId: null,
+      order: 0,
+    }),
+    ...rows,
+    node({ id: 'a', parentId: rows[0]?.id ?? 't', order: 99 }),
+  ];
+
+  const row = (id: string, order: number, configuration: Record<string, unknown>): Node =>
+    node({
+      id,
+      type: AutomationNodeType.CONDITION,
+      subtype: 'FIELD_COMPARISON',
+      configuration,
+      parentId: 't',
+      order,
+    });
+
+  const answered = { field: 'status', operator: 'EQUALS', value: 'DONE' };
+
+  it('is not asked what it checks', () => {
+    /*
+     * It is defined by asking nothing, so the unanswered-condition check would
+     * refuse every rule with an "otherwise" — for being exactly what somebody
+     * built.
+     */
+    const issues = messages(rule([row('r1', 1, answered), row('r2', 2, { fallback: true })]));
+
+    expect(issues).not.toContain('Choose what this step checks.');
+    expect(issues).not.toContain('Choose how to compare it.');
+  });
+
+  it('refuses a second one', () => {
+    // The first always holds, so a second is a branch that can never run.
+    const issues = messages(
+      rule([row('r1', 1, { fallback: true }), row('r2', 2, { fallback: true })]),
+    );
+
+    expect(issues).toContain('A rule can only have one “otherwise”.');
+  });
+
+  it('refuses a branch ordered after it', () => {
+    const issues = messages(rule([row('r1', 1, { fallback: true }), row('r2', 2, answered)]));
+
+    expect(issues).toContain(
+      '“Otherwise” has to be the last branch — nothing after it could ever run.',
+    );
+  });
+
+  it('accepts one that comes last', () => {
+    const issues = validateGraphStructure(
+      rule([row('r1', 1, answered), row('r2', 2, { fallback: true })]),
+      'A rule',
+    );
+
+    expect(issues.filter((issue) => issue.level === 'ERROR')).toEqual([]);
   });
 });
 

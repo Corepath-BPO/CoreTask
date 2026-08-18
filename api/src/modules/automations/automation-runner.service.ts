@@ -8,16 +8,21 @@ import {
   BLOCK_SELF_RETRIGGER,
   BranchKey,
   FilterOperator,
+  isFallbackBranch,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
+  AUTOMATION_VALUE_TOKEN,
+  isTokenValue,
   NotificationType,
+  toFilterOperator,
   type AutomationTrigger,
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
-import type { AutomationNode, Prisma, Task } from '@prisma/client';
+import { TaskStatus, type AutomationNode, type Prisma, type Task } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
+import { priorityData, readActionId, statusData } from './action-config';
 import type { AutomationEvent } from './automation-event.publisher';
 
 /** What one action attempt produced, for the log. */
@@ -190,7 +195,7 @@ export class AutomationRunnerService {
       // One failing action does not abandon the rest: a rule that assigns
       // someone and adds a comment should still comment if the assignment
       // fails, and the log says which did what.
-      const outcome = await this.runAction(node, task, rule, event).catch(
+      const outcome = await this.runAction(node, task, rule, event, new Date(started)).catch(
         (error: unknown): ActionOutcome => ({
           succeeded: false,
           message: error instanceof Error ? error.message : 'Action failed.',
@@ -274,6 +279,13 @@ export class AutomationRunnerService {
    * condition that does not hold stops everything under it, and a branch sends
    * execution down one arm. The presence of a single parent link is what tells
    * the two apart, because that is the only thing that actually differs.
+   *
+   * The conditions hanging straight off the trigger are that rule's *rows*, and
+   * they are the one place a plain walk would be wrong. Rows are alternatives —
+   * "check if… otherwise if… otherwise" — so visiting every one of them would
+   * run every branch that happened to match rather than the first, which is a
+   * rule doing two contradictory things to the same task. First match wins, and
+   * the rest of the tree is walked exactly as before.
    */
   private plan(
     nodes: AutomationNode[],
@@ -311,12 +323,24 @@ export class AutomationRunnerService {
      * Depth-limited on purpose. A cycle is refused at validation, but the
      * runner reads rows that may have been written by an older client, and a
      * loop here would hang the worker rather than produce a wrong answer.
+     *
+     * `rows` says that the conditions among these children are alternatives to
+     * one another rather than steps on one path. Only the trigger's children
+     * are, which is why it is a parameter rather than the rule everywhere: a
+     * condition further down still governs what follows it, and a rule that
+     * checks two things in sequence must go on doing both.
      */
-    const walk = (nodeId: string, arm: string | null, depth: number): void => {
+    const walk = (nodeId: string, arm: string | null, depth: number, rows = false): void => {
       if (depth > 50) return;
+
+      // Which is to say: a row has already claimed this event. Ordering is by
+      // `position`, so "first" is the row nearest the top of the canvas.
+      let matched = false;
 
       for (const node of childrenOf(nodeId, arm)) {
         if (node.nodeType === AutomationNodeType.CONDITION) {
+          if (rows && matched) continue;
+
           // A condition governs what follows it, not the whole rule. Its
           // siblings on another path are unaffected.
           if (!this.conditionHolds(node, task, event)) {
@@ -324,14 +348,16 @@ export class AutomationRunnerService {
             continue;
           }
 
+          if (rows) matched = true;
+
           walk(node.id, null, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.BRANCH) {
-          const matched = this.conditionHolds(node, task, event);
+          const holds = this.conditionHolds(node, task, event);
 
-          walk(node.id, matched ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          walk(node.id, holds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
           continue;
         }
 
@@ -342,7 +368,7 @@ export class AutomationRunnerService {
       }
     };
 
-    walk(trigger.id, null, 0);
+    walk(trigger.id, null, 0, true);
 
     // "Nothing ran" is only a skip when something stopped it. A rule whose
     // branch legitimately led nowhere has run and done nothing.
@@ -352,14 +378,33 @@ export class AutomationRunnerService {
   private conditionHolds(node: AutomationNode, task: Task, event: AutomationEvent): boolean {
     const config = (node.configuration ?? {}) as {
       field?: string;
-      operator?: FilterOperator;
+      operator?: string;
       value?: unknown;
     };
+
+    /*
+     * The fallback row holds, always.
+     *
+     * "If all other conditions are not met" is what makes it the last row
+     * rather than a comparison of its own — it has no field and no operator, so
+     * every branch below would read it as an unknown operator and return false,
+     * and the one row somebody added to catch everything would catch nothing.
+     */
+    if (isFallbackBranch(node.configuration)) return true;
 
     const actual = this.readField(config.field ?? node.subtype, task, event);
     const expected = config.value;
 
-    switch (config.operator) {
+    /*
+     * The comparison this operator names, whichever vocabulary named it.
+     *
+     * The builder writes the reading names — `IS`, `IS_ONE_OF`, `IS_BEFORE` —
+     * and rules written before those existed hold the query engine's names.
+     * Both spellings mean one comparison, so both are translated to it here
+     * rather than duplicating every case below. An operator with no comparison
+     * still falls to `default` and blocks the rule.
+     */
+    switch (toFilterOperator(config.operator)) {
       case FilterOperator.EQUALS:
         return String(actual ?? '') === String(expected ?? '');
       case FilterOperator.NOT_EQUALS:
@@ -429,6 +474,11 @@ export class AutomationRunnerService {
         return task.createdById;
       case 'title':
         return task.title;
+      // Null rather than the empty string, so "description is empty" holds for
+      // a task nobody has described — `IS_EMPTY` tests both, but a comparison
+      // against text would otherwise match '' and read as a real answer.
+      case 'description':
+        return task.description;
       case 'completed':
         return task.completedAt !== null;
 
@@ -460,6 +510,8 @@ export class AutomationRunnerService {
     task: Task,
     rule: { id: string; workspaceId: string; projectId: string },
     event: AutomationEvent,
+    /* When this execution began, so every action in one run agrees. */
+    at: Date,
   ): Promise<ActionOutcome> {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
@@ -501,24 +553,32 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.UPDATE_STATUS: {
-        const status = String(config['status'] ?? '');
+        const status = readActionId(config, 'status');
+        if (!status) return { succeeded: false, message: 'No status was chosen.' };
+
+        const data = statusData(status);
+
         await this.updateTask(
           task.id,
           {
-            status: status as Task['status'],
+            ...data,
             // Completion is a fact about the task, not a separate action
             // somebody has to remember to add to the rule.
-            ...(status === 'DONE' ? { completedAt: new Date() } : {}),
+            ...(data.status === TaskStatus.DONE ? { completedAt: new Date() } : {}),
           },
           rule.id,
           event,
         );
+
         return { succeeded: true, before: task.status, after: status };
       }
 
       case AutomationAction.UPDATE_PRIORITY: {
-        const priority = String(config['priority'] ?? '');
-        await this.updateTask(task.id, { priority: priority as Task['priority'] }, rule.id, event);
+        const priority = readActionId(config, 'priority');
+        if (!priority) return { succeeded: false, message: 'No priority was chosen.' };
+
+        await this.updateTask(task.id, priorityData(priority), rule.id, event);
+
         return { succeeded: true, before: task.priority, after: priority };
       }
 
@@ -594,7 +654,7 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.SET_CUSTOM_FIELD: {
-        const fieldId = String(config['fieldId'] ?? '');
+        const fieldId = readActionId(config, 'fieldId') ?? '';
         // Through the association: a rule may only write a field its own
         // project actually uses, even though the definition is shared.
         const field = await this.prisma.customField.findFirst({
@@ -609,12 +669,12 @@ export class AutomationRunnerService {
           create: {
             taskId: task.id,
             customFieldId: field.id,
-            ...customFieldValue(field.type, config['value']),
+            ...customFieldValue(field.type, resolveValue(config['value'], at)),
           },
-          update: customFieldValue(field.type, config['value']),
+          update: customFieldValue(field.type, resolveValue(config['value'], at)),
         });
 
-        return { succeeded: true, after: config['value'] };
+        return { succeeded: true, after: resolveValue(config['value'], at) };
       }
 
       default:
@@ -710,6 +770,30 @@ export class AutomationRunnerService {
 }
 
 /** Maps a configured value onto the column its field type uses. */
+/**
+ * A stored value, with anything the rule computes worked out.
+ *
+ * `at` is the execution's own start rather than "now", so every action in one
+ * run stamps the same instant. Two actions computing their own `now` would
+ * differ by however long the first took, and a later question like "did these
+ * happen together?" would get a subtly wrong answer that nothing would explain.
+ *
+ * An unknown token is left alone rather than guessed at: it falls through to the
+ * coercion below, which turns it into `Invalid Date` and fails the action
+ * loudly. Silently substituting today's date would write a plausible wrong
+ * answer, which is worse than a visible failure.
+ */
+function resolveValue(value: unknown, at: Date): unknown {
+  if (!isTokenValue(value)) return value;
+
+  switch (value.token) {
+    case AUTOMATION_VALUE_TOKEN.TRIGGER_DATE:
+      return at.toISOString();
+    default:
+      return value;
+  }
+}
+
 function customFieldValue(type: string, value: unknown): Record<string, unknown> {
   const blank = {
     textValue: null,

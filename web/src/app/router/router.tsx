@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { BarChart3, CalendarDays, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -7,6 +7,7 @@ import { RootLayout } from '@/app/layouts/root-layout';
 import { PlaceholderPage } from '@/components/common/placeholder-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
+import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
@@ -18,6 +19,8 @@ import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page
 import { ProjectListPage } from '@/features/projects/pages/project-list-page';
 import { ProjectOverviewPage } from '@/features/projects/pages/project-overview-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
+import { ReportsPage } from '@/features/reports/pages/reports-page';
+import { SettingsPage } from '@/features/settings/pages/settings-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { TeamsPage } from '@/features/teams/pages/teams-page';
 import { TicketsPage } from '@/features/tickets/pages/tickets-page';
@@ -327,45 +330,23 @@ const projectPlaceholderRoutes = [
   }),
 );
 
-/** Sidebar destinations whose API arrives in the next phase. */
-const placeholders = [
-  {
-    path: '/calendar',
-    title: 'Calendar',
-    description: 'Due dates and milestones on a calendar.',
-    icon: CalendarDays,
-    plannedFor: 'Month and week views fed by task and ticket due dates.',
-  },
-  {
-    path: '/reports',
-    title: 'Reports',
-    description: 'Throughput, cycle time and workload.',
-    icon: BarChart3,
-    plannedFor: 'Dashboards over the activity log and completion history.',
-  },
-  {
-    path: '/settings',
-    title: 'Settings',
-    description: 'Workspace, members and personal preferences.',
-    icon: Settings,
-    plannedFor: 'Workspace settings, member roles and invitations.',
-  },
-] as const;
+const calendarRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/calendar',
+  component: CalendarPage,
+});
 
-const placeholderRoutes = placeholders.map((page) =>
-  createRoute({
-    getParentRoute: () => protectedRoute,
-    path: page.path,
-    component: () => (
-      <PlaceholderPage
-        title={page.title}
-        description={page.description}
-        icon={page.icon}
-        plannedFor={page.plannedFor}
-      />
-    ),
-  }),
-);
+const reportsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/reports',
+  component: ReportsPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings',
+  component: SettingsPage,
+});
 
 const routeTree = rootRoute.addChildren([
   guestRoute.addChildren([loginRoute, registerRoute]),
@@ -388,7 +369,9 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     membersRoute,
     teamsRoute,
-    ...placeholderRoutes,
+    calendarRoute,
+    reportsRoute,
+    settingsRoute,
   ]),
 ]);
 

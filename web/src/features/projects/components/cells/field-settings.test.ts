@@ -92,10 +92,32 @@ describe('date input conversion', () => {
   });
 
   it('round-trips a date carrying a time', () => {
+    /*
+     * The same time back, wherever this runs.
+     *
+     * The two helpers disagreed about the zone — one sliced UTC out of the
+     * stored timestamp, the other read the input as local — so a field carrying
+     * a time moved by the reader's offset on every edit. It passed anywhere
+     * that happened to be at UTC and failed by exactly the offset everywhere
+     * else, which is why it survived: the machine that wrote it was at UTC.
+     */
     const iso = fromInputValue('2026-05-20T14:30', true);
 
     expect(iso).not.toBeNull();
     expect(toInputValue(iso, true)).toBe('2026-05-20T14:30');
+  });
+
+  it('stores the time as written rather than as the reader’s offset', () => {
+    // The assertion the round-trip alone cannot make: two helpers that shifted
+    // by the same amount in opposite directions would round-trip perfectly and
+    // still store the wrong instant.
+    expect(fromInputValue('2026-05-20T14:30', true)).toBe('2026-05-20T14:30:00.000Z');
+  });
+
+  it('keeps a date-only field and a timed one meaning the same instant', () => {
+    // Midnight either way. If the two branches read different zones, switching
+    // a field to carry a time would silently move every value it holds.
+    expect(fromInputValue('2026-05-20T00:00', true)).toBe(fromInputValue('2026-05-20', false));
   });
 
   it('clears rather than inventing a date from an empty input', () => {

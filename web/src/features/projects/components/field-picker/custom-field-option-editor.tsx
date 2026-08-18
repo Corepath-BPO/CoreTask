@@ -53,7 +53,7 @@ export function CustomFieldOptionEditor({
                   className="shrink-0 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
                 >
                   <SemanticBadge color={{ colorToken: option.colorToken, customColor: null }}>
-                    {option.label.trim() || '—'}
+                    {option.label.trim() || '-'}
                   </SemanticBadge>
                 </button>
               </PopoverTrigger>

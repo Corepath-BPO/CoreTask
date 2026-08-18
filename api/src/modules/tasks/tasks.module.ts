@@ -11,7 +11,11 @@ import { TasksService } from './tasks.service';
 
 @Module({
   imports: [
-    AutomationEventsModule,WorkspaceMembersModule, ActivityLogsModule, NotificationsIntegrationModule],
+    AutomationEventsModule,
+    WorkspaceMembersModule,
+    ActivityLogsModule,
+    NotificationsIntegrationModule,
+  ],
   controllers: [TasksController],
   providers: [TasksService],
   exports: [TasksService],

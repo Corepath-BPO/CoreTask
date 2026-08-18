@@ -154,7 +154,7 @@ export function TeamsPage() {
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleting?.projectCount
-                ? `Its ${deleting.projectCount} project${deleting.projectCount === 1 ? '' : 's'} stay put — they simply stop belonging to a team. This cannot be undone.`
+                ? `Its ${deleting.projectCount} project${deleting.projectCount === 1 ? '' : 's'} stay put. They simply stop belonging to a team. This cannot be undone.`
                 : 'The team is removed for everyone. This cannot be undone.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

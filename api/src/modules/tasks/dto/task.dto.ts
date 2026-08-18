@@ -287,6 +287,11 @@ export class TaskListQueryDto {
   @IsISO8601()
   dueBefore?: string;
 
+  @ApiPropertyOptional({ format: 'date-time', description: 'Only tasks due on or after this.' })
+  @IsOptional()
+  @IsISO8601()
+  dueAfter?: string;
+
   @ApiPropertyOptional({ default: false })
   @IsOptional()
   @booleanQuery()

@@ -474,16 +474,17 @@ export class ProjectWorkItemService {
     after: ProjectWorkItem,
     changedFields: string[],
   ): AutomationTrigger[] {
-    const triggers: AutomationTrigger[] = [
-      after.type === WorkItemType.TICKET
-        ? AutomationTrigger.TICKET_STATUS_CHANGED
-        : AutomationTrigger.TASK_UPDATED,
-    ];
+    const triggers: AutomationTrigger[] =
+      after.type === WorkItemType.TICKET ? [] : [AutomationTrigger.TASK_UPDATED];
 
     // Only the specific ones that actually happened. Publishing every trigger
     // on every update would fire rules whose condition never changed.
-    if (changedFields.includes('status') && after.type !== WorkItemType.TICKET) {
-      triggers.push(AutomationTrigger.TASK_STATUS_CHANGED);
+    if (changedFields.includes('status')) {
+      triggers.push(
+        after.type === WorkItemType.TICKET
+          ? AutomationTrigger.TICKET_STATUS_CHANGED
+          : AutomationTrigger.TASK_STATUS_CHANGED,
+      );
     }
     if (changedFields.includes('priority')) {
       triggers.push(AutomationTrigger.TASK_PRIORITY_CHANGED);

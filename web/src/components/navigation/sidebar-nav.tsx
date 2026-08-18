@@ -13,11 +13,11 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   return (
-    <nav aria-label="Primary" className="flex flex-col gap-5">
+    <nav aria-label="Primary" className="flex flex-col gap-6">
       {NAV_SECTIONS.map((section) => (
         <div key={section.id} className="space-y-1">
           {section.label && !collapsed && (
-            <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground/80">
               {section.label}
             </p>
           )}
@@ -57,11 +57,11 @@ function NavLink({
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+        'group flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-[color,background-color,transform]',
         'focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
         active
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+          ? 'bg-primary text-primary-foreground shadow-[0_8px_24px_oklch(0.763_0.164_134/14%)]'
+          : 'text-muted-foreground hover:translate-x-0.5 hover:bg-white/5 hover:text-foreground',
         collapsed && 'justify-center px-0',
       )}
     >

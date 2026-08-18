@@ -1,9 +1,21 @@
-import { AutomationRuleStatus, BranchKey, type AutomationNodeType } from '@coretask/contracts';
-import type { AutomationGraphNode, AutomationRuleGraph } from '@coretask/types';
+import {
+  AutomationRuleStatus,
+  WorkspaceRole,
+  hasAtLeastRole,
+  type AutomationNodeType,
+} from '@coretask/contracts';
+import type {
+  AutomationCatalogEntry,
+  AutomationGraphNode,
+  AutomationRuleGraph,
+} from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
+import { AlertCircle, LockKeyhole } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { EmptyState } from '@/components/feedback/empty-state';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProject } from '@/features/projects/hooks/use-projects';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
@@ -15,17 +27,24 @@ import {
   useSaveGraph,
 } from '../hooks/use-automation-graph';
 
+import { conditionFromCatalogueEntry } from '../configuration/condition-value';
 import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
 import type { RuleSettings } from '../configuration/rule-settings-panel';
 import {
   adoptChildren,
   applyEdits,
+  branchRows,
+  copyBranchRow,
+  fallbackRow,
+  FALLBACK_CONFIGURATION,
   hasEdits,
-  makeBranch,
+  isUnansweredRow,
+  makeBranchRow,
   makeDefaultNodes,
   makeNodeUnder,
   NO_EDITS,
   readPlaceholderId,
+  withDescendants,
   withPlaceholder,
   type CanvasNode,
   type GraphEdits,
@@ -95,10 +114,24 @@ export function AutomationBuilderPage({
 }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
+  const canManage = hasAtLeastRole(
+    (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole,
+    WorkspaceRole.MANAGER,
+  );
   const navigate = useNavigate();
 
-  const { data: fetched, isLoading } = useAutomationGraph(workspaceId, projectId, ruleId);
-  const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
+  const {
+    data: fetched,
+    isLoading: graphLoading,
+    isError: graphError,
+    refetch: refetchGraph,
+  } = useAutomationGraph(workspaceId, projectId, ruleId);
+  const {
+    data: metadata,
+    isLoading: metadataLoading,
+    isError: metadataError,
+    refetch: refetchMetadata,
+  } = useAutomationMetadata(workspaceId, projectId);
   /* The same query the project pages use, so the name in the header comes from
      the cache they have already filled rather than from a request of its own. */
   const { data: project } = useProject(workspaceId, projectId);
@@ -146,7 +179,22 @@ export function AutomationBuilderPage({
    */
   const [edits, setEdits] = useState<GraphEdits>(NO_EDITS);
   /** Where a chosen action will land: the end of the rule, or one arm of a split. */
-  const [addingAt, setAddingAt] = useState<{ parentId: string; arm: string | null } | null>(null);
+  const [addingAt, setAddingAt] = useState<{
+    parentId: string;
+    arm: string | null;
+    /** Whether what already follows the parent should move after the new step. */
+    insert?: boolean;
+  } | null>(null);
+  /**
+   * Which branch row a chosen condition answers.
+   *
+   * The mirror of `addingAt`, and separate from it for the same reason: the
+   * rail is handed a list of entries and nothing else, so what a click on one
+   * of them *means* is a property of what opened the panel. A row already
+   * exists here — an unanswered branch — where an action does not exist until
+   * it is chosen, so this is an id rather than a place to put one.
+   */
+  const [answering, setAnswering] = useState<string | null>(null);
 
   /*
    * What the rail is showing.
@@ -222,14 +270,34 @@ export function AutomationBuilderPage({
   }, [realNodes]);
 
   /** Answers with the step it added, so the caller can go on to set it up. */
-  const addAction = (subtype: string): CanvasNode => {
+  const addAction = (subtype: string, configuration: Record<string, unknown> = {}): CanvasNode => {
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
-    const node = makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes);
+    const node = {
+      ...makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
+      configuration,
+    };
 
-    setEdits((previous) => ({ ...previous, added: [...previous.added, node] }));
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, node],
+      /*
+       * Inserting is decided here rather than when the picker opened.
+       *
+       * Creating the step first and asking afterwards left a blank card behind
+       * whenever somebody closed the list without choosing — a step that is
+       * nothing, which forks the rule and refuses to publish. A step nobody has
+       * chosen is not a step, so now nothing exists until one is.
+       */
+      ...(target.insert
+        ? { reparented: { ...previous.reparented, ...adoptChildren(node, realNodes) } }
+        : {}),
+    }));
 
     return node;
   };
+
+  /** Whether this step is one of the rule's branches rather than a step on one. */
+  const isBranchRow = (nodeId: string) => branchRows(realNodes).some((row) => row.id === nodeId);
 
   /**
    * A copy of a step, running immediately after the one it came from.
@@ -241,10 +309,26 @@ export function AutomationBuilderPage({
    * Its settings come along. A copy that arrived empty would be a new step with
    * extra steps, and the reason to duplicate is that most of the answers are
    * already right.
+   *
+   * A branch is the exception, and has to be: it is a question *and* the actions
+   * answering it, so the same treatment would hand the copy the original's
+   * actions and leave the original with none — see `copyBranchRow`.
    */
   const duplicateNode = (nodeId: string) => {
     const original = realNodes.find((node) => node.id === nodeId);
     if (!original) return;
+
+    if (isBranchRow(nodeId)) {
+      const copies = copyBranchRow(realNodes, nodeId);
+      const [row] = copies;
+      if (!row) return;
+
+      setEdits((previous) => ({ ...previous, added: [...previous.added, ...copies] }));
+
+      setSelectedId(row.id);
+      setRail({ kind: 'configure', nodeId: row.id });
+      return;
+    }
 
     const copy: CanvasNode = {
       ...makeNodeUnder(
@@ -267,48 +351,80 @@ export function AutomationBuilderPage({
     setRail({ kind: 'configure', nodeId: copy.id });
   };
 
+  /**
+   * Removing a step, and closing the gap it leaves.
+   *
+   * Whatever followed attaches to whatever came before, so deleting the third of
+   * five steps does not take the last two with it.
+   *
+   * A branch again goes as a piece. Its actions exist because of its question,
+   * so re-parenting them onto the trigger would turn "assign Maya when the
+   * priority is high" into "assign Maya" — a rule nobody wrote, arrived at by
+   * removing something. Deciding it here rather than in each control means every
+   * route to it agrees: the × on the card, the connector's menu, the panel.
+   */
   const deleteNode = (nodeId: string) => {
-    setEdits((previous) => ({ ...previous, removed: [...previous.removed, nodeId] }));
+    const removed = isBranchRow(nodeId) ? withDescendants(realNodes, nodeId) : [nodeId];
+
+    setEdits((previous) => ({ ...previous, removed: [...previous.removed, ...removed] }));
     setRail((previous) =>
-      previous.kind === 'configure' && previous.nodeId === nodeId ? { kind: 'closed' } : previous,
+      previous.kind === 'configure' && removed.includes(previous.nodeId)
+        ? { kind: 'closed' }
+        : previous,
     );
   };
 
   /**
-   * Another question on the "otherwise" side of a split.
+   * The fallback: what runs when nothing else matched.
    *
-   * This is what an else-if *is* in this model: a second branch hanging off the
-   * first one's otherwise arm. The engine already walks it — a branch takes one
-   * arm and keeps going — so nothing new had to be taught to the runner.
+   * A row like any other — a condition hanging off the trigger — marked as the
+   * one with no question. That mark is the whole difference: the runner takes
+   * the first row whose condition holds and this one always does, so it needs no
+   * comparison and the canvas must not ask for one.
    *
-   * Whatever was on that arm becomes the new question's own otherwise, which is
-   * the only reading that preserves what the rule already said: "otherwise if X
-   * do A, otherwise <what was there before>".
+   * So this opens the action list straight away, where "Otherwise if…" opens the
+   * condition form. That is exactly the distinction the two words draw: one adds
+   * another question, the other adds the answer for when none of them held.
    */
-  const addElseIf = (branchId: string) => {
-    const branch = realNodes.find((node) => node.id === branchId);
-    if (!branch) return;
+  const addOtherwise = () => {
+    if (!triggerNode) return;
 
-    const inserted = makeNodeUnder(
-      'BRANCH',
-      'FIELD_COMPARISON',
-      branchId,
-      BranchKey.ELSE,
-      realNodes,
-    );
+    const inserted = makeBranchRow(realNodes, triggerNode.id, FALLBACK_CONFIGURATION);
 
-    setEdits((previous) => ({
-      ...previous,
-      added: [...previous.added, inserted],
-      reparented: {
-        ...previous.reparented,
-        ...adoptChildren(inserted, realNodes, BranchKey.ELSE),
-      },
-    }));
+    setEdits((previous) => ({ ...previous, added: [...previous.added, inserted] }));
 
-    // Straight into its condition: an unanswered question is not a step yet.
+    // Straight to the actions, because that is the whole of what somebody
+    // chose — there is no question to answer first.
+    openActionPicker({ parentId: inserted.id, arm: null });
+  };
+
+  /**
+   * Another question, on its own row under the trigger.
+   *
+   * A sibling of the rows already there rather than something nested inside the
+   * last one. Nesting is what made an else-if a split with two arms — a "Split
+   * on" card carrying placeholders for paths nobody asked for — where what
+   * somebody wants is one more line: a question, and what to do when it holds.
+   *
+   * The runner reads the siblings in order and takes the first that holds, which
+   * is what makes a list of these behave like the if/else-if chain it reads as.
+   */
+  const addElseIf = () => {
+    if (!triggerNode) return;
+
+    const inserted = makeBranchRow(realNodes, triggerNode.id);
+
+    setEdits((previous) => ({ ...previous, added: [...previous.added, inserted] }));
+
+    /*
+     * Straight into the catalogue: an unanswered question is not a step yet,
+     * and the first thing it is missing is what it checks. It used to open the
+     * comparison form instead, which asked "is / is not / is one of" about a
+     * field nobody had named — the catalogue existed on the server all along
+     * and nothing routed a condition to it.
+     */
     setSelectedId(inserted.id);
-    setRail({ kind: 'configure', nodeId: inserted.id });
+    openConditionPicker(inserted.id, [...realNodes, inserted]);
   };
 
   /*
@@ -318,56 +434,92 @@ export function AutomationBuilderPage({
    * gains a stage instead of growing a second tail. `adoptChildren` works out
    * which nodes that is — only the ones on the same arm, so inserting into one
    * side of a split leaves the other side where it was.
+   *
+   * Nothing exists until the action is chosen. Creating the step first left a
+   * blank card behind whenever somebody closed the list without picking — a step
+   * that is nothing, which forks the rule and refuses to publish.
    */
-  const insertAfter = (type: 'ACTION' | 'BRANCH', parentId: string) => {
+  const insertStepAfter = (parentId: string) => {
     const parent = realNodes.find((node) => node.id === parentId);
     if (!parent) return;
 
-    const inserted =
-      type === 'BRANCH'
-        ? { ...makeBranch(realNodes), parentId, branchKey: null }
-        : makeNodeUnder('ACTION', '', parentId, null, realNodes);
-
-    setEdits((previous) => ({
-      ...previous,
-      added: [...previous.added, inserted],
-      reparented: { ...previous.reparented, ...adoptChildren(inserted, realNodes) },
-    }));
-
-    // A step with no action chosen is not a step yet, so the list opens on it.
-    if (type === 'ACTION') openActionPicker({ parentId, arm: null });
+    openActionPicker({ parentId, arm: null, insert: true });
   };
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
 
-  const openActionPicker = (target: { parentId: string; arm: string | null }) => {
+  const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
+    setAnswering(null);
     setAddingAt(target);
     setRail({
       kind: 'choose',
+      catalogue: 'actions',
       title: 'Do this…',
       description: 'Add an action that happens as a result of the rule.',
       entries: metadata?.actions ?? [],
     });
   };
 
-  const openTriggerPicker = () =>
+  const openTriggerPicker = () => {
+    setAnswering(null);
+    setAddingAt(null);
     setRail({
       kind: 'choose',
+      catalogue: 'triggers',
       title: 'When this happens…',
       description: 'Choose what starts this rule.',
       entries: metadata?.triggers ?? [],
     });
+  };
+
+  /**
+   * What a branch checks, chosen from the catalogue rather than assumed.
+   *
+   * The rule's first row and every "Otherwise if…" after it come here while
+   * they are still unanswered, because the question they are asking is which
+   * check — not which comparison, which is the next one. The panel this opens
+   * is the same grouped, searchable one the actions use, and the same
+   * convention runs through it: a check the engine cannot make is shown greyed
+   * with the reason rather than removed.
+   *
+   * Named for where it sits, so the panel and the card that opened it agree.
+   * Only the first row is the rule's own "Check if".
+   *
+   * `nodes` is a parameter because a row added a moment ago is not in
+   * `realNodes` yet — that is a render behind — and a fresh "Otherwise if…"
+   * asked about the saved canvas comes back as index -1, which would title its
+   * own panel "Check if…".
+   */
+  const openConditionPicker = (nodeId: string, nodes: readonly CanvasNode[] = realNodes) => {
+    const alternative = branchRows(nodes).findIndex((row) => row.id === nodeId) > 0;
+
+    setAddingAt(null);
+    setAnswering(nodeId);
+    setRail({
+      kind: 'choose',
+      catalogue: 'conditions',
+      title: alternative ? 'Otherwise if…' : 'Check if…',
+      description: 'Choose what this branch checks.',
+      entries: metadata?.conditions ?? [],
+    });
+  };
 
   /*
-   * One list, two meanings, decided by where it was opened from.
+   * One list, three meanings, decided by where it was opened from.
    *
-   * The rail does not know whether it is offering triggers or actions — it was
-   * handed a list of entries. What a chosen one means is a property of the
-   * click that opened it, which is exactly what `addingAt` records.
+   * The rail does not know whether it is offering triggers, conditions or
+   * actions — it was handed a list of entries. What a chosen one means is a
+   * property of the click that opened it, which is exactly what `answering` and
+   * `addingAt` record.
    */
-  const chooseFromRail = (subtype: string) => {
+  const chooseFromRail = (entry: AutomationCatalogEntry) => {
+    if (answering) {
+      answerBranch(answering, entry);
+      return;
+    }
+
     if (!addingAt) {
-      setTrigger(subtype);
+      setTrigger(entry.subtype);
       return;
     }
 
@@ -379,10 +531,42 @@ export function AutomationBuilderPage({
      * choice and the settings are two halves of one act, so the panel carries
      * on into the second.
      */
-    const added = addAction(subtype);
+    /*
+     * A generated row already knows its field, so the form does not ask again.
+     *
+     * Every "Change ⟨field⟩ to…" shares one subtype and differs only by the
+     * field it names — without carrying that across, choosing one landed on a
+     * form with an empty field picker, which is the click being thrown away.
+     */
+    const added = addAction(entry.subtype, entry.fieldId ? { fieldId: entry.fieldId } : {});
     setAddingAt(null);
     setSelectedId(added.id);
     setRail({ kind: 'configure', nodeId: added.id });
+  };
+
+  /**
+   * Answering a branch with the check somebody picked.
+   *
+   * The whole configuration is replaced rather than merged into. A row reaching
+   * the catalogue is one nothing has been chosen for, and the value a previous
+   * answer left behind belongs to the field it was chosen from — a section id
+   * means nothing to "assignee is", and keeping it would leave the form looking
+   * answered while holding something the runner cannot use. The same reasoning
+   * as retyping the trigger below.
+   *
+   * Then straight on to the comparison and the value, which is the rest of the
+   * same act: a step chosen and left unconfigured is one somebody has to find
+   * their way back to.
+   */
+  const answerBranch = (nodeId: string, entry: AutomationCatalogEntry) => {
+    setEdits((previous) => ({
+      ...previous,
+      configured: { ...previous.configured, [nodeId]: conditionFromCatalogueEntry(entry) },
+    }));
+
+    setAnswering(null);
+    setSelectedId(nodeId);
+    setRail({ kind: 'configure', nodeId });
   };
 
   /**
@@ -421,6 +605,10 @@ export function AutomationBuilderPage({
           configuration: node.configuration,
           parentId: node.parentId,
           branchKey: node.branchKey,
+          // Carried because "the fallback has to come last" is a fact about
+          // this number: a rule that reads correctly down the canvas can still
+          // have a row ordered after the one that catches everything.
+          order: node.order,
         })),
         currentName,
       ),
@@ -525,8 +713,13 @@ export function AutomationBuilderPage({
     });
 
   const saveDraft = async () => {
-    const savedId = await persist();
-    if (savedId && isNew) await goToSaved(savedId);
+    try {
+      const savedId = await persist();
+      if (savedId && isNew) await goToSaved(savedId);
+    } catch {
+      // The mutation reports the API error. Keeping the builder open preserves
+      // the unsaved canvas so the user can correct it and retry.
+    }
   };
 
   /**
@@ -537,11 +730,19 @@ export function AutomationBuilderPage({
    * from the one on screen.
    */
   const publish = async () => {
-    const savedId = await persist();
-    if (!savedId) return;
+    let savedId: string | null = null;
 
-    await publishRule.mutateAsync(savedId);
-    if (isNew) await goToSaved(savedId);
+    try {
+      savedId = await persist();
+      if (!savedId) return;
+      await publishRule.mutateAsync(savedId);
+    } catch {
+      // Both mutations already surface their own errors. A newly created draft
+      // still needs its real URL even when publishing fails, otherwise another
+      // click would create a duplicate rule.
+    } finally {
+      if (savedId && isNew) await goToSaved(savedId);
+    }
   };
 
   /*
@@ -577,8 +778,43 @@ export function AutomationBuilderPage({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  if (isLoading || !rule) {
+  if ((ruleId !== null && graphError) || metadataError) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <EmptyState
+          icon={AlertCircle}
+          title="The rule builder could not load"
+          description="Your rule has not been changed. Retry the definition and project options, or return to the rule list."
+          action={
+            <div className="flex gap-2">
+              <Button onClick={() => void Promise.all([refetchGraph(), refetchMetadata()])}>
+                Try again
+              </Button>
+              <Button variant="outline" onClick={onClose}>
+                Back to automations
+              </Button>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (graphLoading || metadataLoading || !rule) {
     return <Skeleton className="h-[70vh] w-full" />;
+  }
+
+  if (!canManage) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <EmptyState
+          icon={LockKeyhole}
+          title="Manager access required"
+          description="Only workspace managers and admins can edit or publish automation rules."
+          action={<Button onClick={onClose}>Back to automations</Button>}
+        />
+      </div>
+    );
   }
 
   return (
@@ -605,6 +841,9 @@ export function AutomationBuilderPage({
           )
         }
         save={saveState}
+        saving={saving}
+        canSave={dirty && !unnamed && Boolean(triggerNode?.subtype)}
+        onSave={() => void saveDraft()}
         issues={issues}
         onFocusIssue={(nodeId) => setSelectedId(nodeId)}
         publishing={publishRule.isPending}
@@ -657,13 +896,39 @@ export function AutomationBuilderPage({
               return;
             }
 
+            /*
+             * The fallback opens nothing, because there is nothing to set.
+             *
+             * Its form would be the condition form, which offers to give
+             * "otherwise" a comparison — and a fallback with one is a row that
+             * is neither the fallback nor a question.
+             */
+            if (fallbackRow(realNodes)?.id === nodeId) return;
+
+            /*
+             * A branch nobody has answered opens the catalogue, not the form.
+             *
+             * The card reads "+ Otherwise if…" or "Check if — choose what to
+             * check", and both are asking the same thing: which check. The
+             * comparison form cannot answer that — it asks how to compare a
+             * field, and there is no field yet — so this is the one route to
+             * the seven groups of checks the endpoint has always sent.
+             */
+            const row = realNodes.find((node) => node.id === nodeId);
+
+            if (row && isUnansweredRow(row)) {
+              openConditionPicker(nodeId);
+              return;
+            }
+
             setRail({ kind: 'configure', nodeId });
           }}
           onAddElseIf={addElseIf}
+          onAddOtherwise={addOtherwise}
+          onChangeTrigger={openTriggerPicker}
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
-          onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
-          onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
+          onInsertStep={insertStepAfter}
         />
 
         {/*
@@ -681,6 +946,10 @@ export function AutomationBuilderPage({
           onClose={() => {
             setRail({ kind: 'closed' });
             setAddingAt(null);
+            /* Closing the catalogue leaves the row unanswered rather than
+               half-answered — the card goes on offering, and the × on it is
+               still the way to take a mis-clicked branch back off. */
+            setAnswering(null);
           }}
           onChange={(nodeId, configuration) =>
             setEdits((previous) => ({

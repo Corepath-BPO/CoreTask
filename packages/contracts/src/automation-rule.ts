@@ -1,4 +1,5 @@
 import { AutomationTrigger } from './automation.js';
+import { FILTER_OPERATORS, FilterOperator } from './query.js';
 
 /**
  * The vocabulary of a rule as an ordered list of branches.
@@ -261,6 +262,63 @@ export const VALUELESS_CONDITION_OPERATORS: readonly ConditionOperator[] = [
 ];
 
 /**
+ * Fields that offer fewer comparisons than their type would.
+ *
+ * A section is a `SINGLE_SELECT`, so the type table would offer six — including
+ * "is not one of" and the two emptiness checks. Every task in a project sits in
+ * a section, so "section is empty" is a condition that can never hold, and "is
+ * not one of" is the same question as "is one of" asked backwards. Three is
+ * what the reference offers and all three read as a sentence.
+ *
+ * By field rather than by type, because status and priority are the same type
+ * and do want the full list — a task can genuinely have no priority.
+ */
+export const OPERATORS_BY_CONDITION_FIELD: Partial<Record<string, readonly ConditionOperator[]>> = {
+  sectionId: [CONDITION_OPERATOR.IS, CONDITION_OPERATOR.IS_NOT, CONDITION_OPERATOR.IS_ONE_OF],
+};
+
+/**
+ * The comparisons a field offers, narrowed by field where one is narrower.
+ *
+ * Shared because the API validates what the form builds: a condition the panel
+ * would not let somebody make must also be one the endpoint refuses, or the
+ * restriction is decoration.
+ */
+export function operatorsForConditionField(
+  field: string,
+  valueType: ConditionValueType,
+): readonly ConditionOperator[] {
+  return OPERATORS_BY_CONDITION_FIELD[field] ?? OPERATORS_BY_VALUE_TYPE[valueType] ?? [];
+}
+
+/**
+ * The comparison a field is given the moment its row is picked from the
+ * catalogue.
+ *
+ * The first, because the lists above are ordered with the commonest comparison
+ * for each type at the front — so a condition arrives reading the way most of
+ * them are meant to and the operator select below it is a correction rather
+ * than a blank.
+ *
+ * Shared rather than an index into `operatorsForConditionField` at each call
+ * site, because the two callers are checking each other: the catalogue only
+ * marks a condition available when *this* operator round-trips through
+ * `toFilterOperator`, and the builder writes *this* operator when the row is
+ * chosen. Two copies of "the first one" would let those drift apart, and the
+ * result of drifting is the failure in `toFilterOperator`'s note — a rule that
+ * publishes cleanly and can never fire.
+ *
+ * Null for a value type with no comparisons at all, which no type has today;
+ * a default would be an invented comparison, which is the thing being avoided.
+ */
+export function defaultOperatorForConditionField(
+  field: string,
+  valueType: ConditionValueType,
+): ConditionOperator | null {
+  return operatorsForConditionField(field, valueType)[0] ?? null;
+}
+
+/**
  * Operators whose value is a list rather than a scalar.
  *
  * `BETWEEN` belongs here even though it is not a "one of" form: its value is
@@ -283,6 +341,133 @@ export function operatorNeedsValue(operator: ConditionOperator): boolean {
 export function operatorTakesMultipleValues(operator: ConditionOperator): boolean {
   return MULTI_VALUE_CONDITION_OPERATORS.includes(operator);
 }
+
+/**
+ * The comparison a condition operator actually performs.
+ *
+ * Two vocabularies grew up either side of the same stored row. The builder
+ * writes what a person reads — `IS`, `IS_ONE_OF`, `IS_BEFORE` — while the
+ * runner evaluates with the query engine's names — `EQUALS`, `IN`, `BEFORE`.
+ * They overlap only on `CONTAINS` and the emptiness checks, so a condition
+ * built today stored `IS`, reached the runner's switch, matched no case and
+ * returned false: the rule published cleanly and could never fire.
+ *
+ * Kept as a translation rather than by renaming either side. `EQUALS` is what
+ * conditions were written with before the type-aware lists existed and is still
+ * in the database, so the runner has to keep understanding it; and the reading
+ * names are what the panel says out loud. Mapping at evaluation lets both
+ * spellings mean one comparison without a migration.
+ */
+export const FILTER_OPERATOR_BY_CONDITION_OPERATOR: Partial<
+  Record<ConditionOperator, FilterOperator>
+> = {
+  [CONDITION_OPERATOR.IS]: FilterOperator.EQUALS,
+  [CONDITION_OPERATOR.IS_NOT]: FilterOperator.NOT_EQUALS,
+  [CONDITION_OPERATOR.EQUALS]: FilterOperator.EQUALS,
+  [CONDITION_OPERATOR.DOES_NOT_EQUAL]: FilterOperator.NOT_EQUALS,
+  [CONDITION_OPERATOR.IS_ONE_OF]: FilterOperator.IN,
+  [CONDITION_OPERATOR.IS_NOT_ONE_OF]: FilterOperator.NOT_IN,
+  [CONDITION_OPERATOR.INCLUDES]: FilterOperator.IN,
+  [CONDITION_OPERATOR.DOES_NOT_INCLUDE]: FilterOperator.NOT_IN,
+  [CONDITION_OPERATOR.CONTAINS]: FilterOperator.CONTAINS,
+  [CONDITION_OPERATOR.DOES_NOT_CONTAIN]: FilterOperator.NOT_CONTAINS,
+  [CONDITION_OPERATOR.IS_BEFORE]: FilterOperator.BEFORE,
+  [CONDITION_OPERATOR.IS_AFTER]: FilterOperator.AFTER,
+  [CONDITION_OPERATOR.GREATER_THAN]: FilterOperator.GREATER_THAN,
+  [CONDITION_OPERATOR.GREATER_THAN_OR_EQUAL]: FilterOperator.GREATER_THAN_OR_EQUAL,
+  [CONDITION_OPERATOR.LESS_THAN]: FilterOperator.LESS_THAN,
+  [CONDITION_OPERATOR.LESS_THAN_OR_EQUAL]: FilterOperator.LESS_THAN_OR_EQUAL,
+  [CONDITION_OPERATOR.IS_EMPTY]: FilterOperator.IS_EMPTY,
+  [CONDITION_OPERATOR.IS_NOT_EMPTY]: FilterOperator.IS_NOT_EMPTY,
+};
+
+/**
+ * What a stored operator compares with, or null when nothing can compare it.
+ *
+ * Null rather than a default comparison, because the operators with no entry —
+ * `IS_TODAY`, `IS_OVERDUE`, `IS_WITHIN_NEXT`, `CONTAINS_ANY_OF`, `BETWEEN`,
+ * `IS_CHECKED` — are ones the engine genuinely cannot evaluate yet. Guessing
+ * `EQUALS` for them would turn "cannot run this" into "ran it and it was
+ * false", which is the failure this whole translation exists to end.
+ */
+export function toFilterOperator(operator: string | null | undefined): FilterOperator | null {
+  if (!operator) return null;
+
+  // Already a query-engine name: the shape every condition written before the
+  // reading names existed still has in the database.
+  if ((FILTER_OPERATORS as readonly string[]).includes(operator)) {
+    return operator as FilterOperator;
+  }
+
+  return FILTER_OPERATOR_BY_CONDITION_OPERATOR[operator as ConditionOperator] ?? null;
+}
+
+/** Whether the engine can evaluate this operator at all. */
+export function isEvaluableOperator(operator: string | null | undefined): boolean {
+  return toFilterOperator(operator) !== null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Values an action computes rather than holds                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Values a rule works out when it runs, instead of storing outright.
+ *
+ * "Set Started to the date this rule is triggered" cannot be a stored date: the
+ * whole point is that it is a different date every time the rule fires. So the
+ * configuration holds what to compute and the runner computes it.
+ *
+ * A structured object rather than a magic string like `{{trigger.date}}`.
+ * Somebody can legitimately type that into a text field, and this codebase has
+ * already lost a day to two vocabularies that looked like one — a shape nothing
+ * else can accidentally be is worth more than a shorter spelling.
+ */
+export const AUTOMATION_VALUE_TOKEN = {
+  /** When this execution began. */
+  TRIGGER_DATE: 'TRIGGER_DATE',
+} as const;
+export type AutomationValueToken =
+  (typeof AUTOMATION_VALUE_TOKEN)[keyof typeof AUTOMATION_VALUE_TOKEN];
+
+/** A value the runner computes, as it is stored beside the action. */
+export interface AutomationTokenValue {
+  token: AutomationValueToken;
+}
+
+/**
+ * Whether a stored value is a token, narrowed so callers can read `.token`.
+ *
+ * Deliberately strict about the token being one this file names: an object
+ * carrying an unknown token is not a value the runner can compute, and treating
+ * it as one would stamp `Invalid Date` rather than refusing.
+ */
+export function isTokenValue(value: unknown): value is AutomationTokenValue {
+  if (typeof value !== 'object' || value === null) return false;
+
+  const token = (value as { token?: unknown }).token;
+
+  return (
+    typeof token === 'string' &&
+    (Object.values(AUTOMATION_VALUE_TOKEN) as string[]).includes(token)
+  );
+}
+
+/**
+ * The tokens a field of this type may hold.
+ *
+ * Only dates, for now. A token in a number or a text field is nonsense, and the
+ * validator refuses it there rather than letting the runner discover it — the
+ * endpoint has to refuse what the form would not build.
+ */
+export function tokensForFieldType(type: string): readonly AutomationValueToken[] {
+  return type === 'DATE' ? [AUTOMATION_VALUE_TOKEN.TRIGGER_DATE] : [];
+}
+
+/** How a token reads on a card and in the form that chose it. */
+export const AUTOMATION_VALUE_TOKEN_LABEL: Record<AutomationValueToken, string> = {
+  TRIGGER_DATE: 'the date this rule is triggered',
+};
 
 /* -------------------------------------------------------------------------- */
 /* Trigger configuration forms                                                 */

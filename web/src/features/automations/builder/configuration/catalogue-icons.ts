@@ -1,0 +1,160 @@
+import {
+  AlignLeft,
+  Bell,
+  CalendarClock,
+  CalendarOff,
+  CalendarPlus,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  ClipboardList,
+  FilePlus,
+  Flag,
+  FolderInput,
+  FolderOutput,
+  FolderSymlink,
+  ListChecks,
+  ListPlus,
+  Mail,
+  MessageSquare,
+  MessageSquarePlus,
+  MoveRight,
+  Paperclip,
+  PencilLine,
+  ShieldCheck,
+  Shapes,
+  SlidersHorizontal,
+  Sparkles,
+  Ticket,
+  TicketCheck,
+  Timer,
+  Type,
+  UserMinus,
+  UserPen,
+  UserPlus,
+  Users,
+  Webhook,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
+import { createElement, type ReactNode } from 'react';
+
+/**
+ * A glyph per entry in the catalogue.
+ *
+ * Held here rather than fetched: `AutomationCatalogEntry` carries no icon, and
+ * it should not — an icon is a decision about this interface, and a name sent
+ * over the wire would tie the API to whichever icon set the client happens to
+ * use. Keyed by subtype so the server owns *what* is offered and the client owns
+ * what it looks like.
+ *
+ * The glyph is decoration and never the only signal: every row carries its label
+ * beside it, because a column of small grey shapes is not a list anybody can
+ * read.
+ *
+ * Elements rather than components, built once here. Looking a component up by
+ * subtype and rendering it means declaring a component inside a render, which
+ * remounts it — and its state, had it any — on every keystroke typed into the
+ * search box above the list.
+ */
+const glyph = (Icon: LucideIcon): ReactNode => createElement(Icon, { className: 'size-4' });
+
+const BY_SUBTYPE: Record<string, ReactNode> = {
+  /* Triggers. */
+  TASK_CREATED: glyph(FilePlus),
+  TASK_UPDATED: glyph(PencilLine),
+  TASK_MOVED_TO_SECTION: glyph(MoveRight),
+  TASK_STATUS_CHANGED: glyph(CircleDot),
+  TASK_PRIORITY_CHANGED: glyph(Flag),
+  TASK_ASSIGNED: glyph(UserPlus),
+  TASK_COMPLETED: glyph(CircleCheck),
+  COMMENT_ADDED: glyph(MessageSquare),
+  CUSTOM_FIELD_CHANGED: glyph(SlidersHorizontal),
+  TICKET_CREATED: glyph(Ticket),
+  TICKET_STATUS_CHANGED: glyph(TicketCheck),
+
+  /* Actions the engine performs. */
+  ASSIGN_USER: glyph(UserPlus),
+  UNASSIGN_USER: glyph(UserMinus),
+  MOVE_TO_SECTION: glyph(MoveRight),
+  UPDATE_STATUS: glyph(CircleDot),
+  UPDATE_PRIORITY: glyph(Flag),
+  SET_DUE_DATE: glyph(CalendarClock),
+  CLEAR_DUE_DATE: glyph(CalendarOff),
+  SET_CUSTOM_FIELD: glyph(SlidersHorizontal),
+  ADD_COMMENT: glyph(MessageSquarePlus),
+  SEND_IN_APP_NOTIFICATION: glyph(Bell),
+  CREATE_SUBTASK: glyph(ListPlus),
+
+  /*
+   * Conditions, keyed by the field they check.
+   *
+   * The subtype of a condition row is the field key the runner reads, so these
+   * collide with nothing above — `MOVE_TO_SECTION` is an action and `sectionId`
+   * is the check about the same thing, and they are separate rows in separate
+   * lists. Without them every row in the condition catalogue fell to the
+   * lightning bolt, and thirty identical glyphs down a list is a column of
+   * decoration that makes the list harder to read rather than easier.
+   */
+  sectionId: glyph(MoveRight),
+  status: glyph(CircleDot),
+  priority: glyph(Flag),
+  assigneeId: glyph(UserPlus),
+  createdById: glyph(UserPen),
+  title: glyph(Type),
+  description: glyph(AlignLeft),
+  dueDate: glyph(CalendarClock),
+  startDate: glyph(CalendarPlus),
+  completed: glyph(CircleCheck),
+  // Generated per field, so keyed by the half before the colon — the same
+  // fallback `catalogueIcon` already applies to the action side.
+  customField: glyph(SlidersHorizontal),
+
+  /* Conditions declared but not checkable, greyed with their reason. */
+  AI_CONDITION: glyph(Sparkles),
+  ADDED_BY_FORM: glyph(ClipboardList),
+  ADDED_BY_EMAIL: glyph(Mail),
+  TASK_TYPE: glyph(Shapes),
+  TICKET: glyph(Ticket),
+  APPROVAL_STATUS: glyph(ShieldCheck),
+  NO_LONGER_BLOCKED: glyph(CircleSlash),
+  IN_ANY_PROJECT: glyph(FolderSymlink),
+  HAS_ATTACHMENT: glyph(Paperclip),
+  HAS_COMMENT: glyph(MessageSquare),
+
+  /*
+   * Declared but not executable, and shown disabled rather than hidden — so
+   * they need a glyph as much as the others do. A row that is greyed *and*
+   * missing its icon reads as a rendering fault rather than as a decision.
+   */
+  SEND_EMAIL: glyph(Mail),
+  SEND_WEBHOOK: glyph(Webhook),
+  DELAY: glyph(Timer),
+  CREATE_CHECKLIST: glyph(ListChecks),
+  ASSIGN_TEAM: glyph(Users),
+  MOVE_PROJECT: glyph(FolderInput),
+  REMOVE_FROM_PROJECT: glyph(FolderOutput),
+  CONVERT_TO_PROJECT: glyph(FolderSymlink),
+  AI_ACTION: glyph(Sparkles),
+  AI_DRAFT_UPDATE: glyph(Sparkles),
+  SET_COMPLETION: glyph(CircleCheck),
+  SET_TICKET: glyph(Ticket),
+  SET_TASK_TYPE: glyph(Shapes),
+  SET_TASK_NAME: glyph(Type),
+  SET_TASK_DESCRIPTION: glyph(AlignLeft),
+  CREATE_TASK: glyph(FilePlus),
+  CREATE_APPROVALS: glyph(ShieldCheck),
+  ADD_REMOVE_COLLABORATORS: glyph(Users),
+};
+
+/**
+ * The glyph for one entry.
+ *
+ * The subtype is tried whole and then up to its first colon, because the
+ * per-field entries are generated by the server and name the field they came
+ * from — `SET_CUSTOM_FIELD:019fc8…` should look like setting a custom field,
+ * not like something the map has never heard of.
+ */
+export function catalogueIcon(subtype: string): ReactNode {
+  return BY_SUBTYPE[subtype] ?? BY_SUBTYPE[subtype.split(':')[0] ?? ''] ?? glyph(Zap);
+}

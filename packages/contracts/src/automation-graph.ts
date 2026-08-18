@@ -37,6 +37,28 @@ export const BranchKey = {
 } as const;
 export type BranchKey = (typeof BranchKey)[keyof typeof BranchKey];
 
+/**
+ * The mark that makes a condition the fallback row — "if all other conditions
+ * are not met".
+ *
+ * A flag on the configuration rather than a node type of its own. `nodeType` is
+ * a database enum the API, the runner and the builder all share, so a new member
+ * would be a migration plus a new case in every switch that reads one — for a
+ * row that behaves exactly like a condition which is always true.
+ *
+ * Defined here because all three sides have to agree on it: the canvas draws a
+ * fallback differently, the validator must not ask it what it checks, and the
+ * runner must treat it as holding without a comparison to evaluate.
+ */
+export const FALLBACK_CONFIG_KEY = 'fallback';
+
+/** Whether a node's configuration marks it as the fallback row. */
+export function isFallbackBranch(configuration: unknown): boolean {
+  if (typeof configuration !== 'object' || configuration === null) return false;
+
+  return (configuration as Record<string, unknown>)[FALLBACK_CONFIG_KEY] === true;
+}
+
 /** What each node category is called in the interface. */
 export const NODE_CATEGORY_LABEL: Record<AutomationNodeType, string> = {
   TRIGGER: 'When',
@@ -132,15 +154,31 @@ export const OPERATORS_BY_VALUE_KIND: Record<ConditionValueKind, readonly Filter
     FilterOperator.IS_NOT_EMPTY,
   ],
   BOOLEAN: [FilterOperator.EQUALS],
+  /*
+   * `IN` and `NOT_IN` belong to both list kinds because the panel offers them
+   * and the runner evaluates them.
+   *
+   * `OPERATORS_BY_VALUE_TYPE` offers "is one of" on every single-select and
+   * people field, `OPERATORS_BY_CONDITION_FIELD` offers it on `sectionId`
+   * by name, and `conditionHolds` has had cases for both since branches
+   * landed. Only this table disagreed — so "section is one of these two" was a
+   * comparison the form would build, the engine would run, and the validator
+   * called impossible for that kind of field. Harmless while only the builder
+   * asked; the moment publish asks, it refuses a rule that works.
+   */
   ENUM: [
     FilterOperator.EQUALS,
     FilterOperator.NOT_EQUALS,
+    FilterOperator.IN,
+    FilterOperator.NOT_IN,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],
   REFERENCE: [
     FilterOperator.EQUALS,
     FilterOperator.NOT_EQUALS,
+    FilterOperator.IN,
+    FilterOperator.NOT_IN,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],
