@@ -135,7 +135,7 @@ export function AutomationNode({ data, selected }: NodeProps) {
    * with nothing in front of it.
    */
   const heading = node.heading;
-  const name = heading ? `${heading} — ${node.label}` : node.label;
+  const name = heading ? `${heading} - ${node.label}` : node.label;
 
   return (
     /*

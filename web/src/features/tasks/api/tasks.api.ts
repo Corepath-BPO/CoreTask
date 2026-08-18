@@ -21,6 +21,7 @@ export interface TaskListParams {
   priority?: string[];
   search?: string;
   dueBefore?: string;
+  dueAfter?: string;
   includeArchived?: boolean;
   includeSubtasks?: boolean;
 }

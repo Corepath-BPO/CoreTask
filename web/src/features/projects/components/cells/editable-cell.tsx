@@ -42,5 +42,5 @@ export function CellButton({
 
 /** Placeholder for an unset value, so an empty cell is still a target. */
 export function EmptyCell() {
-  return <span className="text-muted-foreground">—</span>;
+  return <span className="text-muted-foreground">-</span>;
 }

@@ -242,6 +242,11 @@ export class TicketListQueryDto {
   @IsISO8601()
   dueBefore?: string;
 
+  @ApiPropertyOptional({ format: 'date-time' })
+  @IsOptional()
+  @IsISO8601()
+  dueAfter?: string;
+
   @ApiPropertyOptional({
     default: false,
     description: 'Resolved and closed tickets are excluded unless this is set.',

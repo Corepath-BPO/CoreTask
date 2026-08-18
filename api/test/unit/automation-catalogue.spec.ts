@@ -411,6 +411,17 @@ describe('the automation catalogue', () => {
       expect(comment?.available).toBe(false);
       expect(comment?.reason).toBeTruthy();
     });
+
+    it('disables ticket triggers while actions only operate on tasks', () => {
+      const ticketTriggerTypes = new Set<string>([
+        AutomationTrigger.TICKET_CREATED,
+        AutomationTrigger.TICKET_STATUS_CHANGED,
+      ]);
+      const ticketTriggers = triggers.filter((trigger) => ticketTriggerTypes.has(trigger.subtype));
+
+      expect(ticketTriggers).toHaveLength(2);
+      expect(ticketTriggers.every((trigger) => !trigger.available && trigger.reason)).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------------

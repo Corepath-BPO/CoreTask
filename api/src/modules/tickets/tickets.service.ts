@@ -1,6 +1,7 @@
 import {
   ActivityAction,
   ActivityEntity,
+  AutomationTrigger,
   CLOSED_TICKET_STATUSES,
   NotificationType,
   ServerEvent,
@@ -19,6 +20,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 
 import type { CreateTicketDto, TicketListQueryDto, UpdateTicketDto } from './dto/ticket.dto';
 import {
@@ -39,6 +41,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
     private readonly realtime: RealtimeGateway,
+    private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
   ) {}
 
@@ -142,6 +145,19 @@ export class TicketsService {
 
     const ticket = toTicketDto(created);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_CREATED, ticket);
+
+    if (created.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: created.projectId,
+        trigger: AutomationTrigger.TICKET_CREATED,
+        entityType: 'TICKET',
+        entityId: created.id,
+        actorId: userId,
+        after: { title: created.title, status: created.status },
+      });
+    }
+
     await this.notifyAssignment(workspaceId, userId, created, null);
     this.logger.log({ ticketId: created.id, key: created.key }, 'Ticket created');
 
@@ -206,6 +222,20 @@ export class TicketsService {
 
     const ticket = toTicketDto(updated);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_UPDATED, ticket);
+
+    if (statusChanged && updated.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: updated.projectId,
+        trigger: AutomationTrigger.TICKET_STATUS_CHANGED,
+        entityType: 'TICKET',
+        entityId: updated.id,
+        actorId: userId,
+        before: { status: existing.status },
+        after: { status: updated.status },
+      });
+    }
+
     await this.notifyAssignment(workspaceId, userId, updated, existing.assigneeId);
 
     return ticket;
@@ -268,7 +298,14 @@ export class TicketsService {
       ...(query.type?.length ? { type: { in: query.type } } : {}),
       ...(query.priority?.length ? { priority: { in: query.priority } } : {}),
       ...(query.severity?.length ? { severity: { in: query.severity } } : {}),
-      ...(query.dueBefore ? { dueDate: { lte: new Date(query.dueBefore) } } : {}),
+      ...(query.dueBefore || query.dueAfter
+        ? {
+            dueDate: {
+              ...(query.dueAfter ? { gte: new Date(query.dueAfter) } : {}),
+              ...(query.dueBefore ? { lte: new Date(query.dueBefore) } : {}),
+            },
+          }
+        : {}),
       ...(query.search ? this.searchFilter(query.search) : {}),
     };
   }

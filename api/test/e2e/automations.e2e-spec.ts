@@ -439,11 +439,10 @@ describe('Automations (e2e)', () => {
        * Reported by the graph validator, which is what the builder counts as a
        * problem and disables Publish on.
        *
-       * Note that `POST /publish` does NOT run this: it calls a separate,
-       * simpler check in `AutomationsService.validate`. So this refusal is the
-       * builder's, and a rule posted straight to the endpoint would still go
-       * ACTIVE. That divergence is worth closing, and is larger than this
-       * check.
+       * `POST /publish` runs the same validator now, so this refusal is no
+       * longer only the builder's — "refusing what the builder refuses" above
+       * posts this same rule straight to the endpoint and asserts it is turned
+       * away there too.
        */
       const checked = await request(server())
         .post(`${rulesUrl(scope)}/${created.body.data.id}/validate`)
@@ -1281,6 +1280,233 @@ describe('Automations (e2e)', () => {
         .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(400);
+    });
+
+    it('refuses to publish a ticket trigger while actions only operate on tasks', async () => {
+      const scope = await setupScope();
+
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Assign a new ticket',
+          triggerType: 'TICKET_CREATED',
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+            {
+              nodeType: 'ACTION',
+              subtype: 'ASSIGN_USER',
+              configuration: { userId: scope.owner.userId },
+            },
+          ],
+        })
+        .expect(201);
+
+      const response = await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
+
+      expect(response.body.error.details.problems.join(' ')).toMatch(
+        /automation actions currently operate on tasks/i,
+      );
+    });
+
+    /*
+     * The endpoint refuses what the form will not build.
+     *
+     * Every fault below is one the builder counts as a problem and disables
+     * Publish for, and every one of them used to publish anyway: `publish` ran a
+     * shorter check of its own that knew about a missing action and an unknown
+     * subtype and nothing else. So a rule posted straight to this route went
+     * ACTIVE carrying a section from another project, or a comparison the field
+     * cannot be asked — and the runner then failed that action on every event.
+     *
+     * Which is the point of asserting it here rather than through the panel: a
+     * greyed-out button is not a refusal, it is the part somebody can see.
+     */
+    describe('refusing what the builder refuses', () => {
+      const draft = async (scope: Scope, nodes: Record<string, unknown>[]) => {
+        const created = await request(server())
+          .post(rulesUrl(scope))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({
+            name: 'Posted straight to the endpoint',
+            triggerType: 'TASK_MOVED_TO_SECTION',
+            triggerConfig: { sectionId: scope.sectionId },
+            nodes,
+          })
+          .expect(201);
+
+        return created.body.data.id as string;
+      };
+
+      /** Why publish refused, as one string to match against. */
+      const refusal = async (scope: Scope, ruleId: string) => {
+        const response = await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(400);
+
+        return (response.body.error.details.problems as string[]).join(' ');
+      };
+
+      it('gives each fault once, in one voice', async () => {
+        /*
+         * The two halves used to overlap. `AutomationsService` counted the
+         * actions and so did the structural check, in different words — so an
+         * empty rule came back saying "Add at least one action." and "Add at
+         * least one action — a rule with none would do nothing.", which reads
+         * as two problems to fix rather than one said twice.
+         *
+         * Asserted as the exact list rather than a match, because the absence
+         * of the second sentence is the whole point: a `toContain` would go on
+         * passing the day something starts double-reporting again.
+         */
+        const scope = await setupScope();
+        const ruleId = await draft(scope, []);
+
+        const response = await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(400);
+
+        expect(response.body.error.details.problems).toEqual([
+          'Choose what starts this rule.',
+          'Add at least one action.',
+        ]);
+      });
+
+      it('refuses a computed date on a field that cannot hold one', async () => {
+        const scope = await setupScope();
+
+        const text = await context.prisma.customField.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            name: 'Notes',
+            type: 'TEXT',
+            projects: { create: { projectId: scope.projectId } },
+          },
+        });
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'SET_CUSTOM_FIELD',
+            parentId: 't',
+            configuration: { customFieldId: text.id, value: { token: 'TRIGGER_DATE' } },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/date field/);
+      });
+
+      it('refuses an action naming a section from another project', async () => {
+        // Not merely a broken rule: a section from somewhere else is a way of
+        // reaching across a tenant boundary, and it has to be refused by the
+        // endpoint rather than by the list the panel happened to offer.
+        const scope = await setupScope();
+        const other = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'MOVE_TO_SECTION',
+            parentId: 't',
+            configuration: { sectionId: other.sectionId },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/no longer in this project/);
+      });
+
+      it('refuses a comparison the field cannot be asked', async () => {
+        // "Due date contains…" is a question with no answer: the evaluator reads
+        // it as an unknown operator and returns false, so the rule publishes
+        // cleanly and can never fire — nothing anywhere reports a failure.
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'c',
+            nodeType: 'CONDITION',
+            subtype: 'FIELD_COMPARISON',
+            parentId: 't',
+            configuration: { field: 'dueDate', operator: 'CONTAINS', value: 'soon' },
+          },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            parentId: 'c',
+            configuration: { userId: scope.owner.userId },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/cannot be used with this kind of field/);
+      });
+
+      it('refuses a step nothing connects to, in a rule that has parentage', async () => {
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            parentId: 't',
+            configuration: { userId: scope.owner.userId },
+          },
+          {
+            id: 'stranded',
+            nodeType: 'ACTION',
+            subtype: 'UPDATE_PRIORITY',
+            parentId: null,
+            configuration: { priority: 'LOW' },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/not connected to anything/);
+      });
+
+      it('still publishes a rule from before the canvas, where nothing is parented', async () => {
+        /*
+         * The deliberate exception, and the reason the check above says "in a
+         * rule that has parentage".
+         *
+         * Every node of a pre-canvas rule has a null parent, and the runner
+         * reads that shape as "every condition must hold, then every action
+         * runs" — it tells the two apart by whether a single parent link exists.
+         * Refusing it as disconnected would strand every rule written before the
+         * canvas, for being the shape it was always allowed to have.
+         */
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+          {
+            nodeType: 'CONDITION',
+            subtype: 'FIELD_COMPARISON',
+            configuration: { field: 'title', operator: 'CONTAINS', value: 'task' },
+          },
+          {
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            configuration: { userId: scope.owner.userId },
+          },
+        ]);
+
+        await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(200);
+      });
     });
 
     it('publishes a valid rule', async () => {

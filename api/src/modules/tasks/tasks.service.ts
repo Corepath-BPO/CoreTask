@@ -307,6 +307,19 @@ export class TasksService {
 
     const task = toTaskDto(created);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_CREATED, task);
+
+    if (created.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: created.projectId,
+        trigger: AutomationTrigger.TASK_CREATED,
+        entityType: 'TASK',
+        entityId: created.id,
+        actorId: userId,
+        after: { title: created.title, sectionId: created.sectionId },
+      });
+    }
+
     await this.notifyAssignment(workspaceId, userId, created, null);
 
     return task;
@@ -378,23 +391,38 @@ export class TasksService {
      * because an automation failing to enqueue must not fail the edit.
      */
     if (updated.projectId) {
-      await this.automation.publish({
-        workspaceId,
-        projectId: updated.projectId,
-        trigger:
-          existing.status !== updated.status
-            ? AutomationTrigger.TASK_STATUS_CHANGED
-            : existing.priority !== updated.priority
-              ? AutomationTrigger.TASK_PRIORITY_CHANGED
-              : existing.assigneeId !== updated.assigneeId && updated.assigneeId
-                ? AutomationTrigger.TASK_ASSIGNED
-                : AutomationTrigger.TASK_UPDATED,
-        entityType: 'TASK',
-        entityId: updated.id,
-        actorId: userId,
-        before: { status: existing.status, priority: existing.priority, assigneeId: existing.assigneeId },
-        after: { status: updated.status, priority: updated.priority, assigneeId: updated.assigneeId },
-      });
+      const triggers: AutomationTrigger[] = [AutomationTrigger.TASK_UPDATED];
+      if (existing.status !== updated.status) triggers.push(AutomationTrigger.TASK_STATUS_CHANGED);
+      if (existing.priority !== updated.priority) {
+        triggers.push(AutomationTrigger.TASK_PRIORITY_CHANGED);
+      }
+      if (existing.assigneeId !== updated.assigneeId && updated.assigneeId) {
+        triggers.push(AutomationTrigger.TASK_ASSIGNED);
+      }
+      if (existing.completedAt === null && updated.completedAt !== null) {
+        triggers.push(AutomationTrigger.TASK_COMPLETED);
+      }
+
+      for (const trigger of [...new Set(triggers)]) {
+        await this.automation.publish({
+          workspaceId,
+          projectId: updated.projectId,
+          trigger,
+          entityType: 'TASK',
+          entityId: updated.id,
+          actorId: userId,
+          before: {
+            status: existing.status,
+            priority: existing.priority,
+            assigneeId: existing.assigneeId,
+          },
+          after: {
+            status: updated.status,
+            priority: updated.priority,
+            assigneeId: updated.assigneeId,
+          },
+        });
+      }
     }
     await this.notifyAssignment(workspaceId, userId, updated, existing.assigneeId);
 
@@ -565,7 +593,14 @@ export class TasksService {
       ...(query.status?.length ? { status: { in: query.status } } : {}),
       ...(query.priority?.length ? { priority: { in: query.priority } } : {}),
       ...(query.search ? { title: { contains: query.search, mode: 'insensitive' } } : {}),
-      ...(query.dueBefore ? { dueDate: { lte: new Date(query.dueBefore) } } : {}),
+      ...(query.dueBefore || query.dueAfter
+        ? {
+            dueDate: {
+              ...(query.dueAfter ? { gte: new Date(query.dueAfter) } : {}),
+              ...(query.dueBefore ? { lte: new Date(query.dueBefore) } : {}),
+            },
+          }
+        : {}),
     };
   }
 

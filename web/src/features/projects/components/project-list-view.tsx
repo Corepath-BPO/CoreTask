@@ -888,17 +888,17 @@ function Cell({
       return <DueDateCell {...shared} />;
 
     case SystemField.START_DATE:
-      return <span className="text-xs">{task.startDate ? formatDate(task.startDate) : '—'}</span>;
+      return <span className="text-xs">{task.startDate ? formatDate(task.startDate) : '-'}</span>;
     case SystemField.COMPLETED_AT:
       return (
-        <span className="text-xs">{task.completedAt ? formatDate(task.completedAt) : '—'}</span>
+        <span className="text-xs">{task.completedAt ? formatDate(task.completedAt) : '-'}</span>
       );
     case SystemField.CREATED_AT:
       return <span className="text-xs">{formatDate(task.createdAt)}</span>;
     case SystemField.ESTIMATE:
       return (
         <span className="text-xs tabular-nums">
-          {task.estimatedMinutes ? `${task.estimatedMinutes}m` : '—'}
+          {task.estimatedMinutes ? `${task.estimatedMinutes}m` : '-'}
         </span>
       );
 
@@ -910,7 +910,7 @@ function Cell({
 
       // A column whose field was archived or removed. Blank rather than a
       // thrown render — a missing cell is recoverable, a broken row is not.
-      if (!definition) return <span className="text-xs text-muted-foreground">—</span>;
+      if (!definition) return <span className="text-xs text-muted-foreground">-</span>;
 
       return (
         <CustomFieldCell

@@ -152,8 +152,9 @@ export class AutomationsController {
     const rule = await this.automations.get(workspaceId, projectId, ruleId);
 
     // The body is what is on the canvas right now; the stored rule is the
-    // fallback, so this also answers "is what I saved publishable?".
-    const nodes = (body.nodes ?? rule.nodes.map(toValidatable)).map(toValidatableFromDto);
+    // fallback, so this also answers "is what I saved publishable?". The rows
+    // need no conversion — they are already the shape the validator reads.
+    const nodes = body.nodes ? body.nodes.map(toValidatableFromDto) : rule.nodes;
 
     return this.validator.validate(projectId, workspaceId, body.name ?? rule.name, nodes);
   }
@@ -190,7 +191,11 @@ export class AutomationsController {
   @ApiOperation({
     summary: 'Validate and activate a rule',
     description:
-      'Refuses a rule with no action, an unknown trigger or action, or a trigger naming a section that no longer exists — each of which otherwise fails silently at run time.',
+      'Refuses everything `/validate` reports as an error — the checks the rule builder disables ' +
+      'Publish for — plus a trigger naming a section that no longer exists. A rule with no ' +
+      'action, an unknown trigger or action, a step nothing connects to, a comparison that does ' +
+      'not fit the field, an id belonging to another project: each otherwise fails silently at ' +
+      'run time. Warnings do not block. The stored graph is what gets checked, not a body.',
   })
   @ApiParam({ name: 'ruleId', format: 'uuid' })
   @ApiErrorResponseDoc(400, 'The rule is not ready; the problems are listed in details')
@@ -232,13 +237,10 @@ export class AutomationsController {
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
     @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
-    return this.automations.setStatus(
-      workspaceId,
-      projectId,
-      role,
-      ruleId,
-      AutomationRuleStatus.ACTIVE,
-    );
+    // A paused rule may have gone stale while it was off (deleted section,
+    // removed member, unsupported action after a deployment). Resume through
+    // the same validator as first publish instead of activating broken work.
+    return this.automations.publish(workspaceId, projectId, role, ruleId);
   }
 
   @Post(':ruleId/duplicate')
@@ -365,39 +367,26 @@ export class AutomationsController {
   }
 }
 
-/** A stored node in the shape the validator reads. */
-function toValidatable(node: {
-  id: string;
-  nodeType: string;
-  subtype: string;
-  configuration: unknown;
-  parentNodeId: string | null;
-  branchKey: string | null;
-  position: number;
-}): AutomationNodeDto & { id: string; parentId: string | null; branchKey: string | null } {
-  return {
-    id: node.id,
-    nodeType: node.nodeType,
-    subtype: node.subtype,
-    configuration: (node.configuration ?? {}) as Record<string, unknown>,
-    parentId: node.parentNodeId,
-    branchKey: node.branchKey,
-    // The column is called `position` in the table and `order` on the wire; the
-    // validator needs it either way, because "the last branch" is a fact about
-    // this number rather than about the order rows came back in.
-    order: node.position,
-  };
-}
-
-/** A node off the wire in the shape the validator reads. */
+/**
+ * A node off the wire in the shape the validator reads — the stored one.
+ *
+ * The mapping goes this way round because publish validates the table, so the
+ * row is what the validator speaks. A body coming the other way is the thing
+ * that has to be translated, and doing it here means the two callers cannot
+ * disagree about what a graph is: `/validate` answers about the same shape
+ * `publish` will refuse.
+ */
 function toValidatableFromDto(node: AutomationNodeDto) {
   return {
     id: node.id ?? '',
-    type: node.nodeType,
+    nodeType: node.nodeType,
     subtype: node.subtype,
     configuration: node.configuration ?? {},
-    parentId: node.parentId ?? null,
+    parentNodeId: node.parentId ?? null,
     branchKey: node.branchKey ?? null,
-    order: node.order,
+    // `order` on the wire, `position` in the table. The validator needs it
+    // either way, because "the last branch" is a fact about this number rather
+    // than about the order rows came back in.
+    position: node.order,
   };
 }

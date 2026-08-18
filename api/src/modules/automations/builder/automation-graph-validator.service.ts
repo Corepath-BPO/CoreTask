@@ -5,7 +5,6 @@ import {
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
   AutomationNodeType,
-  ConditionValueKind,
   GraphIssueLevel,
   isFallbackBranch,
 } from '@coretask/contracts';
@@ -15,17 +14,42 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../../database/prisma.service';
 
-/** The shape this validator needs, whether it came from the wire or the table. */
+import { conditionFieldKind, triggerUnavailableReason } from './automation-catalogue';
+
+/**
+ * One node as the table holds it.
+ *
+ * The stored shape rather than the wire's, because the two disagree — the row
+ * says `nodeType` and `parentNodeId`, the builder says `type` and `parentId` —
+ * and something has to be the shape this reads. It is the row's, since publish
+ * validates what is stored: whatever a request body claimed, the rule that goes
+ * ACTIVE is the one in the table, and validating anything else would check a
+ * graph nobody is about to run. The controller maps a body into this on its way
+ * in; a row needs no mapping at all.
+ *
+ * `configuration` is `unknown` for the same reason: the column is JSON and can
+ * hold anything, so it is narrowed here rather than asserted at every caller.
+ */
 export interface ValidatableGraphNode {
   id: string;
-  type: string;
+  nodeType: string;
   subtype: string;
-  configuration: Record<string, unknown>;
-  parentId: string | null;
+  configuration: unknown;
+  parentNodeId: string | null;
   branchKey: string | null;
   /** Where this sits among its siblings — what makes "the last row" a fact. */
-  order?: number;
+  position?: number;
 }
+
+/**
+ * The same node in the shape the shared structural check reads.
+ *
+ * Taken from that function's own parameter rather than written out again. It is
+ * shared with the browser, which has no rows at all and speaks the canvas's
+ * names for these fields, so this is the one place the two vocabularies meet —
+ * and a second declaration of it here would be a second thing to keep in step.
+ */
+type StructuralNode = Parameters<typeof validateGraphStructure>[0][number];
 
 /**
  * Whether a rule is fit to publish.
@@ -50,11 +74,15 @@ export class AutomationGraphValidatorService {
     name: string | null,
     nodes: readonly ValidatableGraphNode[],
   ): Promise<AutomationGraphValidation> {
+    // Mapped once, here, so every check below reads one shape — and so the
+    // structural half gets exactly what the builder passes it.
+    const graph = nodes.map(toStructural);
+
     const issues: AutomationGraphIssue[] = [
-      ...validateGraphStructure(nodes, name),
-      ...this.checkSubtypes(nodes),
-      ...(await this.checkReferences(projectId, workspaceId, nodes)),
-      ...this.checkLoopRisk(nodes),
+      ...validateGraphStructure(graph, name),
+      ...this.checkSubtypes(graph),
+      ...(await this.checkReferences(projectId, workspaceId, graph)),
+      ...this.checkLoopRisk(graph),
     ];
 
     return {
@@ -64,7 +92,7 @@ export class AutomationGraphValidatorService {
   }
 
   /** A trigger or action this engine has no code for cannot run, whatever it says. */
-  private checkSubtypes(nodes: readonly ValidatableGraphNode[]): AutomationGraphIssue[] {
+  private checkSubtypes(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
     const issues: AutomationGraphIssue[] = [];
 
     for (const node of nodes) {
@@ -76,6 +104,17 @@ export class AutomationGraphValidatorService {
             path: 'subtype',
             message: 'This is not a trigger the engine understands.',
           });
+        } else {
+          const reason = triggerUnavailableReason(node.subtype);
+
+          if (reason) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'subtype',
+              message: reason,
+            });
+          }
         }
       }
 
@@ -122,7 +161,7 @@ export class AutomationGraphValidatorService {
   private async checkReferences(
     projectId: string,
     workspaceId: string,
-    nodes: readonly ValidatableGraphNode[],
+    nodes: readonly StructuralNode[],
   ): Promise<AutomationGraphIssue[]> {
     const issues: AutomationGraphIssue[] = [];
 
@@ -298,34 +337,11 @@ export class AutomationGraphValidatorService {
        * exactly what somebody built.
        */
       if (node.type === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
-        issues.push(...validateCondition(config, this.valueKindOf(config['field']), node.id));
+        issues.push(...validateCondition(config, conditionFieldKind(config['field']), node.id));
       }
     }
 
     return issues;
-  }
-
-  /**
-   * What kind of value a condition field holds.
-   *
-   * Kept alongside the metadata service's list rather than derived from it, so
-   * the two are read together — if a field is added there and not here, the
-   * condition simply reports as unknown rather than validating against nothing.
-   */
-  private valueKindOf(field: unknown): ConditionValueKind | undefined {
-    if (typeof field !== 'string') return undefined;
-
-    const kinds: Record<string, ConditionValueKind> = {
-      status: ConditionValueKind.ENUM,
-      priority: ConditionValueKind.ENUM,
-      sectionId: ConditionValueKind.REFERENCE,
-      assigneeId: ConditionValueKind.REFERENCE,
-      title: ConditionValueKind.TEXT,
-      dueDate: ConditionValueKind.DATE,
-      startDate: ConditionValueKind.DATE,
-    };
-
-    return kinds[field];
   }
 
   /**
@@ -336,7 +352,7 @@ export class AutomationGraphValidatorService {
    * limits and correlation ids to stop it running away. Refusing outright would
    * block a legitimate rule to prevent a survivable one.
    */
-  private checkLoopRisk(nodes: readonly ValidatableGraphNode[]): AutomationGraphIssue[] {
+  private checkLoopRisk(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
     const trigger = nodes.find((node) => node.type === AutomationNodeType.TRIGGER);
     if (!trigger) return [];
 
@@ -359,4 +375,36 @@ export class AutomationGraphValidatorService {
         message: 'This action can set off the same trigger again.',
       }));
   }
+}
+
+/** A stored node in the shape every check above reads. */
+function toStructural(node: ValidatableGraphNode): StructuralNode {
+  return {
+    id: node.id,
+    type: node.nodeType,
+    subtype: node.subtype,
+    configuration: asConfiguration(node.configuration),
+    parentId: node.parentNodeId,
+    branchKey: node.branchKey,
+    // The column is `position` and the wire calls it `order`; either way the
+    // checks need it, because "the last branch" is a fact about this number
+    // rather than about the order rows came back in.
+    order: node.position,
+  };
+}
+
+/**
+ * The JSON column as an object, whatever it actually holds.
+ *
+ * A configuration is written as an object everywhere, but the column is JSON
+ * and a row from an older client — or from a hand-run migration — may hold a
+ * string, an array or null. Reading a key off one of those would throw here and
+ * fail a publish with a stack trace instead of the reason it was refused, so
+ * anything that is not a plain object is read as an empty configuration and
+ * reported by the checks that notice what is missing from it.
+ */
+function asConfiguration(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+
+  return value as Record<string, unknown>;
 }

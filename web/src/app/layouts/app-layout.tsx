@@ -17,8 +17,12 @@ export function AppLayout() {
 
           {/* Skip link target; `tabIndex={-1}` makes the region focusable
               programmatically without adding it to the tab order. */}
-          <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto outline-none">
-            <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 overflow-y-auto bg-background outline-none"
+          >
+            <div className="page-enter mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
               {/* Scoped per route: a crash in one page must not take the shell
                   down with it, or the user loses their way out. */}
               <ErrorBoundary>

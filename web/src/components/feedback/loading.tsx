@@ -21,27 +21,33 @@ export function FullPageLoader({ label = 'Loading CoreTask…' }: { label?: stri
 /** Route-level skeleton matching the dashboard's grid so the layout does not jump. */
 export function DashboardSkeleton() {
   return (
-    <div role="status" aria-live="polite" className="space-y-6">
+    <div role="status" aria-live="polite" className="space-y-8">
       <span className="sr-only">Loading dashboard</span>
 
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-64" />
-        <Skeleton className="h-4 w-80" />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index}>
-            <CardHeader>
-              <Skeleton className="h-4 w-24" />
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Skeleton className="h-7 w-16" />
-              <Skeleton className="h-3 w-28" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <Card className="overflow-hidden">
+        <CardHeader className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+        </CardHeader>
+        <CardContent className="space-y-6 pb-6">
+          <div className="grid gap-3 lg:grid-cols-[minmax(220px,0.82fr)_2fr]">
+            <Skeleton className="h-44 bg-primary/20" />
+            <div className="grid gap-3 sm:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-44" />
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 border-t pt-5 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-7 w-12" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Skeleton className="h-72 lg:col-span-2" />

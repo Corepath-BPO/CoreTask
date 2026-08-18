@@ -61,8 +61,8 @@ export function FieldConfigPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SHORT">Short — one line</SelectItem>
-                <SelectItem value="LONG">Long — a paragraph</SelectItem>
+                <SelectItem value="SHORT">Short: one line</SelectItem>
+                <SelectItem value="LONG">Long: a paragraph</SelectItem>
               </SelectContent>
             </Select>
           </div>

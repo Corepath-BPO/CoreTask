@@ -19,22 +19,24 @@ export function Sidebar() {
     <aside
       data-collapsed={collapsed}
       className={cn(
-        'hidden shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200 lg:flex',
-        collapsed ? 'w-[68px]' : 'w-64',
+        'hidden shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar text-sidebar-foreground transition-[width] duration-200 lg:flex',
+        collapsed ? 'w-[72px]' : 'w-[17rem]',
       )}
     >
-      <div className={cn('flex h-14 items-center gap-2 px-3', collapsed && 'justify-center px-0')}>
+      <div className={cn('flex h-16 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
         <Link
           to="/"
           className="flex items-center gap-2 rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
           aria-label={`${env.appName} home`}
         >
           <BrandMark />
-          {!collapsed && <span className="text-sm font-semibold">{env.appName}</span>}
+          {!collapsed && (
+            <span className="text-[15px] font-semibold tracking-[-0.01em]">{env.appName}</span>
+          )}
         </Link>
       </div>
 
-      <div className={cn('px-3 pb-3', collapsed && 'px-2')}>
+      <div className={cn('px-3 pb-4', collapsed && 'px-2')}>
         <WorkspaceSwitcher collapsed={collapsed} />
       </div>
 
@@ -78,7 +80,7 @@ export function BrandMark({ className }: { className?: string }) {
       width={28}
       height={28}
       className={cn(
-        'size-7 shrink-0 rounded-lg bg-white object-contain ring-1 ring-black/5 dark:ring-white/10',
+        'size-8 shrink-0 rounded-xl bg-white object-contain shadow-[0_4px_12px_rgba(20,35,60,0.08)] ring-1 ring-black/5 dark:ring-white/10',
         className,
       )}
     />

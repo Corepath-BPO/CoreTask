@@ -111,10 +111,37 @@ describe('graph structure', () => {
     );
   });
 
-  it('refuses a step with no parent', () => {
-    expect(messages([trigger(), node({ id: 'orphan', parentId: null })])).toContain(
+  it('refuses a step with no parent, among steps that have one', () => {
+    /*
+     * The connected `node()` is what makes this a graph with parentage, and it
+     * has to be there for the orphan to be an orphan. With nothing parented the
+     * rule is the flat pre-canvas shape, where the runner runs every action and
+     * an unparented step is not stranded — it is the whole rule.
+     */
+    expect(messages([trigger(), node(), node({ id: 'orphan', parentId: null })])).toContain(
       'This step is not connected to anything.',
     );
+  });
+
+  it('accepts a rule from before the canvas, where nothing is parented', () => {
+    // "Every condition must hold, then every action runs" — still what the
+    // runner does with one, so refusing it here would strand a working rule.
+    const issues = validateGraphStructure(
+      [
+        trigger(),
+        node({
+          id: 'c',
+          type: AutomationNodeType.CONDITION,
+          parentId: null,
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'title', operator: 'CONTAINS', value: 'urgent' },
+        }),
+        node({ id: 'a', parentId: null }),
+      ],
+      'A rule from before the canvas',
+    );
+
+    expect(issues.filter((issue) => issue.level === 'ERROR')).toEqual([]);
   });
 
   it('refuses a step whose parent is gone', () => {

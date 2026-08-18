@@ -256,20 +256,36 @@ export function validateGraphStructure(
     warn('No condition is set, so this rule runs every time its trigger fires.');
   }
 
-  // Every node except the trigger needs a parent that exists, or it is a step
-  // nothing can reach — invisible on the canvas and never run.
+  /*
+   * Every node except the trigger needs a parent that exists, or it is a step
+   * nothing can reach — invisible on the canvas and never run.
+   *
+   * Asked only of a graph that has parentage at all. A rule written before the
+   * canvas has none — every parent is null — and means "every condition must
+   * hold, then every action runs"; the runner still executes that shape, and
+   * tells the two apart by this same test. Asking it of one would report every
+   * step of a working rule as disconnected and refuse to publish it, for being
+   * the shape it was always allowed to have.
+   *
+   * Which is why this is a fact about the graph rather than about who is
+   * asking: an unparented step among parented ones really is unreachable, and
+   * the same step in a rule where nothing is parented really does run.
+   */
+  const isTree = nodes.some((node) => node.parentId !== null);
   const ids = new Set(nodes.map((node) => node.id));
 
-  for (const node of nodes) {
-    if (node.type === AutomationNodeType.TRIGGER) continue;
+  if (isTree) {
+    for (const node of nodes) {
+      if (node.type === AutomationNodeType.TRIGGER) continue;
 
-    if (node.parentId === null) {
-      error('This step is not connected to anything.', node.id);
-      continue;
-    }
+      if (node.parentId === null) {
+        error('This step is not connected to anything.', node.id);
+        continue;
+      }
 
-    if (!ids.has(node.parentId)) {
-      error('This step follows something that is no longer here.', node.id);
+      if (!ids.has(node.parentId)) {
+        error('This step follows something that is no longer here.', node.id);
+      }
     }
   }
 

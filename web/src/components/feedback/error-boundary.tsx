@@ -48,7 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="space-y-1.5">
             <h2 className="text-lg font-semibold">Something went wrong</h2>
             <p className="text-sm text-muted-foreground">
-              This screen failed to render. Your work is safe — try again, or reload the page.
+              This screen failed to render. Your work is safe. Try again, or reload the page.
             </p>
           </div>
 

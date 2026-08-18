@@ -154,15 +154,31 @@ export const OPERATORS_BY_VALUE_KIND: Record<ConditionValueKind, readonly Filter
     FilterOperator.IS_NOT_EMPTY,
   ],
   BOOLEAN: [FilterOperator.EQUALS],
+  /*
+   * `IN` and `NOT_IN` belong to both list kinds because the panel offers them
+   * and the runner evaluates them.
+   *
+   * `OPERATORS_BY_VALUE_TYPE` offers "is one of" on every single-select and
+   * people field, `OPERATORS_BY_CONDITION_FIELD` offers it on `sectionId`
+   * by name, and `conditionHolds` has had cases for both since branches
+   * landed. Only this table disagreed — so "section is one of these two" was a
+   * comparison the form would build, the engine would run, and the validator
+   * called impossible for that kind of field. Harmless while only the builder
+   * asked; the moment publish asks, it refuses a rule that works.
+   */
   ENUM: [
     FilterOperator.EQUALS,
     FilterOperator.NOT_EQUALS,
+    FilterOperator.IN,
+    FilterOperator.NOT_IN,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],
   REFERENCE: [
     FilterOperator.EQUALS,
     FilterOperator.NOT_EQUALS,
+    FilterOperator.IN,
+    FilterOperator.NOT_IN,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],

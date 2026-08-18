@@ -1,5 +1,4 @@
 import {
-  ConditionValueKind,
   TASK_PRIORITIES,
   TASK_PRIORITY_DISPLAY,
   TASK_STATUS_DISPLAY,
@@ -18,6 +17,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { ProjectsService } from '../../projects/projects.service';
 
 import {
+  CONDITION_FIELD_KINDS,
   actionCatalogue,
   capabilities,
   conditionCatalogue,
@@ -203,7 +203,7 @@ export class AutomationMetadataService {
       {
         field: 'status',
         label: 'Status',
-        valueKind: ConditionValueKind.ENUM,
+        valueKind: CONDITION_FIELD_KINDS.status,
         options: statuses.length
           ? statuses.map((row) => ({ value: row.id, label: row.name }))
           : TASK_STATUSES.map((value) => ({ value, label: TASK_STATUS_DISPLAY[value].name })),
@@ -211,7 +211,7 @@ export class AutomationMetadataService {
       {
         field: 'priority',
         label: 'Priority',
-        valueKind: ConditionValueKind.ENUM,
+        valueKind: CONDITION_FIELD_KINDS.priority,
         options: priorities.length
           ? priorities.map((row) => ({ value: row.id, label: row.name }))
           : TASK_PRIORITIES.map((value) => ({
@@ -222,13 +222,13 @@ export class AutomationMetadataService {
       {
         field: 'sectionId',
         label: 'Section',
-        valueKind: ConditionValueKind.REFERENCE,
+        valueKind: CONDITION_FIELD_KINDS.sectionId,
         options: sections.map((row) => ({ value: row.id, label: row.name })),
       },
       {
         field: 'assigneeId',
         label: 'Assignee',
-        valueKind: ConditionValueKind.REFERENCE,
+        valueKind: CONDITION_FIELD_KINDS.assigneeId,
         options: members.map((row) => ({ value: row.user.id, label: row.user.name })),
       },
       {
@@ -242,13 +242,13 @@ export class AutomationMetadataService {
          */
         field: 'createdById',
         label: 'Task creator',
-        valueKind: ConditionValueKind.REFERENCE,
+        valueKind: CONDITION_FIELD_KINDS.createdById,
         options: members.map((row) => ({ value: row.user.id, label: row.user.name })),
       },
-      { field: 'title', label: 'Title', valueKind: ConditionValueKind.TEXT },
-      { field: 'description', label: 'Description', valueKind: ConditionValueKind.TEXT },
-      { field: 'dueDate', label: 'Due date', valueKind: ConditionValueKind.DATE },
-      { field: 'startDate', label: 'Start date', valueKind: ConditionValueKind.DATE },
+      { field: 'title', label: 'Title', valueKind: CONDITION_FIELD_KINDS.title },
+      { field: 'description', label: 'Description', valueKind: CONDITION_FIELD_KINDS.description },
+      { field: 'dueDate', label: 'Due date', valueKind: CONDITION_FIELD_KINDS.dueDate },
+      { field: 'startDate', label: 'Start date', valueKind: CONDITION_FIELD_KINDS.startDate },
     ];
   }
 }

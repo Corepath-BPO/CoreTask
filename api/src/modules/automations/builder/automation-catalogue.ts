@@ -7,6 +7,7 @@ import {
   AutomationTrigger,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
+  ConditionValueKind,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
   TRIGGER_CONFIG_FORM,
@@ -144,6 +145,38 @@ export const READABLE_TASK_FIELDS: readonly string[] = [
 const READABLE = new Set(READABLE_TASK_FIELDS);
 
 /**
+ * What kind of value each condition field holds.
+ *
+ * One definition, read both by the metadata service that offers these fields
+ * and by the validator that judges what somebody built with them. It used to be
+ * two — a list of rows there, a private map here — and they drifted exactly as
+ * you would expect: `description` and `createdById` were offered by the builder
+ * and read by the runner while the validator, never taught them, answered
+ * "unknown" for both. Nothing showed while only the builder asked; the moment
+ * publish asks the same question, that answer refuses a working rule.
+ *
+ * So a field is added here once, or it is not added.
+ */
+export const CONDITION_FIELD_KINDS = {
+  status: ConditionValueKind.ENUM,
+  priority: ConditionValueKind.ENUM,
+  sectionId: ConditionValueKind.REFERENCE,
+  assigneeId: ConditionValueKind.REFERENCE,
+  createdById: ConditionValueKind.REFERENCE,
+  title: ConditionValueKind.TEXT,
+  description: ConditionValueKind.TEXT,
+  dueDate: ConditionValueKind.DATE,
+  startDate: ConditionValueKind.DATE,
+} as const satisfies Record<string, ConditionValueKind>;
+
+/** The kind for a field key off the wire, which may be anything at all. */
+export function conditionFieldKind(field: unknown): ConditionValueKind | undefined {
+  if (typeof field !== 'string') return undefined;
+
+  return (CONDITION_FIELD_KINDS as Record<string, ConditionValueKind | undefined>)[field];
+}
+
+/**
  * Whether the runner can evaluate a condition about this field key.
  *
  * One rule for the hand-written entries and the generated custom-field ones
@@ -239,7 +272,16 @@ export const ACTION_CATEGORY = {
 const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {
   [AutomationTrigger.COMMENT_ADDED]:
     'Adding a comment does not raise an automation event yet, so a rule waiting for one would never run.',
+  [AutomationTrigger.TICKET_CREATED]:
+    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
+  [AutomationTrigger.TICKET_STATUS_CHANGED]:
+    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
 };
+
+/** Why the runner cannot execute a trigger, or null when it can. */
+export function triggerUnavailableReason(trigger: string): string | null {
+  return TRIGGER_UNAVAILABLE_REASON[trigger as AutomationTrigger] ?? null;
+}
 
 /**
  * The comparison each configuration form makes.
@@ -302,7 +344,7 @@ const TRIGGER_CATEGORY_ORDER: readonly string[] = [
  */
 export function triggerCatalogue(): AutomationTriggerEntry[] {
   const entries = AUTOMATION_TRIGGERS.map((subtype) => {
-    const reason = TRIGGER_UNAVAILABLE_REASON[subtype] ?? null;
+    const reason = triggerUnavailableReason(subtype);
 
     return {
       subtype,

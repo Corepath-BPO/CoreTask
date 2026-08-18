@@ -1,4 +1,10 @@
-import { AUTOMATION_STATE_COLOR, AutomationRuleStatus, TRIGGER_LABEL } from '@coretask/contracts';
+import {
+  AUTOMATION_STATE_COLOR,
+  AutomationRuleStatus,
+  TRIGGER_LABEL,
+  WorkspaceRole,
+  hasAtLeastRole,
+} from '@coretask/contracts';
 import { Link } from '@tanstack/react-router';
 import { AlertTriangle, Plus, Settings2, Zap } from 'lucide-react';
 import { useState } from 'react';
@@ -65,6 +71,10 @@ export function SectionAutomationPopover({
 }) {
   const [open, setOpen] = useState(false);
   const { workspace } = useActiveWorkspace();
+  const canManage = hasAtLeastRole(
+    (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole,
+    WorkspaceRole.MANAGER,
+  );
 
   const { data: rules, isLoading } = useSectionAutomations(
     workspace?.id,
@@ -83,7 +93,7 @@ export function SectionAutomationPopover({
           size="icon"
           className="size-7"
           // The state is in the name, not only the colour.
-          aria-label={`Automations for ${sectionName} — ${summary.label}`}
+          aria-label={`Automations for ${sectionName} - ${summary.label}`}
           title={summary.label}
         >
           <Zap className={cn('size-4', TONE_CLASS[summary.tone])} aria-hidden="true" />
@@ -110,7 +120,18 @@ export function SectionAutomationPopover({
             <ul className="space-y-0.5">
               {(rules ?? []).map((rule) => (
                 <li key={rule.id} className="rounded-md px-2 py-1.5 hover:bg-muted">
-                  <p className="truncate text-sm font-medium">{rule.name}</p>
+                  {canManage ? (
+                    <Link
+                      to="/projects/$projectId/automations/$ruleId"
+                      params={{ projectId, ruleId: rule.id }}
+                      className="block truncate text-sm font-medium hover:underline"
+                      onClick={() => setOpen(false)}
+                    >
+                      {rule.name}
+                    </Link>
+                  ) : (
+                    <p className="truncate text-sm font-medium">{rule.name}</p>
+                  )}
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
                     {TRIGGER_LABEL[rule.triggerType as keyof typeof TRIGGER_LABEL] ??
                       rule.triggerType}
@@ -150,16 +171,18 @@ export function SectionAutomationPopover({
             scoped to "when a task moves here" rather than asking again for
             something the click already said.
           */}
-          <Button asChild variant="ghost" size="sm" className="flex-1 justify-start">
-            <Link
-              to="/projects/$projectId/automations/new"
-              params={{ projectId }}
-              search={{ sectionId }}
-            >
-              <Plus className="size-4" aria-hidden="true" />
-              Add rule
-            </Link>
-          </Button>
+          {canManage && (
+            <Button asChild variant="ghost" size="sm" className="flex-1 justify-start">
+              <Link
+                to="/projects/$projectId/automations/new"
+                params={{ projectId }}
+                search={{ sectionId }}
+              >
+                <Plus className="size-4" aria-hidden="true" />
+                Add rule
+              </Link>
+            </Button>
+          )}
 
           <Button asChild variant="ghost" size="sm" className="flex-1 justify-start">
             <Link to="/projects/$projectId/automations" params={{ projectId }}>

@@ -53,7 +53,7 @@ export function CreateSectionDialog({ open, onOpenChange, metadata, pending, onS
         <DialogHeader>
           <DialogTitle>Add a section</DialogTitle>
           <DialogDescription>
-            A column on the Board and a group in the List — the same section, drawn twice.
+            A column on the Board and a group in the List, with the same section shown twice.
           </DialogDescription>
         </DialogHeader>
 

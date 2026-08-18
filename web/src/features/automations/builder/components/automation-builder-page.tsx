@@ -1,4 +1,9 @@
-import { AutomationRuleStatus, type AutomationNodeType } from '@coretask/contracts';
+import {
+  AutomationRuleStatus,
+  WorkspaceRole,
+  hasAtLeastRole,
+  type AutomationNodeType,
+} from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
@@ -6,8 +11,11 @@ import type {
 } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
+import { AlertCircle, LockKeyhole } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { EmptyState } from '@/components/feedback/empty-state';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProject } from '@/features/projects/hooks/use-projects';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
@@ -106,10 +114,24 @@ export function AutomationBuilderPage({
 }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
+  const canManage = hasAtLeastRole(
+    (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole,
+    WorkspaceRole.MANAGER,
+  );
   const navigate = useNavigate();
 
-  const { data: fetched, isLoading } = useAutomationGraph(workspaceId, projectId, ruleId);
-  const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
+  const {
+    data: fetched,
+    isLoading: graphLoading,
+    isError: graphError,
+    refetch: refetchGraph,
+  } = useAutomationGraph(workspaceId, projectId, ruleId);
+  const {
+    data: metadata,
+    isLoading: metadataLoading,
+    isError: metadataError,
+    refetch: refetchMetadata,
+  } = useAutomationMetadata(workspaceId, projectId);
   /* The same query the project pages use, so the name in the header comes from
      the cache they have already filled rather than from a request of its own. */
   const { data: project } = useProject(workspaceId, projectId);
@@ -691,8 +713,13 @@ export function AutomationBuilderPage({
     });
 
   const saveDraft = async () => {
-    const savedId = await persist();
-    if (savedId && isNew) await goToSaved(savedId);
+    try {
+      const savedId = await persist();
+      if (savedId && isNew) await goToSaved(savedId);
+    } catch {
+      // The mutation reports the API error. Keeping the builder open preserves
+      // the unsaved canvas so the user can correct it and retry.
+    }
   };
 
   /**
@@ -703,11 +730,19 @@ export function AutomationBuilderPage({
    * from the one on screen.
    */
   const publish = async () => {
-    const savedId = await persist();
-    if (!savedId) return;
+    let savedId: string | null = null;
 
-    await publishRule.mutateAsync(savedId);
-    if (isNew) await goToSaved(savedId);
+    try {
+      savedId = await persist();
+      if (!savedId) return;
+      await publishRule.mutateAsync(savedId);
+    } catch {
+      // Both mutations already surface their own errors. A newly created draft
+      // still needs its real URL even when publishing fails, otherwise another
+      // click would create a duplicate rule.
+    } finally {
+      if (savedId && isNew) await goToSaved(savedId);
+    }
   };
 
   /*
@@ -743,8 +778,43 @@ export function AutomationBuilderPage({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  if (isLoading || !rule) {
+  if ((ruleId !== null && graphError) || metadataError) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <EmptyState
+          icon={AlertCircle}
+          title="The rule builder could not load"
+          description="Your rule has not been changed. Retry the definition and project options, or return to the rule list."
+          action={
+            <div className="flex gap-2">
+              <Button onClick={() => void Promise.all([refetchGraph(), refetchMetadata()])}>
+                Try again
+              </Button>
+              <Button variant="outline" onClick={onClose}>
+                Back to automations
+              </Button>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (graphLoading || metadataLoading || !rule) {
     return <Skeleton className="h-[70vh] w-full" />;
+  }
+
+  if (!canManage) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <EmptyState
+          icon={LockKeyhole}
+          title="Manager access required"
+          description="Only workspace managers and admins can edit or publish automation rules."
+          action={<Button onClick={onClose}>Back to automations</Button>}
+        />
+      </div>
+    );
   }
 
   return (
@@ -771,6 +841,9 @@ export function AutomationBuilderPage({
           )
         }
         save={saveState}
+        saving={saving}
+        canSave={dirty && !unnamed && Boolean(triggerNode?.subtype)}
+        onSave={() => void saveDraft()}
         issues={issues}
         onFocusIssue={(nodeId) => setSelectedId(nodeId)}
         publishing={publishRule.isPending}

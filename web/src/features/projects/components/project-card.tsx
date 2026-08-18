@@ -39,7 +39,10 @@ export function ProjectCard({
 
   return (
     <Card
-      className={cn('group relative transition-shadow hover:shadow-md', archived && 'opacity-70')}
+      className={cn(
+        'group relative transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md',
+        archived && 'opacity-70',
+      )}
     >
       <CardContent className="space-y-3 py-4">
         <div className="flex items-start gap-2.5">

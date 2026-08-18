@@ -164,7 +164,7 @@ export function ProjectFormDialog({
           <DialogTitle>{isEdit ? 'Edit project' : 'Create a project'}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? 'The project key cannot change — it is part of every ticket reference.'
+              ? 'The project key cannot change because it is part of every ticket reference.'
               : 'Four default sections are created so the board is usable straight away.'}
           </DialogDescription>
         </DialogHeader>
@@ -310,7 +310,7 @@ export function ProjectFormDialog({
             label="Team"
             htmlFor="project-team"
             error={errors.teamId?.message}
-            hint="Optional — who owns this project"
+            hint="Optional. Choose who owns this project."
           >
             <Controller
               control={control}

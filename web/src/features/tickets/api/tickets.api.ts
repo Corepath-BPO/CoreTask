@@ -23,6 +23,7 @@ export interface TicketListParams {
   /** A key such as `CORE-1001` matches exactly; anything else matches the title. */
   search?: string;
   dueBefore?: string;
+  dueAfter?: string;
   includeClosed?: boolean;
 }
 

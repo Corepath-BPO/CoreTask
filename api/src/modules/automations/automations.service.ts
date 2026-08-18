@@ -1,8 +1,8 @@
 import {
-  AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
   AutomationNodeType,
   AutomationRuleStatus,
+  GraphIssueLevel,
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
@@ -14,6 +14,7 @@ import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 
+import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
 import type { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
 
 /** One node as the builder sends it. Mirrors `SaveAutomationGraphNode`. */
@@ -40,6 +41,7 @@ export class AutomationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
+    private readonly graph: AutomationGraphValidatorService,
   ) {}
 
   async list(workspaceId: string, projectId: string, sectionId?: string) {
@@ -235,12 +237,52 @@ export class AutomationsService {
    * rule with no action does nothing, one with no trigger never fires, and one
    * naming a deleted section fails silently on every event. Each is invisible
    * until someone wonders why their automation "isn't working".
+   *
+   * Everything the rule builder refuses is refused here too, by running the
+   * same validator the builder's problem count comes from. This used to be a
+   * shorter check of its own, so the panel and the endpoint disagreed about
+   * what a valid rule was: a graph posted straight to this route went ACTIVE
+   * carrying faults the form would not have let anybody build — a deleted
+   * section, a comparison that does not fit the field, a computed date on a
+   * text field. The builder greying Publish out was never the refusal; it was
+   * only the part somebody could see.
+   *
+   * The stored graph is what gets validated, not a body — by the time anything
+   * is published the request that wrote it is long gone, and the rule that goes
+   * live is the one in the table.
    */
   async publish(workspaceId: string, projectId: string, role: WorkspaceRole, ruleId: string) {
     const rule = await this.requireRule(workspaceId, projectId, ruleId);
     this.assertMayManage(role);
 
-    const problems = await this.validate(rule);
+    const { issues } = await this.graph.validate(projectId, workspaceId, rule.name, rule.nodes);
+
+    /*
+     * Errors refuse; warnings do not.
+     *
+     * A warning is something worth saying and not worth blocking — "this action
+     * can set off its own trigger" is occasionally the whole point of the rule
+     * — and the builder already draws that line the same way. Publishing on an
+     * error the panel shows would put the two back out of step.
+     *
+     * The graph answers for the nodes and `triggerProblems` for the row, so the
+     * two halves meet here without overlapping: every sentence is a fault no
+     * other sentence is also describing.
+     *
+     * Still deduplicated, for the case they cannot avoid: two steps naming the
+     * same deleted section produce the same sentence twice, and this list is
+     * sentences with no node beside them — so the repeat reads as a fault in
+     * the message rather than as a second broken step. `/validate` is where
+     * per-node detail lives, and it carries the `nodeId` that tells them apart.
+     */
+    const problems = [
+      ...new Set([
+        ...(await this.triggerProblems(rule)),
+        ...issues
+          .filter((issue) => issue.level === GraphIssueLevel.ERROR)
+          .map((issue) => issue.message),
+      ]),
+    ];
 
     if (problems.length > 0) {
       throw AppException.badRequest('BAD_REQUEST', 'This rule is not ready to publish.', {
@@ -255,28 +297,27 @@ export class AutomationsService {
     });
   }
 
-  /** Everything wrong with a rule, so the builder can show all of it at once. */
-  async validate(
-    rule: AutomationRule & {
-      nodes: { nodeType: string; subtype: string; configuration: unknown }[];
-    },
-  ): Promise<string[]> {
+  /**
+   * What is wrong with the rule's own row, rather than with its graph.
+   *
+   * The two trigger columns and nothing else. It used to check the nodes too —
+   * that there was an action, and that each one names something the engine can
+   * run — and the graph validator now answers both, from the same node tree, in
+   * the same words the builder shows. Two validators saying the same thing
+   * differently put two sentences for one fault in front of whoever pressed
+   * Publish, each phrased just differently enough to read as two problems.
+   *
+   * What is left is the half the graph cannot answer. `triggerType` and
+   * `triggerConfig` are columns on the rule, denormalised from the trigger node
+   * so the matcher can find candidate rules with one indexed query — they are
+   * what actually decides whether a rule sees an event, and a graph validator
+   * reading nodes never looks at them.
+   */
+  private async triggerProblems(rule: AutomationRule): Promise<string[]> {
     const problems: string[] = [];
 
     if (!AUTOMATION_TRIGGERS.includes(rule.triggerType as never)) {
       problems.push('The trigger is not one this engine understands.');
-    }
-
-    const actions = rule.nodes.filter((node) => node.nodeType === AutomationNodeType.ACTION);
-
-    if (actions.length === 0) {
-      problems.push('Add at least one action — a rule with none would do nothing.');
-    }
-
-    for (const action of actions) {
-      if (!AUTOMATION_ACTIONS.includes(action.subtype as never)) {
-        problems.push(`"${action.subtype}" is not an action this engine can run.`);
-      }
     }
 
     // A section named in the trigger must still exist. A rule pointing at a
@@ -324,27 +365,42 @@ export class AutomationsService {
 
     // A copy is always a draft. Duplicating a live rule and having both fire
     // immediately is never what anyone means by "duplicate".
-    return this.prisma.automationRule.create({
+    const copy = await this.prisma.automationRule.create({
       data: {
         workspaceId,
         projectId,
         name: `${rule.name} copy`,
         description: rule.description,
         status: AutomationRuleStatus.DRAFT,
+        allowChaining: rule.allowChaining,
         triggerType: rule.triggerType,
         triggerConfig: rule.triggerConfig as Prisma.InputJsonValue,
         createdById: userId,
-        nodes: {
-          create: rule.nodes.map((node) => ({
-            nodeType: node.nodeType,
-            subtype: node.subtype,
-            configuration: node.configuration as Prisma.InputJsonValue,
-            position: node.position,
-          })),
-        },
       },
       include: ruleInclude,
     });
+
+    // A graph copy must remain a graph. Nested Prisma creates cannot point a
+    // child at another row being created in the same array, so use the same
+    // two-pass writer as the builder. The previous implementation copied only
+    // subtype/configuration and silently flattened every branch and position.
+    if (rule.nodes.length > 0) {
+      await this.replaceNodes(
+        copy.id,
+        rule.nodes.map((node) => ({
+          id: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          configuration: node.configuration as Record<string, unknown>,
+          position: { x: node.positionX, y: node.positionY },
+          parentId: node.parentNodeId,
+          branchKey: node.branchKey,
+          order: node.position,
+        })),
+      );
+    }
+
+    return this.get(workspaceId, projectId, copy.id);
   }
 
   /**

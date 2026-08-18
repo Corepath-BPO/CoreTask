@@ -11,14 +11,14 @@
  * for meaning, never decoration.
  */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
-  --background: oklch(1 0 0);
+  --background: oklch(0.982 0.002 286.3);
   --foreground: oklch(0.21 0.006 285.9);
 
-  --card: oklch(1 0 0);
+  --card: oklch(0.998 0.001 286.3);
   --card-foreground: oklch(0.21 0.006 285.9);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.998 0.001 286.3);
   --popover-foreground: oklch(0.21 0.006 285.9);
 
   /*
@@ -33,13 +33,13 @@
   --primary: oklch(0.763 0.164 134);
   --primary-foreground: oklch(0.21 0.006 285.9);
 
-  --secondary: oklch(0.967 0.001 286.4);
+  --secondary: oklch(0.951 0.003 286.3);
   --secondary-foreground: oklch(0.21 0.006 285.9);
 
-  --muted: oklch(0.967 0.001 286.4);
+  --muted: oklch(0.954 0.003 286.3);
   --muted-foreground: oklch(0.552 0.014 285.9);
 
-  --accent: oklch(0.967 0.001 286.4);
+  --accent: oklch(0.944 0.009 134);
   --accent-foreground: oklch(0.21 0.006 285.9);
 
   --destructive: oklch(0.577 0.245 27.3);
@@ -50,13 +50,13 @@
   --warning: oklch(0.769 0.163 70.1);
   --warning-foreground: oklch(0.21 0.006 285.9);
 
-  --border: oklch(0.92 0.004 286.3);
-  --input: oklch(0.92 0.004 286.3);
+  --border: oklch(0.895 0.006 286.3);
+  --input: oklch(0.873 0.007 286.3);
   --ring: oklch(0.763 0.164 134);
 
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.965 0.004 286.3);
   --sidebar-foreground: oklch(0.21 0.006 285.9);
-  --sidebar-accent: oklch(0.967 0.001 286.4);
+  --sidebar-accent: oklch(0.925 0.017 134);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
   --sidebar-border: oklch(0.92 0.004 286.3);
 
@@ -74,12 +74,12 @@
 }
 
 .dark {
-  --background: oklch(0.171 0.006 285.9);
+  --background: oklch(0.135 0.008 285.9);
   --foreground: oklch(0.967 0.001 286.4);
 
-  --card: oklch(0.211 0.006 285.9);
+  --card: oklch(0.186 0.009 285.9);
   --card-foreground: oklch(0.967 0.001 286.4);
-  --popover: oklch(0.211 0.006 285.9);
+  --popover: oklch(0.205 0.009 285.9);
   --popover-foreground: oklch(0.967 0.001 286.4);
 
   /* The same brand colour in both themes: at L=0.76 it already reads bright
@@ -87,13 +87,13 @@
   --primary: oklch(0.763 0.164 134);
   --primary-foreground: oklch(0.171 0.006 285.9);
 
-  --secondary: oklch(0.274 0.006 286);
+  --secondary: oklch(0.238 0.009 286);
   --secondary-foreground: oklch(0.967 0.001 286.4);
 
-  --muted: oklch(0.274 0.006 286);
+  --muted: oklch(0.225 0.009 286);
   --muted-foreground: oklch(0.712 0.013 286.1);
 
-  --accent: oklch(0.274 0.006 286);
+  --accent: oklch(0.26 0.024 134);
   --accent-foreground: oklch(0.967 0.001 286.4);
 
   --destructive: oklch(0.637 0.208 25.3);
@@ -108,9 +108,9 @@
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.763 0.164 134);
 
-  --sidebar: oklch(0.196 0.006 285.9);
+  --sidebar: oklch(0.112 0.012 145);
   --sidebar-foreground: oklch(0.967 0.001 286.4);
-  --sidebar-accent: oklch(0.274 0.006 286);
+  --sidebar-accent: oklch(0.763 0.164 134);
   --sidebar-accent-foreground: oklch(0.967 0.001 286.4);
   --sidebar-border: oklch(1 0 0 / 10%);
 
@@ -164,8 +164,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    'Noto Sans', sans-serif;
+    'Segoe UI Variable', Aptos, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono:
     ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
@@ -185,6 +184,15 @@
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Visible focus for keyboard users only — never a permanent outline. */
@@ -225,6 +233,27 @@
 }
 
 @layer utilities {
+  .surface-shadow {
+    box-shadow:
+      0 1px 2px oklch(0.21 0.006 285.9 / 4%),
+      0 12px 32px oklch(0.21 0.006 285.9 / 5%);
+  }
+
+  .page-enter {
+    animation: page-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes page-enter {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   /* Respect the OS setting; motion is decoration, never information. */
   @media (prefers-reduced-motion: reduce) {
     *,
