@@ -40,7 +40,17 @@ export function CellButton({
   );
 }
 
-/** Placeholder for an unset value, so an empty cell is still a target. */
+/**
+ * Placeholder for an unset value, so an empty cell is still a target.
+ *
+ * Visible only while its row is hovered or holds focus, as Asana leaves
+ * empties: a sparse grid renders mostly dashes, and a page of them reads as
+ * noise louder than the few real values it is hiding.
+ */
 export function EmptyCell() {
-  return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="text-muted-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      —
+    </span>
+  );
 }

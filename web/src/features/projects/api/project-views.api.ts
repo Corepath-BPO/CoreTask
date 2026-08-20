@@ -5,6 +5,7 @@ import type {
   ProjectFieldMetadata,
   ProjectView,
   Task,
+  UpdateCustomFieldPayload,
   UpdateProjectViewPayload,
   ViewFilterCondition,
   ViewSort,
@@ -131,6 +132,51 @@ export const customFieldsApi = {
   ): Promise<{ deleted: boolean; archived: boolean }> =>
     apiClient.delete<{ deleted: boolean; archived: boolean }>(
       `${base(workspaceId, projectId)}/custom-fields/${fieldId}`,
+    ),
+
+  /** The type cannot change — everything else about a field can. */
+  update: (
+    workspaceId: string,
+    projectId: string,
+    fieldId: string,
+    payload: UpdateCustomFieldPayload,
+  ): Promise<CustomField> =>
+    apiClient.patch<CustomField>(
+      `${base(workspaceId, projectId)}/custom-fields/${fieldId}`,
+      payload,
+    ),
+
+  addOption: (
+    workspaceId: string,
+    projectId: string,
+    fieldId: string,
+    payload: { label: string; colorToken?: string },
+  ): Promise<CustomField> =>
+    apiClient.post<CustomField>(
+      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options`,
+      payload,
+    ),
+
+  updateOption: (
+    workspaceId: string,
+    projectId: string,
+    fieldId: string,
+    optionId: string,
+    payload: { label?: string; colorToken?: string; position?: number },
+  ): Promise<CustomField> =>
+    apiClient.patch<CustomField>(
+      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options/${optionId}`,
+      payload,
+    ),
+
+  removeOption: (
+    workspaceId: string,
+    projectId: string,
+    fieldId: string,
+    optionId: string,
+  ): Promise<{ deleted: boolean; archived: boolean }> =>
+    apiClient.delete<{ deleted: boolean; archived: boolean }>(
+      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options/${optionId}`,
     ),
 
   setValue: (

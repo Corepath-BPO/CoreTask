@@ -65,8 +65,16 @@ export function columnWidth(column: ViewColumn): number {
   return column.width ?? COLUMN_WIDTHS[column.field] ?? DEFAULT_COLUMN_WIDTH;
 }
 
-export function clampWidth(width: number): number {
-  return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, Math.round(width)));
+/**
+ * The Task column's own floor. It holds the expander, the drag handle and the
+ * only text identifying the row — at the general 60px minimum a drag can
+ * crush it into a sliver of nothing, so it stops earlier.
+ */
+export const MIN_TITLE_WIDTH = 200;
+
+export function clampWidth(width: number, field?: string): number {
+  const min = field && isFixedColumn(field) ? MIN_TITLE_WIDTH : MIN_COLUMN_WIDTH;
+  return Math.min(MAX_COLUMN_WIDTH, Math.max(min, Math.round(width)));
 }
 
 /**
@@ -138,11 +146,7 @@ export function pinnedLayout(columns: ViewColumn[]): PinnedLayout {
  * Unpinning drops the column just past the block, so it stays next to where it
  * was rather than jumping to the far end of a wide grid.
  */
-export function setPinned(
-  columns: ViewColumn[],
-  field: string,
-  isPinned: boolean,
-): ViewColumn[] {
+export function setPinned(columns: ViewColumn[], field: string, isPinned: boolean): ViewColumn[] {
   if (isFixedColumn(field)) return columns;
 
   const target = columns.find((column) => column.field === field);

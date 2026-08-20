@@ -1,5 +1,13 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { BarChart3, CalendarDays, Settings } from 'lucide-react';
+import {
+  BarChart3,
+  CalendarDays,
+  Gauge,
+  LayoutDashboard,
+  MessageSquare,
+  Settings,
+  TrendingUp,
+} from 'lucide-react';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -18,6 +26,10 @@ import { ProjectDetailPage } from '@/features/projects/pages/project-detail-page
 import { ProjectListPage } from '@/features/projects/pages/project-list-page';
 import { ProjectOverviewPage } from '@/features/projects/pages/project-overview-page';
 import { ProjectsPage } from '@/features/projects/pages/projects-page';
+import { PortfolioDetailPage } from '@/features/portfolios/pages/portfolio-detail-page';
+import { PortfolioListPage } from '@/features/portfolios/pages/portfolio-list-page';
+import { PortfolioTimelinePage } from '@/features/portfolios/pages/portfolio-timeline-page';
+import { PortfoliosPage } from '@/features/portfolios/pages/portfolios-page';
 import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { TeamsPage } from '@/features/teams/pages/teams-page';
 import { TicketsPage } from '@/features/tickets/pages/tickets-page';
@@ -122,6 +134,102 @@ const projectsRoute = createRoute({
   },
 });
 
+const portfoliosRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/portfolios',
+  component: PortfoliosPage,
+});
+
+/**
+ * The portfolio shell: header, tabs and an outlet, same shape as the project
+ * shell above. Portfolios are client-side state (there is no portfolio API
+ * yet), so the id here is whatever the store minted — the page guards against
+ * ids the store does not know rather than trusting the URL.
+ */
+const portfolioDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/portfolios/$portfolioId',
+  component: function PortfolioDetailRoute() {
+    const { portfolioId } = portfolioDetailRoute.useParams();
+    return <PortfolioDetailPage portfolioId={portfolioId} />;
+  },
+});
+
+/** Bare `/portfolios/:id` sends the reader to the list, the one built view. */
+const portfolioIndexRoute = createRoute({
+  getParentRoute: () => portfolioDetailRoute,
+  path: '/',
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: '/portfolios/$portfolioId/list',
+      params: params as { portfolioId: string },
+    });
+  },
+});
+
+const portfolioListRoute = createRoute({
+  getParentRoute: () => portfolioDetailRoute,
+  path: '/list',
+  component: function PortfolioListRoute() {
+    const { portfolioId } = portfolioDetailRoute.useParams();
+    return <PortfolioListPage portfolioId={portfolioId} />;
+  },
+});
+
+const portfolioTimelineRoute = createRoute({
+  getParentRoute: () => portfolioDetailRoute,
+  path: '/timeline',
+  component: function PortfolioTimelineRoute() {
+    const { portfolioId } = portfolioDetailRoute.useParams();
+    return <PortfolioTimelinePage portfolioId={portfolioId} />;
+  },
+});
+
+/** Portfolio tabs whose implementation lands in a later milestone. */
+const portfolioPlaceholderRoutes = [
+  {
+    segment: 'dashboard',
+    title: 'Dashboard',
+    icon: LayoutDashboard,
+    plannedFor: 'Completion, status breakdown and throughput across member projects.',
+  },
+  {
+    segment: 'progress',
+    title: 'Progress',
+    icon: TrendingUp,
+    plannedFor: 'A history of status updates for this portfolio.',
+  },
+  {
+    segment: 'workload',
+    title: 'Workload',
+    icon: Gauge,
+    plannedFor: 'Task load per person across the member projects.',
+  },
+  {
+    segment: 'messages',
+    title: 'Messages',
+    icon: MessageSquare,
+    plannedFor: 'Conversations that span more than one project.',
+  },
+].map((tab) =>
+  createRoute({
+    getParentRoute: () => portfolioDetailRoute,
+    path: `/${tab.segment}`,
+    // The portfolio shell's outlet area manages no scrolling of its own, so
+    // each tab brings its own — same contract the List tab follows.
+    component: () => (
+      <div className="h-full overflow-y-auto px-4 py-6 sm:px-6">
+        <PlaceholderPage
+          title={tab.title}
+          description="Not built yet."
+          icon={tab.icon}
+          plannedFor={tab.plannedFor}
+        />
+      </div>
+    ),
+  }),
+);
+
 const myTasksRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/my-tasks',
@@ -185,9 +293,32 @@ const acceptInvitationRoute = createRoute({
  * each view is a route rather than a piece of component state — the choice then
  * survives a refresh, works with back and forward, and can be shared.
  */
+/**
+ * `?task=` names the work item open in the List/Board side panel;
+ * `?customize=true` opens the Customize panel. Declared on the parent route so
+ * every project view shares one schema and the tab links can carry both across
+ * List↔Board.
+ *
+ * Never both at once: the two panels share the right edge of the window, and a
+ * task link is the more specific intent — so in a hand-built URL naming both,
+ * the task wins and `customize` is dropped.
+ */
+export function validateProjectDetailSearch(
+  search: Record<string, unknown>,
+): { task?: string; customize?: boolean } {
+  const task = search['task'];
+  const validTask = typeof task === 'string' && UUID_PATTERN.test(task) ? task : undefined;
+  const customize = search['customize'] === true || search['customize'] === 'true';
+  return {
+    ...(validTask ? { task: validTask } : {}),
+    ...(customize && !validTask ? { customize: true } : {}),
+  };
+}
+
 const projectDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/projects/$projectId',
+  validateSearch: validateProjectDetailSearch,
   // Params are read from the route object rather than by route-id string, so
   // the page stays a plain prop-driven component and cannot address a route
   // path that does not exist.
@@ -198,9 +329,9 @@ const projectDetailRoute = createRoute({
 });
 
 /**
- * Bare `/projects/:id` sends the reader to the board.
+ * Bare `/projects/:id` sends the reader to the list, as Asana does.
  *
- * A redirect rather than rendering the board here, so there is one canonical
+ * A redirect rather than rendering the list here, so there is one canonical
  * URL per view and an existing bookmark still lands somewhere real.
  */
 const projectIndexRoute = createRoute({
@@ -208,7 +339,7 @@ const projectIndexRoute = createRoute({
   path: '/',
   beforeLoad: ({ params }) => {
     throw redirect({
-      to: '/projects/$projectId/board',
+      to: '/projects/$projectId/list',
       params: params as { projectId: string },
     });
   },
@@ -382,6 +513,13 @@ const routeTree = rootRoute.addChildren([
       projectAutomationNewRoute,
       projectAutomationBuilderRoute,
       ...projectPlaceholderRoutes,
+    ]),
+    portfoliosRoute,
+    portfolioDetailRoute.addChildren([
+      portfolioIndexRoute,
+      portfolioListRoute,
+      portfolioTimelineRoute,
+      ...portfolioPlaceholderRoutes,
     ]),
     myTasksRoute,
     ticketsRoute,

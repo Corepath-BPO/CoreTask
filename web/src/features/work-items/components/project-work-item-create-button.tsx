@@ -39,6 +39,8 @@ interface Props {
   onCreateSection?: (() => void) | undefined;
   pending?: boolean;
   size?: 'sm' | 'default';
+  /** Asana's list toolbar wears the neutral outline; the default stays filled. */
+  variant?: 'default' | 'outline';
   className?: string;
 }
 
@@ -70,6 +72,7 @@ export function ProjectWorkItemCreateButton({
   onCreateSection,
   pending = false,
   size = 'sm',
+  variant = 'default',
   className,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -84,13 +87,15 @@ export function ProjectWorkItemCreateButton({
       <Button
         type="button"
         size={size}
+        variant={variant}
         disabled={pending}
         onClick={() => onCreate(defaultType, context)}
         // The two segments read as one control: the seam is a single border and
         // only the outer corners are rounded.
         className={cn(
           height,
-          'cursor-pointer rounded-r-none border-r border-primary-foreground/20',
+          'cursor-pointer rounded-r-none border-r',
+          variant === 'outline' ? 'border-border' : 'border-primary-foreground/20',
         )}
       >
         {pending ? (
@@ -106,11 +111,16 @@ export function ProjectWorkItemCreateButton({
           <Button
             type="button"
             size={size}
+            variant={variant}
             disabled={pending}
             // Named for what it does, not what it looks like. "Chevron" tells a
             // screen-reader user nothing about where it leads.
             aria-label="Choose what to add"
-            className={cn(height, 'cursor-pointer rounded-l-none px-2')}
+            className={cn(
+              height,
+              'cursor-pointer rounded-l-none px-2',
+              variant === 'outline' && 'border-l-0',
+            )}
           >
             <ChevronDown className="size-4" aria-hidden="true" />
           </Button>

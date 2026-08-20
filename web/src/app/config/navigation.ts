@@ -2,6 +2,7 @@ import {
   BarChart3,
   CalendarDays,
   CircleCheckBig,
+  Folder,
   FolderKanban,
   Home,
   Inbox,
@@ -50,6 +51,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Work',
     items: [
       { label: 'Projects', to: '/projects', icon: FolderKanban },
+      { label: 'Portfolios', to: '/portfolios', icon: Folder },
       { label: 'Tickets', to: '/tickets', icon: Ticket },
       { label: 'Members', to: '/members', icon: Users },
       { label: 'Teams', to: '/teams', icon: UsersRound },

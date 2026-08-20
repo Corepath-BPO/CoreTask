@@ -29,6 +29,8 @@ interface Props {
   onCreate: (input: { type: WorkItemType; title: string }) => Promise<unknown>;
   pending?: boolean;
   className?: string;
+  /** Asana's list styling: "Add task…" alone, no leading plus. */
+  plain?: boolean;
 }
 
 /**
@@ -49,6 +51,7 @@ export function QuickCreateWorkItemRow({
   onCreate,
   pending = false,
   className,
+  plain = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -104,8 +107,10 @@ export function QuickCreateWorkItemRow({
           className,
         )}
       >
-        <Plus className="size-4" aria-hidden="true" />
-        {WORK_ITEM_TYPE_ACTION_LABEL[defaultType]}
+        {!plain && <Plus className="size-4" aria-hidden="true" />}
+        {plain
+          ? `${WORK_ITEM_TYPE_ACTION_LABEL[defaultType]}…`
+          : WORK_ITEM_TYPE_ACTION_LABEL[defaultType]}
       </button>
     );
   }

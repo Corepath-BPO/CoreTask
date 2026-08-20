@@ -5,10 +5,10 @@ import type { Task } from '@coretask/types';
 import { CalendarClock, ListChecks, MessageSquareText } from 'lucide-react';
 
 import { TaskPriorityBadge } from '@/components/data-display/status-badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { WorkItemTypeIcon } from '@/features/work-items/components/work-item-type-icon';
 import { isTicketRow } from '@/features/work-items/lib/work-item-row';
-import { cn, daysUntil, formatDate, formatDueDate, initials } from '@/lib/utils';
+import { cn, daysUntil, formatDate, formatDueDate } from '@/lib/utils';
 
 interface TaskCardProps {
   task: Task;
@@ -32,7 +32,10 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
   });
 
   const done = task.status === TaskStatus.DONE;
-  const overdue = task.dueDate !== null && !done && daysUntil(task.dueDate) < 0;
+  const days = task.dueDate !== null && !done ? daysUntil(task.dueDate) : null;
+  const overdue = days !== null && days < 0;
+  // Today or tomorrow — the list's due-date cell draws the same green.
+  const dueNow = days === 0 || days === 1;
 
   return (
     <article
@@ -89,7 +92,11 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
             <span
               className={cn(
                 'inline-flex items-center gap-1 text-[11px]',
-                overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                overdue
+                  ? 'font-medium text-destructive'
+                  : dueNow
+                    ? 'text-success'
+                    : 'text-muted-foreground',
               )}
             >
               <CalendarClock className="size-3" aria-hidden="true" />
@@ -117,10 +124,13 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
           )}
 
           {task.assignee && (
-            <Avatar className="ml-auto size-5" title={task.assignee.name}>
-              {task.assignee.avatarUrl && <AvatarImage src={task.assignee.avatarUrl} alt="" />}
-              <AvatarFallback className="text-[9px]">{initials(task.assignee.name)}</AvatarFallback>
-            </Avatar>
+            <PersonAvatar
+              name={task.assignee.name}
+              avatarUrl={task.assignee.avatarUrl}
+              className="ml-auto size-5"
+              fallbackClassName="text-[9px]"
+              title={task.assignee.name}
+            />
           )}
         </div>
       )}
