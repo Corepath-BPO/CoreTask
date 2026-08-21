@@ -283,8 +283,23 @@
       0 12px 32px oklch(0.21 0.006 285.9 / 5%);
   }
 
+  /*
+   * `backwards`, never `both`.
+   *
+   * `both` keeps the last keyframe applied for good, which leaves
+   * `transform: translateY(0)` on the element forever. A transform other than
+   * `none` makes an element the containing block for *fixed* descendants as
+   * well as absolute ones, so every `fixed inset-y-0` overlay rendered inside
+   * the animated element stops measuring against the window and starts
+   * measuring against the element. That is what put the task panel below the
+   * top bar instead of flush with the window.
+   *
+   * `backwards` applies the opening keyframe before the animation runs and
+   * hands the element back afterwards, so the resting transform is `none`. The
+   * end state was already the natural one, so nothing moves.
+   */
   .page-enter {
-    animation: page-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: page-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
   @keyframes page-enter {

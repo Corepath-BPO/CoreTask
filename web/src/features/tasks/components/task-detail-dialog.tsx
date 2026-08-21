@@ -258,7 +258,12 @@ export function TaskDetailPanel({
       aria-label="Task details"
       inert={!open}
       className={cn(
-        'fixed inset-y-0 right-0 z-40 flex w-full max-w-[42rem] flex-col border-l bg-card shadow-xl outline-none transition-transform',
+        // `m-0` is load-bearing: this renders inside a page that stacks its
+        // children with `space-y-*`, and Tailwind v4 hands every non-last child
+        // a `margin-block-end`. On an element pinned to both `inset-y` edges a
+        // bottom margin does not offset it, it *shortens* it, which left a gap
+        // between the panel and the bottom of the window.
+        'fixed inset-y-0 right-0 z-40 m-0 flex w-full max-w-[42rem] flex-col border-l bg-card shadow-xl outline-none transition-transform',
         // Decelerate into place; leave quicker than arriving. The global
         // reduced-motion kill-switch already flattens these transitions.
         open ? 'translate-x-0 duration-300 ease-out' : 'translate-x-full duration-200 ease-in',
