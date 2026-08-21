@@ -6,7 +6,7 @@ import {
   TaskStatus,
 } from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleCheck, Pencil } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import {
@@ -16,7 +16,7 @@ import {
   TicketStatusBadge,
 } from '@/components/data-display/status-badge';
 import { isTicketRow } from '@/features/work-items/lib/work-item-row';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { cn, formatDate, initials } from '@/lib/utils';
+import { cn, daysUntil, formatDate, formatDueDate } from '@/lib/utils';
 
 import { CellButton, EmptyCell } from './editable-cell';
 import { useCellEditor } from './use-cell-editor';
@@ -116,6 +116,28 @@ export function TitleCell({
         <span className="size-4 shrink-0" aria-hidden="true" />
       )}
 
+      {/* Asana's completion circle, on tasks and subtasks alike. Tickets sit
+          this out — "complete" is a different word in their vocabulary. */}
+      {!isTicketRow(task) && (
+        <button
+          type="button"
+          disabled={!canEdit}
+          aria-pressed={task.status === TaskStatus.DONE}
+          aria-label={`Mark "${task.title}" ${task.status === TaskStatus.DONE ? 'incomplete' : 'complete'}`}
+          onClick={() =>
+            onSave({ status: task.status === TaskStatus.DONE ? TaskStatus.TODO : TaskStatus.DONE })
+          }
+          className={cn(
+            'shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+            task.status === TaskStatus.DONE
+              ? 'text-success'
+              : 'text-muted-foreground hover:text-success',
+          )}
+        >
+          <CircleCheck className="size-4" aria-hidden="true" />
+        </button>
+      )}
+
       <button
         type="button"
         onClick={onOpenTask}
@@ -139,18 +161,29 @@ export function TitleCell({
         </span>
       )}
 
+      {/* Asana's hover tail: quick actions surface at the right edge of the
+          Name cell while the row is hovered, and stay reachable by keyboard.
+          The rename pencil is ours; the chevron opens the details, as
+          Asana's does. */}
       {canEdit && (
         <button
           type="button"
           onClick={editor.open}
           aria-label={`Rename "${task.title}"`}
-          // Revealed on hover or focus so the row stays quiet at rest, but
-          // never hidden from the keyboard.
-          className="shrink-0 cursor-pointer rounded px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
+          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
         >
-          ✎
+          <Pencil className="size-3.5" aria-hidden="true" />
         </button>
       )}
+
+      <button
+        type="button"
+        onClick={onOpenTask}
+        aria-label={`Open details for "${task.title}"`}
+        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
+      >
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+      </button>
     </span>
   );
 }
@@ -195,10 +228,12 @@ export function AssigneeCell({ task, metadata, canEdit, onSave }: CellProps) {
     <CellButton onOpen={editor.open} disabled={!canEdit} ariaLabel={`Assignee for "${task.title}"`}>
       {task.assignee ? (
         <span className="inline-flex items-center gap-1.5">
-          <Avatar className="size-5">
-            {task.assignee.avatarUrl && <AvatarImage src={task.assignee.avatarUrl} alt="" />}
-            <AvatarFallback className="text-[9px]">{initials(task.assignee.name)}</AvatarFallback>
-          </Avatar>
+          <PersonAvatar
+            name={task.assignee.name}
+            avatarUrl={task.assignee.avatarUrl}
+            className="size-5"
+            fallbackClassName="text-[9px]"
+          />
           <span className="truncate text-xs">{task.assignee.name}</span>
         </span>
       ) : (
@@ -330,17 +365,35 @@ export function DueDateCell({ task, canEdit, onSave }: CellProps) {
     );
   }
 
-  const overdue =
-    task.dueDate && task.status !== TaskStatus.DONE && new Date(task.dueDate) < new Date();
+  const done = task.status === TaskStatus.DONE;
+  // Calendar-day arithmetic, as the board and dashboard count it. A plain
+  // Date comparison read a task due today as overdue from a minute past
+  // midnight.
+  const days = task.dueDate && !done ? daysUntil(task.dueDate) : null;
 
   return (
     <CellButton
       onOpen={editor.open}
       disabled={!canEdit}
       ariaLabel={`Due date for "${task.title}"`}
-      className={cn('text-xs', overdue && 'text-destructive')}
+      className={cn(
+        'text-xs',
+        days !== null && days < 0 && 'text-destructive',
+        // Asana's green "Today": due now is a nudge; only late is an alarm.
+        (days === 0 || days === 1) && 'text-success',
+      )}
     >
-      {task.dueDate ? formatDate(task.dueDate) : <EmptyCell />}
+      {/* A finished task is never "3d overdue" — the deadline stopped
+          mattering when it was completed, so show the plain date. */}
+      {task.dueDate ? (
+        done ? (
+          formatDate(task.dueDate)
+        ) : (
+          formatDueDate(task.dueDate)
+        )
+      ) : (
+        <EmptyCell />
+      )}
     </CellButton>
   );
 }

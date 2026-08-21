@@ -1,4 +1,5 @@
 import { WorkspaceRole, hasAtLeastRole, type CreatableWorkItemType } from '@coretask/contracts';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { FolderKanban } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -6,7 +7,7 @@ import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
+import { TaskDetailPanel } from '@/features/tasks/components/task-detail-dialog';
 import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
 import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
 import {
@@ -21,6 +22,9 @@ import { SectionBoard } from '../components/section-board';
 import { ViewToolbar } from '../components/view-toolbar-slot';
 import { useFieldMetadata } from '../hooks/use-project-views';
 import { useCreateSection, useProject } from '../hooks/use-projects';
+
+/** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * The Board tab — the Kanban that used to be the whole project page.
@@ -48,8 +52,37 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
   } = useProjectWorkItems(workspaceId, projectId, { includeCustomFields: true });
 
   const tasks = useMemo(() => (workItems?.items ?? []).map(toWorkItemRow), [workItems]);
-  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [composing, setComposing] = useState<CreatableWorkItemType | null>(null);
+
+  /*
+   * The open panel lives in the URL, not component state — same contract as
+   * the List page: reload restores it, Copy link can copy it, Back closes it.
+   * Re-validated because `useSearch({ strict: false })` returns raw params.
+   */
+  const navigate = useNavigate();
+  const routeSearch: Partial<{ task: string }> = useSearch({ strict: false });
+  const openTaskId =
+    routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
+
+  // Push on open (Back closes), replace on swap and on close; `resetScroll:
+  // false` keeps the router from jumping the page per open. See the List page.
+  const openTask = (taskId: string) =>
+    void navigate({
+      to: '/projects/$projectId/board',
+      params: { projectId },
+      search: { task: taskId },
+      replace: openTaskId !== null,
+      resetScroll: false,
+    });
+
+  const closeTask = () =>
+    void navigate({
+      to: '/projects/$projectId/board',
+      params: { projectId },
+      search: {},
+      replace: true,
+      resetScroll: false,
+    });
 
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
   const createSection = useCreateSection(workspaceId, projectId);
@@ -118,7 +151,7 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
           totalTaskCount={tasks.length}
           canEdit={canEdit && !archived}
           canDelete={canManage && !archived}
-          onOpenTask={setOpenTaskId}
+          onOpenTask={openTask}
           onAddSection={() => setAddingSection(true)}
         />
       )}
@@ -140,11 +173,13 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
         onSubmit={(payload) => createWorkItem.mutateAsync(payload)}
       />
 
-      <TaskDetailDialog
+      <TaskDetailPanel
         workspaceId={workspaceId}
         taskId={openTaskId}
         role={role}
-        onClose={() => setOpenTaskId(null)}
+        projectId={projectId}
+        onOpenTask={openTask}
+        onClose={closeTask}
       />
     </div>
   );

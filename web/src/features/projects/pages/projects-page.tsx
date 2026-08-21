@@ -1,34 +1,64 @@
-import { PROJECT_STATUSES, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
-import type { ProjectSummary } from '@coretask/types';
-import { useNavigate, useSearch } from '@tanstack/react-router';
-import { FolderKanban, Plus, Search } from 'lucide-react';
+import {
+  PROJECT_STATUSES,
+  ProjectStatus,
+  WorkItemType,
+  WorkspaceRole,
+  hasAtLeastRole,
+} from '@coretask/contracts';
+import type { ProjectSummary, UserRef } from '@coretask/types';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  Folder,
+  FolderKanban,
+  List,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Star,
+  Ticket,
+  Upload,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
 import { EmptyState } from '@/components/feedback/empty-state';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ImportProjectDialog } from '@/features/import/components/import-project-dialog';
 import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { humanizeEnum } from '@/lib/utils';
+import { cn, formatDate, humanizeEnum, initials } from '@/lib/utils';
+import { usePortfolios, type Portfolio } from '@/stores/portfolio.store';
 
-import { ProjectCard } from '../components/project-card';
 import { ProjectFormDialog } from '../components/project-form-dialog';
 import { useArchiveProject, useProjects } from '../hooks/use-projects';
 
-const ALL_STATUSES = '__all__';
-const ALL_TEAMS = '__all__';
-const PAGE_SIZE = 12;
+/**
+ * One page of everything: the API caps a page at 100, which comfortably holds
+ * a workspace this size, so the browse list filters and sorts client-side the
+ * way Asana's does. Search still round-trips so it can reach past the cap.
+ */
+const PAGE_CAP = 100;
 
+const ROW_GRID = 'grid grid-cols-[minmax(0,2.2fr)_150px_minmax(0,1.6fr)_200px] items-center gap-3';
+
+/** Asana's "Browse projects": one searchable list, not a wall of cards. */
 export function ProjectsPage() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
   const workspaceId = workspace?.id;
@@ -38,14 +68,17 @@ export function ProjectsPage() {
   const { teamId } = useSearch({ from: '/protected/projects' });
   const navigate = useNavigate();
   const { data: teams } = useTeams(workspaceId);
+  const portfolios = usePortfolios(workspaceId);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [status, setStatus] = useState<string>(ALL_STATUSES);
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<string | null>(null);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const [sortDescending, setSortDescending] = useState(true);
   const [editing, setEditing] = useState<ProjectSummary | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   // Debounced so typing does not fire a request per keystroke.
   useEffect(() => {
@@ -53,40 +86,16 @@ export function ProjectsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  /**
-   * Filters reset paging at the point of change rather than in an effect
-   * reacting to them — otherwise page 3 of the old filter is requested once
-   * before the reset lands, which shows a flash of wrong (or empty) results.
-   */
-  const applyFilter = <T,>(setter: (value: T) => void) => {
-    return (value: T) => {
-      setter(value);
-      setPage(1);
-    };
-  };
-
-  const onSearchChange = applyFilter(setSearch);
-  const onStatusChange = applyFilter(setStatus);
-  const onArchivedChange = applyFilter(setIncludeArchived);
-
-  const onTeamChange = applyFilter((value: string) => {
-    void navigate({
-      to: '/projects',
-      search: value === ALL_TEAMS ? {} : { teamId: value },
-      replace: true,
-    });
-  });
-
   const params = useMemo(
     () => ({
-      page,
-      limit: PAGE_SIZE,
-      ...(status !== ALL_STATUSES ? { status } : {}),
+      limit: PAGE_CAP,
+      ...(status ? { status } : {}),
+      // Archived projects stay hidden until someone asks for them by status.
+      ...(status === ProjectStatus.ARCHIVED ? { includeArchived: true } : {}),
       ...(teamId ? { teamId } : {}),
-      ...(includeArchived ? { includeArchived: true } : {}),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
     }),
-    [page, status, teamId, includeArchived, debouncedSearch],
+    [status, teamId, debouncedSearch],
   );
 
   const { data, isLoading, isError, error } = useProjects(workspaceId, params);
@@ -96,10 +105,54 @@ export function ProjectsPage() {
   const canCreate = hasAtLeastRole(role, WorkspaceRole.MEMBER);
   const canArchive = hasAtLeastRole(role, WorkspaceRole.MANAGER);
 
-  const projects = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
   const meta = data?.meta;
+
+  const owners = useMemo(() => {
+    const byId = new Map<string, UserRef>();
+    for (const project of items) if (project.lead) byId.set(project.lead.id, project.lead);
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
+
+  const portfoliosByProject = useMemo(() => {
+    const byProject = new Map<string, Portfolio[]>();
+    for (const portfolio of portfolios) {
+      for (const projectId of portfolio.projectIds) {
+        byProject.set(projectId, [...(byProject.get(projectId) ?? []), portfolio]);
+      }
+    }
+    return byProject;
+  }, [portfolios]);
+
+  const visible = useMemo(() => {
+    let list = items;
+    if (ownerId) list = list.filter((project) => project.lead?.id === ownerId);
+    if (portfolioId) {
+      const chosen = new Set(
+        portfolios.find((portfolio) => portfolio.id === portfolioId)?.projectIds ?? [],
+      );
+      list = list.filter((project) => chosen.has(project.id));
+    }
+    const direction = sortDescending ? -1 : 1;
+    return [...list].sort(
+      (a, b) => direction * (Date.parse(a.updatedAt) - Date.parse(b.updatedAt)),
+    );
+  }, [items, ownerId, portfolioId, portfolios, sortDescending]);
+
   const filtered =
-    debouncedSearch !== '' || status !== ALL_STATUSES || includeArchived || Boolean(teamId);
+    debouncedSearch !== '' ||
+    status !== null ||
+    ownerId !== null ||
+    portfolioId !== null ||
+    Boolean(teamId);
+
+  const clearFilters = () => {
+    setSearch('');
+    setStatus(null);
+    setOwnerId(null);
+    setPortfolioId(null);
+    void navigate({ to: '/projects', search: {}, replace: true });
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -111,7 +164,7 @@ export function ProjectsPage() {
     setFormOpen(true);
   };
 
-  if (workspaceLoading) return <ProjectsSkeleton />;
+  if (workspaceLoading) return <BrowseSkeleton />;
 
   if (!workspace) {
     return (
@@ -125,74 +178,91 @@ export function ProjectsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        title="Projects"
-        description={`Boards, sections and work across ${workspace.name}.`}
+        title="Browse projects"
         actions={
           canCreate && (
-            <Button onClick={openCreate}>
-              <Plus />
-              New project
-            </Button>
+            <>
+              {/* Same permission as creating by hand — an import is just a
+                  lot of creates. */}
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <Upload />
+                Import CSV
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus />
+                Create project
+              </Button>
+            </>
           )
         }
       />
 
+      <div className="relative">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Find a project"
+          aria-label="Find a project"
+          className="h-10 rounded-lg pl-9"
+        />
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1 sm:max-w-xs">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search by name or key…"
-            aria-label="Search projects"
-            className="pl-9"
-          />
-        </div>
-
-        <Select value={status} onValueChange={onStatusChange}>
-          <SelectTrigger aria-label="Filter by status" className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_STATUSES}>All statuses</SelectItem>
-            {PROJECT_STATUSES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {humanizeEnum(value)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {(teams ?? []).length > 0 && (
-          <Select value={teamId ?? ALL_TEAMS} onValueChange={onTeamChange}>
-            <SelectTrigger aria-label="Filter by team" className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_TEAMS}>All teams</SelectItem>
-              {(teams ?? []).map((team) => (
-                <SelectItem key={team.id} value={team.id}>
-                  {team.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={includeArchived}
-            onChange={(event) => onArchivedChange(event.target.checked)}
-            className="size-4 rounded border-input accent-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
-          />
-          Show archived
-        </label>
+        <FilterChip
+          label="Owner"
+          allLabel="All owners"
+          value={ownerId}
+          options={owners.map((owner) => ({ value: owner.id, label: owner.name }))}
+          onSelect={setOwnerId}
+        />
+        {/* Real member lists need project membership, which the API doesn't
+            model yet — the chip is here so the row reads like Asana's. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled
+          title="Filtering by members needs project membership — not built yet"
+          className="rounded-full font-normal"
+        >
+          Members
+          <ChevronDown className="text-muted-foreground" />
+        </Button>
+        <FilterChip
+          label="Teams"
+          allLabel="All teams"
+          value={teamId ?? null}
+          options={(teams ?? []).map((team) => ({ value: team.id, label: team.name }))}
+          onSelect={(value) => {
+            void navigate({
+              to: '/projects',
+              search: value ? { teamId: value } : {},
+              replace: true,
+            });
+          }}
+        />
+        <FilterChip
+          label="Portfolios"
+          allLabel="All portfolios"
+          value={portfolioId}
+          options={portfolios.map((portfolio) => ({
+            value: portfolio.id,
+            label: portfolio.name,
+          }))}
+          onSelect={setPortfolioId}
+        />
+        <FilterChip
+          label="Status"
+          allLabel="All statuses"
+          value={status}
+          options={PROJECT_STATUSES.map((value) => ({ value, label: humanizeEnum(value) }))}
+          onSelect={setStatus}
+        />
       </div>
 
       {isError && (
@@ -203,9 +273,9 @@ export function ProjectsPage() {
         </Card>
       )}
 
-      {isLoading && <ProjectsGridSkeleton />}
+      {isLoading && <BrowseRowsSkeleton />}
 
-      {!isLoading && !isError && projects.length === 0 && (
+      {!isLoading && !isError && visible.length === 0 && (
         <EmptyState
           icon={FolderKanban}
           title={filtered ? 'No projects match those filters' : 'No projects yet'}
@@ -216,15 +286,7 @@ export function ProjectsPage() {
           }
           action={
             filtered ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  onSearchChange('');
-                  onStatusChange(ALL_STATUSES);
-                  onArchivedChange(false);
-                  onTeamChange(ALL_TEAMS);
-                }}
-              >
+              <Button variant="outline" onClick={clearFilters}>
                 Clear filters
               </Button>
             ) : canCreate ? (
@@ -237,50 +299,53 @@ export function ProjectsPage() {
         />
       )}
 
-      {projects.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {projects.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onEdit={openEdit}
-              onToggleArchive={(target) =>
-                archiveProject.mutate({
-                  projectId: target.id,
-                  archived: target.archivedAt !== null,
-                })
-              }
-              canEdit={canCreate}
-              canArchive={canArchive}
-            />
-          ))}
+      {!isLoading && !isError && visible.length > 0 && (
+        <div className="overflow-x-auto">
+          <div className="min-w-[56rem]">
+            <div
+              className={cn(
+                ROW_GRID,
+                'border-b px-2 pb-2 text-xs font-medium text-muted-foreground',
+              )}
+            >
+              <span>Name</span>
+              <span>Members</span>
+              <span>Portfolios</span>
+              <button
+                type="button"
+                onClick={() => setSortDescending((current) => !current)}
+                aria-label={`Sort by last modified, ${sortDescending ? 'newest' : 'oldest'} first`}
+                className="inline-flex items-center justify-end gap-1 rounded-sm font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              >
+                <ArrowUpDown className="size-3.5" aria-hidden="true" />
+                Last modified
+              </button>
+            </div>
+
+            {visible.map((project) => (
+              <ProjectRow
+                key={project.id}
+                project={project}
+                portfolios={portfoliosByProject.get(project.id) ?? []}
+                canEdit={canCreate}
+                canArchive={canArchive}
+                onEdit={openEdit}
+                onToggleArchive={(target) =>
+                  archiveProject.mutate({
+                    projectId: target.id,
+                    archived: target.archivedAt !== null,
+                  })
+                }
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between border-t pt-4">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.page} of {meta.totalPages} · {meta.total} projects
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={meta.page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={meta.page >= meta.totalPages}
-              onClick={() => setPage((current) => current + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
+      {meta && meta.total > items.length && (
+        <p className="text-xs text-muted-foreground">
+          Showing the first {items.length} of {meta.total} projects — search to find the rest.
+        </p>
       )}
 
       <ProjectFormDialog
@@ -289,33 +354,222 @@ export function ProjectsPage() {
         workspaceId={workspaceId}
         project={editing}
       />
+
+      <ImportProjectDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        workspaceId={workspaceId}
+      />
     </div>
   );
 }
 
-function ProjectsSkeleton() {
+interface FilterChipProps {
+  label: string;
+  allLabel: string;
+  value: string | null;
+  options: { value: string; label: string }[];
+  onSelect: (value: string | null) => void;
+}
+
+/** Asana's rounded filter pill: the label alone until a choice narrows it. */
+function FilterChip({ label, allLabel, value, options, onSelect }: FilterChipProps) {
+  const selected = options.find((option) => option.value === value);
+
   return (
-    <div role="status" aria-live="polite" className="space-y-6">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(
+            'rounded-full font-normal',
+            selected && 'border-primary/40 bg-primary/5 font-medium',
+          )}
+        >
+          {selected ? `${label}: ${selected.label}` : label}
+          <ChevronDown className="text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 min-w-44 overflow-y-auto">
+        <DropdownMenuItem onSelect={() => onSelect(null)}>
+          <Check className={cn(value === null ? 'opacity-100' : 'opacity-0')} />
+          {allLabel}
+        </DropdownMenuItem>
+        {options.map((option) => (
+          <DropdownMenuItem key={option.value} onSelect={() => onSelect(option.value)}>
+            <Check className={cn(option.value === value ? 'opacity-100' : 'opacity-0')} />
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ProjectRow({
+  project,
+  portfolios,
+  canEdit,
+  canArchive,
+  onEdit,
+  onToggleArchive,
+}: {
+  project: ProjectSummary;
+  portfolios: Portfolio[];
+  canEdit: boolean;
+  canArchive: boolean;
+  onEdit: (project: ProjectSummary) => void;
+  onToggleArchive: (project: ProjectSummary) => void;
+}) {
+  const archived = project.archivedAt !== null;
+  const TileIcon = project.defaultWorkItemType === WorkItemType.TICKET ? Ticket : List;
+  const extraPortfolios = portfolios.length - 1;
+
+  return (
+    <div
+      className={cn(
+        ROW_GRID,
+        'group relative border-b border-border/40 px-2 py-2 transition-colors hover:bg-muted/50',
+        archived && 'opacity-70',
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-white"
+          style={{ backgroundColor: project.color }}
+        >
+          <TileIcon className="size-4" />
+        </span>
+        <div className="min-w-0">
+          {/* The whole row is clickable via this stretched link; interactive
+              cells below sit above it with their own z-index. */}
+          <Link
+            to="/projects/$projectId"
+            params={{ projectId: project.id }}
+            className="after:absolute after:inset-0 focus-visible:outline-none"
+          >
+            <span className="block truncate text-sm font-medium group-hover:underline">
+              {project.name}
+            </span>
+          </Link>
+          {archived && <span className="text-xs text-muted-foreground">Archived</span>}
+        </div>
+      </div>
+
+      {/* Only the lead is known per project — a full avatar stack needs the
+          membership the backend doesn't have yet. */}
+      <div className="flex items-center">
+        {project.lead ? (
+          <Avatar className="size-6" title={`${project.lead.name} — lead`}>
+            {project.lead.avatarUrl && <AvatarImage src={project.lead.avatarUrl} alt="" />}
+            <AvatarFallback className="text-[9px]">{initials(project.lead.name)}</AvatarFallback>
+          </Avatar>
+        ) : (
+          <span className="text-sm text-muted-foreground">—</span>
+        )}
+      </div>
+
+      <div className="flex min-w-0 items-center gap-1.5">
+        {portfolios.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
+        {portfolios.slice(0, 1).map((portfolio) => (
+          <Link
+            key={portfolio.id}
+            to="/portfolios/$portfolioId/list"
+            params={{ portfolioId: portfolio.id }}
+            className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium transition-colors hover:bg-accent"
+          >
+            <Folder
+              aria-hidden="true"
+              className="size-3.5 shrink-0"
+              fill="currentColor"
+              style={{ color: portfolio.color }}
+            />
+            <span className="truncate">{portfolio.name}</span>
+          </Link>
+        ))}
+        {extraPortfolios > 0 && (
+          <span className="rounded-md bg-muted px-1.5 py-1 text-xs text-muted-foreground">
+            +{extraPortfolios}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-1">
+        <div className="relative z-10 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled
+            title="Starring projects is not built yet"
+            aria-label="Star project (not built yet)"
+          >
+            <Star />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled
+            title="Joining needs project membership — not built yet"
+          >
+            Join
+          </Button>
+          {(canEdit || canArchive) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${project.name}`}>
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canEdit && (
+                  <DropdownMenuItem onSelect={() => onEdit(project)}>
+                    <Pencil />
+                    Edit project
+                  </DropdownMenuItem>
+                )}
+                {canEdit && canArchive && <DropdownMenuSeparator />}
+                {canArchive && (
+                  <DropdownMenuItem
+                    variant={archived ? 'default' : 'destructive'}
+                    onSelect={() => onToggleArchive(project)}
+                  >
+                    {archived ? <ArchiveRestore /> : <Archive />}
+                    {archived ? 'Restore project' : 'Archive project'}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {formatDate(project.updatedAt)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BrowseSkeleton() {
+  return (
+    <div role="status" aria-live="polite" className="space-y-5">
       <span className="sr-only">Loading projects</span>
       <Skeleton className="h-8 w-48" />
-      <Skeleton className="h-9 w-full max-w-md" />
-      <ProjectsGridSkeleton />
+      <Skeleton className="h-10 w-full" />
+      <BrowseRowsSkeleton />
     </div>
   );
 }
 
-function ProjectsGridSkeleton() {
+function BrowseRowsSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <Card key={index}>
-          <CardContent className="space-y-3 py-4">
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-1.5 w-full" />
-            <Skeleton className="h-3 w-1/3" />
-          </CardContent>
-        </Card>
+    <div className="space-y-2">
+      {Array.from({ length: 8 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3">
+          <Skeleton className="size-9 rounded-lg" />
+          <Skeleton className="h-4 flex-1" />
+        </div>
       ))}
     </div>
   );

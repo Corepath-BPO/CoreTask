@@ -17,12 +17,19 @@ export function AppLayout() {
 
           {/* Skip link target; `tabIndex={-1}` makes the region focusable
               programmatically without adding it to the tab order. */}
+          {/* `relative` so a full-bleed page (portfolio detail) can pin itself
+              to this area with `absolute inset-0` and manage its own scroll.
+              The entry animation rides here rather than on the padded wrapper
+              below: its transform would otherwise make that wrapper the
+              containing block and a pinned page would inset by its padding. */}
           <main
             id="main-content"
             tabIndex={-1}
-            className="flex-1 overflow-y-auto bg-background outline-none"
+            className="page-enter relative flex-1 overflow-y-auto bg-background outline-none"
           >
-            <div className="page-enter mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+            {/* Full width, as Asana lays its pages: the content starts at the
+                sidebar rather than floating in a centered column. */}
+            <div className="w-full px-4 py-6 sm:px-6">
               {/* Scoped per route: a crash in one page must not take the shell
                   down with it, or the user loses their way out. */}
               <ErrorBoundary>

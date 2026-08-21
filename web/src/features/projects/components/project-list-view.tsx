@@ -3,7 +3,17 @@ import type { ProjectFieldMetadata, Task, TaskCustomFieldValue, ViewColumn } fro
 
 /** A task as this view receives it — the task plus its field values. */
 type TaskRow = Task & { customFieldValues?: TaskCustomFieldValue[] };
-import { ChevronDown, ChevronRight, Search, SlidersHorizontal } from 'lucide-react';
+import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+  ListFilter,
+  Plus,
+  Rows3,
+  Search,
+  Settings2,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
@@ -19,11 +29,29 @@ import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/
 import { useCreateSection, useProject, useRenameSection } from '../hooks/use-projects';
 import {
   ADD_COLUMN_WIDTH,
+  MAX_COLUMN_WIDTH,
+  MIN_TITLE_WIDTH,
   columnWidth,
+  isFixedColumn,
   pinnedLayout,
   visibleColumns,
   type PinnedLayout,
 } from '../lib/column-layout';
+import { columnLabel, columnMinWidth } from '../lib/column-labels';
+import { textWidth } from '@/lib/text-width';
+
+/*
+ * The floor for the Name column tracks the widest section header: chevron,
+ * name and lightning have to fit inside the first column, or the header
+ * spills across the gridline into Assignee. Text is measured with the
+ * header's own font; the fallback estimate covers environments without
+ * canvas, like the test runner.
+ */
+const SECTION_HEADER_CHROME = 80;
+
+function sectionLabelWidth(text: string): number {
+  return textWidth(text, '600 14px');
+}
 import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
@@ -41,6 +69,7 @@ import { toWorkItemUpdate } from '@/features/work-items/lib/cell-payload';
 import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { ViewToolbar } from './view-toolbar-slot';
 import { CustomFieldCell } from './cells/custom-field-cell';
+import { EmptyCell } from './cells/editable-cell';
 import { useCellEditor } from './cells/use-cell-editor';
 import {
   AssigneeCell,
@@ -50,6 +79,7 @@ import {
   TitleCell,
 } from './cells/system-cells';
 
+import { EditCustomFieldDialog } from './field-picker/edit-custom-field-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { ColumnHeaderTable } from './column-header';
 import { ColumnManager } from './column-manager';
@@ -81,6 +111,8 @@ export function ProjectListView({
 }: ProjectListViewProps) {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
+  // Asana keeps the search as a bare icon until it is needed.
+  const [searchOpen, setSearchOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   /** Non-null while the fuller create form is open, holding what it starts from. */
@@ -91,6 +123,9 @@ export function ProjectListView({
 
   // Debounced so typing does not fire a request per keystroke.
   useDebouncedValue(search, setDebounced);
+
+  // A stable ref, so it focuses when the input appears — not on every render.
+  const focusOnMount = useCallback((node: HTMLInputElement | null) => node?.focus(), []);
 
   /*
    * The shared work-item query, not the task-only one.
@@ -111,7 +146,11 @@ export function ProjectListView({
   const createSection = useCreateSection(workspaceId, projectId);
   const updateWorkItem = useUpdateProjectWorkItem(workspaceId, projectId);
   const [addingSection, setAddingSection] = useState(false);
+  /** The custom field whose edit dialog is open, by id. */
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const { data: project } = useProject(workspaceId, projectId);
+
+  const editingField = metadata?.customFields.find((field) => field.id === editingFieldId);
 
   // `TASK` until the project loads, which is what it was before this existed.
   const defaultType: CreatableWorkItemType = project?.defaultWorkItemType ?? 'TASK';
@@ -147,8 +186,30 @@ export function ProjectListView({
 
   const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
 
-  // See `visibleColumns`: a saved view outlives what it points at.
-  const columns = useMemo(() => visibleColumns(allColumns, metadata), [allColumns, metadata]);
+  /** What the Name column may never shrink past — see `sectionLabelWidth`. */
+  const titleMinWidth = useMemo(() => {
+    const widest = groups.reduce((max, group) => Math.max(max, sectionLabelWidth(group.name)), 0);
+    return Math.min(
+      MAX_COLUMN_WIDTH,
+      Math.max(MIN_TITLE_WIDTH, Math.ceil(widest) + SECTION_HEADER_CHROME),
+    );
+  }, [groups]);
+
+  /*
+   * See `visibleColumns`: a saved view outlives what it points at. Widths are
+   * also floored per label here — see `columnMinWidth` — so a column saved
+   * narrower than its own header still draws a readable word, not a letter.
+   */
+  const columns = useMemo(
+    () =>
+      visibleColumns(allColumns, metadata).map((column) => {
+        const min = isFixedColumn(column.field)
+          ? titleMinWidth
+          : columnMinWidth(column.field, metadata);
+        return columnWidth(column) < min ? { ...column, width: min } : column;
+      }),
+    [allColumns, metadata, titleMinWidth],
+  );
 
   /*
    * The width under the cursor mid-drag, before it is saved.
@@ -157,21 +218,120 @@ export function ProjectListView({
    * drag together: a header that widens while the rows below it do not is worse
    * feedback than none. On release the real column is written and this clears.
    */
-  const [resizing, setResizing] = useState<{ field: string; width: number } | null>(null);
+  const [resizing, setResizing] = useState<{ field: string; width: number }[] | null>(null);
 
-  const shown = useMemo(
-    () =>
-      resizing
-        ? columns.map((column) =>
-            column.field === resizing.field ? { ...column, width: resizing.width } : column,
-          )
-        : columns,
-    [columns, resizing],
-  );
+  const shown = useMemo(() => {
+    if (!resizing) return columns;
+    const preview = new Map(resizing.map((entry) => [entry.field, entry.width]));
+    return columns.map((column) => {
+      const width = preview.get(column.field);
+      return width === undefined ? column : { ...column, width };
+    });
+  }, [columns, resizing]);
 
   // Pinned offsets and the grid's width come from the same pass, so the frozen
   // block and the scroll container can never disagree about how wide a column is.
   const pinned: PinnedLayout = useMemo(() => pinnedLayout(shown), [shown]);
+
+  /*
+   * Where each column ends, for the full-height gridlines. Asana's vertical
+   * rules run through the add rows and the gaps — not just the task rows —
+   * so they are drawn once behind everything rather than as a border on
+   * every cell. The section-header bands are opaque and cover them, as
+   * Asana's are: they have to be, to pin below the column header.
+   */
+  const columnEdges = useMemo(() => {
+    const edges: number[] = [];
+    let x = 0;
+    for (const column of shown) {
+      x += columnWidth(column);
+      edges.push(x);
+    }
+    edges.push(x + ADD_COLUMN_WIDTH);
+    return edges;
+  }, [shown]);
+
+  /** The edge under a live resize — where the blue guide draws. */
+  const resizeEdge = useMemo(() => {
+    const dragged = resizing?.[0];
+    if (!dragged) return null;
+    const index = shown.findIndex((column) => column.field === dragged.field);
+    return index === -1 ? null : (columnEdges[index] ?? null);
+  }, [resizing, shown, columnEdges]);
+
+  /*
+   * The overlays (gridlines, resize strips) live in the scrolled content, so
+   * a sideways scroll slides them through the frozen block's zone in the
+   * gaps and add rows — the grid visibly crossing "behind" the frozen
+   * column. They are clipped at the frozen boundary instead, written
+   * straight to the nodes on scroll rather than through state, which would
+   * re-render the whole grid per frame.
+   */
+  const linesRef = useRef<HTMLDivElement>(null);
+  const stripsRef = useRef<HTMLDivElement>(null);
+
+  const pinnedWidth = useMemo(() => {
+    if (!pinned.lastPinned) return 0;
+    const column = shown.find((entry) => entry.field === pinned.lastPinned);
+    return (pinned.offsets.get(pinned.lastPinned) ?? 0) + (column ? columnWidth(column) : 0);
+  }, [pinned, shown]);
+
+  /*
+   * A gridline drag resizes the column on its left, exactly as Asana's does:
+   * the columns beyond keep their widths and slide along with the edge. The
+   * travel is bounded — the general 60px floor, the measured section-header
+   * floor for the Name column, 800px at the top — so the line stops rather
+   * than crushing what it labels.
+   */
+  const resizeAdjustments = (
+    index: number,
+    dx: number,
+  ): { field: string; width: number }[] | null => {
+    const column = columns[index];
+    if (!column) return null;
+
+    const width = columnWidth(column);
+    const min = index === 0 ? titleMinWidth : columnMinWidth(column.field, metadata);
+
+    return [
+      {
+        field: column.field,
+        width: Math.min(MAX_COLUMN_WIDTH, Math.max(min, Math.round(width + dx))),
+      },
+    ];
+  };
+
+  const commitResize = (adjustments: { field: string; width: number }[]) => {
+    const byField = new Map(adjustments.map((entry) => [entry.field, entry.width]));
+    onColumnsChange(
+      columns.map((column) => {
+        const width = byField.get(column.field);
+        return width === undefined ? column : { ...column, width };
+      }),
+    );
+  };
+
+  /*
+   * The column header's height, published as a CSS variable for the section
+   * bands: each sticky h3 pins at `top: var(--list-header-h)`, which is
+   * "directly below the header". Measured rather than hardcoded — the height
+   * is intrinsic (label padding on one side, the add-field button on the
+   * other), and a table row treats a fixed height as a minimum, so no class
+   * can truly pin it. Written to the parent, the grid container, so the
+   * header must stay its direct child. Same write-to-the-node idiom as
+   * `paneRef` below.
+   */
+  const headerRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+
+    const write = () =>
+      node.parentElement?.style.setProperty('--list-header-h', `${node.offsetHeight}px`);
+
+    write();
+    const observer = new ResizeObserver(write);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   /*
    * The grid is its own scrolling pane, sized to reach the bottom of the
@@ -266,40 +426,82 @@ export function ProjectListView({
 
   return (
     <div className="space-y-3">
+      {/* Asana's toolbar row: create on the left, everything else trailing.
+          Filter, Sort, Group and Options are honestly inert until saved views
+          can hold them. */}
       <ViewToolbar>
-        <div className="relative w-56">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <ProjectWorkItemCreateButton
+            defaultType={defaultType}
+            context={{ projectId, sourceView: 'LIST' }}
+            pending={createWorkItem.isPending}
+            variant="outline"
+            onCreate={(type) => setComposing({ type: type as CreatableWorkItemType })}
+            onCreateSection={() => setAddingSection(true)}
           />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search tasks…"
-            aria-label="Search tasks"
-            className="h-8 pl-9"
-          />
-        </div>
 
-        <ProjectWorkItemCreateButton
-          defaultType={defaultType}
-          context={{ projectId, sourceView: 'LIST' }}
-          pending={createWorkItem.isPending}
-          onCreate={(type) => setComposing({ type: type as CreatableWorkItemType })}
-          onCreateSection={() => setAddingSection(true)}
-        />
-
-        <ColumnManager
-          columns={columns}
-          metadata={metadata}
-          onChange={onColumnsChange}
-          trigger={
-            <Button variant="outline" size="sm">
-              <SlidersHorizontal className="size-4" aria-hidden="true" />
-              Fields
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
+              <ListFilter />
+              Filter
             </Button>
-          }
-        />
+            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
+              <ArrowUpDown />
+              Sort
+            </Button>
+            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
+              <Rows3 />
+              Group
+            </Button>
+            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
+              <Settings2 />
+              Options
+            </Button>
+
+            {searchOpen || search !== '' ? (
+              <div className="relative w-44">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  // Mount-focused: this branch only appears because somebody
+                  // clicked the search icon a moment ago.
+                  ref={focusOnMount}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  onBlur={() => {
+                    if (search === '') setSearchOpen(false);
+                  }}
+                  placeholder="Search tasks…"
+                  aria-label="Search tasks"
+                  className="h-8 pl-9"
+                />
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Search tasks"
+                onClick={() => setSearchOpen(true)}
+              >
+                <Search />
+              </Button>
+            )}
+
+            <ColumnManager
+              columns={columns}
+              metadata={metadata}
+              onChange={onColumnsChange}
+              trigger={
+                <Button variant="outline" size="sm">
+                  <SlidersHorizontal className="size-4" aria-hidden="true" />
+                  Fields
+                </Button>
+              }
+            />
+          </div>
+        </div>
       </ViewToolbar>
 
       {isError ? (
@@ -342,11 +544,23 @@ export function ProjectListView({
          */
         <div
           ref={paneRef}
-          onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}
-          className="overflow-auto rounded-lg"
+          onScroll={(event) => {
+            const left = event.currentTarget.scrollLeft;
+            setScrolled(left > 0);
+            // Keep the frozen zone clean — see linesRef above.
+            const clip = left > 0 ? `inset(0 0 0 ${left + pinnedWidth}px)` : 'none';
+            if (linesRef.current) linesRef.current.style.clipPath = clip;
+            if (stripsRef.current) stripsRef.current.style.clipPath = clip;
+          }}
+          className="overflow-auto"
         >
           <ListDndContext onDrop={handleDrop}>
-            <div className="space-y-3 pb-1" style={{ minWidth: pinned.totalWidth }}>
+            {/* `isolate` so the negative-z gridlines stay inside this box
+                instead of vanishing behind the page background. */}
+            <div
+              className="relative isolate space-y-5 pb-1"
+              style={{ minWidth: pinned.totalWidth }}
+            >
               {/*
                * The column header sits above the cards rather than repeating
                * inside each one: the columns are a property of the view, not of
@@ -355,18 +569,21 @@ export function ProjectListView({
                *
                * Sticky to the top of the pane, because a header that scrolls away
                * leaves you reading unlabelled columns.
+               *
+               * The rule across the top marks where the grid begins — without
+               * it the labels float unanchored between the toolbar and the
+               * first section.
                */}
-              {/* Wrapped in a box with the cards' border, made transparent: the
-                header has to sit in the same geometry as the tables it labels,
-                or every column is off by the card's one-pixel border. */}
-              <div className="sticky top-0 z-30 rounded-lg border border-transparent bg-background">
+              <div ref={headerRef} className="sticky top-0 z-30 border-y border-border bg-background">
                 <ColumnHeaderTable
                   columns={shown}
                   metadata={metadata}
                   canEdit={canEdit}
                   pinned={{ ...pinned, scrolled }}
                   onChange={onColumnsChange}
-                  onResizePreview={setResizing}
+                  titleMinWidth={titleMinWidth}
+                  onEditField={canEdit ? setEditingFieldId : undefined}
+                  onResizePreview={(preview) => setResizing(preview ? [preview] : null)}
                   widths={<ColumnWidths columns={shown} />}
                   addControl={
                     canEdit ? (
@@ -399,16 +616,44 @@ export function ProjectListView({
                       ref={dropRef}
                       aria-label={group.name}
                       className={cn(
-                        'rounded-lg border bg-card shadow-sm transition-colors',
+                        // Flat in the flow rather than a card, as Asana draws
+                        // its sections — the rows' own rules carry the grid.
+                        'transition-colors',
                         // Lit while a row hovers it, because a drop with no feedback
                         // is a guess about where the task will land.
-                        isOver ? 'border-primary/60 bg-primary/5' : 'border-border',
+                        isOver && 'bg-primary/5',
                       )}
                     >
-                      <h3 className="border-b border-border px-3 py-2">
-                        {/* Sticky so a section's name stays readable once the table
-                      has been scrolled sideways past it. */}
-                        <span className="sticky left-3 flex w-fit items-center gap-1.5">
+                      {/*
+                       * Sticky on both axes, split across two elements. The h3
+                       * is the band: sticky-top, it pins below the column
+                       * header while its rows scroll, and the section's own
+                       * bottom edge pushes it away — Asana's push-off. Opaque
+                       * and full grid width, so rows slide beneath it; z-20
+                       * sits above the pinned cells and below the column
+                       * header. The span inside is the name: sticky-left, so
+                       * it stays readable once the table has been scrolled
+                       * sideways; capped at the Name column so a long name
+                       * truncates instead of crossing the gridline. Neither
+                       * the h3 nor its section may gain `overflow` or
+                       * `transform` — either silently breaks both stickies.
+                       *
+                       * The drag tint is a gradient, not `bg-primary/5`: a
+                       * background-color would replace `bg-background` in
+                       * tailwind-merge and turn the band translucent mid-drag
+                       * — and a collapsed section is nothing *but* this band,
+                       * so it has to carry the drop feedback itself.
+                       */}
+                      <h3
+                        className={cn(
+                          'sticky top-[var(--list-header-h,30px)] z-20 bg-background px-2 py-1.5',
+                          isOver && 'bg-gradient-to-r from-primary/5 to-primary/5',
+                        )}
+                      >
+                        <span
+                          className="sticky left-2 flex w-fit items-center gap-1.5"
+                          style={{ maxWidth: (shown[0] ? columnWidth(shown[0]) : 300) - 16 }}
+                        >
                           <SectionHeader
                             group={group}
                             projectId={projectId}
@@ -421,20 +666,9 @@ export function ProjectListView({
                       </h3>
 
                       {!collapsed.has(group.id) && (
-                        <table className="w-full table-fixed text-sm">
+                        <table className="w-full table-fixed border-t border-border text-sm">
                           <ColumnWidths columns={shown} />
                           <tbody>
-                            {group.tasks.length === 0 && (
-                              <tr>
-                                <td
-                                  colSpan={shown.length + 2}
-                                  className="px-3 py-3 text-xs italic text-muted-foreground"
-                                >
-                                  <span className="sticky left-3">No tasks in this section</span>
-                                </td>
-                              </tr>
-                            )}
-
                             {group.tasks.map((task) => (
                               <TaskRows
                                 key={task.id}
@@ -477,13 +711,15 @@ export function ProjectListView({
                         filed into it.
                       */}
                             {group.id !== ORPHAN_GROUP_ID && (
-                              <tr>
+                              <tr className="border-b border-border">
                                 <td colSpan={shown.length + 2} className="p-0">
                                   <div className="sticky left-0 w-fit min-w-[320px]">
                                     <QuickCreateWorkItemRow
                                       defaultType={defaultType}
                                       sectionName={group.name}
                                       pending={createWorkItem.isPending}
+                                      plain
+                                      className="pl-10"
                                       onCreate={({ type, title }) =>
                                         create({ type, title, sectionId: group.id })
                                       }
@@ -499,6 +735,77 @@ export function ProjectListView({
                   )}
                 </SectionDropZone>
               ))}
+
+              {/* Asana closes the list with "+ Add section"; same dialog the
+                  create button's menu opens. */}
+              {canEdit && (
+                <div className="sticky left-0 w-fit">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground"
+                    onClick={() => setAddingSection(true)}
+                  >
+                    <Plus />
+                    Add section
+                  </Button>
+                </div>
+              )}
+
+              {/* The full-height column rules. Behind the rows (negative z),
+                  so opaque things — the sticky header, pinned cells — cover
+                  them and draw their own. `!mt-0` keeps the absolutely
+                  positioned box out of the space-y rhythm. */}
+              <div
+                ref={linesRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 -z-10 !mt-0"
+              >
+                {columnEdges.map((edge) => (
+                  <span
+                    key={edge}
+                    className="absolute inset-y-0 w-px bg-border/60"
+                    style={{ left: edge - 1 }}
+                  />
+                ))}
+              </div>
+
+              {/* The rules are also handles: grab one anywhere along its
+                  height to resize the column, as in Asana. A pinned column's
+                  visible edge parts company with its natural position once
+                  the grid is scrolled, so its strip retires and the header
+                  handle takes over. */}
+              {canEdit && (
+                <div ref={stripsRef} className="pointer-events-none absolute inset-0 z-20 !mt-0">
+                  {shown.map((column, index) => {
+                    if (pinned.offsets.has(column.field) && scrolled) return null;
+                    return (
+                      <EdgeResizer
+                        key={column.field}
+                        x={columnEdges[index] ?? 0}
+                        label={`Resize ${columnLabel(column.field, metadata)}`}
+                        onDrag={(dx) => setResizing(resizeAdjustments(index, dx))}
+                        onEnd={(dx) => {
+                          const adjustments = resizeAdjustments(index, dx);
+                          setResizing(null);
+                          if (adjustments) commitResize(adjustments);
+                        }}
+                        onCancel={() => setResizing(null)}
+                      />
+                    );
+                  })}
+
+                  {/* Asana's blue guide, tracking whichever edge is being
+                      dragged — the header handles share it too. */}
+                  {resizeEdge !== null && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-y-0 w-0.5 bg-primary/70"
+                      style={{ left: resizeEdge - 1 }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           </ListDndContext>
         </div>
@@ -526,6 +833,17 @@ export function ProjectListView({
         pending={createWorkItem.isPending}
         onSubmit={(payload) => createWorkItem.mutateAsync(payload)}
       />
+
+      {/* Keyed by mounting: it exists only while a field is being edited, so
+          its form state initialises from that field and no other. */}
+      {editingField && (
+        <EditCustomFieldDialog
+          workspaceId={workspaceId}
+          projectId={projectId}
+          field={editingField}
+          onOpenChange={(open) => !open && setEditingFieldId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -613,6 +931,7 @@ function TaskRows({ task, onAddSubtask, ...shared }: RowProps & { task: TaskRow 
               <QuickCreateWorkItemRow
                 defaultType="TASK"
                 sectionName={task.title}
+                plain
                 onCreate={({ title }) => onAddSubtask(task.id, title)}
               />
             </div>
@@ -664,11 +983,10 @@ function Row({
             key={column.field}
             style={left === undefined ? undefined : { left }}
             className={cn(
-              // A rule down the right of every cell. With only row lines, a
-              // value sitting under a wide header reads as belonging to
-              // whichever column the eye happens to land on.
-              'border-r border-border/60 px-3 py-2 align-middle',
-              left !== undefined && 'sticky z-10 bg-card',
+              'px-3 py-2 align-middle',
+              // The column rules are drawn once behind the whole list; a
+              // pinned cell is opaque and covers them, so it carries its own.
+              left !== undefined && 'sticky z-10 border-r border-border/60 bg-background',
               column.field === pinned.lastPinned &&
                 pinned.scrolled &&
                 'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
@@ -740,37 +1058,14 @@ function SectionHeader({
     if (editor.editing) inputRef.current?.select();
   }, [editor.editing]);
 
-  const count = (
-    <span className="rounded-full bg-muted px-1.5 text-xs font-normal text-muted-foreground">
-      {group.tasks.length}
-    </span>
-  );
-
   return (
     <>
-      {/*
-        What runs when something lands in this section — the same control the
-        Board column header carries, in the same place. It was on the Board only,
-        which meant the answer to "why did this get assigned?" was visible in one
-        view and invisible in the other.
-
-        Not on the orphan bucket: that is a synthetic group for items whose
-        section was removed, and there is no section for a rule to belong to.
-      */}
-      {isRealSection && (
-        <SectionAutomationPopover
-          projectId={projectId}
-          sectionId={group.id}
-          sectionName={group.name}
-        />
-      )}
-
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
         aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${group.name}`}
-        className="cursor-pointer rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        className="shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
       >
         {collapsed ? (
           <ChevronRight className="size-4" aria-hidden="true" />
@@ -794,15 +1089,38 @@ function SectionHeader({
           type="button"
           onClick={editor.open}
           aria-label={`Rename ${group.name}`}
-          className="cursor-pointer rounded px-1 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          className="min-w-0 cursor-pointer truncate rounded px-1 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
         >
           {group.name}
         </button>
       ) : (
-        <span className="px-1 text-sm font-semibold text-foreground">{group.name}</span>
+        <span className="min-w-0 truncate px-1 text-sm font-semibold text-foreground">
+          {group.name}
+        </span>
       )}
 
-      {count}
+      {/*
+        What runs when something lands in this section — the same control the
+        Board column header carries. After the name, where Asana keeps its
+        lightning. Not on the orphan bucket: that is a synthetic group for
+        items whose section was removed, and there is no section for a rule to
+        belong to.
+      */}
+      {isRealSection && (
+        <SectionAutomationPopover
+          projectId={projectId}
+          sectionId={group.id}
+          sectionName={group.name}
+        />
+      )}
+
+      {/* The count only earns its place once the rows are hidden — open,
+          the rows speak for themselves, as in Asana. */}
+      {collapsed && (
+        <span className="rounded-full bg-muted px-1.5 text-xs font-normal text-muted-foreground">
+          {group.tasks.length}
+        </span>
+      )}
     </>
   );
 }
@@ -822,6 +1140,57 @@ function ColumnWidths({ columns }: { columns: ViewColumn[] }) {
       <col style={{ width: ADD_COLUMN_WIDTH }} />
       <col />
     </colgroup>
+  );
+}
+
+/**
+ * A full-height grab strip over one column rule — pointer capture, stretched
+ * down the pane so the line itself is what you grab, the way Asana's rules
+ * drag. It only reports how far the pointer travelled; what that does to the
+ * columns is the caller's decision.
+ */
+function EdgeResizer({
+  x,
+  label,
+  onDrag,
+  onEnd,
+  onCancel,
+}: {
+  x: number;
+  label: string;
+  onDrag: (dx: number) => void;
+  onEnd: (dx: number) => void;
+  onCancel: () => void;
+}) {
+  const start = useRef<number | null>(null);
+
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        start.current = event.clientX;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (start.current !== null) onDrag(event.clientX - start.current);
+      }}
+      onPointerUp={(event) => {
+        if (start.current === null) return;
+        const dx = event.clientX - start.current;
+        start.current = null;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        onEnd(dx);
+      }}
+      onPointerCancel={() => {
+        start.current = null;
+        onCancel();
+      }}
+      className="pointer-events-auto absolute inset-y-0 w-[7px] -translate-x-1/2 cursor-col-resize touch-none hover:bg-primary/20"
+      style={{ left: x }}
+    />
   );
 }
 
@@ -888,17 +1257,23 @@ function Cell({
       return <DueDateCell {...shared} />;
 
     case SystemField.START_DATE:
-      return <span className="text-xs">{task.startDate ? formatDate(task.startDate) : '-'}</span>;
+      return (
+        <span className="text-xs">
+          {task.startDate ? formatDate(task.startDate) : <EmptyCell />}
+        </span>
+      );
     case SystemField.COMPLETED_AT:
       return (
-        <span className="text-xs">{task.completedAt ? formatDate(task.completedAt) : '-'}</span>
+        <span className="text-xs">
+          {task.completedAt ? formatDate(task.completedAt) : <EmptyCell />}
+        </span>
       );
     case SystemField.CREATED_AT:
       return <span className="text-xs">{formatDate(task.createdAt)}</span>;
     case SystemField.ESTIMATE:
       return (
         <span className="text-xs tabular-nums">
-          {task.estimatedMinutes ? `${task.estimatedMinutes}m` : '-'}
+          {task.estimatedMinutes ? `${task.estimatedMinutes}m` : <EmptyCell />}
         </span>
       );
 
@@ -910,7 +1285,7 @@ function Cell({
 
       // A column whose field was archived or removed. Blank rather than a
       // thrown render — a missing cell is recoverable, a broken row is not.
-      if (!definition) return <span className="text-xs text-muted-foreground">-</span>;
+      if (!definition) return <EmptyCell />;
 
       return (
         <CustomFieldCell

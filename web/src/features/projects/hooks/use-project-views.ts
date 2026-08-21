@@ -1,4 +1,9 @@
-import type { UpdateProjectViewPayload, ViewSettings } from '@coretask/types';
+import type {
+  CustomField,
+  UpdateCustomFieldPayload,
+  UpdateProjectViewPayload,
+  ViewSettings,
+} from '@coretask/types';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -169,6 +174,117 @@ export function useCreateCustomField(workspaceId: string | undefined, projectId:
       });
     },
     onError: (error) => reportError(error, 'Could not create the field.'),
+  });
+}
+
+export interface EditFieldOptionDraft {
+  /** The stored option's id, or null for one added in the editor. */
+  id: string | null;
+  label: string;
+  colorToken: string;
+}
+
+export interface EditFieldChanges {
+  field: CustomField;
+  name: string;
+  description: string;
+  isRequired: boolean;
+  /** Final option list in display order; null for types without options. */
+  options: EditFieldOptionDraft[] | null;
+}
+
+/**
+ * Applies an edit-field form as the set of API calls it implies.
+ *
+ * The API models a field edit as separate operations — rename the field, patch
+ * an option, add one, remove one — because each has its own rules (an option in
+ * use is archived, not deleted). The form models it as "here is how the field
+ * should look". This hook is the translation: it diffs the form against the
+ * stored field and issues only the calls that changed something.
+ */
+export function useEditCustomField(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: async ({ field, name, description, isRequired, options }: EditFieldChanges) => {
+      const ws = workspaceId as string;
+
+      const fieldPatch: UpdateCustomFieldPayload = {};
+      if (name !== field.name) fieldPatch.name = name;
+      if (description !== (field.description ?? '')) fieldPatch.description = description || null;
+      if (isRequired !== field.isRequired) fieldPatch.isRequired = isRequired;
+      if (Object.keys(fieldPatch).length > 0) {
+        await customFieldsApi.update(ws, projectId, field.id, fieldPatch);
+      }
+
+      if (!options) return;
+
+      const live = field.options
+        .filter((option) => !option.isArchived)
+        .sort((a, b) => a.position - b.position);
+      const byId = new Map(live.map((option) => [option.id, option]));
+      const keptIds = new Set(options.map((option) => option.id).filter(Boolean));
+
+      // Removals first, so a rename onto a removed option's label cannot
+      // collide with it.
+      for (const existing of live) {
+        if (!keptIds.has(existing.id)) {
+          await customFieldsApi.removeOption(ws, projectId, field.id, existing.id);
+        }
+      }
+
+      for (const draft of options) {
+        if (!draft.id) continue;
+        const existing = byId.get(draft.id);
+        if (!existing) continue;
+        const patch: { label?: string; colorToken?: string } = {};
+        if (draft.label !== existing.label) patch.label = draft.label;
+        if (draft.colorToken !== existing.colorToken) patch.colorToken = draft.colorToken;
+        if (Object.keys(patch).length > 0) {
+          await customFieldsApi.updateOption(ws, projectId, field.id, draft.id, patch);
+        }
+      }
+
+      // Additions land at the end server-side; the response names the new id,
+      // which the reorder pass below needs.
+      for (const draft of options) {
+        if (draft.id) continue;
+        const known = new Set(
+          [...byId.keys(), ...options.map((entry) => entry.id).filter(Boolean)] as string[],
+        );
+        const updated = await customFieldsApi.addOption(ws, projectId, field.id, {
+          label: draft.label,
+          colorToken: draft.colorToken,
+        });
+        const created = updated.options.find(
+          (option) => !option.isArchived && !known.has(option.id),
+        );
+        if (created) draft.id = created.id;
+      }
+
+      // What the order would be with no reordering: survivors as stored, then
+      // additions in the order they were made. Anything else needs positions
+      // written — all of them, so old fractional positions cannot interleave.
+      const baseline = [
+        ...live.filter((option) => keptIds.has(option.id)).map((option) => option.id),
+        ...options.filter((option) => !byId.has(option.id ?? '')).map((option) => option.id),
+      ];
+      const desired = options.map((option) => option.id);
+      if (desired.some((id, index) => id !== null && id !== baseline[index])) {
+        for (let index = 0; index < options.length; index++) {
+          const id = options[index]?.id;
+          if (!id) continue;
+          await customFieldsApi.updateOption(ws, projectId, field.id, id, { position: index });
+        }
+      }
+    },
+    onSuccess: async () => {
+      toast.success('Field updated.');
+      // The prefix reaches the metadata every cell reads, the catalog, and the
+      // task pages whose chips draw these options.
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projectViews.all(workspaceId as string, projectId),
+      });
+    },
+    onError: (error) => reportError(error, 'Could not save the field.'),
   });
 }
 

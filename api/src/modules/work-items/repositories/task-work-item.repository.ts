@@ -97,6 +97,9 @@ export class TaskWorkItemRepository {
         assigneeId: payload.assigneeIds?.[0] ?? null,
         createdById: userId,
         ...(payload.statusId ? this.statusData(payload.statusId) : {}),
+        // The schema accepts a priority at create — dropping it here meant a
+        // task created with one arrived without it, while update honoured it.
+        ...(payload.priorityId ? this.priorityData(payload.priorityId) : {}),
         startDate: toDate(payload.startDate) ?? null,
         dueDate: toDate(payload.dueDate) ?? null,
       },

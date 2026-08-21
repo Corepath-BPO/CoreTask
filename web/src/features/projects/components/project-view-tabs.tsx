@@ -1,13 +1,4 @@
 import { Link, useLocation } from '@tanstack/react-router';
-import {
-  Activity,
-  LayoutDashboard,
-  List,
-  Settings,
-  SquareKanban,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -15,18 +6,18 @@ import { cn } from '@/lib/utils';
 interface ProjectTab {
   label: string;
   segment: string;
-  icon: LucideIcon;
   /** Routed and honest about being unbuilt, rather than a fake working screen. */
   comingSoon?: boolean;
 }
 
+/** Bare labels, as Asana draws its project tabs — the words carry it. */
 const TABS: ProjectTab[] = [
-  { label: 'Overview', segment: 'overview', icon: LayoutDashboard },
-  { label: 'List', segment: 'list', icon: List },
-  { label: 'Board', segment: 'board', icon: SquareKanban },
-  { label: 'Automations', segment: 'automations', icon: Zap },
-  { label: 'Activity', segment: 'activity', icon: Activity, comingSoon: true },
-  { label: 'Settings', segment: 'settings', icon: Settings, comingSoon: true },
+  { label: 'Overview', segment: 'overview' },
+  { label: 'List', segment: 'list' },
+  { label: 'Board', segment: 'board' },
+  { label: 'Automations', segment: 'automations' },
+  { label: 'Activity', segment: 'activity', comingSoon: true },
+  { label: 'Settings', segment: 'settings', comingSoon: true },
 ];
 
 /**
@@ -55,17 +46,24 @@ export function ProjectViewTabs({ projectId }: { projectId: string }) {
           <Link
             key={tab.segment}
             to={to}
+            // Carry the open task panel and the Customize panel across views —
+            // both belong to the project, not to one tab. Everything else (the
+            // automations tab's ?sectionId, for instance) still resets, which
+            // is what a tab switch means.
+            search={(previous) => ({
+              task: (previous as { task?: string }).task,
+              customize: (previous as { customize?: boolean }).customize,
+            })}
             role="tab"
             aria-selected={isActive}
             className={cn(
-              'inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              'inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors',
               'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
               isActive
-                ? 'bg-secondary text-secondary-foreground'
+                ? 'bg-primary/10 font-medium text-primary'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',
             )}
           >
-            <tab.icon className="size-4" aria-hidden="true" />
             {tab.label}
             {tab.comingSoon && (
               // Named as well as styled: "Soon" has to be readable, not merely

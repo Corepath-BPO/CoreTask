@@ -7,12 +7,8 @@ import {
   pointerWithin,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import {
-  horizontalListSortingStrategy,
-  SortableContext,
-  useSortable,
-} from '@dnd-kit/sortable';
-import { Pin, PinOff } from 'lucide-react';
+import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
+import { Pencil, Pin, PinOff } from 'lucide-react';
 import { useRef } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -25,7 +21,7 @@ import {
   moveColumn,
   setPinned,
 } from '../lib/column-layout';
-import { columnLabel } from '../lib/column-labels';
+import { columnLabel, columnMinWidth } from '../lib/column-labels';
 
 /** Where a pinned column sits, and whether it is the one casting the shadow. */
 export interface PinnedProps {
@@ -50,6 +46,8 @@ export function ColumnHeaderTable({
   onResizePreview,
   addControl,
   widths,
+  titleMinWidth,
+  onEditField,
 }: {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
@@ -61,6 +59,10 @@ export function ColumnHeaderTable({
   addControl: React.ReactNode;
   /** The shared `<colgroup>`, so this table sizes like the ones below it. */
   widths: React.ReactNode;
+  /** The Name column's floor — the view measures its widest section header. */
+  titleMinWidth?: number | undefined;
+  /** Opens the edit dialog for a custom field's column. */
+  onEditField?: ((fieldId: string) => void) | undefined;
 }) {
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so clicking the pin button
@@ -85,12 +87,22 @@ export function ColumnHeaderTable({
       label={columnLabel(column.field, metadata)}
       canEdit={canEdit}
       pinned={pinned}
+      minWidth={
+        isFixedColumn(column.field) ? titleMinWidth : columnMinWidth(column.field, metadata)
+      }
       onPin={(isPinned) => onChange(setPinned(columns, column.field, isPinned))}
       onResizePreview={onResizePreview}
       onResizeEnd={(width) =>
         onChange(
           columns.map((entry) => (entry.field === column.field ? { ...entry, width } : entry)),
         )
+      }
+      // Only a custom field is editable from its header — the system columns
+      // are furniture with nothing to configure.
+      onEdit={
+        canEdit && onEditField && column.field.startsWith('custom:')
+          ? () => onEditField(column.field.slice('custom:'.length))
+          : undefined
       }
     />
   ));
@@ -154,17 +166,21 @@ function HeaderCell({
   label,
   canEdit,
   pinned,
+  minWidth,
   onPin,
   onResizePreview,
   onResizeEnd,
+  onEdit,
 }: {
   column: ViewColumn;
   label: string;
   canEdit: boolean;
   pinned: PinnedProps;
+  minWidth?: number | undefined;
   onPin: (isPinned: boolean) => void;
   onResizePreview: (preview: { field: string; width: number } | null) => void;
   onResizeEnd: (width: number) => void;
+  onEdit?: (() => void) | undefined;
 }) {
   /*
    * The Task column is not a sortable at all, rather than a sortable that
@@ -197,7 +213,9 @@ function HeaderCell({
       scope="col"
       style={isPinned ? { left } : undefined}
       className={cn(
-        'group/header border-r border-border/60 px-3 pb-1 text-xs font-medium text-muted-foreground',
+        // Padded on both sides vertically: the grid's top rule sits directly
+        // above, and a label flush against it reads as underlining the toolbar.
+        'group/header border-r border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground',
         isPinned && 'sticky z-20 bg-background',
         // The shadow belongs to the last frozen column: it marks where the
         // frozen block ends and the scrolling part begins.
@@ -211,10 +229,24 @@ function HeaderCell({
       <span className="relative flex items-center gap-1">
         <span
           {...(canArrange ? { ...attributes, ...listeners } : {})}
+          // A narrow column clips its label, and the only other way to read a
+          // clipped one is to resize the column. Hover answers it in place.
+          title={label}
           className={cn('flex-1 truncate', canArrange && 'cursor-grab active:cursor-grabbing')}
         >
           {label}
         </span>
+
+        {onEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={`Edit ${label}`}
+            className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover/header:opacity-100"
+          >
+            <Pencil className="size-3" aria-hidden="true" />
+          </button>
+        )}
 
         {canArrange && (
           <button
@@ -240,7 +272,9 @@ function HeaderCell({
 
         {canEdit && (
           <ResizeHandle
+            field={column.field}
             label={label}
+            minWidth={minWidth}
             startWidth={columnWidth(column)}
             onPreview={(width) => onResizePreview({ field: column.field, width })}
             onEnd={(width) => {
@@ -263,12 +297,16 @@ function HeaderCell({
  * reorder by the sortable wrapping it.
  */
 function ResizeHandle({
+  field,
   label,
+  minWidth,
   startWidth,
   onPreview,
   onEnd,
 }: {
+  field: string;
   label: string;
+  minWidth?: number | undefined;
   startWidth: number;
   onPreview: (width: number) => void;
   onEnd: (width: number) => void;
@@ -278,7 +316,7 @@ function ResizeHandle({
   const widthAt = (clientX: number) => {
     const from = drag.current;
     if (!from) return startWidth;
-    return clampWidth(from.width + (clientX - from.x));
+    return Math.max(minWidth ?? 0, clampWidth(from.width + (clientX - from.x), field));
   };
 
   return (

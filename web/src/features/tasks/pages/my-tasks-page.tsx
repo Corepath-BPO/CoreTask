@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/common/page-header';
 import { StatCard } from '@/components/data-display/stat-card';
 import { TaskPriorityBadge, TaskStatusBadge } from '@/components/data-display/status-badge';
 import { EmptyState } from '@/components/feedback/empty-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { cn, daysUntil, formatDate, formatDueDate, humanizeEnum, initials } from '@/lib/utils';
+import { cn, daysUntil, formatDate, formatDueDate, humanizeEnum } from '@/lib/utils';
 
 import { TaskDetailDialog } from '../components/task-detail-dialog';
 import { useTasks } from '../hooks/use-tasks';
@@ -301,12 +301,13 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: (taskId: string) => voi
             </span>
           )}
           {task.assignee ? (
-            <Avatar className="size-6" title={task.assignee.name}>
-              {task.assignee.avatarUrl && <AvatarImage src={task.assignee.avatarUrl} alt="" />}
-              <AvatarFallback className="text-[10px]">
-                {initials(task.assignee.name)}
-              </AvatarFallback>
-            </Avatar>
+            <PersonAvatar
+              name={task.assignee.name}
+              avatarUrl={task.assignee.avatarUrl}
+              className="size-6"
+              fallbackClassName="text-[10px]"
+              title={task.assignee.name}
+            />
           ) : (
             <Badge variant="muted" className="text-[10px]">
               Unassigned

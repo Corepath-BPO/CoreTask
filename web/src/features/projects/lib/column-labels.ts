@@ -1,6 +1,8 @@
 import { SystemField } from '@coretask/contracts';
 import type { ProjectFieldMetadata } from '@coretask/types';
 
+import { textWidth } from '@/lib/text-width';
+
 /**
  * Human labels for the system columns a List view can show.
  *
@@ -9,7 +11,8 @@ import type { ProjectFieldMetadata } from '@coretask/types';
  * column manager need these.
  */
 export const COLUMN_LABEL: Record<string, string> = {
-  [SystemField.TITLE]: 'Task',
+  // "Name", as Asana heads the column — the rows hold tickets too.
+  [SystemField.TITLE]: 'Name',
   [SystemField.ASSIGNEE]: 'Assignee',
   [SystemField.PRIORITY]: 'Priority',
   [SystemField.STATUS]: 'Status',
@@ -31,6 +34,21 @@ export const COLUMN_LABEL: Record<string, string> = {
  * internal id on screen. A deleted field gets a plain label instead, matching
  * the `—` its cells already render.
  */
+/**
+ * The narrowest a column may draw or drag: its full label plus the header's
+ * chrome, never under 90px. Flooring only the first word left every
+ * multi-word field reading "Did w…" — a header that labels nothing. Capped
+ * so one long name cannot force a column wide open; past the cap the header
+ * truncates and its tooltip carries the rest.
+ */
+export function columnMinWidth(field: string, metadata: ProjectFieldMetadata | undefined): number {
+  const label = columnLabel(field, metadata);
+  // The chrome around the label, measured in the rendered header: the cell's
+  // padding (24px), the pin button (16px — hidden by opacity, so it still
+  // holds its space), the gap (4px) and the gridline, plus a little slack.
+  return Math.min(220, Math.max(90, Math.ceil(textWidth(label, '500 12px')) + 48));
+}
+
 export function columnLabel(field: string, metadata: ProjectFieldMetadata | undefined): string {
   if (COLUMN_LABEL[field]) return COLUMN_LABEL[field];
 
