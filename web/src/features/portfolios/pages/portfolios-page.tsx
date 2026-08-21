@@ -175,7 +175,7 @@ export function PortfoliosPage() {
             <ul aria-label="Portfolios" className="divide-y">
               {sorted.length === 0 ? (
                 <li className="py-6 text-center text-sm text-muted-foreground">
-                  No portfolios yet — create one to start watching projects together.
+                  No portfolios yet. Create one to start watching projects together.
                 </li>
               ) : (
                 sorted.map(tileFor)
@@ -212,7 +212,7 @@ export function PortfoliosPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Its projects are untouched — a portfolio is only a grouping of references. This cannot
+              Its projects are untouched. A portfolio is only a grouping of references. This cannot
               be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -32,12 +32,31 @@
    */
   --primary: oklch(0.763 0.164 134);
   --primary-foreground: oklch(0.21 0.006 285.9);
+  /*
+   * The same green, dark enough to be a foreground.
+   *
+   * --primary is tuned as a *surface* that carries dark text, which is why it
+   * sits at L=0.76. Used the other way round — as link text or an icon glyph on
+   * a white card — it measures 2.01:1, so anything painted `text-primary` in
+   * the light theme is barely there. This is that colour at a lightness that
+   * reads: 5.16:1 on card, 4.93:1 on the page, 4.54:1 on muted.
+   *
+   * The dark theme needs no such split: --primary is already 9.21:1 there.
+   */
+  --primary-strong: oklch(0.52 0.164 134);
 
   --secondary: oklch(0.951 0.003 286.3);
   --secondary-foreground: oklch(0.21 0.006 285.9);
 
   --muted: oklch(0.954 0.003 286.3);
-  --muted-foreground: oklch(0.552 0.014 285.9);
+  /*
+   * Measured against the two surfaces it actually sits on, not just the page
+   * background. At its previous L=0.552 it read 4.22:1 on --muted (the "Soon"
+   * chips) and 4.36:1 on the sidebar, and both of those are 11px text, so both
+   * owed 4.5:1. L=0.53 clears it everywhere: 4.63 on muted, 4.78 on sidebar,
+   * 5.03 on the page.
+   */
+  --muted-foreground: oklch(0.53 0.014 285.9);
 
   --accent: oklch(0.944 0.009 134);
   --accent-foreground: oklch(0.21 0.006 285.9);
@@ -45,10 +64,18 @@
   --destructive: oklch(0.577 0.245 27.3);
   --destructive-foreground: oklch(0.985 0 0);
 
-  --success: oklch(0.596 0.145 163.2);
+  /*
+   * Darkened from L=0.596, where white on it measured 3.51:1. Badge text is
+   * 12px, so it owes 4.5:1 and gets 4.71:1 here. Darkening the surface rather
+   * than switching to a dark label keeps success and destructive badges
+   * wearing the same white text.
+   */
+  --success: oklch(0.52 0.145 163.2);
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.769 0.163 70.1);
   --warning-foreground: oklch(0.21 0.006 285.9);
+  /* Same split as --primary-strong: --warning as a foreground is 2.13:1 here. */
+  --warning-strong: oklch(0.54 0.163 70.1);
 
   --border: oklch(0.895 0.006 286.3);
   --input: oklch(0.873 0.007 286.3);
@@ -86,6 +113,9 @@
      against a dark background, so lightening it further would only wash it out. */
   --primary: oklch(0.763 0.164 134);
   --primary-foreground: oklch(0.171 0.006 285.9);
+  /* Against a dark surface the brand green already reads, so this is the same
+     value: the split exists only so the light theme can darken it. */
+  --primary-strong: oklch(0.763 0.164 134);
 
   --secondary: oklch(0.238 0.009 286);
   --secondary-foreground: oklch(0.967 0.001 286.4);
@@ -96,13 +126,19 @@
   --accent: oklch(0.26 0.024 134);
   --accent-foreground: oklch(0.967 0.001 286.4);
 
-  --destructive: oklch(0.637 0.208 25.3);
+  /*
+   * Was L=0.637, where white on it measured 3.60:1 — a destructive button is
+   * 14px text and owes 4.5:1. Taking the light theme's lightness gives 4.61:1
+   * and leaves one destructive red across both themes instead of two.
+   */
+  --destructive: oklch(0.577 0.208 25.3);
   --destructive-foreground: oklch(0.985 0 0);
 
   --success: oklch(0.667 0.15 163.2);
   --success-foreground: oklch(0.171 0.006 285.9);
   --warning: oklch(0.828 0.152 78.8);
   --warning-foreground: oklch(0.171 0.006 285.9);
+  --warning-strong: oklch(0.828 0.152 78.8);
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
@@ -110,7 +146,13 @@
 
   --sidebar: oklch(0.112 0.012 145);
   --sidebar-foreground: oklch(0.967 0.001 286.4);
-  --sidebar-accent: oklch(0.763 0.164 134);
+  /*
+   * A raised tint of the sidebar, which is how the light theme builds this too.
+   * It was previously the brand green at full strength under a near-white
+   * label: 1.84:1, precisely the pairing the --primary note warns about. Now
+   * 11.5:1, and still 1.61:1 clear of the sidebar behind it.
+   */
+  --sidebar-accent: oklch(0.315 0.055 134);
   --sidebar-accent-foreground: oklch(0.967 0.001 286.4);
   --sidebar-border: oklch(1 0 0 / 10%);
 
@@ -132,6 +174,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -144,6 +187,7 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-warning-strong: var(--warning-strong);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

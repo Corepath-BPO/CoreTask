@@ -46,7 +46,7 @@ export function useRemoveMember(workspaceId: string | undefined) {
       const unassigned = result.tasksUnassigned + result.ticketsUnassigned;
       toast.success(
         unassigned > 0
-          ? `${variables.name} removed — ${unassigned} open item${unassigned === 1 ? '' : 's'} unassigned`
+          ? `${variables.name} removed, ${unassigned} open item${unassigned === 1 ? '' : 's'} unassigned`
           : `${variables.name} removed`,
       );
     },

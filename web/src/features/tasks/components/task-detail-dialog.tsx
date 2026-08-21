@@ -837,7 +837,7 @@ function TaskDetailBody({
             offering an add that fails. */}
         {ticket && (
           <p className="pt-1 text-xs text-muted-foreground">
-            Subtasks under tickets need API support — not built yet.
+            Subtasks under tickets need API support. Not built yet.
           </p>
         )}
 

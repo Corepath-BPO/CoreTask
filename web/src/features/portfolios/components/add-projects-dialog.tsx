@@ -86,7 +86,7 @@ export function AddProjectsDialog({
         <DialogHeader>
           <DialogTitle>Add projects</DialogTitle>
           <DialogDescription>
-            A project can sit in any number of portfolios — adding it here changes nothing about the
+            A project can sit in any number of portfolios. Adding it here changes nothing about the
             project.
           </DialogDescription>
         </DialogHeader>

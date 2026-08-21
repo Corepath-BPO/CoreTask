@@ -76,7 +76,7 @@ describe('what a node says', () => {
   });
 
   it('asks for what is missing rather than showing a bare label', () => {
-    expect(summarise(node({ configuration: {} }), metadata)).toBe('Assign — choose somebody');
+    expect(summarise(node({ configuration: {} }), metadata)).toBe('Assign: choose somebody');
   });
 
   it('reads a condition as a sentence, with the option’s label', () => {

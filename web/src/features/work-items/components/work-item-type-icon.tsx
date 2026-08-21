@@ -26,8 +26,8 @@ const ICON: Record<WorkItemType, LucideIcon> = {
  */
 const TONE: Record<WorkItemType, string> = {
   TASK: 'text-muted-foreground',
-  TICKET: 'text-primary',
-  MILESTONE: 'text-warning',
+  TICKET: 'text-primary-strong',
+  MILESTONE: 'text-warning-strong',
   APPROVAL: 'text-success',
 };
 

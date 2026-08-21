@@ -131,7 +131,7 @@ export function TeamFormDialog({
           <DialogTitle>{isEdit ? 'Edit team' : 'Create a team'}</DialogTitle>
           <DialogDescription>
             A team groups people and the projects they work on. It does not change what anyone is
-            allowed to do — roles handle that.
+            allowed to do. Roles handle that.
           </DialogDescription>
         </DialogHeader>
 

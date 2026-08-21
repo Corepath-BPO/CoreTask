@@ -29,7 +29,7 @@ export function CommentBody({ body, mentions, currentUserId, className }: Commen
             className={cn(
               'rounded px-1 py-0.5 text-sm font-medium',
               segment.userId === currentUserId?.toLowerCase()
-                ? 'bg-primary/15 text-primary'
+                ? 'bg-primary/15 text-primary-strong'
                 : 'bg-muted text-foreground',
               // A mention of someone no longer in the workspace is still
               // readable, just visibly inert.

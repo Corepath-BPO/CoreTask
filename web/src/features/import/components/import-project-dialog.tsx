@@ -64,13 +64,13 @@ function formatEta(ms: number): string {
   return `about ${minutes} minutes`;
 }
 
-/** "4–25 minutes" — the spread between never-throttled and throttled pace. */
+/** "4-25 minutes": the spread between never-throttled and throttled pace. */
 function formatEtaRange(fastMs: number, safeMs: number): string {
   const safeMinutes = Math.round(safeMs / 60_000);
   if (safeMinutes < 1) return 'under a minute';
   const fastMinutes = Math.max(1, Math.round(fastMs / 60_000));
   if (fastMinutes >= safeMinutes) return formatEta(safeMs);
-  return `${fastMinutes}–${safeMinutes} minutes`;
+  return `${fastMinutes}-${safeMinutes} minutes`;
 }
 
 /**
@@ -123,7 +123,7 @@ export function ImportProjectDialog({
 
   const acceptFile = async (file: File) => {
     if (file.size > MAX_FILE_BYTES) {
-      setState({ step: 'pick', error: 'That file is over 20 MB — it does not look like a project export.' });
+      setState({ step: 'pick', error: 'That file is over 20 MB. It does not look like a project export.' });
       return;
     }
     try {
@@ -192,7 +192,7 @@ export function ImportProjectDialog({
         <DialogHeader>
           <DialogTitle>Import a project from CSV</DialogTitle>
           <DialogDescription>
-            Bring an Asana export in as a new project — sections, tasks, subtasks and fields.
+            Bring an Asana export in as a new project: sections, tasks, subtasks and fields.
           </DialogDescription>
         </DialogHeader>
 
@@ -218,7 +218,7 @@ export function ImportProjectDialog({
               <Upload className="size-6 text-muted-foreground" aria-hidden="true" />
               <p className="text-sm">
                 Drop a CSV file here, or{' '}
-                <label className="cursor-pointer font-medium text-primary underline-offset-2 hover:underline">
+                <label className="cursor-pointer font-medium text-primary-strong underline-offset-2 hover:underline">
                   browse
                   <input
                     type="file"
@@ -269,7 +269,7 @@ export function ImportProjectDialog({
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
-              Keep this tab open — the import runs in your browser.
+              Keep this tab open. The import runs in your browser.
             </p>
             <div className="flex justify-end">
               <Button
@@ -293,7 +293,7 @@ export function ImportProjectDialog({
           <div className="space-y-4">
             <p className="text-sm">
               {state.result.cancelled
-                ? 'Import cancelled — everything created before the cancel was kept.'
+                ? 'Import cancelled. Everything created before the cancel was kept.'
                 : state.result.projectId
                   ? 'Import finished.'
                   : 'The import could not run.'}
@@ -323,7 +323,7 @@ export function ImportProjectDialog({
                       {error.rowIndex !== null && (
                         <span className="tabular-nums">row {error.rowIndex}: </span>
                       )}
-                      <span className="text-foreground">{error.label}</span> — {error.message}
+                      <span className="text-foreground">{error.label}</span> - {error.message}
                     </li>
                   ))}
                 </ul>
