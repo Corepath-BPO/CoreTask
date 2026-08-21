@@ -79,7 +79,7 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
         <EmptyState
           icon={Briefcase}
           title="Portfolio not found"
-          description="It may have been deleted — or created in another browser. Portfolios are stored locally for now."
+          description="It may have been deleted, or created in another browser. Portfolios are stored locally for now."
           action={
             <Button variant="outline" asChild>
               <Link to="/portfolios">Back to portfolios</Link>
@@ -185,7 +185,7 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {portfolio.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Its projects are untouched — a portfolio is only a grouping of references. This cannot
+              Its projects are untouched. A portfolio is only a grouping of references. This cannot
               be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -20,8 +20,10 @@ export function AppLayout() {
           {/* `relative` so a full-bleed page (portfolio detail) can pin itself
               to this area with `absolute inset-0` and manage its own scroll.
               The entry animation rides here rather than on the padded wrapper
-              below: its transform would otherwise make that wrapper the
-              containing block and a pinned page would inset by its padding. */}
+              below, so a pinned page measures against this area and not against
+              the wrapper's padding. It must stay `backwards`-filled: a resting
+              transform here would capture the `fixed` panels the pages render
+              as well. See `.page-enter` in globals.css. */}
           <main
             id="main-content"
             tabIndex={-1}

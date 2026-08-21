@@ -179,7 +179,7 @@ export function buildImportPlan(
       tasks: [],
       customFieldColumns: [],
       warnings,
-      blockingError: 'This file has no "Name" column — it does not look like an Asana export.',
+      blockingError: 'This file has no "Name" column. It does not look like an Asana export.',
       stats: emptyStats(),
     };
   }
@@ -299,7 +299,7 @@ export function buildImportPlan(
         stats.topLevel++;
         warnings.push({
           rowIndex,
-          message: `Parent "${parentName}" was not found — imported as a top-level task.`,
+          message: `Parent "${parentName}" was not found. Imported as a top-level task.`,
         });
       } else if (tasks[candidate]!.parentIndex === null) {
         parentIndex = candidate;
@@ -390,7 +390,7 @@ export function buildImportPlan(
   if (taggedRows > 0) {
     warnings.push({
       rowIndex: null,
-      message: `Tags are not imported — ${taggedRows} row${taggedRows === 1 ? '' : 's'} had tags.`,
+      message: `Tags are not imported. ${taggedRows} row${taggedRows === 1 ? '' : 's'} had tags.`,
     });
   }
 

@@ -219,7 +219,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
         <div className="ml-auto flex items-center gap-2">
           {project.lead && (
-            <Avatar className="size-7" title={`${project.lead.name} — lead`}>
+            <Avatar className="size-7" title={`${project.lead.name} - lead`}>
               {project.lead.avatarUrl && <AvatarImage src={project.lead.avatarUrl} alt="" />}
               <AvatarFallback className="text-[10px]">{initials(project.lead.name)}</AvatarFallback>
             </Avatar>
@@ -228,7 +228,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             variant="secondary"
             size="sm"
             disabled
-            title="Joining needs project membership — not built yet"
+            title="Joining needs project membership. Not built yet."
           >
             <Lock />
             Join

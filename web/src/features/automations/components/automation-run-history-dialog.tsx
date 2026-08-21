@@ -32,7 +32,7 @@ export function AutomationRunHistoryDialog({
       <DialogContent className="max-h-[85vh] overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="border-b px-6 py-5">
           <DialogTitle className="flex items-center gap-2">
-            <History className="size-4 text-primary" aria-hidden="true" />
+            <History className="size-4 text-primary-strong" aria-hidden="true" />
             Run history
           </DialogTitle>
           <DialogDescription>
@@ -140,10 +140,10 @@ function executionTone(status: string): {
     };
   }
   if (status === 'RUNNING') {
-    return { icon: Clock3, iconClass: 'bg-warning/10 text-warning', badge: 'warning' };
+    return { icon: Clock3, iconClass: 'bg-warning/10 text-warning-strong', badge: 'warning' };
   }
   if (status === 'PARTIALLY_FAILED') {
-    return { icon: AlertCircle, iconClass: 'bg-warning/10 text-warning', badge: 'warning' };
+    return { icon: AlertCircle, iconClass: 'bg-warning/10 text-warning-strong', badge: 'warning' };
   }
   return { icon: MinusCircle, iconClass: 'bg-muted text-muted-foreground', badge: 'muted' };
 }

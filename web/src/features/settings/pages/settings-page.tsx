@@ -59,7 +59,7 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
     trimmedName !== workspace.name || description.trim() !== (workspace.description ?? '');
 
   return (
-    <div className="space-y-7">
+    <div className="mx-auto w-full max-w-6xl space-y-7">
       <PageHeader
         title="Settings"
         description="Personal preferences and workspace configuration."
@@ -154,7 +154,7 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
                   <div>
                     <span className="text-sm font-semibold">{option.label}</span>
                     {theme === option.value && (
-                      <Check className="absolute right-3 top-3 size-4 text-primary" />
+                      <Check className="absolute right-3 top-3 size-4 text-primary-strong" />
                     )}
                   </div>
                 </button>
@@ -174,13 +174,13 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Name
                 </p>
-                <p className="mt-1 text-sm font-semibold">{user?.name ?? '—'}</p>
+                <p className="mt-1 text-sm font-semibold">{user?.name ?? '-'}</p>
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email
                 </p>
-                <p className="mt-1 break-all text-sm">{user?.email ?? '—'}</p>
+                <p className="mt-1 break-all text-sm">{user?.email ?? '-'}</p>
               </div>
               <p className="border-t pt-4 text-xs text-muted-foreground">
                 Account identity is managed by your sign-in profile.

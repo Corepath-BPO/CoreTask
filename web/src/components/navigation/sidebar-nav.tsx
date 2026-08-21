@@ -17,7 +17,7 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
       {NAV_SECTIONS.map((section) => (
         <div key={section.id} className="space-y-1">
           {section.label && !collapsed && (
-            <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground/80">
+            <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground">
               {section.label}
             </p>
           )}
@@ -61,7 +61,7 @@ function NavLink({
         'focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
         active
           ? 'bg-primary text-primary-foreground shadow-[0_8px_24px_oklch(0.763_0.164_134/14%)]'
-          : 'text-muted-foreground hover:translate-x-0.5 hover:bg-white/5 hover:text-foreground',
+          : 'text-muted-foreground hover:translate-x-0.5 hover:bg-sidebar-accent hover:text-foreground',
         collapsed && 'justify-center px-0',
       )}
     >

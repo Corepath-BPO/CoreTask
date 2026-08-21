@@ -63,7 +63,7 @@ export function AutomationValidationIssues({
               'cursor-pointer gap-1.5',
               blocking
                 ? 'text-destructive hover:text-destructive'
-                : 'text-warning hover:text-warning',
+                : 'text-warning-strong hover:text-warning-strong',
             )}
           >
             {blocking ? (

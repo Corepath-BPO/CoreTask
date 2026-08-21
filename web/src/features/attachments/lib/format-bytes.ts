@@ -8,7 +8,7 @@ const UNITS = ['B', 'KB', 'MB', 'GB'] as const;
  * reads as noise and "1536 B" reads as a machine talking.
  */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
   if (bytes < 1024) return `${bytes} B`;
 
   let value = bytes;

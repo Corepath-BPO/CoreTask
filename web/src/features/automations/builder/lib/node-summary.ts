@@ -27,9 +27,9 @@ import { isUnansweredRow, type CanvasNode } from './graph-edits';
  * card claims the opposite of the rule.
  */
 const TRIGGER_FORM_VERB: Readonly<Record<string, string>> = {
-  SECTION_CHANGED_TO: '—',
-  SECTION_CHANGED_TO_NOT: '— not',
-  SECTION_CHANGED_TO_ANY_OF: '— one of',
+  SECTION_CHANGED_TO: '-',
+  SECTION_CHANGED_TO_NOT: '- not',
+  SECTION_CHANGED_TO_ANY_OF: '- one of',
 };
 
 /**
@@ -157,7 +157,7 @@ export function summariseParts(
       const named = sections.map((id) => name(metadata?.sections, id, 'any section'));
 
       // The form's own words, so "is not" does not read as "is" with a list.
-      const verb = TRIGGER_FORM_VERB[form] ?? '—';
+      const verb = TRIGGER_FORM_VERB[form] ?? '-';
 
       return [{ text: label }, { text: verb }, { text: named.join(', '), chip: true }];
     }
@@ -196,7 +196,7 @@ export function summariseParts(
       const parts = conditionSummary(config, metadata);
 
       return parts.length === 1 && parts[0]!.text === 'Choose what to check'
-        ? [{ text: 'Split on — choose what to check' }]
+        ? [{ text: 'Split on: choose what to check' }]
         : parts;
     }
 
@@ -379,14 +379,14 @@ function actionSummary(
       const who = person(config['userId']);
       return who
         ? [{ text: 'Assign to' }, { text: who, chip: true }]
-        : [{ text: 'Assign — choose somebody' }];
+        : [{ text: 'Assign: choose somebody' }];
     }
 
     case 'MOVE_TO_SECTION': {
       const where = section(config['sectionId']);
       return where
         ? [{ text: 'Move to' }, { text: where, chip: true }]
-        : [{ text: 'Move — choose a section' }];
+        : [{ text: 'Move: choose a section' }];
     }
 
     case 'UPDATE_STATUS': {
@@ -396,7 +396,7 @@ function actionSummary(
       const found = metadata?.statuses.find((entry) => entry.id === status)?.name;
       return found
         ? [{ text: 'Set status to' }, { text: found, chip: true }]
-        : [{ text: 'Set status — choose one' }];
+        : [{ text: 'Set status: choose one' }];
     }
 
     case 'UPDATE_PRIORITY': {
@@ -404,7 +404,7 @@ function actionSummary(
       const found = metadata?.priorities.find((entry) => entry.id === priority)?.name;
       return found
         ? [{ text: 'Set priority to' }, { text: found, chip: true }]
-        : [{ text: 'Set priority — choose one' }];
+        : [{ text: 'Set priority: choose one' }];
     }
 
     case 'SET_CUSTOM_FIELD': {
@@ -419,7 +419,7 @@ function actionSummary(
       const fieldId = config['fieldId'] ?? config['customFieldId'];
       const field = metadata?.customFields.find((entry) => entry.id === fieldId);
 
-      if (!field) return [{ text: 'Set a field — choose one' }];
+      if (!field) return [{ text: 'Set a field: choose one' }];
 
       const raw = config['value'];
 
@@ -444,7 +444,7 @@ function actionSummary(
         (value) => field.options?.find((option) => option.id === value)?.label ?? value,
       );
 
-      if (shown.length === 0) return [{ text: `Set ${field.name} — choose a value` }];
+      if (shown.length === 0) return [{ text: `Set ${field.name}: choose a value` }];
 
       return [{ text: `Set ${field.name} to` }, { text: shown.join(', '), chip: true }];
     }
@@ -456,7 +456,7 @@ function actionSummary(
             { text: 'Comment:' },
             { text: `“${body.slice(0, 40)}${body.length > 40 ? '…' : ''}”`, chip: true },
           ]
-        : [{ text: 'Comment — write what it says' }];
+        : [{ text: 'Comment: write what it says' }];
     }
 
     default:

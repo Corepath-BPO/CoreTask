@@ -97,7 +97,7 @@ const ICON: Record<string, LucideIcon> = {
  * the colour stays decoration instead of becoming the background.
  */
 const ICON_TILE: Record<string, string> = {
-  TRIGGER: 'bg-primary/15 text-primary',
+  TRIGGER: 'bg-primary/15 text-primary-strong',
   CONDITION: 'bg-violet-500/15 text-violet-500',
   ACTION: 'bg-emerald-500/15 text-emerald-500',
   BRANCH: 'bg-cyan-500/15 text-cyan-500',
@@ -344,7 +344,7 @@ export function AutomationNode({ data, selected }: NodeProps) {
           className={cn(
             'absolute -right-3 top-1/2 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-opacity',
             'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-            'hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+            'hover:border-primary hover:text-primary-strong focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
           )}
         >
           <Plus className="size-3.5" aria-hidden="true" />

@@ -60,7 +60,7 @@ export function ProjectViewTabs({ projectId }: { projectId: string }) {
               'inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors',
               'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
               isActive
-                ? 'bg-primary/10 font-medium text-primary'
+                ? 'bg-primary/10 font-medium text-primary-strong'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',
             )}
           >

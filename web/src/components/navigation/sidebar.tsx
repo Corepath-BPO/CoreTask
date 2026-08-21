@@ -40,7 +40,12 @@ export function Sidebar() {
         <WorkspaceSwitcher collapsed={collapsed} />
       </div>
 
-      <ScrollArea className="flex-1">
+      {/*
+        `min-h-0` alongside `flex-1`: a flex child defaults to `min-height:auto`,
+        which refuses to shrink below its content, so on a short window the nav
+        pushed the Collapse button past the bottom edge instead of scrolling.
+      */}
+      <ScrollArea className="min-h-0 flex-1">
         <div className={cn('px-3 pb-4', collapsed && 'px-2')}>
           <SidebarNav collapsed={collapsed} />
         </div>

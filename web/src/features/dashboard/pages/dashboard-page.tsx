@@ -72,7 +72,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto w-full max-w-[1440px] space-y-8">
       <section className="surface-shadow overflow-hidden rounded-2xl border border-border/80 bg-card">
         <div className="px-5 py-6 sm:px-7 sm:py-7">
           <PageHeader
@@ -80,7 +80,7 @@ export function DashboardPage() {
             description={`Here is what is happening in ${workspace.name} today.`}
             actions={
               <Badge variant="outline" className="h-8 gap-2 rounded-lg bg-background/45 px-3">
-                <UsersRound className="size-3.5 text-primary" aria-hidden="true" />
+                <UsersRound className="size-3.5 text-primary-strong" aria-hidden="true" />
                 {workspace.memberCount} members
               </Badge>
             }
@@ -130,7 +130,7 @@ export function DashboardPage() {
           <div className="grid gap-4 xl:grid-cols-[180px_1fr] xl:items-center">
             <div>
               <h2 id="tickets-heading" className="flex items-center gap-2 text-sm font-semibold">
-                <Ticket className="size-4 text-primary" aria-hidden="true" />
+                <Ticket className="size-4 text-primary-strong" aria-hidden="true" />
                 Ticket health
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">Current workspace queue</p>

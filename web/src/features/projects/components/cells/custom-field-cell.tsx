@@ -159,7 +159,7 @@ export function CustomFieldCell({
                 target="_blank"
                 rel="noreferrer noopener"
                 onClick={(event) => event.stopPropagation()}
-                className="truncate text-primary underline-offset-2 hover:underline"
+                className="truncate text-primary-strong underline-offset-2 hover:underline"
               >
                 {text}
               </a>
