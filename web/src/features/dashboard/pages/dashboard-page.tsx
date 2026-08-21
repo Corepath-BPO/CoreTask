@@ -1,5 +1,12 @@
 import { Link } from '@tanstack/react-router';
-import { Activity, CalendarClock, CircleCheckBig, FolderKanban, Ticket } from 'lucide-react';
+import {
+  Activity,
+  CalendarClock,
+  CircleCheckBig,
+  FolderKanban,
+  Ticket,
+  UsersRound,
+} from 'lucide-react';
 
 import { PageHeader } from '@/components/common/page-header';
 import { StatCard } from '@/components/data-display/stat-card';
@@ -65,54 +72,94 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={`${greeting()}, ${user?.name.split(' ')[0] ?? 'there'}`}
-        description={`Here is what is happening in ${workspace.name} today.`}
-        actions={
-          <Badge variant="outline" className="gap-1.5">
-            <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
-            {workspace.memberCount} members
-          </Badge>
-        }
-      />
+    <div className="space-y-8">
+      <section className="surface-shadow overflow-hidden rounded-2xl border border-border/80 bg-card">
+        <div className="px-5 py-6 sm:px-7 sm:py-7">
+          <PageHeader
+            title={`${greeting()}, ${user?.name.split(' ')[0] ?? 'there'}`}
+            description={`Here is what is happening in ${workspace.name} today.`}
+            actions={
+              <Badge variant="outline" className="h-8 gap-2 rounded-lg bg-background/45 px-3">
+                <UsersRound className="size-3.5 text-primary" aria-hidden="true" />
+                {workspace.memberCount} members
+              </Badge>
+            }
+          />
 
-      <section aria-labelledby="tasks-heading" className="space-y-3">
-        <h2 id="tasks-heading" className="text-sm font-semibold">
-          Tasks
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {taskTiles.map((tile) => (
-            <StatCard
-              key={tile.label}
-              label={tile.label}
-              value={tile.value}
-              hint={tile.hint}
-              invertDelta={tile.invert ?? false}
-            />
-          ))}
+          <section aria-labelledby="tasks-heading" className="mt-7">
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <h2 id="tasks-heading" className="text-sm font-semibold">
+                Task overview
+              </h2>
+              <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+                <Link to="/my-tasks">Open tasks</Link>
+              </Button>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(220px,0.82fr)_2fr]">
+              {taskTiles[0] && (
+                <StatCard
+                  label={taskTiles[0].label}
+                  value={taskTiles[0].value}
+                  hint={taskTiles[0].hint}
+                  invertDelta={taskTiles[0].invert ?? false}
+                  featured
+                />
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                {taskTiles.slice(1).map((tile) => (
+                  <StatCard
+                    key={tile.label}
+                    label={tile.label}
+                    value={tile.value}
+                    hint={tile.hint}
+                    invertDelta={tile.invert ?? false}
+                    className="min-h-44"
+                  />
+                ))}
+              </div>
+            </div>
+          </section>
         </div>
+
+        <section
+          aria-labelledby="tickets-heading"
+          className="border-t border-border/70 bg-muted/20 px-5 py-5 sm:px-7"
+        >
+          <div className="grid gap-4 xl:grid-cols-[180px_1fr] xl:items-center">
+            <div>
+              <h2 id="tickets-heading" className="flex items-center gap-2 text-sm font-semibold">
+                <Ticket className="size-4 text-primary" aria-hidden="true" />
+                Ticket health
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">Current workspace queue</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-y-5 sm:grid-cols-4 sm:divide-x sm:divide-border/70">
+              {ticketTiles.map((tile) => (
+                <div key={tile.label} className="min-w-0 px-0 sm:px-5 first:pl-0 last:pr-0">
+                  <p className="text-xs font-medium text-muted-foreground">{tile.label}</p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold tabular-nums tracking-[-0.04em]">
+                      {tile.value}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">{tile.hint}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       </section>
 
-      <section aria-labelledby="tickets-heading" className="space-y-3">
-        <h2 id="tickets-heading" className="text-sm font-semibold">
-          Tickets
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {ticketTiles.map((tile) => (
-            <StatCard
-              key={tile.label}
-              label={tile.label}
-              value={tile.value}
-              hint={tile.hint}
-              invertDelta={tile.invert ?? false}
-            />
-          ))}
-        </div>
-      </section>
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold tracking-[-0.02em]">Your focus</h2>
+        <p className="text-sm text-muted-foreground">Work that needs your attention next.</p>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="min-h-64 overflow-hidden lg:col-span-2">
           <CardHeader>
             <CardTitle>Assigned to you</CardTitle>
             <CardDescription>Open work waiting on you</CardDescription>
@@ -128,14 +175,14 @@ export function DashboardPage() {
                 Nothing assigned to you right now.
               </p>
             ) : (
-              <ul className="divide-y">
+              <ul className="divide-y divide-border/70">
                 {assignedTasks.map((task) => {
                   const overdue = task.dueDate !== null && daysUntil(task.dueDate) < 0;
 
                   return (
                     <li
                       key={task.id}
-                      className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
+                      className="flex flex-wrap items-center gap-3 px-6 py-4 transition-colors hover:bg-muted/45"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{task.title}</p>
@@ -168,7 +215,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-primary/15 bg-muted/25">
           <CardHeader>
             <CardTitle>Upcoming deadlines</CardTitle>
             <CardDescription>Next two weeks</CardDescription>
@@ -209,6 +256,11 @@ export function DashboardPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="space-y-1 pt-1">
+        <h2 className="text-lg font-semibold tracking-[-0.02em]">Workspace pulse</h2>
+        <p className="text-sm text-muted-foreground">Progress and recent team movement.</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -280,7 +332,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-muted/25">
           <CardHeader>
             <CardTitle className="flex items-center gap-1.5">
               <Activity className="size-3.5" aria-hidden="true" />
@@ -314,7 +366,7 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
             <Ticket className="size-3.5" aria-hidden="true" />
@@ -337,11 +389,11 @@ export function DashboardPage() {
               .
             </p>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border/70">
               {recentTickets.map((ticket) => (
                 <li
                   key={ticket.id}
-                  className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
+                  className="flex flex-wrap items-center gap-3 px-6 py-4 transition-colors hover:bg-muted/45"
                 >
                   <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
                     {ticket.key}

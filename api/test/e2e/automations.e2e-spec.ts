@@ -220,6 +220,239 @@ describe('Automations (e2e)', () => {
       expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
     });
 
+    it('evaluates a section condition in the words the builder writes', async () => {
+      /*
+       * The builder names comparisons the way a person reads them — `IS`,
+       * `IS_ONE_OF` — and the evaluator only knew the query engine's names.
+       * Rules seeded before the reading names existed hold `EQUALS`, so every
+       * condition that worked kept working and nothing pointed at the hole:
+       * only conditions built or edited in the panel were dead, and they were
+       * dead silently.
+       */
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'sectionId', operator: 'IS', value: scope.sectionId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('evaluates "is one of" against the list it was given', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: {
+            field: 'sectionId',
+            operator: 'IS_ONE_OF',
+            value: [scope.otherSectionId, scope.sectionId],
+          },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('still blocks when the builder’s condition does not hold', async () => {
+      // The other half. A translation that made every operator pass would make
+      // these tests green and every rule fire on everything.
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'sectionId', operator: 'IS_NOT', value: scope.sectionId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBeNull();
+    });
+
+    it('evaluates the fields the catalogue newly offers', async () => {
+      /*
+       * Description and task creator, added so the catalogue can offer them.
+       *
+       * The rule the owner set: nothing is offered that does not run. Asserted
+       * through the runner rather than by checking the metadata lists them,
+       * because a field appearing in a dropdown is exactly the symptom this
+       * guards against.
+       */
+      const scope = await setupScope();
+
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { description: 'Needs triage' },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'description', operator: 'CONTAINS', value: 'triage' },
+        },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'createdById', operator: 'IS', value: scope.owner.userId },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+    });
+
+    it('blocks on a description that does not match', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'description', operator: 'CONTAINS', value: 'triage' },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'ASSIGN_USER',
+          configuration: { userId: scope.owner.userId },
+        },
+      ]);
+
+      expect(await assigneeAfterRun(scope)).toBeNull();
+    });
+
+    it('stamps a date field with the moment the rule ran', async () => {
+      /*
+       * "Set Started to the date this rule is triggered".
+       *
+       * The value cannot be stored, because the whole point is that it differs
+       * every time the rule fires. Before the token existed the configuration
+       * could only hold a literal, so `new Date('TRIGGER_DATE')` produced an
+       * Invalid Date and the write threw.
+       */
+      const scope = await setupScope();
+
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Started',
+          type: 'DATE',
+          projects: { create: { projectId: scope.projectId } },
+        },
+      });
+
+      const before = Date.now();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { customFieldId: field.id, value: { token: 'TRIGGER_DATE' } },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const stored = await context.prisma.taskCustomFieldValue.findFirst({
+        where: { taskId: scope.taskId, customFieldId: field.id },
+      });
+
+      expect(stored?.dateValue).not.toBeNull();
+
+      // Within the window the run happened in, rather than an exact instant:
+      // asserting equality with a clock the test does not own is a flake.
+      const stamped = stored!.dateValue!.getTime();
+      expect(stamped).toBeGreaterThanOrEqual(before);
+      expect(stamped).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('refuses a computed date on a field that cannot hold one', async () => {
+      /*
+       * The panel only offers it for a date, so this is the endpoint agreeing.
+       *
+       * A form is not a check: a token posted onto a text field would otherwise
+       * be stored and published, and only discovered when the action failed at
+       * run time — long after whoever wrote the rule stopped watching.
+       */
+      const scope = await setupScope();
+
+      const text = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Notes',
+          type: 'TEXT',
+          projects: { create: { projectId: scope.projectId } },
+        },
+      });
+
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Token on text',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.sectionId },
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+            {
+              nodeType: 'ACTION',
+              subtype: 'SET_CUSTOM_FIELD',
+              configuration: { customFieldId: text.id, value: { token: 'TRIGGER_DATE' } },
+            },
+          ],
+        })
+        .expect(201);
+
+      /*
+       * Reported by the graph validator, which is what the builder counts as a
+       * problem and disables Publish on.
+       *
+       * `POST /publish` runs the same validator now, so this refusal is no
+       * longer only the builder's — "refusing what the builder refuses" above
+       * posts this same rule straight to the endpoint and asserts it is turned
+       * away there too.
+       */
+      const checked = await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/validate`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({})
+        .expect(200);
+
+      expect(JSON.stringify(checked.body)).toContain('date field');
+    });
+
     it('skips a rule that will not chain when another rule caused the event', async () => {
       /*
        * The whole point of the setting.
@@ -257,6 +490,138 @@ describe('Automations (e2e)', () => {
 
       const afterDirect = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
       expect(afterDirect?.assigneeId).toBe(scope.owner.userId);
+    });
+
+    /*
+     * The three actions whose settings the builder and the runner named
+     * differently.
+     *
+     * These are written the way the *builder* writes them and asserted on the
+     * task, so a key nothing reads fails here rather than shipping as a rule
+     * that runs, reports success, and changes nothing. That is what each of
+     * these did: the form stored a definition id under `statusDefinitionId`
+     * while the runner read `status`, so it wrote an empty string.
+     */
+    it('sets a status the builder chose, as a definition', async () => {
+      const scope = await setupScope();
+
+      const definition = await context.prisma.statusDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          name: 'In review',
+          slug: 'in-review',
+          category: 'ACTIVE',
+          position: 1,
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: definition.id } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.statusDefinitionId).toBe(definition.id);
+    });
+
+    it('sets a status the builder chose, as a legacy enum', async () => {
+      // A workspace with no definitions of its own is offered the enums, so the
+      // same key legitimately holds either shape and both have to land.
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: 'DONE' } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.status).toBe('DONE');
+      expect(task?.completedAt).not.toBeNull();
+    });
+
+    it('sets a priority the builder chose', async () => {
+      const scope = await setupScope();
+
+      const definition = await context.prisma.priorityDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Urgent',
+          slug: 'urgent',
+          level: 1,
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_PRIORITY',
+          configuration: { priority: definition.id },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.priorityDefinitionId).toBe(definition.id);
+    });
+
+    it('sets a custom field the builder chose', async () => {
+      const scope = await setupScope();
+
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Effort',
+          type: 'TEXT',
+          projects: { create: { projectId: scope.projectId, position: 0 } },
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { fieldId: field.id, value: 'Large' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const stored = await context.prisma.taskCustomFieldValue.findUnique({
+        where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId: field.id } },
+      });
+      expect(stored?.textValue).toBe('Large');
+    });
+
+    it('still honours a rule stored under the old key names', async () => {
+      /*
+       * The migration rewrites what it can reach. This covers what it cannot —
+       * a draft held in a browser, a rule restored from a backup — because
+       * dropping the fallback would break those on exactly the release that
+       * fixed the bug for everybody else.
+       */
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'ACTION',
+          subtype: 'UPDATE_STATUS',
+          configuration: { statusDefinitionId: 'IN_PROGRESS' },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.status).toBe('IN_PROGRESS');
     });
 
     it('still runs a flat rule exactly as it always did', async () => {
@@ -454,6 +819,187 @@ describe('Automations (e2e)', () => {
       expect(task?.assigneeId).toBe(scope.owner.userId);
       expect(task?.priority).toBe('HIGH');
     });
+
+    /* ------------------------------------------------------------------ */
+    /* Branch rows                                                         */
+    /* ------------------------------------------------------------------ */
+
+    /*
+     * A rule's branches are the conditions hanging straight off its trigger,
+     * and they are alternatives to one another: "check if… otherwise if…
+     * otherwise". First match wins.
+     *
+     * Every one of these would pass under a plain tree walk *except* by running
+     * more branches than it should, so each asserts on what did not happen as
+     * well as on what did. That is the whole failure: a rule that quietly does
+     * two contradictory things to one task.
+     */
+    describe('branch rows', () => {
+      /** One row: a condition under the trigger, with an action beside it. */
+      const row = (
+        id: string,
+        configuration: Record<string, unknown>,
+        action: Record<string, unknown>,
+        order: number,
+      ) => [
+        {
+          id,
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          parentId: 't',
+          configuration,
+          order,
+        },
+        { ...action, id: `${id}-action`, parentId: id, order: order + 0.5 },
+      ];
+
+      const trigger = {
+        id: 't',
+        nodeType: 'TRIGGER',
+        subtype: 'TASK_MOVED_TO_SECTION',
+        parentId: null,
+        order: 0,
+      };
+
+      const assign = (scope: Scope) => ({
+        nodeType: 'ACTION',
+        subtype: 'ASSIGN_USER',
+        configuration: { userId: scope.owner.userId },
+      });
+
+      const setPriority = (priority: string) => ({
+        nodeType: 'ACTION',
+        subtype: 'UPDATE_PRIORITY',
+        configuration: { priority },
+      });
+
+      const matches = { field: 'title', operator: 'CONTAINS', value: 'task' };
+      const misses = { field: 'title', operator: 'EQUALS', value: 'something else' };
+
+      it('runs the first branch that matches and no other', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', matches, setPriority('HIGH'), 1),
+          ...row('r2', matches, assign(scope), 3),
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.priority).toBe('HIGH');
+        // The second row's condition holds just as well, and must not run: two
+        // branches acting on one event is the rule contradicting itself.
+        expect(task?.assigneeId).toBeNull();
+      });
+
+      it('falls through to the next branch when the first does not match', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, setPriority('HIGH'), 1),
+          ...row('r2', matches, assign(scope), 3),
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('HIGH');
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('runs the fallback only when nothing before it matched', async () => {
+        /*
+         * The fallback carries no comparison at all, which every operator in
+         * the evaluator reads as "unknown" and answers false. Without knowing
+         * what the flag means, the one row somebody added to catch everything
+         * would catch nothing.
+         */
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, setPriority('HIGH'), 1),
+          ...row('r2', misses, setPriority('LOW'), 3),
+          ...row('r3', { fallback: true }, assign(scope), 5),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('HIGH');
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('reads the branches in stored order, not in the order they arrived', async () => {
+        // The canvas can add a question in front of the fallback without
+        // rewriting what is already there, so the array a save happens to send
+        // is not the order the rule runs in — `position` is.
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r3', { fallback: true }, setPriority('LOW'), 5),
+          ...row('r1', matches, assign(scope), 1),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+
+        expect(task?.assigneeId).toBe(scope.owner.userId);
+        expect(task?.priority).not.toBe('LOW');
+      });
+
+      it('does nothing when no branch matches and there is no fallback', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [
+          trigger,
+          ...row('r1', misses, assign(scope), 1),
+          ...row('r2', misses, setPriority('LOW'), 3),
+        ]);
+
+        await runner.handle(moveEvent(scope));
+
+        const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+        expect(task?.assigneeId).toBeNull();
+        expect(task?.priority).not.toBe('LOW');
+
+        // Recorded as a skip with a reason, so the history says "did not match"
+        // rather than leaving somebody to wonder whether it ran at all.
+        const execution = await context.prisma.automationExecution.findFirst({
+          where: { projectId: scope.projectId },
+        });
+        expect(execution?.status).toBe('SKIPPED');
+      });
+
+      it('leaves a rule with a single branch exactly as it was', async () => {
+        /*
+         * The regression that matters most: every canvas rule written before
+         * branches became rows has one condition under its trigger, and "first
+         * match wins" over a list of one has to mean what it always did.
+         */
+        const scope = await setupScope();
+
+        await publishGraph(scope, [trigger, ...row('r1', matches, assign(scope), 1)]);
+
+        expect(await assigneeAfterRun(scope)).toBe(scope.owner.userId);
+      });
+
+      it('leaves a single branch that does not hold exactly as it was', async () => {
+        const scope = await setupScope();
+
+        await publishGraph(scope, [trigger, ...row('r1', misses, assign(scope), 1)]);
+
+        expect(await assigneeAfterRun(scope)).toBeNull();
+      });
+    });
   });
 
   describe('the graph endpoints', () => {
@@ -551,27 +1097,6 @@ describe('Automations (e2e)', () => {
       expect(edges[0]).toMatchObject({ source: trigger?.id, target: action?.id, kind: 'DEFAULT' });
       expect(action?.parentId).toBe(trigger?.id);
       expect(trigger?.id).not.toBe('t');
-    });
-
-    it('offers the forms this project’s own values', async () => {
-      const scope = await setupScope();
-
-      const response = await request(server())
-        .get(`${rulesUrl(scope)}/metadata`)
-        .set('Authorization', `Bearer ${scope.owner.token}`)
-        .expect(200);
-
-      const metadata = response.body.data;
-      expect(metadata.triggers.length).toBeGreaterThan(0);
-      expect(metadata.sections.length).toBeGreaterThan(0);
-
-      // A status field offering free text is a field that silently never
-      // matches.
-      const status = metadata.conditionFields.find(
-        (field: { field: string }) => field.field === 'status',
-      );
-      expect(status.valueKind).toBe('ENUM');
-      expect(status.options.length).toBeGreaterThan(0);
     });
 
     it('reports why a graph cannot be published, without saving it', async () => {
@@ -755,6 +1280,233 @@ describe('Automations (e2e)', () => {
         .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(400);
+    });
+
+    it('refuses to publish a ticket trigger while actions only operate on tasks', async () => {
+      const scope = await setupScope();
+
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Assign a new ticket',
+          triggerType: 'TICKET_CREATED',
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+            {
+              nodeType: 'ACTION',
+              subtype: 'ASSIGN_USER',
+              configuration: { userId: scope.owner.userId },
+            },
+          ],
+        })
+        .expect(201);
+
+      const response = await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
+
+      expect(response.body.error.details.problems.join(' ')).toMatch(
+        /automation actions currently operate on tasks/i,
+      );
+    });
+
+    /*
+     * The endpoint refuses what the form will not build.
+     *
+     * Every fault below is one the builder counts as a problem and disables
+     * Publish for, and every one of them used to publish anyway: `publish` ran a
+     * shorter check of its own that knew about a missing action and an unknown
+     * subtype and nothing else. So a rule posted straight to this route went
+     * ACTIVE carrying a section from another project, or a comparison the field
+     * cannot be asked — and the runner then failed that action on every event.
+     *
+     * Which is the point of asserting it here rather than through the panel: a
+     * greyed-out button is not a refusal, it is the part somebody can see.
+     */
+    describe('refusing what the builder refuses', () => {
+      const draft = async (scope: Scope, nodes: Record<string, unknown>[]) => {
+        const created = await request(server())
+          .post(rulesUrl(scope))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({
+            name: 'Posted straight to the endpoint',
+            triggerType: 'TASK_MOVED_TO_SECTION',
+            triggerConfig: { sectionId: scope.sectionId },
+            nodes,
+          })
+          .expect(201);
+
+        return created.body.data.id as string;
+      };
+
+      /** Why publish refused, as one string to match against. */
+      const refusal = async (scope: Scope, ruleId: string) => {
+        const response = await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(400);
+
+        return (response.body.error.details.problems as string[]).join(' ');
+      };
+
+      it('gives each fault once, in one voice', async () => {
+        /*
+         * The two halves used to overlap. `AutomationsService` counted the
+         * actions and so did the structural check, in different words — so an
+         * empty rule came back saying "Add at least one action." and "Add at
+         * least one action — a rule with none would do nothing.", which reads
+         * as two problems to fix rather than one said twice.
+         *
+         * Asserted as the exact list rather than a match, because the absence
+         * of the second sentence is the whole point: a `toContain` would go on
+         * passing the day something starts double-reporting again.
+         */
+        const scope = await setupScope();
+        const ruleId = await draft(scope, []);
+
+        const response = await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(400);
+
+        expect(response.body.error.details.problems).toEqual([
+          'Choose what starts this rule.',
+          'Add at least one action.',
+        ]);
+      });
+
+      it('refuses a computed date on a field that cannot hold one', async () => {
+        const scope = await setupScope();
+
+        const text = await context.prisma.customField.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            name: 'Notes',
+            type: 'TEXT',
+            projects: { create: { projectId: scope.projectId } },
+          },
+        });
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'SET_CUSTOM_FIELD',
+            parentId: 't',
+            configuration: { customFieldId: text.id, value: { token: 'TRIGGER_DATE' } },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/date field/);
+      });
+
+      it('refuses an action naming a section from another project', async () => {
+        // Not merely a broken rule: a section from somewhere else is a way of
+        // reaching across a tenant boundary, and it has to be refused by the
+        // endpoint rather than by the list the panel happened to offer.
+        const scope = await setupScope();
+        const other = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'MOVE_TO_SECTION',
+            parentId: 't',
+            configuration: { sectionId: other.sectionId },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/no longer in this project/);
+      });
+
+      it('refuses a comparison the field cannot be asked', async () => {
+        // "Due date contains…" is a question with no answer: the evaluator reads
+        // it as an unknown operator and returns false, so the rule publishes
+        // cleanly and can never fire — nothing anywhere reports a failure.
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'c',
+            nodeType: 'CONDITION',
+            subtype: 'FIELD_COMPARISON',
+            parentId: 't',
+            configuration: { field: 'dueDate', operator: 'CONTAINS', value: 'soon' },
+          },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            parentId: 'c',
+            configuration: { userId: scope.owner.userId },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/cannot be used with this kind of field/);
+      });
+
+      it('refuses a step nothing connects to, in a rule that has parentage', async () => {
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            parentId: 't',
+            configuration: { userId: scope.owner.userId },
+          },
+          {
+            id: 'stranded',
+            nodeType: 'ACTION',
+            subtype: 'UPDATE_PRIORITY',
+            parentId: null,
+            configuration: { priority: 'LOW' },
+          },
+        ]);
+
+        expect(await refusal(scope, ruleId)).toMatch(/not connected to anything/);
+      });
+
+      it('still publishes a rule from before the canvas, where nothing is parented', async () => {
+        /*
+         * The deliberate exception, and the reason the check above says "in a
+         * rule that has parentage".
+         *
+         * Every node of a pre-canvas rule has a null parent, and the runner
+         * reads that shape as "every condition must hold, then every action
+         * runs" — it tells the two apart by whether a single parent link exists.
+         * Refusing it as disconnected would strand every rule written before the
+         * canvas, for being the shape it was always allowed to have.
+         */
+        const scope = await setupScope();
+
+        const ruleId = await draft(scope, [
+          { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+          {
+            nodeType: 'CONDITION',
+            subtype: 'FIELD_COMPARISON',
+            configuration: { field: 'title', operator: 'CONTAINS', value: 'task' },
+          },
+          {
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            configuration: { userId: scope.owner.userId },
+          },
+        ]);
+
+        await request(server())
+          .post(`${rulesUrl(scope)}/${ruleId}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(200);
+      });
     });
 
     it('publishes a valid rule', async () => {
@@ -1006,6 +1758,341 @@ describe('Automations (e2e)', () => {
         where: { ruleId },
       });
       expect(execution.correlationId).toBe(correlationId);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  /**
+   * The catalogue, over the wire, answered from one project.
+   *
+   * The unit spec pins `available` to the engine; these pin the other half —
+   * that the lists and the values in them belong to *this* project. A section
+   * from somebody else's project or a status the board stopped showing produces
+   * a rule that saves, publishes, and can never match.
+   */
+  describe('the builder’s metadata', () => {
+    interface CatalogueEntry {
+      subtype: string;
+      label: string;
+      category: string;
+      available: boolean;
+      reason: string | null;
+      fieldId?: string;
+      fieldName?: string;
+    }
+
+    interface Metadata {
+      triggers: (CatalogueEntry & {
+        configForms: { form: string; label: string; available: boolean; reason: string | null }[];
+      })[];
+      conditions: (CatalogueEntry & { valueType: string })[];
+      actions: CatalogueEntry[];
+      conditionFields: { field: string; valueKind: string; options?: unknown[] }[];
+      sections: { id: string; name: string }[];
+      statuses: { id: string; name: string }[];
+      priorities: { id: string; name: string }[];
+      customFields: { id: string; name: string; type: string; options: { label: string }[] }[];
+      capabilities: Record<string, unknown>;
+      permissions: Record<string, unknown>;
+    }
+
+    const readMetadata = async (scope: Scope, token = scope.owner.token): Promise<Metadata> => {
+      const response = await request(server())
+        .get(`${rulesUrl(scope)}/metadata`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      return response.body.data as Metadata;
+    };
+
+    /** A workspace field, attached to one project, with two options. */
+    const addCustomField = async (
+      scope: Scope,
+      name: string,
+      type: 'SINGLE_SELECT' | 'NUMBER' = 'SINGLE_SELECT',
+      projectId = scope.projectId,
+    ) => {
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name,
+          type,
+          projects: { create: { projectId } },
+          ...(type === 'SINGLE_SELECT'
+            ? {
+                options: {
+                  create: [
+                    { label: 'Low', position: 0 },
+                    { label: 'High', position: 1 },
+                  ],
+                },
+              }
+            : {}),
+        },
+      });
+
+      return field.id;
+    };
+
+    it('explains every entry it will not let somebody choose', async () => {
+      /*
+       * The convention, end to end. A greyed row with no explanation says "not
+       * for you" without saying why or whether that changes, and is worse than
+       * the row being absent — so this is the property worth testing over the
+       * wire rather than only where the lists are built.
+       */
+      const scope = await setupScope();
+      await addCustomField(scope, 'Risk');
+
+      const metadata = await readMetadata(scope);
+      const entries = [...metadata.triggers, ...metadata.conditions, ...metadata.actions];
+
+      expect(entries.length).toBeGreaterThan(0);
+
+      const unexplained = entries
+        .filter((entry) => !entry.available)
+        .filter((entry) => typeof entry.reason !== 'string' || entry.reason.trim() === '');
+
+      expect(unexplained.map((entry) => `${entry.category} / ${entry.label}`)).toEqual([]);
+
+      const forms = metadata.triggers.flatMap((trigger) => trigger.configForms);
+      expect(forms.filter((form) => !form.available && !form.reason)).toEqual([]);
+    });
+
+    it('generates the custom field rows from the fields the project really has', async () => {
+      const scope = await setupScope();
+      await addCustomField(scope, 'Risk', 'SINGLE_SELECT');
+      await addCustomField(scope, 'Effort', 'NUMBER');
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.customFields.map((field) => field.name)).toEqual(['Effort', 'Risk']);
+      // The options travel with the field: "Risk is…" is unusable without the
+      // values Risk can take, and a request per row would be absurd.
+      expect(
+        metadata.customFields.find((field) => field.name === 'Risk')?.options.map((o) => o.label),
+      ).toEqual(['Low', 'High']);
+
+      const generated = metadata.conditions.filter((entry) => entry.category === 'Custom field is');
+      expect(generated.map((entry) => entry.label)).toEqual(['Effort is…', 'Risk is…']);
+      expect(generated.map((entry) => entry.fieldName)).toEqual(['Effort', 'Risk']);
+      expect(generated.every((entry) => entry.fieldId)).toBe(true);
+      expect(generated.map((entry) => entry.valueType)).toEqual(['NUMBER', 'SINGLE_SELECT']);
+
+      const writes = metadata.actions.filter(
+        (entry) => entry.category === 'Change custom field to…',
+      );
+      expect(writes.map((entry) => entry.label)).toEqual(['Change Effort to…', 'Change Risk to…']);
+      expect(writes.every((entry) => entry.subtype === 'SET_CUSTOM_FIELD')).toBe(true);
+      // The engine writes custom fields and cannot read them, so the same field
+      // is an available action and an unavailable check.
+      expect(writes.every((entry) => entry.available)).toBe(true);
+      expect(generated.every((entry) => !entry.available && entry.reason)).toBe(true);
+    });
+
+    it('leaves out a field another project uses, and one that was archived', async () => {
+      const scope = await setupScope();
+
+      const other = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Somebody else’s project' })
+        .expect(201);
+
+      await addCustomField(scope, 'Mine');
+      await addCustomField(scope, 'Theirs', 'SINGLE_SELECT', other.body.data.id as string);
+
+      const archived = await addCustomField(scope, 'Retired');
+      await context.prisma.customField.update({
+        where: { id: archived },
+        data: { isArchived: true },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.customFields.map((field) => field.name)).toEqual(['Mine']);
+      expect(
+        metadata.conditions.filter((entry) => entry.category === 'Custom field is').length,
+      ).toBe(1);
+    });
+
+    it('offers this project’s sections and never another project’s', async () => {
+      /*
+       * Scoping rather than tidiness. A rule that moves a task into another
+       * project's section is a reach across a tenant boundary, and the runner
+       * refuses it at execution time — so a form that offers one produces a rule
+       * that looks right and quietly fails every time it runs.
+       */
+      const scope = await setupScope();
+
+      const other = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Somebody else’s project' })
+        .expect(201);
+
+      const theirs = await context.prisma.section.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: other.body.data.id as string,
+          name: 'Their column',
+          position: 0,
+        },
+      });
+
+      const metadata = await readMetadata(scope);
+      const ids = metadata.sections.map((section) => section.id);
+
+      expect(ids).toContain(scope.sectionId);
+      expect(ids).not.toContain(theirs.id);
+
+      const mine = await context.prisma.section.findMany({
+        where: { projectId: scope.projectId },
+        orderBy: { position: 'asc' },
+      });
+      expect(ids).toEqual(mine.map((section) => section.id));
+    });
+
+    it('drops an archived status and stops mixing the workspace set into the project’s', async () => {
+      /*
+       * The old query was `OR: [{ projectId }, { projectId: null }]` with no
+       * archive filter, so a project that had defined its own statuses saw them
+       * *and* the workspace's, duplicated — with nothing to say which of two
+       * identically named rows a rule would compare against. Archived rows came
+       * through as well.
+       */
+      const scope = await setupScope();
+
+      // Seeded here rather than relied upon: a workspace only grows definitions
+      // once something reads a project view, so this flow has none of its own.
+      await context.prisma.statusDefinition.createMany({
+        data: [
+          {
+            workspaceId: scope.workspaceId,
+            name: 'Workspace wide',
+            slug: 'workspace-wide',
+            category: 'NOT_STARTED',
+            position: 0,
+          },
+          {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Triage',
+            slug: 'triage',
+            category: 'NOT_STARTED',
+            position: 0,
+          },
+          {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Retired',
+            slug: 'retired',
+            category: 'CANCELLED',
+            position: 1,
+            isArchived: true,
+          },
+        ],
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.statuses.map((status) => status.name)).toEqual(['Triage']);
+    });
+
+    it('falls back to the workspace set for a project with no statuses of its own', async () => {
+      // A project that has never overridden its statuses has none, and an empty
+      // list would leave "Status is…" impossible to complete.
+      const scope = await setupScope();
+
+      await context.prisma.statusDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Workspace wide',
+          slug: 'workspace-wide',
+          category: 'NOT_STARTED',
+          position: 0,
+        },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.statuses.map((status) => status.name)).toEqual(['Workspace wide']);
+    });
+
+    it('drops an archived priority', async () => {
+      const scope = await setupScope();
+
+      await context.prisma.priorityDefinition.createMany({
+        data: [
+          { workspaceId: scope.workspaceId, name: 'Low', slug: 'low', level: 1 },
+          { workspaceId: scope.workspaceId, name: 'Retired', slug: 'retired', level: 2 },
+        ],
+      });
+      await context.prisma.priorityDefinition.update({
+        where: { workspaceId_slug: { workspaceId: scope.workspaceId, slug: 'retired' } },
+        data: { isArchived: true },
+      });
+
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.priorities.map((priority) => priority.name)).toEqual(['Low']);
+    });
+
+    it('offers the forms this project’s own values', async () => {
+      const scope = await setupScope();
+      const metadata = await readMetadata(scope);
+
+      expect(metadata.triggers.length).toBeGreaterThan(0);
+      expect(metadata.sections.length).toBeGreaterThan(0);
+
+      // A status field offering free text is a field that silently never
+      // matches.
+      const status = metadata.conditionFields.find((field) => field.field === 'status');
+      expect(status?.valueKind).toBe('ENUM');
+      expect(status?.options?.length).toBeGreaterThan(0);
+    });
+
+    it('says which of the four move forms the engine can honour', async () => {
+      const scope = await setupScope();
+      const metadata = await readMetadata(scope);
+
+      const moved = metadata.triggers.find((entry) => entry.subtype === 'TASK_MOVED_TO_SECTION');
+
+      expect(moved?.configForms.map((form) => form.label)).toEqual([
+        'Section is changed',
+        'Section is…',
+        'Section is not…',
+        'Section is one of…',
+      ]);
+      expect(moved?.configForms.filter((form) => form.available).map((form) => form.form)).toEqual([
+        'SECTION_CHANGED',
+        'SECTION_CHANGED_TO',
+      ]);
+    });
+
+    it('tells a member they may read the rules and not write them', async () => {
+      /*
+       * Sent so the builder can present a rule as read-only rather than let
+       * somebody fill in a form and meet a 403 on save. It is not the check —
+       * the service still refuses — because a permission the client is told
+       * about is one the client could ignore.
+       */
+      const scope = await setupScope();
+
+      expect(await readMetadata(scope, scope.owner.token)).toMatchObject({
+        permissions: { role: 'OWNER', canView: true, canCreate: true, canPublish: true },
+      });
+
+      expect(await readMetadata(scope, scope.member.token)).toMatchObject({
+        permissions: {
+          role: 'MEMBER',
+          canView: true,
+          canCreate: false,
+          canEdit: false,
+          canPublish: false,
+          canDelete: false,
+        },
+      });
     });
   });
 });

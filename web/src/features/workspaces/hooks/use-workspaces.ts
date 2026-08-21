@@ -1,4 +1,8 @@
-import type { CreateWorkspacePayload, WorkspaceSummary } from '@coretask/types';
+import type {
+  CreateWorkspacePayload,
+  UpdateWorkspacePayload,
+  WorkspaceSummary,
+} from '@coretask/types';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -75,6 +79,21 @@ export function useCreateWorkspace() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
       toast.success(`Workspace "${workspace.name}" created`);
     },
+  });
+}
+
+export function useUpdateWorkspace(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: (payload: UpdateWorkspacePayload) =>
+      workspacesApi.update(workspaceId as string, payload),
+    onSuccess: async (workspace) => {
+      queryClient.setQueryData<WorkspaceSummary[]>(queryKeys.workspaces.list(), (previous) =>
+        previous?.map((candidate) => (candidate.id === workspace.id ? workspace : candidate)),
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
+      toast.success('Workspace settings saved');
+    },
+    onError: () => toast.error('Could not save workspace settings.'),
   });
 }
 

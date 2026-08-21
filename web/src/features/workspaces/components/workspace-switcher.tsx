@@ -33,16 +33,16 @@ export function WorkspaceSwitcher({ collapsed = false }: WorkspaceSwitcherProps)
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            'flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
+            'flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-background/35 px-2.5 py-2.5 text-left shadow-[inset_0_1px_0_oklch(1_0_0/4%)] transition-[border-color,background-color] hover:border-primary/25 hover:bg-background/55 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
             collapsed && 'justify-center px-0',
           )}
           aria-label="Switch workspace"
         >
           <span
             aria-hidden="true"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground"
           >
-            {workspace ? initials(workspace.name) : '—'}
+            {workspace ? initials(workspace.name) : '-'}
           </span>
 
           {!collapsed && (

@@ -1,4 +1,3 @@
-import { BranchKey } from '@coretask/contracts';
 import type { AutomationGraphEdge, AutomationMetadata } from '@coretask/types';
 import {
   Background,
@@ -16,9 +15,9 @@ import '@xyflow/react/dist/style.css';
 
 import { AutomationEdge } from '../nodes/automation-edge';
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
-import type { CanvasNode } from '../lib/graph-edits';
+import { branchRows, fallbackRow, isUnansweredRow, type CanvasNode } from '../lib/graph-edits';
 import { layoutGraph } from '../lib/layout';
-import { isNodeIncomplete, summarise, summariseParts } from '../lib/node-summary';
+import { isNodeIncomplete, nodeHeading, summarise, summariseParts } from '../lib/node-summary';
 
 /** Registered once, outside render: a new object each time remounts every node. */
 const nodeTypes = { automation: AutomationNode };
@@ -34,11 +33,17 @@ interface Props {
   onOpenNode: (nodeId: string) => void;
   /** Add a step directly after `parentId`, before whatever follows it. */
   onInsertStep: (parentId: string) => void;
-  /** Split the rule directly after `parentId`. */
-  onInsertBranch: (parentId: string) => void;
-  /** Add another question on this split's "otherwise" arm. */
-  onAddElseIf: (branchId: string) => void;
+  /** Add another question on a row of its own. */
+  onAddElseIf: () => void;
+  /** Add the row that runs when nothing else matched. */
+  onAddOtherwise: () => void;
+  /**
+   * Copy a step. A branch comes with its actions and lands on a row of its own
+   * — the page decides which of the two this is, so every control agrees.
+   */
   onDuplicateNode: (nodeId: string) => void;
+  onChangeTrigger: () => void;
+  /** Remove a step, or a whole branch when the step is one. */
   onDeleteNode: (nodeId: string) => void;
 }
 
@@ -69,10 +74,11 @@ function Canvas({
   onSelect,
   onOpenNode,
   onInsertStep,
-  onInsertBranch,
   onAddElseIf,
+  onAddOtherwise,
   onDuplicateNode,
   onDeleteNode,
+  onChangeTrigger,
 }: Props) {
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -99,49 +105,128 @@ function Canvas({
    */
   const placement = useMemo(() => layoutGraph(graph.nodes), [graph.nodes]);
 
+  const triggerIds = useMemo(
+    () => new Set(graph.nodes.filter((node) => node.type === 'TRIGGER').map((node) => node.id)),
+    [graph.nodes],
+  );
+
+  /*
+   * Which conditions are rows, and which of those is the first.
+   *
+   * A card cannot tell on its own: being the rule's leading question is a fact
+   * about the rule rather than about the step, and it decides both what the
+   * unanswered card says and whether it carries a control to remove itself.
+   */
+  const rows = useMemo(() => branchRows(graph.nodes), [graph.nodes]);
+  const alternatives = useMemo(() => new Set(rows.slice(1).map((row) => row.id)), [rows]);
+  const fallbackId = useMemo(() => fallbackRow(graph.nodes)?.id ?? null, [graph.nodes]);
+
+  /*
+   * The one connection that carries the "Add branch" pill.
+   *
+   * Every branch hangs off the trigger, so every one of those connections looks
+   * alike to an edge — and offering the pill on each drew three identical
+   * buttons down the spine of a three-branch rule. The last row's is the one
+   * that means anything: a branch added from there appears directly beneath it.
+   *
+   * A rule with no branches at all still needs somewhere to start one, so it
+   * falls back to whatever the trigger leads to first.
+   */
+  const branchTailId = useMemo(() => {
+    const last = rows.at(-1);
+    if (last) return last.id;
+
+    const trigger = graph.nodes.find((node) => node.type === 'TRIGGER');
+    if (!trigger) return null;
+
+    return (
+      graph.nodes
+        .filter((node) => node.parentId === trigger.id)
+        .sort((a, b) => a.order - b.order)[0]?.id ?? null
+    );
+  }, [rows, graph.nodes]);
+
   const nodes = useMemo<Node<AutomationNodeData>[]>(
     () =>
-      graph.nodes.map((node) => ({
-        id: node.id,
-        type: 'automation',
-        position: placement.get(node.id) ?? node.position,
-        selected: node.id === selectedId,
-        data: {
-          category: node.type,
-          summary: summariseParts(node, metadata),
-          label: summarise(node, metadata),
-          invalid: isNodeIncomplete(node),
-          onOpen: () => onOpenNode(node.id),
-          /*
-           * Only where nothing follows yet.
-           *
-           * The plus means "and then", so on a step that already leads
-           * somewhere it would have to mean "insert between" instead — which is
-           * what the control on the connection itself does. Two controls a few
-           * pixels apart doing subtly different things is how somebody ends up
-           * with a step in the wrong place.
-           *
-           * Never on a placeholder either: that card is already the invitation.
-           */
-          ...(node.type === 'PLACEHOLDER' || hasFollower.has(node.id)
-            ? {}
-            : { onAddAfter: () => onInsertStep(node.id) }),
+      graph.nodes.map((node) => {
+        const place = { alternative: alternatives.has(node.id) };
 
-          /*
-           * No menu on a placeholder: there is nothing yet to copy or remove,
-           * and the card already offers the only thing that applies to it.
-           */
-          ...(node.type === 'PLACEHOLDER'
-            ? {}
-            : {
-                onDuplicate: () => onDuplicateNode(node.id),
-                // Every step but the trigger. A rule with nothing to start it
-                // is not a rule; the way to change what starts one is to pick a
-                // different trigger.
-                ...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDeleteNode(node.id) }),
-              }),
-        },
-      })),
+        return {
+          id: node.id,
+          type: 'automation',
+          position: placement.get(node.id) ?? node.position,
+          selected: node.id === selectedId,
+          data: {
+            category: node.type,
+            // The fallback is a condition by node type and reads as nothing
+            // like one, so the card is told which it is rather than inferring
+            // it from the words above the sentence.
+            isFallback: node.id === fallbackId,
+            heading: nodeHeading(node, place),
+            summary: summariseParts(node, metadata, place),
+            label: summarise(node, metadata, place),
+            invalid: isNodeIncomplete(node),
+            onOpen: () => onOpenNode(node.id),
+            /*
+             * Only where nothing follows yet.
+             *
+             * The plus means "and then", so on a step that already leads
+             * somewhere it would have to mean "insert between" instead — which
+             * is what the control on the connection itself does. Two controls a
+             * few pixels apart doing subtly different things is how somebody
+             * ends up with a step in the wrong place.
+             *
+             * Never on a placeholder either: that card is already the
+             * invitation.
+             */
+            ...(node.type === 'PLACEHOLDER' || hasFollower.has(node.id)
+              ? {}
+              : { onAddAfter: () => onInsertStep(node.id) }),
+
+            /*
+             * No menu on a placeholder: there is nothing yet to copy or remove,
+             * and the card already offers the only thing that applies to it.
+             */
+            ...(node.type === 'PLACEHOLDER'
+              ? {}
+              : {
+                  /*
+                   * Everything but the fallback can be copied.
+                   *
+                   * A rule falls back once — a second "otherwise" is a branch
+                   * that can never run — so the offer is withdrawn rather than
+                   * taken and then refused at publish.
+                   */
+                  ...(node.id === fallbackId
+                    ? {}
+                    : { onDuplicate: () => onDuplicateNode(node.id) }),
+                  // Only the trigger can be swapped for a different kind; every
+                  // other step is replaced by deleting it and choosing again.
+                  ...(node.type === 'TRIGGER' ? { onChangeTrigger } : {}),
+                  // Every step but the trigger. A rule with nothing to start it
+                  // is not a rule; the way to change what starts one is to pick a
+                  // different trigger.
+                  ...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDeleteNode(node.id) }),
+                }),
+
+            /*
+             * A question nobody has answered carries its own way out.
+             *
+             * The connector's menu can remove any branch, but one still reading
+             * "+ Otherwise if…" is a half-finished thing in the middle of a
+             * rule — the way back from it has to be visible on the card rather
+             * than a hover away, or the only obvious move is to answer a
+             * question that was a mis-click.
+             *
+             * Never on the first row: that one is the rule's own question, and
+             * removing it leaves a rule that runs every time.
+             */
+            ...(alternatives.has(node.id) && isUnansweredRow(node)
+              ? { onRemove: () => onDeleteNode(node.id) }
+              : {}),
+          },
+        };
+      }),
     [
       graph.nodes,
       metadata,
@@ -150,8 +235,11 @@ function Canvas({
       onInsertStep,
       hasFollower,
       placement,
+      alternatives,
+      fallbackId,
       onDuplicateNode,
       onDeleteNode,
+      onChangeTrigger,
     ],
   );
 
@@ -166,21 +254,46 @@ function Canvas({
         type: 'automation',
         animated: false,
         data: {
-          onInsertStep,
-          onInsertBranch,
+          onAddElseIf,
+          // A rule falls back once, so the row that does cannot be copied.
+          ...(edge.target === fallbackId ? {} : { onDuplicate: onDuplicateNode }),
+          onDelete: onDeleteNode,
+          onAddOtherwise,
+
           /*
-           * Only on the "otherwise" arm, because that is the only place the
-           * offer means anything: an else-if extends the fallback, and offering
-           * it on the matching arm would read as "if this matched, then ask a
-           * different question", which is not what it does.
+           * Offered once, because a rule can only fall back once.
            *
-           * Keyed on the arm the edge carries rather than on its label — the
-           * label is words for people and will be reworded.
+           * A second "otherwise" is a row that can never run — the first one
+           * always holds — so the menu stops offering it rather than letting
+           * somebody build a branch and be told about it at publish.
            */
-          ...(edge.branchKey === BranchKey.ELSE ? { onAddElseIf } : {}),
+          hasFallback: fallbackId !== null,
+
+          /*
+           * Only the trigger's own connection carries the branch controls.
+           *
+           * Every branch is a row hanging off the trigger, so there is one place
+           * to add one — and a control between a check and its action would be
+           * offering a branch where none can go.
+           */
+          ...(triggerIds.has(edge.source) ? { isJunction: true } : {}),
+
+          // And exactly one of them carries the pill — see `branchTailId`.
+          ...(triggerIds.has(edge.source) && edge.target === branchTailId
+            ? { isBranchTail: true }
+            : {}),
         },
       })),
-    [graph.edges, onInsertStep, onInsertBranch, onAddElseIf],
+    [
+      graph.edges,
+      onAddElseIf,
+      onAddOtherwise,
+      onDuplicateNode,
+      onDeleteNode,
+      fallbackId,
+      branchTailId,
+      triggerIds,
+    ],
   );
 
   /*

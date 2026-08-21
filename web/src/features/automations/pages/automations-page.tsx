@@ -5,8 +5,20 @@ import {
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
-import { useNavigate, useParams } from '@tanstack/react-router';
-import { Copy, MoreHorizontal, Pause, Play, Plus, Trash2, Upload, Zap } from 'lucide-react';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import {
+  AlertCircle,
+  Copy,
+  History,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  Upload,
+  Zap,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
@@ -34,6 +46,7 @@ import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { formatRelativeTime } from '@/lib/utils';
 
 import type { AutomationRule } from '../api/automations.api';
+import { AutomationRunHistoryDialog } from '../components/automation-run-history-dialog';
 import {
   useAutomations,
   useDuplicateRule,
@@ -57,7 +70,7 @@ export function AutomationsPage() {
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const canManage = hasAtLeastRole(role, WorkspaceRole.MANAGER);
 
-  const { data: rules, isLoading } = useAutomations(workspaceId, projectId);
+  const { data: rules, isLoading, isError, refetch } = useAutomations(workspaceId, projectId);
   const publish = usePublishRule(workspaceId, projectId);
   const pause = usePauseRule(workspaceId, projectId);
   const enable = useEnableRule(workspaceId, projectId);
@@ -65,6 +78,7 @@ export function AutomationsPage() {
   const remove = useRemoveRule(workspaceId, projectId);
 
   const [pendingRemove, setPendingRemove] = useState<AutomationRule | null>(null);
+  const [historyRule, setHistoryRule] = useState<AutomationRule | null>(null);
 
   const navigate = useNavigate();
 
@@ -78,12 +92,23 @@ export function AutomationsPage() {
     );
   }
 
+  if (isError) {
+    return (
+      <EmptyState
+        icon={AlertCircle}
+        title="Automations could not be loaded"
+        description="The project is still available. Retry the rule request without leaving this page."
+        action={<Button onClick={() => void refetch()}>Try again</Button>}
+      />
+    );
+  }
+
   if ((rules ?? []).length === 0) {
     return (
       <EmptyState
         icon={Zap}
         title="No automations yet"
-        description="Rules react to what happens on this project — a task moving into a section, a status changing — and act without anyone remembering to."
+        description="Rules react to project changes and act automatically, without relying on anyone to remember."
         action={
           canManage ? (
             <Button
@@ -143,7 +168,22 @@ export function AutomationsPage() {
             {(rules ?? []).map((rule) => (
               <tr key={rule.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                 <td className="px-3 py-2">
-                  <p className="font-medium text-foreground">{rule.name}</p>
+                  {canManage ? (
+                    <Button
+                      asChild
+                      variant="link"
+                      className="h-auto justify-start p-0 text-foreground"
+                    >
+                      <Link
+                        to="/projects/$projectId/automations/$ruleId"
+                        params={{ projectId, ruleId: rule.id }}
+                      >
+                        {rule.name}
+                      </Link>
+                    </Button>
+                  ) : (
+                    <p className="font-medium text-foreground">{rule.name}</p>
+                  )}
                   {rule.description && (
                     <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                       {rule.description}
@@ -174,7 +214,13 @@ export function AutomationsPage() {
                 </td>
 
                 <td className="px-3 py-2 text-xs tabular-nums">
-                  {rule.runCount}
+                  <button
+                    type="button"
+                    className="rounded font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setHistoryRule(rule)}
+                  >
+                    {rule.runCount}
+                  </button>
                   {/* Failures are shown beside the total rather than instead of
                       it: "12 runs, 3 failed" is a different story from "3". */}
                   {rule.failureCount > 0 && (
@@ -196,6 +242,22 @@ export function AutomationsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void navigate({
+                              to: '/projects/$projectId/automations/$ruleId',
+                              params: { projectId, ruleId: rule.id },
+                            })
+                          }
+                        >
+                          <Pencil className="size-4" aria-hidden="true" />
+                          Edit rule
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setHistoryRule(rule)}>
+                          <History className="size-4" aria-hidden="true" />
+                          Run history
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {rule.status === AutomationRuleStatus.DRAFT && (
                           <DropdownMenuItem onSelect={() => publish.mutate(rule.id)}>
                             <Upload className="size-4" aria-hidden="true" />
@@ -267,6 +329,13 @@ export function AutomationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AutomationRunHistoryDialog
+        workspaceId={workspaceId}
+        projectId={projectId}
+        rule={historyRule}
+        onOpenChange={(open) => !open && setHistoryRule(null)}
+      />
     </div>
   );
 }

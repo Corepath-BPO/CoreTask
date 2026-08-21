@@ -1,5 +1,5 @@
 import type { AutomationGraphIssue } from '@coretask/types';
-import { Settings, X } from 'lucide-react';
+import { Save, Settings, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +47,9 @@ export function AutomationBuilderHeader({
   settingsOpen,
   onToggleSettings,
   save,
+  saving,
+  canSave,
+  onSave,
   issues,
   onFocusIssue,
   publishing,
@@ -63,6 +66,9 @@ export function AutomationBuilderHeader({
   settingsOpen: boolean;
   onToggleSettings: () => void;
   save: SaveState;
+  saving: boolean;
+  canSave: boolean;
+  onSave: () => void;
   issues: AutomationGraphIssue[];
   onFocusIssue: (nodeId: string) => void;
   publishing: boolean;
@@ -98,6 +104,18 @@ export function AutomationBuilderHeader({
 
       <div className="flex shrink-0 items-center gap-2">
         <SaveIndicator state={save} />
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          loading={saving}
+          disabled={!canSave || saving}
+          onClick={onSave}
+        >
+          <Save className="size-4" aria-hidden="true" />
+          Save draft
+        </Button>
 
         {/* The rule's own settings — what it is called, what it is for, and
             whether other rules may set it off. */}

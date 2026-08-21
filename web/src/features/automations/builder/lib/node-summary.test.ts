@@ -3,11 +3,12 @@ import type { AutomationMetadata } from '@coretask/types';
 import type { CanvasNode } from './graph-edits';
 import { describe, expect, it } from 'vitest';
 
-import { isNodeIncomplete, summarise } from './node-summary';
+import { isNodeIncomplete, nodeCategory, nodeHeading, summarise } from './node-summary';
 
 const metadata = {
   triggers: [],
   actions: [],
+  conditions: [],
   conditionFields: [
     {
       field: 'priority',
@@ -157,6 +158,74 @@ describe('which nodes are flagged incomplete', () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe('the branch rows', () => {
+  const fallback = () =>
+    node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration: { fallback: true } });
+
+  it('says what the fallback is for, because it checks nothing', () => {
+    expect(nodeHeading(fallback())).toBe('Otherwise');
+    expect(summarise(fallback(), metadata)).toBe('If all other conditions are not met');
+  });
+
+  it('never flags the fallback as unfinished', () => {
+    // It has nothing to answer, so flagging it would put a red border and a
+    // count beside Publish on the one row that is complete by definition.
+    expect(isNodeIncomplete(fallback())).toBe(false);
+  });
+
+  it('reads an unanswered second row as the offer somebody clicked, on one line', () => {
+    /*
+     * "Otherwise if" above "+ Otherwise if…" is the same words twice, on the
+     * one card whose whole job is to be a single line and an invitation.
+     */
+    const row = node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration: {} });
+
+    expect(summarise(row, metadata, { alternative: true })).toBe('+ Otherwise if…');
+    expect(nodeHeading(row, { alternative: true })).toBe('');
+  });
+
+  it('leaves the rule’s own first question alone', () => {
+    /*
+     * The default shape of a new rule is an unanswered condition, and "+
+     * Otherwise if…" on the first row would describe a branch that does not
+     * exist yet.
+     */
+    const row = node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration: {} });
+
+    expect(summarise(row, metadata)).toBe('Choose what to check');
+    expect(nodeHeading(row)).toBe('Check if');
+  });
+
+  it('reads an answered row as its comparison under “Otherwise if”', () => {
+    // Only the first branch leads with the rule's question; every one after it
+    // is an alternative to that question, and says so above its own comparison.
+    const row = node({
+      type: 'CONDITION',
+      subtype: 'FIELD_COMPARISON',
+      configuration: { field: 'priority', operator: 'EQUALS', value: 'HIGH' },
+    });
+
+    expect(summarise(row, metadata, { alternative: true })).toBe('Priority is High');
+    expect(nodeHeading(row, { alternative: true })).toBe('Otherwise if');
+    expect(nodeHeading(row)).toBe('Check if');
+  });
+
+  it('names the fallback “Otherwise” wherever it sits', () => {
+    // It is the case where nothing matched, which is not something that can be
+    // asked first or last differently.
+    expect(nodeCategory(fallback(), { alternative: true })).toBe('Otherwise');
+    expect(nodeCategory(fallback())).toBe('Otherwise');
+  });
+
+  it('gives a branch the panel calls it by, even while unanswered', () => {
+    // The card collapses to one line; the panel is where the question gets
+    // answered, so its breadcrumb still has to say which branch this is.
+    const row = node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration: {} });
+
+    expect(nodeCategory(row, { alternative: true })).toBe('Otherwise if');
   });
 });
 

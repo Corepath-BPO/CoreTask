@@ -104,6 +104,25 @@ async function connect(): Promise<Api> {
   );
   expect(created.ok(), `could not create the rule: ${created.status()}`).toBe(true);
 
+  /*
+   * A custom field, so the catalogue has one to generate a row from.
+   *
+   * The generated rows are the whole point of the "Change ⟨field⟩ to…" group,
+   * and a project with no fields produces an empty group that proves nothing.
+   */
+  const field = await request.post(
+    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/custom-fields`,
+    {
+      headers,
+      data: {
+        name: `Effort ${RUN}`,
+        type: 'SINGLE_SELECT',
+        options: [{ label: 'Small' }, { label: 'Large' }],
+      },
+    },
+  );
+  expect(field.ok(), `could not create the field: ${field.status()}`).toBe(true);
+
   return {
     request,
     headers,
@@ -137,25 +156,16 @@ test.describe('the automation builder', () => {
   };
 
   /**
-   * The connector furthest along the rule — the end of the main path.
+   * A new rule opened from a section, which is how one is really started.
    *
-   * Chosen by position rather than by index. Every connector renders its
-   * controls through a portal into one shared layer, so their order in the DOM
-   * is the order they happened to mount in and not the order they appear on
-   * screen; `.last()` was picking a different arm depending on what had been
-   * added before it.
+   * The shared fixture rule checks Priority, and with no field picker a
+   * condition's field is now settled when the rule is created — so a test about
+   * the section comparisons has to start from the section.
    */
-  const endConnector = async (page: Page) => {
-    const dots = page.getByRole('button', { name: /add a step here/i });
-    await expect(dots.first()).toBeVisible();
+  const openSectionRule = async (page: Page) => {
+    await page.goto(`/projects/${api.projectId}/automations/new?sectionId=${api.sectionId}`);
 
-    // All of them in one pass. Measuring them one at a time answered `null` for
-    // any that had not settled yet, which silently fell back to the first.
-    const xs = await dots.evaluateAll((elements) =>
-      elements.map((element) => element.getBoundingClientRect().x),
-    );
-
-    return dots.nth(xs.indexOf(Math.max(...xs)));
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
   };
 
   /** Every node's box, from the browser rather than from the model. */
@@ -287,7 +297,7 @@ test.describe('the automation builder', () => {
     // From the placeholder on the canvas: the card that says "choose a step" is
     // the invitation, so pressing it is how an action gets chosen.
     await page.getByRole('button', { name: /^Add a step —/ }).click();
-    await page.getByRole('option', { name: /add a comment/i }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
 
     /*
      * The count does not change, and that is the point: the placeholder is the
@@ -305,105 +315,218 @@ test.describe('the automation builder', () => {
     expect(labels).not.toContain('Add a step');
   });
 
-  test('adds a branch, and draws both of its arms', async ({ page }) => {
+  /* ------------------------------------------------------------------ */
+  /* Branches, which are rows                                            */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * A branch is a row: its own question, its own actions beside it, and the
+   * next branch on the line below. It used to be a split — a "Split on" card
+   * with two placeholder arms — which drew a fork where the rule reads as a
+   * list, and made "otherwise if" mean "nest another fork inside the first".
+   */
+
+  /** The menu behind the one pill, opened. */
+  const openBranchMenu = async (page: Page) => {
+    const pill = page.getByRole('button', { name: /^Add branch$/ });
+
+    // One pill per rule. Every branch hangs off the same trigger, so the
+    // version of this that keyed on the connection drew one per branch.
+    await expect(pill).toHaveCount(1);
+    await pill.click();
+  };
+
+  const OTHERWISE = /all other conditions are not met/;
+
+  test('“Otherwise if…” adds one question and one place for its actions', async ({ page }) => {
+    await openBuilder(page);
+    const before = (await nodeBoxes(page)).length;
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+
+    // Two cards and no more: a question, and the invitation beside it. The old
+    // shape added four — a split, two arms, and a card for the question.
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 2);
+
+    const boxes = await nodeBoxes(page);
+    const question = boxes.find((box) => box.label.includes('Otherwise if…'));
+    const first = boxes.find((box) => box.label.includes('Priority is'));
+
+    expect(question, 'the new branch does not read as the offer that made it').toBeDefined();
+
+    // A row of its own, in the same column as the question above it.
+    expect(question!.x).toBe(first!.x);
+    expect(question!.y).toBeGreaterThan(first!.y);
+
+    // And its actions sit beside it, on its line rather than under the rule.
+    const invitations = boxes.filter((box) => box.label.includes('Add a step'));
+    const beside = invitations.find((box) => box.y === question!.y);
+
+    expect(beside, 'the new branch has nowhere to put its actions').toBeDefined();
+    expect(beside!.x).toBeGreaterThan(question!.x);
+  });
+
+  test('“Otherwise” adds the fallback, which asks nothing', async ({ page }) => {
+    await openBuilder(page);
+    const before = (await nodeBoxes(page)).length;
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 2);
+
+    const boxes = await nodeBoxes(page);
+    const fallback = boxes.find((box) => box.label.includes('If all other conditions are not met'));
+
     /*
-     * A split showing only the path somebody built looks like it goes one way.
-     * Both arms have to be on screen, and they must not land on each other.
+     * The card says what it is for rather than asking what to check. It has no
+     * comparison and must never be given one, so "Check if — choose what to
+     * check" would be the canvas insisting on an answer that cannot exist.
+     */
+    expect(fallback?.label).toBe('Otherwise — If all other conditions are not met');
+
+    const beside = boxes
+      .filter((box) => box.label.includes('Add a step'))
+      .find((box) => box.y === fallback!.y);
+    expect(beside, 'the fallback has nowhere to put its actions').toBeDefined();
+  });
+
+  test('offers the fallback once, and then stops offering it', async ({ page }) => {
+    /*
+     * A rule can only fall back once: the first "otherwise" always runs when
+     * nothing else matched, so a second is a branch that never can. Saying so
+     * before anybody builds one beats refusing it at publish.
      */
     await openBuilder(page);
 
-    // Split from the connector at the end of the rule — the point on the
-    // drawing where "and then it goes two ways" is actually being decided.
-    await (await endConnector(page)).click();
-    await page.getByRole('button', { name: /^Add branch$/ }).click();
+    await openBranchMenu(page);
+    await expect(page.getByRole('menuitem', { name: OTHERWISE })).toHaveCount(1);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
 
     await expect
       .poll(
         async () =>
-          (await nodeBoxes(page)).filter((box) => box.label.includes('Add a step')).length,
-        {
-          timeout: 5000,
-        },
-      )
-      .toBe(2);
-
-    const arms = (await nodeBoxes(page)).filter((box) => box.label.includes('Add a step'));
-
-    expect(arms[0]!.y).not.toBe(arms[1]!.y);
-  });
-
-  test('chains another question onto the otherwise arm', async ({ page }) => {
-    await openBuilder(page);
-    await (await endConnector(page)).click();
-    await page.getByRole('button', { name: /^Add branch$/ }).click();
-
-    await expect
-      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
-      .toBeGreaterThan(2);
-
-    /*
-     * The offer belongs to the otherwise arm and nowhere else.
-     *
-     * On the matching arm it would read as "if this matched, then ask a
-     * different question", which is not what it does — so exactly one of the
-     * connectors on screen may carry it.
-     */
-    const dots = page.getByRole('button', { name: /add a step here/i });
-    let found = -1;
-
-    for (let index = 0; index < (await dots.count()); index += 1) {
-      await dots.nth(index).click();
-
-      if ((await page.getByRole('button', { name: /^Otherwise if…$/ }).count()) > 0) {
-        found = index;
-        break;
-      }
-
-      await dots.nth(index).click();
-    }
-
-    expect(found, 'no connector offered to chain another question').toBeGreaterThanOrEqual(0);
-    await page.getByRole('button', { name: /^Otherwise if…$/ }).click();
-
-    // Two questions, stacked in one column, each with its own answer beside it.
-    await expect
-      .poll(
-        async () => (await nodeBoxes(page)).filter((box) => box.label.includes('Split on')).length,
+          (await nodeBoxes(page)).filter((box) => box.label.includes('Otherwise —')).length,
         { timeout: 5000 },
       )
-      .toBe(2);
+      .toBe(1);
 
-    const splits = (await nodeBoxes(page)).filter((box) => box.label.includes('Split on'));
-
-    expect(splits[0]!.x).toBe(splits[1]!.x);
-    expect(splits[0]!.y).not.toBe(splits[1]!.y);
+    await openBranchMenu(page);
+    await expect(page.getByRole('menuitem', { name: OTHERWISE })).toHaveCount(0);
+    // The other offer stays: a rule can go on gaining questions.
+    await expect(page.getByRole('menuitem', { name: /^Otherwise if…/ })).toHaveCount(1);
   });
 
-  test('duplicates and deletes a step from its own card', async ({ page }) => {
+  test('takes a branch off again from the × on its card', async ({ page }) => {
+    /*
+     * A question nobody has answered is a half-finished thing in the middle of
+     * a rule, so the way back out of it has to be on the card rather than a
+     * hover away — otherwise the only obvious move is to answer a mis-click.
+     */
     await openBuilder(page);
-
-    const condition = page.getByRole('button', { name: /^More for: Priority is/ });
     const before = (await nodeBoxes(page)).length;
 
-    await condition.click();
-    await page.getByRole('menuitem', { name: /duplicate/i }).click();
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
 
-    /*
-     * The copy runs after the original, not beside it.
-     *
-     * Two steps sharing a parent are two paths from one point — a branch — and
-     * duplicating an action means "do that again", not "fork the rule here".
-     */
     await expect
       .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
-      .toBe(before + 1);
+      .toBe(before + 2);
 
-    const copies = (await nodeBoxes(page)).filter((box) => box.label.includes('Priority is'));
-    expect(copies).toHaveLength(2);
-    expect(copies[0]!.y).toBe(copies[1]!.y);
-    expect(copies[0]!.x).not.toBe(copies[1]!.x);
+    const remove = page.getByRole('button', { name: /^Remove branch:/ });
+    await expect(remove).toHaveCount(1);
+    await remove.click();
 
-    // And the copy goes away again from the same place.
+    // The branch goes, and the invitation beside it goes with it.
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
+  });
+
+  test('keeps one branch pill, below the last row and clear of everything', async ({ page }) => {
+    /*
+     * The pill used to be drawn by whichever connection carried the branch
+     * controls, and with branches as rows every one of them qualified: three
+     * identical buttons stacked down the spine, and one of them across the card
+     * in between.
+     */
+    await openBuilder(page);
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(5);
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: OTHERWISE }).click();
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(7);
+
+    const pill = page.getByRole('button', { name: /^Add branch$/ });
+    await expect(pill).toHaveCount(1);
+
+    const box = (await pill.boundingBox())!;
+    const boxes = await nodeBoxes(page);
+
+    // Below every card, which is where the branch it adds will appear.
+    for (const card of boxes) {
+      expect(box.y, `the pill overlaps "${card.label}"`).toBeGreaterThan(card.y + card.height);
+    }
+  });
+
+  /** Gives the first branch something to do, and closes the panel behind it. */
+  const addComment = async (page: Page) => {
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
+    await page.keyboard.press('Escape');
+
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(3);
+  };
+
+  test('duplicates a branch with its actions, onto a row of its own', async ({ page }) => {
+    await openBuilder(page);
+    await addComment(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    await page.getByRole('button', { name: /^More for: Priority is/ }).click();
+    await page.getByRole('menuitem', { name: /duplicate/i }).click();
+
+    // The question and the action answering it — a copy of one without the
+    // other is a branch that asks nothing or answers nothing.
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 2);
+
+    const boxes = await nodeBoxes(page);
+    const first = boxes.find((box) => box.label.startsWith('Check if — Priority is'));
+    const copy = boxes.find((box) => box.label.startsWith('Otherwise if — Priority is'));
+
+    /*
+     * The copy reads as another branch purely by no longer being first. A
+     * second "Check if" would say two branches lead with the same question,
+     * rather than that the second is what to do when the first did not hold.
+     */
+    expect(copy, 'the copy did not read as another branch').toBeDefined();
+
+    // A row of its own, directly below — not a step inside the row it came
+    // from, which is what a copy parented to the question would have been.
+    expect(copy!.x).toBe(first!.x);
+    expect(copy!.y).toBeGreaterThan(first!.y);
+
+    /*
+     * And each row has an action of its own.
+     *
+     * Duplicating an ordinary step lets the copy adopt what followed the
+     * original; doing that here would move the actions off the branch being
+     * copied, leaving two questions with one answer between them.
+     */
+    const comments = boxes.filter((box) => box.label.includes('Comment'));
+    expect(comments).toHaveLength(2);
+    expect(comments.map((box) => box.y).sort()).toEqual([first!.y, copy!.y].sort());
+
+    // It goes away again from the same place, taking its action with it.
     await page
       .getByRole('button', { name: /^More for: Priority is/ })
       .last()
@@ -413,6 +536,29 @@ test.describe('the automation builder', () => {
     await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
   });
 
+  test('duplicates an ordinary step after the one it came from', async ({ page }) => {
+    /*
+     * Not beside it: two steps sharing a parent are two paths from one point,
+     * and duplicating an action means "do that again with one thing changed".
+     */
+    await openBuilder(page);
+    await addComment(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    await page.getByRole('button', { name: /^More for: Comment/ }).click();
+    await page.getByRole('menuitem', { name: /duplicate/i }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 1);
+
+    const copies = (await nodeBoxes(page)).filter((box) => box.label.includes('Comment'));
+    expect(copies).toHaveLength(2);
+    expect(copies[0]!.y).toBe(copies[1]!.y);
+    expect(copies[0]!.x).not.toBe(copies[1]!.x);
+  });
+
   test('the trigger has no delete in its menu', async ({ page }) => {
     await openBuilder(page);
 
@@ -420,6 +566,112 @@ test.describe('the automation builder', () => {
 
     await expect(page.getByRole('menuitem', { name: /duplicate/i })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
+  });
+
+  test('leaves nothing behind when an insert is abandoned', async ({ page }) => {
+    /*
+     * The step used to be created before it was chosen, so closing the list
+     * left a card that is nothing — no label, no settings, and a fork in the
+     * rule that refuses to publish. Nothing exists now until somebody picks.
+     */
+    await openBuilder(page);
+
+    const before = (await nodeBoxes(page)).length;
+
+    /*
+     * From the placeholder, which is where a fresh rule offers a step.
+     *
+     * No card carries a plus here: every step already leads somewhere, and the
+     * plus means "and then" rather than "insert between". That is the leaf-only
+     * rule doing its job, not a missing control.
+     */
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
+
+    const labels = (await nodeBoxes(page)).map((box) => box.label).join(' | ');
+    expect(labels).not.toContain('Do this — ');
+  });
+
+  test('a chosen trigger can still be swapped', async ({ page }) => {
+    /*
+     * The card opens the picker while nothing is chosen and that step's
+     * settings afterwards, so a set trigger had no route back to the list —
+     * the only way to correct a mis-click was to delete the rule.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^More for: When a task/ }).click();
+    await page.getByRole('menuitem', { name: /change trigger/i }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole('option').first()).toBeVisible();
+  });
+
+  test('configures a custom field the catalogue row already named', async ({ page }) => {
+    /*
+     * The row says which field it means, so the form must not ask again.
+     *
+     * Every "Change ⟨field⟩ to…" shares one subtype and differs only by the
+     * field, so before the entry was carried through, choosing one landed on a
+     * form with an empty picker — the click thrown away.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+    await page.getByRole('option', { name: /^Change Effort/i }).click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+
+    // The field is already answered, and its own options are what it offers.
+    await expect(rail.getByLabel('Field')).toContainText(/Effort/);
+
+    await rail.getByLabel('Value').click();
+    await page.getByRole('option', { name: 'Large' }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('Large');
+  });
+
+  test('the trigger card follows whichever shape was chosen', async ({ page }) => {
+    /*
+     * The card is where a rule is read without opening it, so a trigger that
+     * shows only its kind makes two rules firing on completely different moves
+     * look identical. Each shape has to reach the card, and "is not" has to say
+     * so — a list with no verb reads as the opposite rule.
+     */
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    const trigger = async () => (await nodeBoxes(page))[0]!.label;
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is not…' }).click();
+    await expect.poll(trigger, { timeout: 5000 }).toContain('not Incoming');
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+    await rail.getByLabel('Choose one or more options for column/section').click();
+    await page.getByRole('menuitemcheckbox').nth(1).click();
+    await page.keyboard.press('Escape');
+
+    await expect.poll(trigger, { timeout: 5000 }).toContain('one of');
+
+    // And the shape that names no section says nothing about one.
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is changed' }).click();
+
+    await expect.poll(trigger, { timeout: 5000 }).not.toContain('one of');
   });
 
   test('opens a step to configure it, without hiding the rule', async ({ page }) => {
@@ -444,7 +696,7 @@ test.describe('the automation builder', () => {
     await openBuilder(page);
 
     await page.getByRole('button', { name: /^Add a step —/ }).click();
-    await page.getByRole('option', { name: /add a comment/i }).click();
+    await page.getByRole('option', { name: /add (a )?comment/i }).click();
 
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();
@@ -592,6 +844,455 @@ test.describe('the automation builder', () => {
 
     await expect(page.locator('.react-flow__node').first()).toBeVisible();
     await expect(page.getByRole('button', { name: `Rule name: ${before}` })).toBeVisible();
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* The three inspectors                                                */
+  /* ------------------------------------------------------------------ */
+
+  /** The panel, whichever of its jobs it is currently doing. */
+  const inspector = (page: Page) => page.getByRole('complementary', { name: /step settings/i });
+
+  const openStep = async (page: Page, name: RegExp) => {
+    await page.locator('.react-flow__node').filter({ hasText: name }).first().click();
+
+    const rail = inspector(page);
+    await expect(rail).toBeVisible();
+
+    return rail;
+  };
+
+  test('the When inspector offers exactly the four ways a move can be narrowed', async ({
+    page,
+  }) => {
+    /*
+     * The whole point of the trigger panel.
+     *
+     * A move can be watched four ways, and the old panel — one optional section
+     * — could express exactly one of them. If this list ever shrinks back, the
+     * inspector has quietly lost three quarters of what it is for.
+     */
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    // A breadcrumb above, the particular trigger below it — and the trigger
+    // does not say "When" twice.
+    await expect(rail.getByText('When… /')).toBeVisible();
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText(
+      'A task is moved to a section',
+    );
+
+    await rail.getByLabel('Choose an option').click();
+
+    await expect(page.getByRole('option')).toHaveText([
+      'Section is changed',
+      'Section is…',
+      'Section is not…',
+      'Section is one of…',
+    ]);
+
+    await page.keyboard.press('Escape');
+  });
+
+  test('“Section is one of…” asks for several sections at once', async ({ page }) => {
+    await openBuilder(page);
+    const rail = await openStep(page, /When/);
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+
+    /*
+     * One section is a select; several is a menu of checkboxes.
+     *
+     * The difference between the two controls *is* the difference between the
+     * two forms, so a "one of" that renders the single picker would be a rule
+     * that can only ever name one section however it is labelled.
+     */
+    await expect(rail.getByLabel('Choose a column/section')).toHaveCount(0);
+
+    const picker = rail.getByLabel('Choose one or more options for column/section');
+    await expect(picker).toBeVisible();
+    await picker.click();
+
+    const boxes = page.getByRole('menuitemcheckbox');
+    await expect(boxes.first()).toBeVisible();
+
+    const first = ((await boxes.nth(0).textContent()) ?? '').trim();
+    const second = ((await boxes.nth(1).textContent()) ?? '').trim();
+
+    // The second click without reopening: a question with more than one answer
+    // by definition cannot shut its menu after the first.
+    await boxes.nth(0).click();
+    await boxes.nth(1).click();
+    await page.keyboard.press('Escape');
+
+    await expect(picker).toContainText(first);
+    await expect(picker).toContainText(second);
+  });
+
+  test('a condition offers the three comparisons a section has', async ({ page }) => {
+    /*
+     * Three, not the six its type would give.
+     *
+     * Every task in a project sits in a section, so "is empty" can never hold;
+     * and "is not one of" asks the same question as "is one of" backwards.
+     * Offering them makes somebody choose between spellings of one thing, and
+     * the one they pick decides whether the rule reads properly afterwards.
+     *
+     * There is no field picker to reach them through — the condition is a
+     * section check and its heading says so.
+     */
+    await openSectionRule(page);
+    const rail = await openStep(page, /Check if/);
+
+    await expect(rail.getByLabel('Field', { exact: true })).toHaveCount(0);
+
+    await rail.getByLabel('Choose an option').click();
+    // Named with the field, because the option is the whole condition — an
+    // operator on its own is a fragment somebody has to reassemble.
+    await expect(page.getByRole('option')).toHaveText([
+      'Section is…',
+      'Section is not…',
+      'Section is one of…',
+    ]);
+
+    await page.keyboard.press('Escape');
+  });
+
+  test('“is one of” asks for several sections and names them on the card', async ({ page }) => {
+    /*
+     * The list half of the condition, end to end.
+     *
+     * "Is one of" holds an array where the other two hold a string, and every
+     * layer had to be told: the panel asks for more than one, the card names
+     * what was chosen instead of printing "…", and the operator reads as words
+     * rather than as `is_one_of`.
+     */
+    await openSectionRule(page);
+    const rail = await openStep(page, /Check if/);
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…' }).click();
+
+    // The wording changes with the shape: one section, or a set of them.
+    await expect(rail.getByText('Choose one or more options for column/section')).toBeVisible();
+
+    await rail.getByLabel('Choose one or more options for column/section').click();
+    const first = page.getByRole('menuitemcheckbox').first();
+    const chosen = ((await first.textContent()) ?? '').trim();
+    await first.click();
+    await page.keyboard.press('Escape');
+
+    const card = page.locator('.react-flow__node', { hasText: 'Check if' }).first();
+
+    await expect(card).toContainText('Section is one of');
+    await expect(card).toContainText(chosen);
+    // The failure this replaces: the card showed the stored key.
+    await expect(card).not.toContainText('is_one_of');
+  });
+
+  test('the condition reads as a sentence, and never as an identifier', async ({ page }) => {
+    await openSectionRule(page);
+    const rail = await openStep(page, /Check if/);
+    const heading = rail.getByRole('heading', { level: 2 });
+
+    await expect(rail.getByText('Check if… /')).toBeVisible();
+
+    // The section field asks in the words of the thing it is asking about.
+    const value = rail.getByLabel('Choose a column/section');
+    await value.click();
+
+    const section = ((await page.getByRole('option').first().textContent()) ?? '').trim();
+    await page.getByRole('option').first().click();
+
+    /*
+     * The heading names the question, and the card names the answer.
+     *
+     * It used to carry the value too, directly above the control holding it —
+     * the same thing twice, and a heading that rewrote itself as somebody typed
+     * into the field beneath it. The value moved to the card, which is where a
+     * rule is read without opening it.
+     */
+    await expect(heading).toHaveText('Section is');
+
+    /*
+     * And something says the edit landed.
+     *
+     * There is no save button on this panel, so with the value gone from the
+     * heading the card is the only thing left that confirms it — which makes
+     * this worth asserting rather than assuming.
+     */
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain(section);
+
+    await rail.getByLabel('Choose an option').click();
+    await page.getByRole('option', { name: 'Section is one of…', exact: true }).click();
+
+    await expect(heading).toHaveText('Section is one of');
+
+    // Never the id behind the name. One on a heading looks like data rather
+    // than like a mistake, and the mistake is what needs noticing.
+    expect(await heading.textContent()).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+
+  test('the action catalogue is grouped, and keeps a tab for external actions', async ({
+    page,
+  }) => {
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Do this…');
+    await expect(
+      rail.getByText('Add an action that occurs as a result of the rule.'),
+    ).toBeVisible();
+
+    /*
+     * Grouped in the server's order, not in whichever order a Map happened to
+     * hand back. Taken from the endpoint rather than hard-coded, so renaming a
+     * category is not a test to fix.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const expected: string[] = [];
+    for (const entry of metadata.data.actions) {
+      if (!expected.includes(entry.category)) expected.push(entry.category);
+    }
+
+    const rendered = await rail
+      .getByRole('group')
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute('aria-label') ?? ''),
+      );
+
+    expect(rendered).toEqual(expected);
+
+    // Every offer is still an option inside a listbox, so a screen reader can
+    // say how much catalogue is left below the fold.
+    await expect(rail.getByRole('listbox')).toBeVisible();
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    /*
+     * The tab exists and says it is not ready, rather than being quietly
+     * removed so that nobody asks. No fake integrations behind it.
+     */
+    await rail.getByRole('tab', { name: 'External actions' }).click();
+    await expect(rail.getByText('External actions will be available later.')).toBeVisible();
+    await expect(rail.getByRole('option')).toHaveCount(0);
+  });
+
+  test('an action the engine cannot run is listed with the reason it cannot', async ({ page }) => {
+    /*
+     * Listed rather than filtered. Absence reads as "never considered"; a
+     * greyed row with a reason reads as "not yet", which is the truth and saves
+     * somebody searching for it a second time somewhere else.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const blocked = metadata.data.actions.filter(
+      (entry: { available: boolean }) => !entry.available,
+    );
+
+    expect(
+      blocked.length,
+      'the metadata offered nothing unavailable, so the convention cannot be checked',
+    ).toBeGreaterThan(0);
+
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    const entry = blocked[0] as { label: string; reason: string };
+    const row = rail.getByRole('option', { name: entry.label }).first();
+
+    await expect(row).toBeDisabled();
+    await expect(row.locator('[data-slot="catalogue-reason"]')).toHaveText(entry.reason);
+  });
+
+  /**
+   * A branch nobody has answered, with the catalogue open on it.
+   *
+   * "Otherwise if…" is the route the references show it from, and it is the one
+   * that was broken: the row was added and the comparison form opened on it,
+   * asking how to compare a field nobody had named.
+   */
+  const openConditionCatalogue = async (page: Page) => {
+    await openBuilder(page);
+
+    await openBranchMenu(page);
+    await page.getByRole('menuitem', { name: /^Otherwise if…/ }).click();
+
+    const rail = inspector(page);
+    await expect(rail).toBeVisible();
+
+    return rail;
+  };
+
+  test('“Otherwise if…” opens the condition catalogue, not a comparison', async ({ page }) => {
+    /*
+     * The gap this closes. Both halves existed — the endpoint sent the grouped
+     * catalogue and the panel could draw one — and nothing routed a condition
+     * row to it, so the only thing a new branch could ever be was a section
+     * check with the field already assumed.
+     */
+    const rail = await openConditionCatalogue(page);
+
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Otherwise if…');
+    await expect(rail.getByRole('textbox', { name: /search conditions/i })).toBeVisible();
+
+    // The operator select is the *next* question, and must not be the first.
+    await expect(rail.getByLabel('Choose an option')).toHaveCount(0);
+
+    /*
+     * "Create your own" leads, which is the reason it is declared first: the
+     * widest offer in the list belongs where somebody arriving with a question
+     * no row answers will see it, rather than below six groups already read
+     * past. Taken from the endpoint so renaming a group is not a test to fix.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const expected: string[] = [];
+    for (const entry of metadata.data.conditions) {
+      if (!expected.includes(entry.category)) expected.push(entry.category);
+    }
+
+    expect(expected[0]).toBe('Create your own');
+
+    const rendered = await rail
+      .getByRole('group')
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute('aria-label') ?? ''),
+      );
+
+    expect(rendered).toEqual(expected);
+
+    /* No external tab here: "external conditions" is not a thing anybody asked
+       for, and an empty one would be answering a question nobody put. */
+    await expect(rail.getByRole('tab')).toHaveCount(0);
+  });
+
+  test('a check the engine cannot make is listed with the reason it cannot', async ({ page }) => {
+    /*
+     * The same convention as the action catalogue, and the constraint the whole
+     * feature turns on: availability is the server's answer, derived from what
+     * the runner can read and compare. A row greyed here is one the endpoint
+     * greyed, never one this client decided to withhold.
+     */
+    const metadata = await (
+      await api.request.get(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/metadata`,
+        { headers: api.headers },
+      )
+    ).json();
+
+    const blocked = metadata.data.conditions.filter(
+      (entry: { available: boolean }) => !entry.available,
+    );
+
+    expect(
+      blocked.length,
+      'the metadata offered nothing unavailable, so the convention cannot be checked',
+    ).toBeGreaterThan(0);
+
+    const rail = await openConditionCatalogue(page);
+    await expect(rail.getByRole('option').first()).toBeVisible();
+
+    const entry = blocked[0] as { label: string; reason: string };
+    const row = rail.getByRole('option', { name: entry.label }).first();
+
+    await expect(row).toBeDisabled();
+    await expect(row.locator('[data-slot="catalogue-reason"]')).toHaveText(entry.reason);
+  });
+
+  test('choosing a check leads straight into its comparison and value', async ({ page }) => {
+    /*
+     * The choice and the settings are two halves of one act, so the panel
+     * carries on into the second rather than closing on a step that says
+     * "choose what to check" and offering no obvious way to.
+     *
+     * The comparison is written with the field, because a condition holding one
+     * and not the other is refused at publish — and the card is what says the
+     * edit landed, there being no save button on this panel.
+     */
+    const rail = await openConditionCatalogue(page);
+
+    await rail.getByRole('option', { name: 'Task is in section…' }).click();
+
+    // Same panel, now the comparison form for the field just chosen.
+    await expect(rail.getByRole('heading', { level: 2 })).toHaveText('Section is');
+    await expect(rail.getByText('Otherwise if… /')).toBeVisible();
+
+    const value = rail.getByLabel('Choose a column/section');
+    await value.click();
+
+    const section = ((await page.getByRole('option').first().textContent()) ?? '').trim();
+    await page.getByRole('option').first().click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain(`Otherwise if — Section is ${section}`);
+  });
+
+  test('a check on a field the catalogue only names is not offered as working', async ({
+    page,
+  }) => {
+    /*
+     * The rule the owner set: never an enabled row that creates a name without
+     * functioning task values. "Create conditional check with AI" is the one
+     * every reference screenshot shows and the one nothing stands behind, so it
+     * has to be visible, greyed, and unclickable — visible because absence
+     * reads as "never considered".
+     */
+    const rail = await openConditionCatalogue(page);
+
+    const ai = rail.getByRole('option', { name: /Create conditional check with AI/ });
+
+    await expect(ai).toBeVisible();
+    await expect(ai).toBeDisabled();
+
+    // And a working one beside it, so this is a decision rather than a
+    // catalogue that offers nothing.
+    await expect(rail.getByRole('option', { name: 'Task is in section…' })).toBeEnabled();
+  });
+
+  test('searching the catalogue matches the group as well as the row', async ({ page }) => {
+    await openBuilder(page);
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+
+    const rail = inspector(page);
+    const groups = rail.getByRole('group');
+    await expect(groups.first()).toBeVisible();
+
+    const heading = (await groups.first().getAttribute('aria-label')) ?? '';
+
+    // The category is printed above every row, so a search that cannot find it
+    // reads as a search that is broken.
+    await rail.getByRole('textbox', { name: /search actions/i }).fill(heading);
+
+    await expect(groups).toHaveCount(1);
+    await expect(groups.first()).toHaveAttribute('aria-label', heading);
   });
 
   test('renders in dark mode too', async ({ page }) => {

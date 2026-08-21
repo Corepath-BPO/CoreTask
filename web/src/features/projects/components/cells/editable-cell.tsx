@@ -50,7 +50,7 @@ export function CellButton({
 export function EmptyCell() {
   return (
     <span className="text-muted-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-      —
+      -
     </span>
   );
 }

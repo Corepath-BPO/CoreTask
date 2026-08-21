@@ -3,6 +3,7 @@ import type {
   AutomationNodeType,
   AutomationRuleStatus,
   ConditionValueKind,
+  ConditionValueType,
   GraphIssueLevel,
 } from '@coretask/contracts';
 
@@ -120,12 +121,38 @@ export interface AutomationGraphValidation {
 export interface AutomationMetadata {
   triggers: AutomationCatalogEntry[];
   actions: AutomationCatalogEntry[];
+  /**
+   * The condition catalogue: what a branch may be asked to check.
+   *
+   * The endpoint has always sent this and this type did not say so, which left
+   * the one client that needed it reading through a cast — and the compiler
+   * unable to notice if the endpoint stopped sending it. Declared beside
+   * `triggers` and `actions` because it is the third of the same thing: the
+   * grouped, searchable list a step is chosen from.
+   *
+   * Distinct from `conditionFields` below, which is not the picker but what a
+   * picked row is then configured with.
+   */
+  conditions: AutomationCatalogEntry[];
   conditionFields: ConditionFieldDefinition[];
   sections: { id: string; name: string }[];
   statuses: { id: string; name: string; colorToken: string }[];
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
-  customFields: { id: string; name: string; type: string }[];
+  /**
+   * The project's own fields, with the values each one offers.
+   *
+   * `options` is declared here because the endpoint has always returned it and
+   * this type did not say so — which left every form that needed the choices
+   * casting its way to them, and the compiler unable to notice when one of them
+   * was wrong.
+   */
+  customFields: {
+    id: string;
+    name: string;
+    type: string;
+    options?: { id: string; label: string; colorToken: string }[];
+  }[];
 }
 
 /** One offer in the trigger or action selector. */
@@ -136,6 +163,33 @@ export interface AutomationCatalogEntry {
   category: string;
   /** False for something declared but not executable — shown disabled. */
   available: boolean;
+  /**
+   * Why it cannot be chosen, when it cannot.
+   *
+   * A greyed row with no explanation is worse than an absent one: it says "not
+   * for you" without saying why or whether that will change. This is the half
+   * that makes showing it rather than hiding it the kinder choice.
+   */
+  reason?: string | null;
+  /**
+   * The custom field an entry was generated from.
+   *
+   * Set only for the per-field entries, so the card can render the field's name
+   * as a token — "Change `Priority` to…" — rather than baking it into the label
+   * and losing the distinction between the words and the field.
+   */
+  fieldId?: string;
+  fieldName?: string;
+  /**
+   * What this row's value is, on the rows that compare one.
+   *
+   * Only the condition entries carry it — the same convention as `fieldId`
+   * above, which is present only on the generated rows. It is what decides the
+   * comparisons the row may use, so choosing a condition can write the field
+   * *and* its first operator in one act rather than leaving a step half
+   * answered.
+   */
+  valueType?: ConditionValueType;
 }
 
 export interface ConditionFieldDefinition {
