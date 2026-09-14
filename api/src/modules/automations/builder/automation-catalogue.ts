@@ -3,6 +3,7 @@ import {
   AUTOMATION_ACTIONS,
   AutomationAction,
   AutomationTrigger,
+  EXTERNAL_ACTION_CATEGORY,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
   ConditionValueKind,
@@ -320,6 +321,8 @@ export const ACTION_CATEGORY = {
   CREATE_NEW: 'Create new',
   CONVERT: 'Convert task to…',
   ADD_TO_TASK: 'Add to task',
+  /** Actions that leave CoreTask. The builder shows this group on its own tab. */
+  EXTERNAL: EXTERNAL_ACTION_CATEGORY,
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -333,15 +336,13 @@ const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
  * Triggers nothing publishes, and why.
  *
  * Everything else in `AUTOMATION_TRIGGERS` reaches the queue from
- * `TasksService`, `ProjectWorkItemService` or `CustomFieldsService` — checked
- * against the `automation.publish` call sites rather than assumed. A trigger
- * with no publisher is the quietest failure the builder can sell: the rule
- * saves, publishes, validates, and then waits forever for an event that is
- * never sent.
+ * `TasksService`, `ProjectWorkItemService`, `CustomFieldsService` or
+ * `CommentsService` — checked against the `automation.publish` call sites
+ * rather than assumed. A trigger with no publisher is the quietest failure the
+ * builder can sell: the rule saves, publishes, validates, and then waits
+ * forever for an event that is never sent.
  */
 const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {
-  [AutomationTrigger.COMMENT_ADDED]:
-    'Adding a comment does not raise an automation event yet, so a rule waiting for one would never run.',
   [AutomationTrigger.TICKET_CREATED]:
     'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
   [AutomationTrigger.TICKET_STATUS_CHANGED]:
@@ -1244,6 +1245,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     label: 'Add comment',
     category: ACTION_CATEGORY.ADD_TO_TASK,
     description: 'Authored by whoever caused the trigger, falling back to the task’s creator.',
+  },
+
+  // Send to another tool
+  {
+    subtype: AutomationAction.SEND_WEBHOOK,
+    label: 'Send a webhook…',
+    category: ACTION_CATEGORY.EXTERNAL,
+    description:
+      'POSTs the task as JSON to a webhook endpoint from Settings (signed), or to a URL you enter.',
   },
   {
     subtype: 'ADD_REMOVE_COLLABORATORS',

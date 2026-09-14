@@ -20,10 +20,18 @@ describe('AutomationProcessor', () => {
     depth: 0,
   };
 
+  const webhooks = { enqueueRuleSend: jest.fn().mockResolvedValue(undefined) };
+
   const build = (events: unknown[]) => {
-    const runner = { handle: jest.fn().mockResolvedValue({ executed: 1, skipped: 0, events }) };
+    const runner = {
+      handle: jest.fn().mockResolvedValue({ executed: 1, skipped: 0, events, webhooks: [] }),
+    };
     const publisher = { publish: jest.fn().mockResolvedValue(undefined) };
-    const processor = new AutomationProcessor(runner as never, publisher as never);
+    const processor = new AutomationProcessor(
+      runner as never,
+      publisher as never,
+      webhooks as never,
+    );
 
     return { runner, publisher, processor };
   };
@@ -39,7 +47,7 @@ describe('AutomationProcessor', () => {
 
     expect(runner.handle).toHaveBeenCalledWith(event);
     expect(publisher.publish.mock.calls.map(([published]) => published)).toEqual(raised);
-    expect(result).toEqual({ executed: 1, skipped: 0, published: 2 });
+    expect(result).toEqual({ executed: 1, skipped: 0, published: 2, webhooks: 0 });
   });
 
   it('publishes nothing when the run raised nothing', async () => {
@@ -55,7 +63,7 @@ describe('AutomationProcessor', () => {
     const runner = {
       handle: jest.fn(async () => {
         order.push('run');
-        return { executed: 1, skipped: 0, events: [event] };
+        return { executed: 1, skipped: 0, events: [event], webhooks: [] };
       }),
     };
     const publisher = {
@@ -64,7 +72,7 @@ describe('AutomationProcessor', () => {
       }),
     };
 
-    await new AutomationProcessor(runner as never, publisher as never).process({
+    await new AutomationProcessor(runner as never, publisher as never, webhooks as never).process({
       data: event,
     } as never);
 

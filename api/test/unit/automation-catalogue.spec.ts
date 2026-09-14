@@ -611,17 +611,17 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * Nothing calls `automation.publish` with a comment event. The rule saves,
-     * publishes and validates, then waits for something that is never sent —
-     * which is why it is listed disabled rather than left looking usable.
+     * `CommentsService` publishes a comment event for items in a project, so
+     * the trigger is offered for real. A trigger nothing publishes would be
+     * the quietest failure the builder can sell — see the ticket triggers.
      */
-    it('disables a trigger nothing publishes', () => {
+    it('offers the comment trigger now that comments are published', () => {
       const comment = triggers.find(
         (trigger) => trigger.subtype === AutomationTrigger.COMMENT_ADDED,
       );
 
-      expect(comment?.available).toBe(false);
-      expect(comment?.reason).toBeTruthy();
+      expect(comment?.available).toBe(true);
+      expect(comment?.reason).toBeNull();
     });
 
     it('disables ticket triggers while actions only operate on tasks', () => {
@@ -680,7 +680,8 @@ describe('the automation catalogue', () => {
   describe('capabilities and permissions', () => {
     it('claims nothing the action list does not support', () => {
       expect(capabilities()).toMatchObject({
-        externalActions: false,
+        // SEND_WEBHOOK is executable, so the engine may say it talks to other tools.
+        externalActions: true,
         ai: false,
         conditionsOnCustomFields: true,
         actionsOnCustomFields: true,

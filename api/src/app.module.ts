@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule, seconds } from '@nestjs/throttler';
+import { ThrottlerModule, seconds } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { AppConfigModule } from './config/app-config.module';
@@ -14,6 +15,7 @@ import { NotificationsIntegrationModule } from './integrations/notifications/not
 import { StorageModule } from './integrations/storage/storage.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AutomationsModule } from './modules/automations/automations.module';
@@ -33,6 +35,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { MembersModule } from './modules/members/members.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
@@ -73,6 +76,8 @@ import { WebsocketModule } from './websocket/websocket.module';
 
     // Domain
     AuthModule,
+    ApiKeysModule,
+    WebhooksModule,
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,
@@ -97,9 +102,10 @@ import { WebsocketModule } from './websocket/websocket.module';
     HealthModule,
   ],
   providers: [
-    // Authentication is the default; `@Public()` opts a route out.
+    // Authentication is the default; `@Public()` opts a route out. Session or
+    // API key — the throttler runs after it so it can key on the principal.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
   ],
 })

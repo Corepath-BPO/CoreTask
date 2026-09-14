@@ -14,6 +14,7 @@ import {
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
 
+import { IntegrationBadge } from '@/components/common/integration-badge';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
 import {
   AlertDialog,
@@ -431,6 +432,7 @@ function StoryRow({
       )}
       <p className="min-w-0 flex-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{name}</span>{' '}
+        {actor?.isServiceAccount && <IntegrationBadge className="mr-1 align-middle" />}
         {describeStory(story, { itemWord, meId })}
         <span className="whitespace-nowrap"> · {formatRelativeTime(story.createdAt)}</span>
       </p>
@@ -513,6 +515,7 @@ function CommentRow({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-sm font-medium">{comment.author?.name ?? 'Removed account'}</span>
+          {comment.author?.isServiceAccount && <IntegrationBadge />}
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(comment.createdAt)}
           </span>

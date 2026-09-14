@@ -19,6 +19,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { WorkspaceMemberDto } from '../workspaces/dto/workspace-response.dto';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
@@ -53,6 +54,7 @@ export class MembersController {
   }
 
   @Patch(':memberId')
+  @SessionOnly()
   @ApiOperation({
     summary: 'Change a member’s role',
     description:
@@ -72,6 +74,7 @@ export class MembersController {
   }
 
   @Delete(':memberId')
+  @SessionOnly()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Remove a member, or leave',
@@ -92,6 +95,7 @@ export class MembersController {
   }
 
   @Post(':memberId/transfer-ownership')
+  @SessionOnly()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Transfer ownership to another member',

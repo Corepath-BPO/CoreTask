@@ -188,6 +188,49 @@ export const ApiRoutes = {
     libraryField: (workspaceId: string, fieldId: string) =>
       `/workspaces/${workspaceId}/custom-fields/${fieldId}`,
   },
+  /**
+   * Workspace API keys, nested under the workspace like invitations. `whoami`
+   * is not: a tool calls it to check its credential and learn which workspace
+   * its key belongs to, so it cannot be asked to know that first.
+   */
+  apiKeys: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/api-keys`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/api-keys`,
+    update: (workspaceId: string, apiKeyId: string) =>
+      `/workspaces/${workspaceId}/api-keys/${apiKeyId}`,
+    revoke: (workspaceId: string, apiKeyId: string) =>
+      `/workspaces/${workspaceId}/api-keys/${apiKeyId}`,
+  },
+  integration: {
+    whoami: '/integration/whoami',
+  },
+  webhooks: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
+    detail: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    update: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    remove: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    /** Returns the new signing secret once. */
+    rotateSecret: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}/rotate-secret`,
+    /** Queues a `ping` delivery so the receiver can be checked. */
+    test: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}/test`,
+  },
+  /**
+   * One flat, filterable list rather than a list per endpoint: a rule can send
+   * to an ad-hoc URL, and those deliveries belong to no endpoint at all.
+   */
+  webhookDeliveries: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-deliveries`,
+    detail: (workspaceId: string, deliveryId: string) =>
+      `/workspaces/${workspaceId}/webhook-deliveries/${deliveryId}`,
+    redeliver: (workspaceId: string, deliveryId: string) =>
+      `/workspaces/${workspaceId}/webhook-deliveries/${deliveryId}/redeliver`,
+  },
   activity: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
     /** One item's stories, newest first, by `entity`, `entityId` and a `before` cursor. */

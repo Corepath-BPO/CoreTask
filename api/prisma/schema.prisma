@@ -158,6 +158,8 @@ enum ActivityEntity {
   TEAM
   ATTACHMENT
   USER
+  API_KEY
+  WEBHOOK_ENDPOINT
 }
 
 // ---------------------------------------------------------------------------
@@ -165,46 +167,53 @@ enum ActivityEntity {
 // ---------------------------------------------------------------------------
 
 model User {
-  id              String    @id @default(uuid(7)) @db.Uuid
+  id               String    @id @default(uuid(7)) @db.Uuid
   /// Always stored lower-cased; the application normalises before writing.
-  email           String    @unique @db.VarChar(254)
-  passwordHash    String
-  name            String    @db.VarChar(120)
-  avatarUrl       String?
-  timezone        String    @default("UTC") @db.VarChar(64)
-  emailVerifiedAt DateTime?
-  isActive        Boolean   @default(true)
-  lastLoginAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  email            String    @unique @db.VarChar(254)
+  passwordHash     String
+  name             String    @db.VarChar(120)
+  avatarUrl        String?
+  timezone         String    @default("UTC") @db.VarChar(64)
+  emailVerifiedAt  DateTime?
+  isActive         Boolean   @default(true)
+  /// True for the hidden principal behind an API key. It never signs in, never
+  /// receives mail (its address is under a reserved TLD) and is left out of
+  /// people lists and counts — every query that lists members must filter it.
+  isServiceAccount Boolean   @default(false)
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  refreshTokens             RefreshToken[]
-  memberships               WorkspaceMember[]
-  invitedMembers            WorkspaceMember[]       @relation("MemberInvitedBy")
-  createdWorkspaces         Workspace[]             @relation("WorkspaceCreatedBy")
-  ledProjects               Project[]               @relation("ProjectLead")
-  createdTasks              Task[]                  @relation("TaskCreatedBy")
-  assignedTasks             Task[]                  @relation("TaskAssignee")
-  reportedTickets           Ticket[]                @relation("TicketReporter")
-  assignedTickets           Ticket[]                @relation("TicketAssignee")
-  comments                  Comment[]
-  attachments               Attachment[]
-  mentionedIn               CommentMention[]
-  commentLikes              CommentLike[]
-  pinnedComments            Comment[]               @relation("CommentPinnedBy")
-  following                 Follower[]
-  sentInvitations           WorkspaceInvitation[]   @relation("InvitationSentBy")
-  teamMemberships           TeamMember[]
-  ledTeams                  Team[]                  @relation("TeamLead")
-  activityLogs              ActivityLog[]
-  notifications             Notification[]
-  createdFields             CustomField[]           @relation("CustomFieldCreatedBy")
-  updatedFieldValues        TaskCustomFieldValue[]  @relation("CustomFieldValueUpdatedBy")
-  ownedViews                ProjectView[]           @relation("ProjectViewOwner")
-  createdViews              ProjectView[]           @relation("ProjectViewCreatedBy")
-  createdAutomations        AutomationRule[]        @relation("AutomationCreatedBy")
-  createdAutomationVersions AutomationRuleVersion[] @relation("AutomationVersionCreatedBy")
-  createdAutomationTemplates AutomationTemplate[]   @relation("AutomationTemplateCreatedBy")
+  refreshTokens              RefreshToken[]
+  apiKey                     ApiKey?
+  createdApiKeys             ApiKey[]                @relation("ApiKeyCreatedBy")
+  createdWebhookEndpoints    WebhookEndpoint[]       @relation("WebhookEndpointCreatedBy")
+  memberships                WorkspaceMember[]
+  invitedMembers             WorkspaceMember[]       @relation("MemberInvitedBy")
+  createdWorkspaces          Workspace[]             @relation("WorkspaceCreatedBy")
+  ledProjects                Project[]               @relation("ProjectLead")
+  createdTasks               Task[]                  @relation("TaskCreatedBy")
+  assignedTasks              Task[]                  @relation("TaskAssignee")
+  reportedTickets            Ticket[]                @relation("TicketReporter")
+  assignedTickets            Ticket[]                @relation("TicketAssignee")
+  comments                   Comment[]
+  attachments                Attachment[]
+  mentionedIn                CommentMention[]
+  commentLikes               CommentLike[]
+  pinnedComments             Comment[]               @relation("CommentPinnedBy")
+  following                  Follower[]
+  sentInvitations            WorkspaceInvitation[]   @relation("InvitationSentBy")
+  teamMemberships            TeamMember[]
+  ledTeams                   Team[]                  @relation("TeamLead")
+  activityLogs               ActivityLog[]
+  notifications              Notification[]
+  createdFields              CustomField[]           @relation("CustomFieldCreatedBy")
+  updatedFieldValues         TaskCustomFieldValue[]  @relation("CustomFieldValueUpdatedBy")
+  ownedViews                 ProjectView[]           @relation("ProjectViewOwner")
+  createdViews               ProjectView[]           @relation("ProjectViewCreatedBy")
+  createdAutomations         AutomationRule[]        @relation("AutomationCreatedBy")
+  createdAutomationVersions  AutomationRuleVersion[] @relation("AutomationVersionCreatedBy")
+  createdAutomationTemplates AutomationTemplate[]    @relation("AutomationTemplateCreatedBy")
 
   @@index([isActive])
   @@map("users")
@@ -238,6 +247,123 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// A workspace API key: the credential a tool such as n8n presents.
+///
+/// The key acts as a hidden service-account `User` (`isServiceAccount`) whose
+/// `WorkspaceMember` row carries the role, so every createdBy/author foreign
+/// key and the membership guard keep working unchanged. Only the SHA-256 of the
+/// key is stored; the raw value is shown once at creation. Revoking keeps the
+/// rows so "created by n8n" stays true in the history.
+model ApiKey {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  workspaceId String    @db.Uuid
+  /// The service account this key acts as. One key, one account.
+  userId      String    @unique @db.Uuid
+  name        String    @db.VarChar(80)
+  /// `ctk_` plus the first characters of the random part — for the list, never for lookup.
+  prefix      String    @db.VarChar(16)
+  /// SHA-256 hex of the raw key.
+  tokenHash   String    @unique @db.VarChar(64)
+  createdById String?   @db.Uuid
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, revokedAt])
+  @@map("api_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Integrations — outbound webhooks
+// ---------------------------------------------------------------------------
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// A URL an admin registered to be told when things happen in the workspace.
+/// The signing secret is stored encrypted (AES-256-GCM, see lib/secret-cipher.ts)
+/// because signing needs it back — a hash would not do — and is never listed.
+model WebhookEndpoint {
+  id                  String                 @id @default(uuid(7)) @db.Uuid
+  workspaceId         String                 @db.Uuid
+  name                String                 @db.VarChar(80)
+  url                 String                 @db.VarChar(2048)
+  /// `v1.<iv>.<tag>.<ciphertext>`, base64url parts.
+  secret              String
+  /// WebhookEventType values the endpoint subscribed to.
+  events              String[]
+  /// Null means every project in the workspace.
+  projectId           String?                @db.Uuid
+  enabled             Boolean                @default(true)
+  /// Set when the endpoint switched itself off after too many failed deliveries.
+  disabledReason      String?                @db.VarChar(200)
+  consecutiveFailures Int                    @default(0)
+  lastDeliveryAt      DateTime?
+  lastDeliveryStatus  WebhookDeliveryStatus?
+  lastSuccessAt       DateTime?
+  createdById         String?                @db.Uuid
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy  User?             @relation("WebhookEndpointCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId, enabled])
+  @@map("webhook_endpoints")
+}
+
+/// One event to one endpoint, updated per attempt. The payload is stored as
+/// sent so every retry signs the identical bytes; `attempts` keeps the history.
+model WebhookDelivery {
+  id             String                @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                @db.Uuid
+  /// Null when a rule sent to an ad-hoc URL rather than a registered endpoint.
+  endpointId     String?               @db.Uuid
+  ruleId         String?               @db.Uuid
+  eventType      String                @db.VarChar(60)
+  /// Stable across attempts and endpoints — the receiver's idempotency key.
+  eventId        String                @db.Uuid
+  correlationId  String?               @db.Uuid
+  /// Snapshot: the endpoint may be edited later.
+  url            String                @db.VarChar(2048)
+  payload        Json
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempt        Int                   @default(0)
+  maxAttempts    Int
+  responseStatus Int?
+  responseBody   String?               @db.VarChar(500)
+  error          String?               @db.VarChar(500)
+  durationMs     Int?
+  /// [{ at, succeeded, responseStatus, error, durationMs }]
+  attempts       Json                  @default("[]")
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  endpoint  WebhookEndpoint? @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  rule      AutomationRule?  @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@unique([eventId, endpointId])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([endpointId, createdAt(sort: Desc)])
+  @@index([ruleId])
+  @@index([status, createdAt])
+  @@map("webhook_deliveries")
+}
+
 // ---------------------------------------------------------------------------
 // Tenancy
 // ---------------------------------------------------------------------------
@@ -262,6 +388,9 @@ model Workspace {
   createdBy            User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members              WorkspaceMember[]
   invitations          WorkspaceInvitation[]
+  apiKeys              ApiKey[]
+  webhookEndpoints     WebhookEndpoint[]
+  webhookDeliveries    WebhookDelivery[]
   teams                Team[]
   projects             Project[]
   sections             Section[]
@@ -374,19 +503,20 @@ model Project {
   /// workspace at large, and a project outlives the team that started it.
   teamId String? @db.Uuid
 
-  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lead         User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
-  team         Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  sections     Section[]
-  tasks        Task[]
-  tickets      Ticket[]
-  statuses     StatusDefinition[]
-  customFields ProjectCustomField[]
-  views        ProjectView[]
-  automations  AutomationRule[]
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead             User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  team             Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  sections         Section[]
+  tasks            Task[]
+  tickets          Ticket[]
+  statuses         StatusDefinition[]
+  customFields     ProjectCustomField[]
+  views            ProjectView[]
+  automations      AutomationRule[]
+  webhookEndpoints WebhookEndpoint[]
   /// Templates saved from this project's rules. Informational — a template
   /// outlives the project, which is why the link nulls rather than cascades.
-  savedTemplates AutomationTemplate[] @relation("TemplateSourceProject")
+  savedTemplates   AutomationTemplate[] @relation("TemplateSourceProject")
 
   @@unique([workspaceId, key])
   @@index([workspaceId, status])
@@ -923,7 +1053,7 @@ model ProjectCustomField {
   /// project's decision.
   notifyOnChange Boolean  @default(false)
   createdAt      DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
 
   project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
@@ -1115,15 +1245,16 @@ model AutomationRule {
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
-  workspace        Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project          Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy        User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  nodes            AutomationNode[]
-  executions       AutomationExecution[]
-  versions         AutomationRuleVersion[] @relation("RuleVersions")
-  draftVersion     AutomationRuleVersion?  @relation("RuleDraft", fields: [draftVersionId], references: [id], onDelete: SetNull)
-  publishedVersion AutomationRuleVersion?  @relation("RulePublished", fields: [publishedVersionId], references: [id], onDelete: SetNull)
-  savedAsTemplates AutomationTemplate[]    @relation("TemplateSourceRule")
+  workspace         Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy         User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  nodes             AutomationNode[]
+  executions        AutomationExecution[]
+  webhookDeliveries WebhookDelivery[]
+  versions          AutomationRuleVersion[] @relation("RuleVersions")
+  draftVersion      AutomationRuleVersion?  @relation("RuleDraft", fields: [draftVersionId], references: [id], onDelete: SetNull)
+  publishedVersion  AutomationRuleVersion?  @relation("RulePublished", fields: [publishedVersionId], references: [id], onDelete: SetNull)
+  savedAsTemplates  AutomationTemplate[]    @relation("TemplateSourceRule")
 
   /// The matcher's query: active rules for a project on a given trigger.
   @@index([projectId, status, triggerType])

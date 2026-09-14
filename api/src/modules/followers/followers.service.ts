@@ -9,7 +9,7 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 
 import type { ItemLink, ItemRef } from './item-ref';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 /**
  * Collaborators on a task or ticket.

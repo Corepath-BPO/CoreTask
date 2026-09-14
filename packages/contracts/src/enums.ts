@@ -168,6 +168,8 @@ export const ActivityEntity = {
   TEAM: 'TEAM',
   ATTACHMENT: 'ATTACHMENT',
   USER: 'USER',
+  API_KEY: 'API_KEY',
+  WEBHOOK_ENDPOINT: 'WEBHOOK_ENDPOINT',
 } as const;
 export type ActivityEntity = (typeof ActivityEntity)[keyof typeof ActivityEntity];
 export const ACTIVITY_ENTITIES = Object.values(ActivityEntity);

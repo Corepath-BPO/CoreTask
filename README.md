@@ -256,6 +256,14 @@ pnpm dev:local
 `dev:local` runs the API and the web dev server in parallel on the host. Both
 read `.env` from the repository root.
 
+On Windows, `scripts\dev-local.ps1` does all of the above in one go, starts the
+worker as well, and opens each service in its own PowerShell window. Pass
+`-BuildPackages` after editing a shared package and `-Seed` on an empty
+database. `scripts\dev-local-stop.ps1` ends the three services (add `-Infra`
+to stop the containers too). Pair it with a `%USERPROFILE%\.wslconfig` that caps the Docker VM
+(for example `memory=2GB`, `processors=2`) so the three infra containers stay
+cheap on a small laptop.
+
 ---
 
 ## Default ports

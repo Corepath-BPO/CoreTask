@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
+import { IntegrationBadge } from '@/components/common/integration-badge';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { RichTextEditor } from '@/components/forms/rich-text-editor';
 import { Badge } from '@/components/ui/badge';
@@ -1044,6 +1045,7 @@ function TaskDetailBody({
         <span>
           Created {formatDate(task.createdAt)}
           {task.createdBy ? ` by ${task.createdBy.name}` : ''}
+          {task.createdBy?.isServiceAccount && <IntegrationBadge className="mx-1 align-middle" />}
           {task.completedAt ? ` · completed ${formatDueDate(task.completedAt)}` : ''}
         </span>
 

@@ -17,6 +17,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
@@ -42,6 +43,7 @@ export class WorkspacesController {
   }
 
   @Post()
+  @SessionOnly()
   @ApiOperation({
     summary: 'Create a workspace',
     description: 'The creator is added as OWNER in the same transaction.',

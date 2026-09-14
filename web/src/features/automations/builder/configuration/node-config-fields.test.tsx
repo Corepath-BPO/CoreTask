@@ -21,6 +21,10 @@ const metadata = {
     { id: 'u-2', name: 'Jonas Feld', email: 'jonas@example.com', avatarUrl: null },
   ],
   customFields: [],
+  webhookEndpoints: [
+    { id: 'wh-1', name: 'n8n', host: 'n8n.example.com', enabled: true },
+    { id: 'wh-2', name: 'Paused hook', host: 'old.example.com', enabled: false },
+  ],
 } as AutomationMetadata;
 
 /** The panel for a "Create subtasks" step holding these rows, and what it writes. */
@@ -317,5 +321,63 @@ describe('moving a task to another project', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear project' }));
 
     expect(onChange).toHaveBeenLastCalledWith({ projectId: undefined, targetSectionId: undefined });
+  });
+});
+
+describe('sending a webhook', () => {
+  it('offers the workspace endpoints and an ad-hoc URL, greying a disabled endpoint', async () => {
+    renderAction('SEND_WEBHOOK', {});
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Send to' }));
+    expect(await screen.findByRole('option', { name: /n8n/ })).toBeEnabled();
+    expect(screen.getByRole('option', { name: /Paused hook/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(screen.getByRole('option', { name: /A URL I enter/ })).toBeInTheDocument();
+  });
+
+  it('writes the endpoint and clears any URL, so a step never names both', async () => {
+    const onChange = renderAction('SEND_WEBHOOK', { url: 'https://old.example.com/hook' });
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Send to' }));
+    await userEvent.click(await screen.findByRole('option', { name: /n8n/ }));
+
+    expect(onChange).toHaveBeenLastCalledWith({ endpointId: 'wh-1', url: '' });
+  });
+
+  it('shows the URL field for an ad-hoc address and flags a bad one without losing it', async () => {
+    const onChange = renderAction('SEND_WEBHOOK', { url: 'not a url' });
+
+    const input = screen.getByRole('textbox', { name: 'URL' });
+    expect(input).toHaveValue('not a url');
+    expect(screen.getByText(/enter a full url/i)).toBeInTheDocument();
+
+    // The harness never feeds the change back, so the controlled input keeps
+    // its value and a keystroke lands on the end of it.
+    await userEvent.type(input, 'h');
+    expect(onChange).toHaveBeenLastCalledWith({ endpointId: '', url: 'not a urlh' });
+  });
+
+  it('edits extra fields as rows and stores them as such', async () => {
+    const onChange = renderAction('SEND_WEBHOOK', {
+      endpointId: 'wh-1',
+      extraFields: [{ key: 'flow', value: 'renewals' }],
+    });
+
+    expect(screen.getByRole('textbox', { name: 'Field 1 name' })).toHaveValue('flow');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        extraFields: [
+          { key: 'flow', value: 'renewals' },
+          { key: '', value: '' },
+        ],
+      }),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove field 1' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ extraFields: [] }));
   });
 });

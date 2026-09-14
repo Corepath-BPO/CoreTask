@@ -8,6 +8,7 @@ import {
 } from '../../modules/automations/automation-event.publisher';
 import { AutomationRunnerService } from '../../modules/automations/automation-runner.service';
 import { QueueName } from '../queue-names';
+import { WebhookQueue } from '../webhook/webhook.queue';
 
 /**
  * Drains automation events.
@@ -24,6 +25,7 @@ export class AutomationProcessor extends WorkerHost {
   constructor(
     private readonly runner: AutomationRunnerService,
     private readonly publisher: AutomationEventPublisher,
+    private readonly webhooks: WebhookQueue,
   ) {
     super();
   }
@@ -51,6 +53,12 @@ export class AutomationProcessor extends WorkerHost {
       await this.publisher.publish(next);
     }
 
+    // The same arrangement for "Send a webhook" actions: the runner says what
+    // it wants sent, and the request goes onto the webhook queue from here.
+    for (const request of result.webhooks) {
+      await this.webhooks.enqueueRuleSend(request);
+    }
+
     if (result.executed > 0) {
       this.logger.log(
         {
@@ -60,6 +68,7 @@ export class AutomationProcessor extends WorkerHost {
           executed: result.executed,
           skipped: result.skipped,
           published: result.events.length,
+          webhooks: result.webhooks.length,
         },
         'Automation rules executed',
       );
@@ -67,6 +76,11 @@ export class AutomationProcessor extends WorkerHost {
 
     // Counts only: the return value is kept on the job in Redis, and a list of
     // events that are already in the queue would be stored twice for nothing.
-    return { executed: result.executed, skipped: result.skipped, published: result.events.length };
+    return {
+      executed: result.executed,
+      skipped: result.skipped,
+      published: result.events.length,
+      webhooks: result.webhooks.length,
+    };
   }
 }

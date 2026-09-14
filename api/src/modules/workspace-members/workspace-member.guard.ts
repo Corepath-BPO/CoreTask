@@ -46,6 +46,13 @@ export class WorkspaceMemberGuard implements CanActivate {
       throw AppException.badRequest('BAD_REQUEST', 'Invalid workspace identifier.');
     }
 
+    // A key belongs to exactly one workspace. Its membership alone would
+    // already refuse another, but saying so here documents the intent and keeps
+    // a stray membership row from ever widening a key's reach.
+    if (request.user.apiKey && request.user.apiKey.workspaceId !== workspaceId) {
+      throw AppException.forbidden('WORKSPACE_ACCESS_DENIED');
+    }
+
     const membership = await this.members.requireMembership(workspaceId, request.user.id);
 
     const requiredRole = this.reflector.getAllAndOverride<WorkspaceRole | undefined>(

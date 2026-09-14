@@ -31,6 +31,7 @@ const metadata = {
   priorities: [{ id: 'pr-1', name: 'High', colorToken: 'orange' }],
   members: [{ id: 'u-1', name: 'Maya Okafor', email: 'maya@example.com', avatarUrl: null }],
   customFields: [],
+  webhookEndpoints: [{ id: 'wh-1', name: 'n8n', host: 'n8n.example.com', enabled: true }],
 } as AutomationMetadata;
 
 const node = (over: Partial<CanvasNode>): CanvasNode =>
@@ -297,5 +298,35 @@ describe('values that match no option', () => {
     );
 
     expect(summary).toContain('urgent fix');
+  });
+});
+
+describe('the send-a-webhook step', () => {
+  it('names the endpoint, or the host of an ad-hoc URL — never the whole URL', () => {
+    expect(
+      summarise(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'wh-1' } }), metadata),
+    ).toBe('Send a webhook to n8n');
+    expect(
+      summarise(
+        node({
+          subtype: 'SEND_WEBHOOK',
+          configuration: { url: 'https://hooks.example.com/abc123/secret-path' },
+        }),
+        metadata,
+      ),
+    ).toBe('Send a webhook to hooks.example.com');
+    expect(
+      summarise(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'gone' } }), metadata),
+    ).toBe('Send a webhook to an endpoint that was removed');
+  });
+
+  it('is incomplete until it has somewhere to send', () => {
+    expect(isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: {} }))).toBe(true);
+    expect(
+      isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: { url: 'https://x.test' } })),
+    ).toBe(false);
+    expect(
+      isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'wh-1' } })),
+    ).toBe(false);
   });
 });

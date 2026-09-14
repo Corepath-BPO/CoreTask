@@ -1,14 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AutomationTrigger } from '@coretask/contracts';
+import { webhookEventTypeFor, type AutomationTrigger } from '@coretask/contracts';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 
 import { AutomationJob, QueueName } from '../../jobs/queue-names';
+import { WebhookQueue } from '../../jobs/webhook/webhook.queue';
 
 /** What happened, and enough context to decide whether a rule cares. */
 export interface AutomationEvent {
+  /**
+   * Identifies this occurrence. Stable across queue retries, so a webhook
+   * delivery keyed on it is made once however often the job runs.
+   */
+  eventId: string;
   workspaceId: string;
   projectId: string;
   trigger: AutomationTrigger;
@@ -48,16 +54,21 @@ export interface AutomationEvent {
 export class AutomationEventPublisher {
   private readonly logger = new Logger(AutomationEventPublisher.name);
 
-  constructor(@InjectQueue(QueueName.AUTOMATION) private readonly queue: Queue) {}
+  constructor(
+    @InjectQueue(QueueName.AUTOMATION) private readonly queue: Queue,
+    private readonly webhooks: WebhookQueue,
+  ) {}
 
   async publish(
-    event: Omit<AutomationEvent, 'correlationId' | 'depth'> & {
+    event: Omit<AutomationEvent, 'eventId' | 'correlationId' | 'depth'> & {
+      eventId?: string;
       correlationId?: string;
       depth?: number;
     },
   ): Promise<void> {
     const payload: AutomationEvent = {
       ...event,
+      eventId: event.eventId ?? randomUUID(),
       // A fresh id means a user action; an inherited one means this is a
       // continuation, and that is what makes a loop traceable end to end.
       correlationId: event.correlationId ?? randomUUID(),
@@ -76,6 +87,17 @@ export class AutomationEventPublisher {
         { err: error, trigger: payload.trigger, entityId: payload.entityId },
         'Could not enqueue an automation event',
       );
+    }
+
+    /*
+     * Webhooks branch off here, onto their own queue, so an endpoint that is
+     * slow to answer never holds up a rule, and a rule that fails never
+     * re-sends a webhook. Rule-caused events pass through the same door, which
+     * is how a receiver learns about what a rule changed — flagged by
+     * `causedByRuleId`, so it can ignore them if it prefers.
+     */
+    if (webhookEventTypeFor(payload.trigger, payload.entityType) !== null) {
+      await this.webhooks.enqueueFanOut(payload);
     }
   }
 }

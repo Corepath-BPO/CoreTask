@@ -68,9 +68,8 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
    * false })` returns raw params.
    */
   const navigate = useNavigate();
-  const routeSearch: Partial<{ task: string; comment: string; view: string }> = useSearch({
-    strict: false,
-  });
+  const routeSearch: Partial<{ task: string; comment: string; view: string; section: string }> =
+    useSearch({ strict: false });
   const openTaskId =
     routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
   const linkedCommentId =
@@ -79,7 +78,23 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
       : null;
   const requestedViewId =
     routeSearch.view && UUID_PATTERN.test(routeSearch.view) ? routeSearch.view : undefined;
-  const viewSearch = requestedViewId ? { view: requestedViewId } : {};
+  // The selected section rides along too, so opening a task does not lose it.
+  const selectedSectionId =
+    routeSearch.section && UUID_PATTERN.test(routeSearch.section) ? routeSearch.section : null;
+  const viewSearch = {
+    ...(requestedViewId ? { view: requestedViewId } : {}),
+    ...(selectedSectionId ? { section: selectedSectionId } : {}),
+  };
+
+  // Replace, as on the List: selecting a section is not a place Back returns from.
+  const selectSection = (sectionId: string) =>
+    void navigate({
+      to: '/projects/$projectId/board',
+      params: { projectId },
+      search: { ...viewSearch, ...(openTaskId ? { task: openTaskId } : {}), section: sectionId },
+      replace: true,
+      resetScroll: false,
+    });
 
   const boardView = useActiveView(views, ProjectViewType.BOARD, requestedViewId);
   const canPersist = canPersistView(boardView, me?.id, role);
@@ -236,6 +251,8 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
           metadata={metadata}
           onOpenTask={openTask}
           onAddSection={() => setAddingSection(true)}
+          selectedSectionId={selectedSectionId}
+          onSelectSection={selectSection}
         />
       )}
 

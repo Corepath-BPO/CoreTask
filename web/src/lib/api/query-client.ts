@@ -37,6 +37,18 @@ export const queryKeys = {
       [...queryKeys.workspaces.all, 'invitations', workspaceId] as const,
   },
   invitationPreview: (token: string) => ['invitation-preview', token] as const,
+  apiKeys: {
+    all: (workspaceId: string) => ['api-keys', workspaceId] as const,
+    list: (workspaceId: string) => [...queryKeys.apiKeys.all(workspaceId), 'list'] as const,
+  },
+  webhooks: {
+    all: (workspaceId: string) => ['webhooks', workspaceId] as const,
+    list: (workspaceId: string) => [...queryKeys.webhooks.all(workspaceId), 'list'] as const,
+    deliveries: (workspaceId: string, endpointId: string) =>
+      [...queryKeys.webhooks.all(workspaceId), 'deliveries', endpointId] as const,
+    delivery: (workspaceId: string, deliveryId: string) =>
+      [...queryKeys.webhooks.all(workspaceId), 'delivery', deliveryId] as const,
+  },
   teams: {
     all: (workspaceId: string) => ['teams', workspaceId] as const,
     list: (workspaceId: string) => [...queryKeys.teams.all(workspaceId), 'list'] as const,

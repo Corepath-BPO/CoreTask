@@ -66,6 +66,9 @@ export class ActivityActorDto {
 
   @ApiProperty({ nullable: true, example: null })
   avatarUrl!: string | null;
+
+  @ApiProperty({ required: false, description: 'True for the hidden account behind an API key.' })
+  isServiceAccount?: boolean;
 }
 
 export class ActivityEntryDto {

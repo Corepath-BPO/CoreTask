@@ -33,7 +33,13 @@ export interface StoryContext {
   entityId: string;
 }
 
-const ACTOR_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const ACTOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  isServiceAccount: true,
+} as const;
 
 /**
  * Append-only audit trail.
@@ -190,7 +196,13 @@ export class ActivityLogsService {
     entityId: string;
     summary: string;
     metadata: unknown;
-    actor: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+    actor: {
+      id: string;
+      name: string;
+      email: string;
+      avatarUrl: string | null;
+      isServiceAccount: boolean;
+    } | null;
     createdAt: Date;
   }): ActivityEntry {
     return {

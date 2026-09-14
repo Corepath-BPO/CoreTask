@@ -137,6 +137,12 @@ export interface AutomationMetadata {
   conditionFields: ConditionFieldDefinition[];
   sections: { id: string; name: string }[];
   /**
+   * The workspace's webhook endpoints, for the "Send a webhook" step. Host
+   * only, not the URL: an n8n address often carries a path token, and this
+   * list is read by every manager who can edit a rule.
+   */
+  webhookEndpoints: { id: string; name: string; host: string; enabled: boolean }[];
+  /**
    * The workspace's other live projects, each with its sections, for the step
    * that moves a task out of this project.
    *

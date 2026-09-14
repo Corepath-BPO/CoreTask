@@ -65,6 +65,9 @@ interface SectionBoardProps {
   onOpenTask: (taskId: string) => void;
   /** Opens the shared section dialog. Omitted hides the trailing column. */
   onAddSection?: (() => void) | undefined;
+  /** The section named in the URL, if any; clicking a column header selects it. */
+  selectedSectionId?: string | null;
+  onSelectSection?: ((sectionId: string) => void) | undefined;
 }
 
 export function SectionBoard({
@@ -80,6 +83,8 @@ export function SectionBoard({
   metadata,
   onOpenTask,
   onAddSection,
+  selectedSectionId = null,
+  onSelectSection,
 }: SectionBoardProps) {
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveSection = useMoveSection(workspaceId, projectId);
@@ -195,6 +200,8 @@ export function SectionBoard({
                 onRename={(sectionId, name) => renameSection.mutate({ sectionId, name })}
                 onRequestDelete={setPendingDelete}
                 onOpenTask={onOpenTask}
+                selected={selectedSectionId === section.id}
+                onSelect={onSelectSection ? () => onSelectSection(section.id) : undefined}
                 defaultType={defaultType}
                 creating={createWorkItem.isPending}
                 onCreateWorkItem={(sectionId, type, title) =>

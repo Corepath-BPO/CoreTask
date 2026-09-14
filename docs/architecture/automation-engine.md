@@ -181,6 +181,13 @@ is logged with its before and after values.
 An unknown condition operator evaluates to **false**, not true. A condition
 nobody can evaluate must block the rule rather than wave it through.
 
+Two kinds of thing come back from `handle` besides the counts, and neither is
+acted on inside the runner: the domain `events` a rule's writes amount to, and
+the `webhooks` a "Send a webhook" action asked for. The processor publishes the
+first and queues the second once the run is over, so the runner never waits on
+Redis or another server mid-execution, and a run that failed part-way has sent
+nothing rather than half of something.
+
 ## Validation at execution time
 
 Membership and section ownership are re-checked when an action runs, not only

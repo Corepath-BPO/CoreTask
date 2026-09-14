@@ -30,6 +30,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
 import { AppException } from '../../common/exceptions/app.exception';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
@@ -123,6 +124,7 @@ export class WorkItemsController {
   }
 
   @Post()
+  @Idempotent()
   @ApiOperation({
     summary: 'Create a work item',
     description:

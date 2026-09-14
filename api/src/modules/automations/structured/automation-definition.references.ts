@@ -151,6 +151,12 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
   SET_START_DATE: [{ key: 'daysFromNow', kind: ConfigKind.NUMBER, required: false }],
   CLEAR_START_DATE: [],
   SET_ESTIMATE: [{ key: 'minutes', kind: ConfigKind.NUMBER, required: true }],
+  // Either one is enough, so neither is required on its own; whether the
+  // endpoint exists and the URL is one CoreTask may call is the validator's.
+  SEND_WEBHOOK: [
+    { key: 'endpointId', kind: ConfigKind.TEXT, required: false },
+    { key: 'url', kind: ConfigKind.TEXT, required: false },
+  ],
   SET_CUSTOM_FIELD: [
     { key: 'fieldId', aliases: ['customFieldId'], kind: ConfigKind.CUSTOM_FIELD, required: true },
     { key: 'value', kind: ConfigKind.ANY, required: false },

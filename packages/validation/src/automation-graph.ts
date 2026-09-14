@@ -358,6 +358,12 @@ const ACTION_REQUIREMENTS: Readonly<
   },
   ADD_COMMENT: { keys: ['body'], path: 'body', message: 'Write the comment.' },
   SET_ESTIMATE: { keys: ['minutes'], path: 'minutes', message: 'Enter the estimate in minutes.' },
+  // Either a registered endpoint or an ad-hoc URL; the server checks the rest.
+  SEND_WEBHOOK: {
+    keys: ['endpointId', 'url'],
+    path: 'endpointId',
+    message: 'Choose a webhook endpoint or enter a URL.',
+  },
 };
 
 /**

@@ -10,6 +10,9 @@ import { RegisterPage } from '@/features/auth/pages/register-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
+import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
+import { IntegrationsPage } from '@/features/integrations/pages/integrations-page';
+import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
@@ -278,6 +281,37 @@ const teamsRoute = createRoute({
 });
 
 /**
+ * Integrations is a shell with tabs, like a project: the shell owns the header
+ * and the admin gate, the tabs are routes so a URL names one of them.
+ */
+const integrationsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/integrations',
+  component: IntegrationsPage,
+});
+
+/** Bare `/integrations` opens the first tab. */
+const integrationsIndexRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/',
+  beforeLoad: () => {
+    throw redirect({ to: '/integrations/api-keys' });
+  },
+});
+
+const integrationsApiKeysRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/api-keys',
+  component: ApiKeysPage,
+});
+
+const integrationsWebhooksRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/webhooks',
+  component: WebhooksPage,
+});
+
+/**
  * Hangs off the root rather than either gate: `guestRoute` would bounce a
  * signed-in user away from the invitation they were sent, and `protectedRoute`
  * would bounce the far more common case — someone with no account at all.
@@ -313,6 +347,7 @@ export function validateProjectDetailSearch(search: Record<string, unknown>): {
   comment?: string;
   customize?: boolean;
   view?: string;
+  section?: string;
 } {
   const task = search['task'];
   const validTask = typeof task === 'string' && UUID_PATTERN.test(task) ? task : undefined;
@@ -321,10 +356,17 @@ export function validateProjectDetailSearch(search: Record<string, unknown>): {
   // view", and the link keeps it. Independent of the panel and the drawer.
   const view = search['view'];
   const validView = typeof view === 'string' && UUID_PATTERN.test(view) ? view : undefined;
+  // The selected section. Clicking a header puts its id here so it can be read
+  // off the address bar the way a task's can — what an n8n flow needs to file
+  // work into it — and a link carrying it lands on that section.
+  const section = search['section'];
+  const validSection =
+    typeof section === 'string' && UUID_PATTERN.test(section) ? section : undefined;
   return {
     ...(validTask ? { task: validTask, ...commentSearch(search) } : {}),
     ...(customize && !validTask ? { customize: true } : {}),
     ...(validView ? { view: validView } : {}),
+    ...(validSection ? { section: validSection } : {}),
   };
 }
 
@@ -532,6 +574,11 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     membersRoute,
     teamsRoute,
+    integrationsRoute.addChildren([
+      integrationsIndexRoute,
+      integrationsApiKeysRoute,
+      integrationsWebhooksRoute,
+    ]),
     calendarRoute,
     reportsRoute,
     settingsRoute,

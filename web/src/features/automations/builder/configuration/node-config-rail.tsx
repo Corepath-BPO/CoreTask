@@ -1,4 +1,9 @@
-import { TRIGGER_LABEL, isFallbackBranch, type AutomationTrigger } from '@coretask/contracts';
+import {
+  EXTERNAL_ACTION_CATEGORY,
+  TRIGGER_LABEL,
+  isFallbackBranch,
+  type AutomationTrigger,
+} from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationMetadata,
@@ -525,6 +530,15 @@ function ChoosePanel({
   }, [entries, query]);
 
   /*
+   * The external group has its own tab, so it is taken out of the main list
+   * when there is one. With no tabs — conditions — everything stays together.
+   */
+  const externalGroups = groups.filter(([group]) => group === EXTERNAL_ACTION_CATEGORY);
+  const internalGroups = tabbed
+    ? groups.filter(([group]) => group !== EXTERNAL_ACTION_CATEGORY)
+    : groups;
+
+  /*
    * The list says it is one.
    *
    * Every row already carried `role="option"`, but an option outside a listbox
@@ -533,15 +547,15 @@ function ChoosePanel({
    * which is the only thing telling somebody how much catalogue is left below
    * the fold.
    */
-  const list = (
-    <div role="listbox" aria-label={title} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-      {groups.length === 0 && (
+  const renderList = (shown: [string, AutomationCatalogEntry[]][], label: string) => (
+    <div role="listbox" aria-label={label} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {shown.length === 0 && (
         <p className="px-2 py-6 text-center text-sm text-muted-foreground">
           Nothing matches “{query}”.
         </p>
       )}
 
-      {groups.map(([group, groupEntries]) => (
+      {shown.map(([group, groupEntries]) => (
         <div key={group} role="group" aria-label={group} className="mb-2">
           {/* The rows that sit above every group carry an empty category, and
               an empty heading would still take a line. */}
@@ -568,6 +582,8 @@ function ChoosePanel({
     </div>
   );
 
+  const list = renderList(internalGroups, title);
+
   return (
     <>
       <RailHeader title={title} hint={CATALOGUE_HINT[catalogue] ?? description} onClose={onClose} />
@@ -587,10 +603,6 @@ function ChoosePanel({
             placeholder={`Search ${noun}`}
             aria-label={`Search ${noun}`}
             className="pl-8"
-            /* Off on the tab with nothing to search. Hidden instead would move
-               the tabs up and down as somebody switched between them, and a box
-               that quietly ignores typing is the worse of the two. */
-            disabled={tab === 'external'}
             autoFocus
           />
         </div>
@@ -617,17 +629,21 @@ function ChoosePanel({
           </TabsPrimitive.Content>
 
           {/*
-            A sentence, and nothing else.
-
-            Nothing external is implemented, so anything else here would be a
-            row that looks like an integration and is not one. The tab exists so
-            that "can this talk to anything else?" has an answer other than
-            silence.
+            The rows the API files under the external category — today, "Send a
+            webhook". When the server sends none, a sentence rather than an
+            empty list, so "can this talk to anything else?" has an answer.
           */}
-          <TabsPrimitive.Content value="external" className="px-4 py-6 outline-none">
-            <p className="text-sm text-muted-foreground">
-              External {noun} will be available later.
-            </p>
+          <TabsPrimitive.Content
+            value="external"
+            className="flex min-h-0 flex-1 flex-col outline-none"
+          >
+            {externalGroups.length > 0 || query.trim() !== '' ? (
+              renderList(externalGroups, `External ${noun}`)
+            ) : (
+              <p className="px-4 py-6 text-sm text-muted-foreground">
+                External {noun} will be available later.
+              </p>
+            )}
           </TabsPrimitive.Content>
         </TabsPrimitive.Root>
       )}

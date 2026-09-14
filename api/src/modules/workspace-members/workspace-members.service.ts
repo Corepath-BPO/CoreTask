@@ -11,6 +11,7 @@ const MEMBER_USER_SELECT = {
   name: true,
   email: true,
   avatarUrl: true,
+  isServiceAccount: true,
 } as const;
 
 @Injectable()
@@ -56,9 +57,10 @@ export class WorkspaceMembersService {
     return membership;
   }
 
+  /** People only: the service account behind an API key is managed from the API keys page. */
   async listMembers(workspaceId: string): Promise<WorkspaceMemberDto[]> {
     const members = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId },
+      where: { workspaceId, user: { isServiceAccount: false } },
       orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
       include: { user: { select: MEMBER_USER_SELECT } },
     });

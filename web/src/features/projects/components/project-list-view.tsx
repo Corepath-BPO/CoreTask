@@ -15,12 +15,24 @@ import type {
 
 /** A task as this view receives it — the task plus its field values. */
 type TaskRow = Task & { customFieldValues?: TaskCustomFieldValue[] };
-import { ChevronDown, ChevronRight, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
+  Plus,
+  Search,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useMoveTaskToSection } from '@/features/tasks/hooks/use-tasks';
@@ -52,12 +64,13 @@ import { textWidth } from '@/lib/text-width';
  * header's own font; the fallback estimate covers environments without
  * canvas, like the test runner.
  */
-const SECTION_HEADER_CHROME = 80;
+const SECTION_HEADER_CHROME = 104;
 
 function sectionLabelWidth(text: string): number {
   return textWidth(text, '600 14px');
 }
 import { ORPHAN_GROUP_ID } from '../lib/group-by-section';
+import { SectionLinkItems } from './section-link-items';
 import { groupRows, type RowGroup } from '../lib/group-rows';
 import { groupValueChange, isManualOrder } from '../lib/group-value';
 import { DEFAULT_VIEW_SETTINGS } from '../lib/view-settings';
@@ -143,6 +156,9 @@ interface ProjectListViewProps {
   canPersist?: boolean;
   dirty?: boolean;
   onSaveAs?: (() => void) | undefined;
+  /** The section named in the URL, if any; clicking a header selects it. */
+  selectedSectionId?: string | null;
+  onSelectSection?: ((sectionId: string) => void) | undefined;
 }
 
 /**
@@ -166,6 +182,8 @@ export function ProjectListView({
   canPersist = true,
   dirty = false,
   onSaveAs,
+  selectedSectionId = null,
+  onSelectSection,
 }: ProjectListViewProps) {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -911,6 +929,8 @@ export function ProjectListView({
                             projectId={projectId}
                             collapsed={collapsed.has(group.id)}
                             canEdit={canEdit}
+                            selected={selectedSectionId === group.id}
+                            onSelect={onSelectSection ? () => onSelectSection(group.id) : undefined}
                             onToggle={() => toggle(group.id)}
                             onRename={(name) => renameSection.mutate({ sectionId: group.id, name })}
                           />
@@ -1389,6 +1409,8 @@ function SectionHeader({
   projectId,
   collapsed,
   canEdit,
+  selected,
+  onSelect,
   onToggle,
   onRename,
 }: {
@@ -1396,12 +1418,16 @@ function SectionHeader({
   projectId: string;
   collapsed: boolean;
   canEdit: boolean;
+  selected: boolean;
+  onSelect: (() => void) | undefined;
   onToggle: () => void;
   onRename: (name: string) => void;
 }) {
   // A value heading — a status, an assignee, an option — has no name to
   // rename and no section for a rule to belong to.
   const isRealSection = group.kind === 'section' && group.id !== ORPHAN_GROUP_ID;
+  // Only a real section has an id worth putting in the address bar.
+  const select = isRealSection ? onSelect : undefined;
 
   const editor = useCellEditor(group.name, (name) => {
     const trimmed = name.trim();
@@ -1411,16 +1437,30 @@ function SectionHeader({
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const caretRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (editor.editing) inputRef.current?.select();
   }, [editor.editing]);
 
+  // A link that names this section lands on it, the way `?task=` opens the
+  // panel. Once, on arrival: a click that selects it must not scroll anything,
+  // so the first render's answer is the one that counts.
+  const [landedHere] = useState(selected);
+  useEffect(() => {
+    if (!landedHere) return;
+    caretRef.current?.closest('section')?.scrollIntoView?.({ block: 'center' });
+  }, [landedHere]);
+
   return (
     <>
       <button
+        ref={caretRef}
         type="button"
-        onClick={onToggle}
+        onClick={() => {
+          onToggle();
+          select?.();
+        }}
         aria-expanded={!collapsed}
         aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${group.name}`}
         className="shrink-0 cursor-pointer rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
@@ -1445,9 +1485,28 @@ function SectionHeader({
       ) : canEdit && isRealSection ? (
         <button
           type="button"
-          onClick={editor.open}
+          onClick={() => {
+            editor.open();
+            select?.();
+          }}
           aria-label={`Rename ${group.name}`}
-          className="min-w-0 cursor-pointer truncate rounded px-1 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          className={cn(
+            'min-w-0 cursor-pointer truncate rounded px-1 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+            selected && 'text-primary',
+          )}
+        >
+          {group.name}
+        </button>
+      ) : isRealSection ? (
+        // Read-only members still get to select it: the id is not an edit.
+        <button
+          type="button"
+          onClick={() => select?.()}
+          aria-label={`Select ${group.name}`}
+          className={cn(
+            'min-w-0 cursor-pointer truncate rounded px-1 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+            selected && 'text-primary',
+          )}
         >
           {group.name}
         </button>
@@ -1476,6 +1535,26 @@ function SectionHeader({
           sectionId={group.id}
           sectionName={group.name}
         />
+      )}
+
+      {/* Asana's section "…": here it carries the link and the id, which is
+          where somebody wiring a tool goes looking for them. Shown on hover,
+          like the lightning beside it. */}
+      {isRealSection && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Section options for ${group.name}`}
+              className="shrink-0 cursor-pointer rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:opacity-100"
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <SectionLinkItems projectId={projectId} sectionId={group.id} view="list" />
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {/* The count only earns its place once the rows are hidden — open,

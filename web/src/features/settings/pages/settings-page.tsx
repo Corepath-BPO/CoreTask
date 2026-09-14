@@ -7,7 +7,7 @@ import {
 } from '@coretask/contracts';
 import { Link } from '@tanstack/react-router';
 import type { WorkspaceSummary } from '@coretask/types';
-import { Building2, Check, Laptop, Moon, Sun, UsersRound } from 'lucide-react';
+import { Building2, Check, KeyRound, Laptop, Moon, Sun, UsersRound, Webhook } from 'lucide-react';
 import { useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -203,6 +203,26 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
                 <Link to="/teams">
                   <Building2 />
                   Teams
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+          <Card className="bg-muted/25">
+            <CardHeader>
+              <CardTitle>Integrations</CardTitle>
+              <CardDescription>Connect n8n and other tools to this workspace.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2 pt-1">
+              <Button asChild variant="outline" className="justify-start">
+                <Link to="/integrations/api-keys">
+                  <KeyRound />
+                  API keys
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="justify-start">
+                <Link to="/integrations/webhooks">
+                  <Webhook />
+                  Webhooks
                 </Link>
               </Button>
             </CardContent>

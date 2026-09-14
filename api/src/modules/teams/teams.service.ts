@@ -16,7 +16,7 @@ import { WorkspaceMembersService } from '../workspace-members/workspace-members.
 
 import type { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 const teamInclude = {
   lead: { select: USER_SELECT },

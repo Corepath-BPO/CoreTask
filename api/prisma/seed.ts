@@ -26,6 +26,12 @@ import {
   WorkspaceRole,
 } from '@prisma/client';
 
+import {
+  deriveKey,
+  encryptSecret,
+  generateWebhookSecret,
+} from '../src/modules/webhooks/lib/secret-cipher';
+
 const prisma = new PrismaClient();
 
 const DEMO_EMAIL = process.env.SEED_USER_EMAIL ?? 'demo@coretask.dev';
@@ -153,6 +159,11 @@ async function main(): Promise<void> {
   if (!backlog || !inProgress || !inReview || !done) {
     throw new Error('Seed failed to create the default sections.');
   }
+
+  // ---------------------------------------------------------------------------
+  // Integrations: a paused example webhook aimed at a local n8n
+  // ---------------------------------------------------------------------------
+  await ensureExampleWebhook(workspace.id, owner.id);
 
   // ---------------------------------------------------------------------------
   // Tasks
@@ -571,6 +582,50 @@ async function upsertTask(input: {
         },
       })
     : prisma.task.create({ data: input });
+}
+
+/**
+ * A paused endpoint aimed at n8n's local test URL, so the Webhooks page has a
+ * row to look at and the shape of a subscription is on show.
+ *
+ * Guarded rather than upserted — endpoints have no natural key — and the
+ * secret is printed the one time it is made, as the real thing would show it.
+ * It is encrypted the way the API encrypts it, so the API can sign with it.
+ */
+async function ensureExampleWebhook(workspaceId: string, createdById: string): Promise<void> {
+  const name = 'n8n (local example)';
+  const existing = await prisma.webhookEndpoint.findFirst({
+    where: { workspaceId, name },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const material =
+    process.env.WEBHOOK_SECRET_ENCRYPTION_KEY ??
+    (process.env.JWT_ACCESS_SECRET ? `${process.env.JWT_ACCESS_SECRET}:webhooks` : null);
+  if (!material) {
+    console.warn(
+      'Skipping the example webhook: set WEBHOOK_SECRET_ENCRYPTION_KEY or JWT_ACCESS_SECRET to encrypt its secret.',
+    );
+    return;
+  }
+
+  const secret = generateWebhookSecret();
+  await prisma.webhookEndpoint.create({
+    data: {
+      workspaceId,
+      name,
+      url: 'http://localhost:5678/webhook-test/coretask',
+      secret: encryptSecret(secret, deriveKey(material)),
+      events: ['task.created', 'task.completed', 'comment.created'],
+      enabled: false,
+      createdById,
+    },
+  });
+
+  console.warn(
+    `Example webhook "${name}" added, paused. Its signing secret (shown once): ${secret}`,
+  );
 }
 
 /**

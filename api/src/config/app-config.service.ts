@@ -124,6 +124,24 @@ export class AppConfigService {
    * `enabled` needs only one check because the schema refuses a partial
    * configuration outright, so any one value present means all of them are.
    */
+  get webhooks() {
+    return {
+      timeoutMs: this.env.WEBHOOK_TIMEOUT_MS,
+      maxAttempts: this.env.WEBHOOK_MAX_ATTEMPTS,
+      retryBaseDelayMs: this.env.WEBHOOK_RETRY_BASE_DELAY_MS,
+      autoDisableAfter: this.env.WEBHOOK_AUTO_DISABLE_AFTER,
+      retentionDays: this.env.WEBHOOK_DELIVERY_RETENTION_DAYS,
+      allowPrivateUrls: this.env.WEBHOOK_ALLOW_PRIVATE_URLS,
+      /**
+       * What the secret cipher derives its key from. Production sets it
+       * explicitly (the schema insists); elsewhere the access-token secret
+       * stands in so a checkout works with no extra configuration.
+       */
+      encryptionKeyMaterial:
+        this.env.WEBHOOK_SECRET_ENCRYPTION_KEY ?? `${this.env.JWT_ACCESS_SECRET}:webhooks`,
+    } as const;
+  }
+
   get microsoftGraph() {
     return {
       tenantId: this.env.MICROSOFT_GRAPH_TENANT_ID,

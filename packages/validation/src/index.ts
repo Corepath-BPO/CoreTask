@@ -1,3 +1,4 @@
+export * from './api-key.js';
 export * from './attachment.js';
 export * from './automation-graph.js';
 export * from './automation-rule.js';
@@ -14,5 +15,6 @@ export * from './section.js';
 export * from './task.js';
 export * from './team.js';
 export * from './ticket.js';
+export * from './webhook.js';
 export * from './work-item.js';
 export * from './workspace.js';

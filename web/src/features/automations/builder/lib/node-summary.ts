@@ -557,6 +557,26 @@ function actionSummary(
         : [{ text: 'Comment — write what it says' }];
     }
 
+    case 'SEND_WEBHOOK': {
+      const endpointId = config['endpointId'];
+      const url = config['url'];
+
+      if (typeof endpointId === 'string' && endpointId !== '') {
+        const endpoint = (metadata?.webhookEndpoints ?? []).find(
+          (entry) => entry.id === endpointId,
+        );
+        return [
+          { text: 'Send a webhook to' },
+          { text: endpoint?.name ?? 'an endpoint that was removed', chip: true },
+        ];
+      }
+      if (typeof url === 'string' && url.trim() !== '') {
+        // The host, not the whole URL: a path token is nobody's business on a card.
+        return [{ text: 'Send a webhook to' }, { text: hostOf(url), chip: true }];
+      }
+      return [{ text: 'Send a webhook — choose where' }];
+    }
+
     case 'CREATE_SUBTASK': {
       // The count rather than the titles: three titles on a card is a
       // paragraph, and the panel is one click away for anyone who wants them.
@@ -635,11 +655,23 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return !has('priorityDefinitionId') && !has('priority');
     case 'ADD_COMMENT':
       return !has('body');
+    case 'SEND_WEBHOOK':
+      // Either destination will do; a step naming neither has nowhere to send.
+      return !has('endpointId') && !has('url');
     case 'CREATE_SUBTASK':
       // No titles, or a row still waiting for its date: a step that reads as
       // ready and would create something other than what it says.
       return subtaskTitles(config).length === 0 || subtaskProblems(config).length > 0;
     default:
       return false;
+  }
+}
+
+/** The host of a URL, or the text itself while somebody is still typing it. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }

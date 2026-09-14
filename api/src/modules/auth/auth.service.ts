@@ -62,6 +62,13 @@ export class AuthService {
       throw AppException.unauthorized('INVALID_CREDENTIALS');
     }
 
+    // The account behind an API key has a password nobody knows; refusing it
+    // outright keeps that true even if one were ever set.
+    if (user.isServiceAccount) {
+      await this.passwords.verifyAgainstDummy(dto.password);
+      throw AppException.unauthorized('INVALID_CREDENTIALS');
+    }
+
     if (!(await this.passwords.verify(user.passwordHash, dto.password))) {
       throw AppException.unauthorized('INVALID_CREDENTIALS');
     }

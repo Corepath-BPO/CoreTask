@@ -9,3 +9,6 @@ test-results
 api/prisma/migrations
 web/src/components/ui
 CHANGELOG.md
+
+# PowerShell helpers: prettier has no parser for them
+*.ps1

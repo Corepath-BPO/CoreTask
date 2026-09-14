@@ -22,13 +22,23 @@ import { TaskStatus, type Prisma } from '@prisma/client';
  */
 
 const userRef = (
-  user: { id: string; name: string; email: string; avatarUrl: string | null } | null,
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    isServiceAccount: boolean;
+  } | null,
 ): UserRef | null => (user ? { ...user } : null);
 
 /** Everything the mapper needs from a task, and nothing it does not. */
 export const workItemTaskInclude = {
-  assignee: { select: { id: true, name: true, email: true, avatarUrl: true } },
-  createdBy: { select: { id: true, name: true, email: true, avatarUrl: true } },
+  assignee: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
+  createdBy: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
   statusDefinition: { select: { id: true, name: true, colorToken: true } },
   priorityDefinition: { select: { id: true, name: true, colorToken: true } },
   customFieldValues: true,
@@ -46,8 +56,12 @@ export const workItemTaskInclude = {
 } satisfies Prisma.TaskInclude;
 
 export const workItemTicketInclude = {
-  assignee: { select: { id: true, name: true, email: true, avatarUrl: true } },
-  reporter: { select: { id: true, name: true, email: true, avatarUrl: true } },
+  assignee: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
+  reporter: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
   _count: {
     select: {
       comments: { where: { deletedAt: null } },

@@ -2,7 +2,7 @@ import { TaskStatus } from '@coretask/contracts';
 import type { Task, TaskDetail } from '@coretask/types';
 import type { Prisma } from '@prisma/client';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 /**
  * Subtask rollups come from a filtered relation count. Prisma cannot alias two

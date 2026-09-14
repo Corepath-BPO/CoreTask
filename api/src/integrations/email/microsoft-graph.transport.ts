@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { fetchWithTimeout, safeBody } from '../../common/utils/http.util';
 import { AppConfigService } from '../../config/app-config.service';
 
 import type { EmailMessage } from './email.service';
@@ -119,40 +120,8 @@ export class MicrosoftGraphTransport {
     return body.access_token;
   }
 
-  /**
-   * `fetch` has no timeout of its own, and a mail send that hangs would occupy a
-   * queue worker until the process restarts.
-   */
-  private async fetchWithTimeout(
-    url: string,
-    init: RequestInit,
-    timeoutMs: number,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      return await fetch(url, { ...init, signal: controller.signal });
-    } catch (error) {
-      if (controller.signal.aborted) {
-        throw new Error(`Microsoft Graph did not respond within ${timeoutMs}ms.`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-}
-
-/**
- * Graph error bodies are the only useful diagnostic when a send fails, but they
- * must never take the process down with a parse error on top of the original
- * failure. Truncated because they can be long and end up in logs.
- */
-async function safeBody(response: Response): Promise<string> {
-  try {
-    return (await response.text()).slice(0, 500);
-  } catch {
-    return '<unreadable response body>';
+  /** The shared helper, naming Graph in its timeout error. */
+  private fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    return fetchWithTimeout(url, init, timeoutMs, 'Microsoft Graph');
   }
 }

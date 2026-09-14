@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   ActivityAction,
   ActivityEntity,
@@ -15,6 +17,7 @@ import {
   isTokenValue,
   NotificationType,
   POSITION_STEP,
+  webhookExtraFields,
   ServerEvent,
   isCalendarDate,
   subtaskEntries,
@@ -45,6 +48,8 @@ import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { labelValue } from '../custom-fields/lib/value-labels';
 
 import { priorityData, readActionId, statusData } from './action-config';
+import type { RuleWebhookRequest } from '../../jobs/queue-names';
+
 import type { AutomationEvent } from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
 import { fieldChangeTriggers } from './task-field-triggers';
@@ -61,12 +66,16 @@ interface ActionOutcome {
    * when the write changed nothing.
    */
   events?: AutomationEvent[];
+  /** What a "Send a webhook" action wants delivered; queued by the caller like `events`. */
+  webhooks?: RuleWebhookRequest[];
 }
 
 /** What `handle` reports back: counts for the log, events for the queue. */
 export interface AutomationRunResult {
   executed: number;
   skipped: number;
+  /** Webhook requests from "Send a webhook" actions, handed back for the same reason as `events`. */
+  webhooks: RuleWebhookRequest[];
   /**
    * Every event the rules' actions raised, in the order the actions ran.
    *
@@ -143,7 +152,7 @@ export class AutomationRunnerService {
         'Automation chain stopped at the depth limit',
       );
       await this.recordSkipped(event, 'Depth limit reached — this looks like a loop.');
-      return { executed: 0, skipped: 1, events: [] };
+      return { executed: 0, skipped: 1, events: [], webhooks: [] };
     }
 
     const rules = await this.prisma.automationRule.findMany({
@@ -164,6 +173,7 @@ export class AutomationRunnerService {
     let executed = 0;
     let skipped = 0;
     const events: AutomationEvent[] = [];
+    const webhooks: RuleWebhookRequest[] = [];
 
     for (const rule of rules) {
       // A rule reacting to its own write is the commonest loop there is: one
@@ -196,6 +206,7 @@ export class AutomationRunnerService {
       if (run.ran) executed += 1;
       else skipped += 1;
       events.push(...run.events);
+      webhooks.push(...run.webhooks);
     }
 
     /*
@@ -208,7 +219,7 @@ export class AutomationRunnerService {
       if (rollup) events.push(rollup);
     }
 
-    return { executed, skipped, events };
+    return { executed, skipped, events, webhooks };
   }
 
   // -------------------------------------------------------------------------
@@ -252,6 +263,8 @@ export class AutomationRunnerService {
 
     return {
       ...event,
+      // Its own event, not the subtask's: webhooks key deliveries on the id.
+      eventId: randomUUID(),
       entityType: 'TASK',
       entityId: parent.id,
       before: { allSubtasksCompleted: false },
@@ -292,8 +305,19 @@ export class AutomationRunnerService {
    * prototype off the Decimals a number field's value carries.
    */
   private async loadTask(event: AutomationEvent): Promise<TaskContext | null> {
+    // A comment event names the comment; the task it was left on rides in
+    // `after`. Comments on tickets carry no task, so their rules are skipped.
+    const taskId =
+      event.entityType === 'COMMENT'
+        ? typeof event.after?.['taskId'] === 'string'
+          ? event.after['taskId']
+          : null
+        : event.entityId;
+
+    if (!taskId) return null;
+
     const live = await this.prisma.task.findFirst({
-      where: { id: event.entityId, workspaceId: event.workspaceId },
+      where: { id: taskId, workspaceId: event.workspaceId },
       include: { customFieldValues: true },
     });
 
@@ -315,7 +339,7 @@ export class AutomationRunnerService {
     },
     event: AutomationEvent,
     context: TaskContext | null,
-  ): Promise<{ ran: boolean; events: AutomationEvent[] }> {
+  ): Promise<{ ran: boolean; events: AutomationEvent[]; webhooks: RuleWebhookRequest[] }> {
     const started = Date.now();
 
     const execution = await this.prisma.automationExecution.create({
@@ -337,7 +361,7 @@ export class AutomationRunnerService {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
         skippedReason: 'The task no longer exists.',
       });
-      return { ran: false, events: [] };
+      return { ran: false, events: [], webhooks: [] };
     }
 
     // Judged on the task as the event found it, run against the live row:
@@ -354,13 +378,14 @@ export class AutomationRunnerService {
         skippedReason: `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
-      return { ran: false, events: [] };
+      return { ran: false, events: [], webhooks: [] };
     }
 
     const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
 
     let failures = 0;
     const events: AutomationEvent[] = [];
+    const webhooks: RuleWebhookRequest[] = [];
 
     for (const node of actions) {
       // One failing action does not abandon the rest: a rule that assigns
@@ -375,6 +400,7 @@ export class AutomationRunnerService {
 
       if (!outcome.succeeded) failures += 1;
       events.push(...(outcome.events ?? []));
+      webhooks.push(...(outcome.webhooks ?? []));
 
       await this.prisma.automationExecutionLog.create({
         data: {
@@ -459,7 +485,7 @@ export class AutomationRunnerService {
       }
     }
 
-    return { ran: true, events };
+    return { ran: true, events, webhooks };
   }
 
   /** Evaluates one condition against the task the event is about. */
@@ -816,6 +842,86 @@ export class AutomationRunnerService {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
     switch (node.subtype) {
+      /*
+       * Nothing is sent from here. The runner has no queue and no HTTP client
+       * — deliberately, so a slow endpoint cannot hold a rule open mid-run —
+       * so the action decides *what* to send and hands the request back for
+       * the processor to queue, exactly as it hands back events.
+       */
+      case AutomationAction.SEND_WEBHOOK: {
+        const text = (value: unknown): string | null =>
+          typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+        const endpointId = text(config['endpointId']);
+        const rawUrl = text(config['url']);
+
+        if (!endpointId && !rawUrl) {
+          return { succeeded: false, message: 'Choose a webhook endpoint or enter a URL.' };
+        }
+
+        let destination: { endpointId: string | null; url: string; label: string };
+
+        if (endpointId) {
+          // Re-checked at execution time: the endpoint may have been deleted
+          // or switched off since the rule was written.
+          const endpoint = await this.prisma.webhookEndpoint.findFirst({
+            where: { id: endpointId, workspaceId: rule.workspaceId },
+            select: { id: true, url: true, name: true, enabled: true },
+          });
+
+          if (!endpoint) {
+            return {
+              succeeded: false,
+              message: 'That webhook endpoint is no longer in this workspace.',
+            };
+          }
+          if (!endpoint.enabled) {
+            return {
+              succeeded: false,
+              message: `Webhook endpoint "${endpoint.name}" is disabled.`,
+            };
+          }
+          destination = { endpointId: endpoint.id, url: endpoint.url, label: endpoint.name };
+        } else {
+          let parsed: URL;
+          try {
+            parsed = new URL(rawUrl as string);
+          } catch {
+            return { succeeded: false, message: 'The webhook URL is not a valid URL.' };
+          }
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            return {
+              succeeded: false,
+              message: 'Webhooks are sent over https:// or http:// only.',
+            };
+          }
+          // Whether the address is one CoreTask may call is decided where the
+          // call is made, with the deployment's own setting.
+          destination = { endpointId: null, url: parsed.toString(), label: parsed.host };
+        }
+
+        return {
+          succeeded: true,
+          message: `Queued a webhook to ${destination.label}`,
+          after: { url: destination.url, endpointId: destination.endpointId },
+          webhooks: [
+            {
+              workspaceId: rule.workspaceId,
+              projectId: rule.projectId,
+              ruleId: rule.id,
+              nodeId: node.id,
+              endpointId: destination.endpointId,
+              url: destination.url,
+              entityId: task.id,
+              trigger: event.trigger,
+              sourceEventId: event.eventId,
+              correlationId: event.correlationId,
+              actorId: event.actorId ?? null,
+              extra: webhookExtraFields(config['extraFields']),
+            },
+          ],
+        };
+      }
+
       case AutomationAction.ASSIGN_USER: {
         const userId = String(config['userId'] ?? '');
         // Membership is re-checked at execution time: the rule may have been
@@ -1644,6 +1750,7 @@ export class AutomationRunnerService {
     projectId?: string,
   ): AutomationEvent {
     return {
+      eventId: randomUUID(),
       workspaceId: rule.workspaceId,
       projectId: projectId ?? event.projectId,
       trigger,

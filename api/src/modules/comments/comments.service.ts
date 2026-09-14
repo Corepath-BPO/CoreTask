@@ -2,6 +2,7 @@ import {
   ActivityAction,
   ActivityEntity,
   AttachmentStatus,
+  AutomationTrigger,
   CommentEntity,
   MAX_MENTIONS_PER_COMMENT,
   NOTIFICATION_BODY_LENGTH,
@@ -23,6 +24,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { FollowersService } from '../followers/followers.service';
 import { linkOf, type ItemLink } from '../followers/item-ref';
 import { TasksService } from '../tasks/tasks.service';
@@ -43,6 +45,8 @@ interface CommentParent {
   label: string;
   /** In-app path the notification links to. */
   actionUrl: string;
+  /** The project the item sits in; null means no automation event is raised, like every other write. */
+  projectId: string | null;
 }
 
 @Injectable()
@@ -57,6 +61,7 @@ export class CommentsService {
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationDispatcher,
     private readonly followers: FollowersService,
+    private readonly automation: AutomationEventPublisher,
   ) {}
 
   async listForTask(
@@ -445,6 +450,27 @@ export class CommentsService {
       metadata: { entity: parent.entity },
     });
 
+    // The same door every other write uses: rules can react to a comment, and
+    // webhooks carry it out. The task rides in `after` so the runner can load
+    // it; comments on items outside a project raise nothing, like other writes.
+    if (parent.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: parent.projectId,
+        trigger: AutomationTrigger.COMMENT_ADDED,
+        entityType: 'COMMENT',
+        entityId: created.id,
+        actorId: userId,
+        after: {
+          taskId: parent.link.taskId,
+          ticketId: parent.link.ticketId,
+          authorId: userId,
+          mentionCount: mentioned.length,
+          excerpt: htmlToText(body).slice(0, NOTIFICATION_BODY_LENGTH),
+        },
+      });
+    }
+
     const comment = toCommentDto(created, userId);
     this.realtime.emitToWorkspace(
       workspaceId,
@@ -605,6 +631,7 @@ export class CommentsService {
       link: { taskId: task.id, ticketId: null },
       label: `“${task.title}”`,
       actionUrl: `/my-tasks?task=${task.id}`,
+      projectId: task.projectId,
     };
   }
 
@@ -616,6 +643,7 @@ export class CommentsService {
       link: { taskId: null, ticketId: ticket.id },
       label: ticket.key,
       actionUrl: `/tickets?ticket=${ticket.key}`,
+      projectId: ticket.projectId,
     };
   }
 

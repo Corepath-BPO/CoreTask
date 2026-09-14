@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { commentBodyToHtml } from '../../common/utils/rich-text.util';
 import { attachmentInclude, toAttachmentDto } from '../attachments/attachment.mapper';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 export const commentInclude = {
   author: { select: USER_SELECT },

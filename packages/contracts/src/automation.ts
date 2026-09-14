@@ -100,6 +100,8 @@ export const AutomationAction = {
   ADD_COMMENT: 'ADD_COMMENT',
   SEND_IN_APP_NOTIFICATION: 'SEND_IN_APP_NOTIFICATION',
   CREATE_SUBTASK: 'CREATE_SUBTASK',
+  /** POSTs the task to a webhook endpoint from Settings, or to an ad-hoc URL. */
+  SEND_WEBHOOK: 'SEND_WEBHOOK',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -120,7 +122,15 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   ADD_COMMENT: 'Add a comment',
   SEND_IN_APP_NOTIFICATION: 'Send a notification',
   CREATE_SUBTASK: 'Create a subtask',
+  SEND_WEBHOOK: 'Send a webhook',
 };
+
+/**
+ * The catalogue group for actions that leave CoreTask. Named here because the
+ * API groups by it and the builder shows that group on its own tab, so both
+ * sides have to agree on the words.
+ */
+export const EXTERNAL_ACTION_CATEGORY = 'Send to another tool';
 
 /**
  * Actions with a contract but no implementation.
@@ -131,7 +141,6 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
  */
 export const PLANNED_ACTIONS = [
   'SEND_EMAIL',
-  'SEND_WEBHOOK',
   'DELAY',
   'CREATE_CHECKLIST',
   'ASSIGN_TEAM',

@@ -26,6 +26,22 @@ export const ErrorCode = {
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   ACCOUNT_DISABLED: 'ACCOUNT_DISABLED',
 
+  // API keys
+  API_KEY_INVALID: 'API_KEY_INVALID',
+  API_KEY_REVOKED: 'API_KEY_REVOKED',
+  API_KEY_EXPIRED: 'API_KEY_EXPIRED',
+  API_KEY_NOT_ALLOWED: 'API_KEY_NOT_ALLOWED',
+  API_KEY_ROLE_NOT_ALLOWED: 'API_KEY_ROLE_NOT_ALLOWED',
+  API_KEY_LIMIT_REACHED: 'API_KEY_LIMIT_REACHED',
+
+  // Webhooks
+  WEBHOOK_URL_NOT_ALLOWED: 'WEBHOOK_URL_NOT_ALLOWED',
+  WEBHOOK_ENDPOINT_LIMIT_REACHED: 'WEBHOOK_ENDPOINT_LIMIT_REACHED',
+
+  // Idempotent creates
+  IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
+  IDEMPOTENCY_IN_PROGRESS: 'IDEMPOTENCY_IN_PROGRESS',
+
   // Authorization / tenancy
   FORBIDDEN: 'FORBIDDEN',
   WORKSPACE_ACCESS_DENIED: 'WORKSPACE_ACCESS_DENIED',
@@ -59,6 +75,20 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   REFRESH_TOKEN_REUSED: 'The refresh token has already been used. All sessions were revoked.',
   EMAIL_ALREADY_REGISTERED: 'An account with this e-mail address already exists.',
   ACCOUNT_DISABLED: 'This account has been disabled.',
+
+  API_KEY_INVALID: 'The API key is not recognised.',
+  API_KEY_REVOKED: 'The API key has been revoked.',
+  API_KEY_EXPIRED: 'The API key has expired.',
+  API_KEY_NOT_ALLOWED: 'This action needs a signed-in person, not an API key.',
+  API_KEY_ROLE_NOT_ALLOWED: 'An API key can be a guest, a member or a manager.',
+  API_KEY_LIMIT_REACHED: 'This workspace already has the maximum number of API keys.',
+
+  WEBHOOK_URL_NOT_ALLOWED: 'CoreTask cannot send webhooks to that address.',
+  WEBHOOK_ENDPOINT_LIMIT_REACHED:
+    'This workspace already has the maximum number of webhook endpoints.',
+
+  IDEMPOTENCY_KEY_REUSED: 'This Idempotency-Key was already used for a different request.',
+  IDEMPOTENCY_IN_PROGRESS: 'A request with this Idempotency-Key is still being processed.',
 
   FORBIDDEN: 'You do not have permission to perform this action.',
   WORKSPACE_ACCESS_DENIED: 'You are not a member of this workspace.',

@@ -18,6 +18,11 @@ export interface UserRef {
   name: string;
   email: string;
   avatarUrl: string | null;
+  /**
+   * True for the hidden account behind a workspace API key, so a task "created
+   * by n8n" can be badged as such. Absent means a person.
+   */
+  isServiceAccount?: boolean;
 }
 
 export interface Project {

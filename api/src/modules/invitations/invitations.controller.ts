@@ -24,6 +24,7 @@ import {
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import {
   CurrentWorkspace,
   RequireWorkspaceRole,
@@ -47,6 +48,7 @@ import { InvitationsService } from './invitations.service';
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/invitations')
 @UseGuards(WorkspaceMemberGuard)
+@SessionOnly()
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 @ApiErrorResponseDoc(403, 'Not an administrator of this workspace')
@@ -132,6 +134,7 @@ export class InvitationsController {
   }
 
   @Post(':token/accept')
+  @SessionOnly()
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

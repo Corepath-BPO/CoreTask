@@ -33,4 +33,17 @@ describe('validateProjectDetailSearch', () => {
   it('returns an empty schema for an empty search', () => {
     expect(validateProjectDetailSearch({})).toEqual({});
   });
+
+  it('keeps a selected section, alongside an open task', () => {
+    const SECTION_ID = '0198c9a1-2b3c-7d4e-89ab-0123456789cd';
+    expect(validateProjectDetailSearch({ section: SECTION_ID })).toEqual({ section: SECTION_ID });
+    expect(validateProjectDetailSearch({ task: TASK_ID, section: SECTION_ID })).toEqual({
+      task: TASK_ID,
+      section: SECTION_ID,
+    });
+  });
+
+  it('drops a section that is not a uuid', () => {
+    expect(validateProjectDetailSearch({ section: 'backlog' })).toEqual({});
+  });
 });

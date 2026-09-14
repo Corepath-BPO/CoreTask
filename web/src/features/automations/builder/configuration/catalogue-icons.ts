@@ -113,6 +113,7 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   ADD_COMMENT: glyph(MessageSquarePlus),
   SEND_IN_APP_NOTIFICATION: glyph(Bell),
   CREATE_SUBTASK: glyph(ListPlus),
+  SEND_WEBHOOK: glyph(Webhook),
 
   /*
    * Conditions, keyed by the field they check.
@@ -159,7 +160,6 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
    * missing its icon reads as a rendering fault rather than as a decision.
    */
   SEND_EMAIL: glyph(Mail),
-  SEND_WEBHOOK: glyph(Webhook),
   DELAY: glyph(Timer),
   CREATE_CHECKLIST: glyph(ListChecks),
   ASSIGN_TEAM: glyph(Users),

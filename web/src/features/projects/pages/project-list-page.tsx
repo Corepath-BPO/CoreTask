@@ -46,9 +46,8 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
    * returns the raw parameters — same rule as the tickets page.
    */
   const navigate = useNavigate();
-  const routeSearch: Partial<{ task: string; comment: string; view: string }> = useSearch({
-    strict: false,
-  });
+  const routeSearch: Partial<{ task: string; comment: string; view: string; section: string }> =
+    useSearch({ strict: false });
   const openTaskId =
     routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
   const linkedCommentId =
@@ -57,8 +56,25 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
       : null;
   const requestedViewId =
     routeSearch.view && UUID_PATTERN.test(routeSearch.view) ? routeSearch.view : undefined;
+  // The selected section rides along too, so opening a task does not lose it.
+  const selectedSectionId =
+    routeSearch.section && UUID_PATTERN.test(routeSearch.section) ? routeSearch.section : null;
 
-  const viewSearch = requestedViewId ? { view: requestedViewId } : {};
+  const viewSearch = {
+    ...(requestedViewId ? { view: requestedViewId } : {}),
+    ...(selectedSectionId ? { section: selectedSectionId } : {}),
+  };
+
+  // Selecting a section is a detail of where you are, not a place you went:
+  // replace, so Back still means "close the panel" or "leave the project".
+  const selectSection = (sectionId: string) =>
+    void navigate({
+      to: '/projects/$projectId/list',
+      params: { projectId },
+      search: { ...viewSearch, ...(openTaskId ? { task: openTaskId } : {}), section: sectionId },
+      replace: true,
+      resetScroll: false,
+    });
 
   /*
    * Opening pushes — Back closes the panel. Swapping tasks replaces, so Back
@@ -120,6 +136,8 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
         canPersist={canPersist}
         dirty={editor.dirty}
         onSaveAs={() => setSavingAs(true)}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={selectSection}
       />
 
       {/* A personal copy of the draft, for somebody who may not write to

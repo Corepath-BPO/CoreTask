@@ -5,6 +5,7 @@ import { RedisService } from '../redis/redis.service';
 
 import { EmailQueue } from './email/email.queue';
 import { QueueName } from './queue-names';
+import { WebhookQueue } from './webhook/webhook.queue';
 
 /**
  * Producer side of the queue layer: registers the BullMQ connection and the
@@ -29,8 +30,9 @@ import { QueueName } from './queue-names';
     BullModule.registerQueue({ name: QueueName.EMAIL }),
     BullModule.registerQueue({ name: QueueName.MAINTENANCE }),
     BullModule.registerQueue({ name: QueueName.AUTOMATION }),
+    BullModule.registerQueue({ name: QueueName.WEBHOOK }),
   ],
-  providers: [EmailQueue],
-  exports: [BullModule, EmailQueue],
+  providers: [EmailQueue, WebhookQueue],
+  exports: [BullModule, EmailQueue, WebhookQueue],
 })
 export class JobsModule {}

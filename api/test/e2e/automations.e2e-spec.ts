@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { API_PREFIX, MAX_AUTOMATION_DEPTH, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
 
@@ -144,6 +146,7 @@ describe('Automations (e2e)', () => {
   };
 
   const moveEvent = (scope: Scope, overrides: Record<string, unknown> = {}) => ({
+    eventId: randomUUID(),
     workspaceId: scope.workspaceId,
     projectId: scope.projectId,
     trigger: 'TASK_MOVED_TO_SECTION' as const,

@@ -47,6 +47,7 @@ import {
   readTriggerSections,
 } from './trigger-forms';
 import { RadioItem } from './radio-item';
+import { SendWebhookFields } from './send-webhook-fields';
 import { SubtaskListFields } from './subtask-list-fields';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
@@ -730,6 +731,11 @@ function ActionFields({
     case 'CREATE_SUBTASK':
       return (
         <SubtaskListFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
+    case 'SEND_WEBHOOK':
+      return (
+        <SendWebhookFields configuration={configuration} metadata={metadata} onChange={onChange} />
       );
 
     default:

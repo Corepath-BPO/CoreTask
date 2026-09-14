@@ -1,12 +1,24 @@
 import type { PaginationMeta } from '@coretask/types';
 import type { Request } from 'express';
 
-/** Identity attached to the request by the JWT strategy. */
+/** The key that authenticated a request, when one did. */
+export interface ApiKeyPrincipal {
+  id: string;
+  workspaceId: string;
+  name: string;
+}
+
+/** Identity attached to the request by `JwtAuthGuard` — a session or an API key. */
 export interface AuthenticatedUser {
   id: string;
   email: string;
-  /** Session id, tying this access token to a refresh-token family. */
-  sessionId: string;
+  /**
+   * Session id, tying this access token to a refresh-token family. Null when
+   * an API key authenticated the request: a key has no session to revoke.
+   */
+  sessionId: string | null;
+  /** Present when a workspace API key authenticated the request. */
+  apiKey?: ApiKeyPrincipal;
 }
 
 /** Membership resolved by `WorkspaceMemberGuard`, scoped to the current request. */

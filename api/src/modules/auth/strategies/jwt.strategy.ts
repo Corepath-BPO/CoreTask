@@ -33,6 +33,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (!user) {
       throw AppException.unauthorized('ACCESS_TOKEN_INVALID');
     }
+    // A service account authenticates with its API key, never with a session
+    // token — there is no way to mint one, so one that names it is forged.
+    if (user.isServiceAccount) {
+      throw AppException.unauthorized('ACCESS_TOKEN_INVALID');
+    }
     if (!user.isActive) {
       throw AppException.forbidden('ACCOUNT_DISABLED');
     }

@@ -19,7 +19,7 @@ import { NotificationDispatcher } from '../../integrations/notifications/notific
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
 
-const MEMBER_USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const MEMBER_USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 /**
  * Changing and ending memberships.
@@ -284,10 +284,21 @@ export class MembersService {
   private async requireMember(workspaceId: string, memberId: string): Promise<WorkspaceMember> {
     const member = await this.prisma.workspaceMember.findFirst({
       where: { id: memberId, workspaceId },
+      include: { user: { select: { isServiceAccount: true } } },
     });
 
     if (!member) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Member not found.');
+    }
+
+    // The membership behind an API key is managed with the key. Changing its
+    // role, removing it or handing it ownership from here would leave the two
+    // disagreeing about what the key may do.
+    if (member.user.isServiceAccount) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Manage integration access from the API keys page.',
+      );
     }
 
     return member;

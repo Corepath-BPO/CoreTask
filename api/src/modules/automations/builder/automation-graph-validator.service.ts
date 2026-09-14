@@ -16,7 +16,10 @@ import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
 import { Injectable } from '@nestjs/common';
 
+import { AppException } from '../../../common/exceptions/app.exception';
+import { AppConfigService } from '../../../config/app-config.service';
 import { PrismaService } from '../../../database/prisma.service';
+import { assertDeliverableUrl } from '../../webhooks/lib/url-policy';
 
 import {
   conditionFieldKind,
@@ -75,7 +78,10 @@ type StructuralNode = Parameters<typeof validateGraphStructure>[0][number];
  */
 @Injectable()
 export class AutomationGraphValidatorService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: AppConfigService,
+  ) {}
 
   async validate(
     projectId: string,
@@ -203,6 +209,7 @@ export class AutomationGraphValidatorService {
     const fieldIds = new Set<string>();
     const targetProjectIds = new Set<string>();
     const targetSectionIds = new Set<string>();
+    const webhookEndpointIds = new Set<string>();
 
     const read = (value: unknown): string | null =>
       typeof value === 'string' && value !== '' ? value : null;
@@ -235,6 +242,13 @@ export class AutomationGraphValidatorService {
         }
       }
 
+      // A webhook step names a workspace endpoint; a rule may not send to
+      // another workspace's, so the lookup is scoped like every other.
+      if (node.subtype === AutomationAction.SEND_WEBHOOK) {
+        const endpointId = read(config['endpointId']);
+        if (endpointId) webhookEndpointIds.add(endpointId);
+      }
+
       /*
        * Canonical name first, then the one it used to be written under.
        *
@@ -261,70 +275,85 @@ export class AutomationGraphValidatorService {
       if (conditionFieldId) fieldIds.add(conditionFieldId);
     }
 
-    const [sections, members, statuses, priorities, fields, targetProjects, targetSections] =
-      await Promise.all([
-        sectionIds.size
-          ? this.prisma.section.findMany({
-              where: { id: { in: [...sectionIds] }, projectId },
-              select: { id: true },
-            })
-          : [],
-        userIds.size
-          ? this.prisma.workspaceMember.findMany({
-              where: { workspaceId, userId: { in: [...userIds] } },
-              select: { userId: true },
-            })
-          : [],
-        statusIds.size
-          ? this.prisma.statusDefinition.findMany({
-              where: {
-                id: { in: [...statusIds] },
-                workspaceId,
-                OR: [{ projectId }, { projectId: null }],
-              },
-              select: { id: true },
-            })
-          : [],
-        priorityIds.size
-          ? // Priorities are workspace-wide; unlike statuses, a project cannot
-            // define its own, so there is no project arm to check.
-            this.prisma.priorityDefinition.findMany({
-              where: { id: { in: [...priorityIds] }, workspaceId },
-              select: { id: true },
-            })
-          : [],
-        fieldIds.size
-          ? this.prisma.customField.findMany({
-              where: { id: { in: [...fieldIds] }, workspaceId, isArchived: false },
-              // The type as well as the id: a computed value is only meaningful
-              // on some of them, and this is where that is refused.
-              select: { id: true, type: true },
-            })
-          : [],
-        targetProjectIds.size
-          ? // Another live project of this workspace. The rule's own is not a
-            // destination, and an archived one would land the task somewhere
-            // nobody looks.
-            this.prisma.project.findMany({
-              where: {
-                id: { in: [...targetProjectIds] },
-                workspaceId,
-                archivedAt: null,
-                NOT: { id: projectId },
-              },
-              select: { id: true },
-            })
-          : [],
-        targetSectionIds.size
-          ? // With the project each belongs to: the check below is that it is
-            // the project the same node chose, not merely that it exists.
-            this.prisma.section.findMany({
-              where: { id: { in: [...targetSectionIds] }, workspaceId },
-              select: { id: true, projectId: true },
-            })
-          : [],
-      ]);
+    const [
+      sections,
+      members,
+      statuses,
+      priorities,
+      fields,
+      targetProjects,
+      targetSections,
+      webhookEndpoints,
+    ] = await Promise.all([
+      sectionIds.size
+        ? this.prisma.section.findMany({
+            where: { id: { in: [...sectionIds] }, projectId },
+            select: { id: true },
+          })
+        : [],
+      userIds.size
+        ? this.prisma.workspaceMember.findMany({
+            where: { workspaceId, userId: { in: [...userIds] } },
+            select: { userId: true },
+          })
+        : [],
+      statusIds.size
+        ? this.prisma.statusDefinition.findMany({
+            where: {
+              id: { in: [...statusIds] },
+              workspaceId,
+              OR: [{ projectId }, { projectId: null }],
+            },
+            select: { id: true },
+          })
+        : [],
+      priorityIds.size
+        ? // Priorities are workspace-wide; unlike statuses, a project cannot
+          // define its own, so there is no project arm to check.
+          this.prisma.priorityDefinition.findMany({
+            where: { id: { in: [...priorityIds] }, workspaceId },
+            select: { id: true },
+          })
+        : [],
+      fieldIds.size
+        ? this.prisma.customField.findMany({
+            where: { id: { in: [...fieldIds] }, workspaceId, isArchived: false },
+            // The type as well as the id: a computed value is only meaningful
+            // on some of them, and this is where that is refused.
+            select: { id: true, type: true },
+          })
+        : [],
+      targetProjectIds.size
+        ? // Another live project of this workspace. The rule's own is not a
+          // destination, and an archived one would land the task somewhere
+          // nobody looks.
+          this.prisma.project.findMany({
+            where: {
+              id: { in: [...targetProjectIds] },
+              workspaceId,
+              archivedAt: null,
+              NOT: { id: projectId },
+            },
+            select: { id: true },
+          })
+        : [],
+      targetSectionIds.size
+        ? // With the project each belongs to: the check below is that it is
+          // the project the same node chose, not merely that it exists.
+          this.prisma.section.findMany({
+            where: { id: { in: [...targetSectionIds] }, workspaceId },
+            select: { id: true, projectId: true },
+          })
+        : [],
+      webhookEndpointIds.size
+        ? this.prisma.webhookEndpoint.findMany({
+            where: { id: { in: [...webhookEndpointIds] }, workspaceId },
+            select: { id: true, enabled: true },
+          })
+        : [],
+    ]);
 
+    const liveEndpoints = new Map(webhookEndpoints.map((row) => [row.id, row.enabled]));
     const liveTargetProjects = new Set(targetProjects.map((row) => row.id));
     const targetSectionProject = new Map(targetSections.map((row) => [row.id, row.projectId]));
 
@@ -429,6 +458,50 @@ export class AutomationGraphValidatorService {
           path: 'customFieldId',
           message: 'That field no longer exists.',
         });
+      }
+
+      /*
+       * Where a webhook step sends. An endpoint that is gone is an error; one
+       * that is switched off is a warning, since switching it back on needs
+       * no change to the rule. An ad-hoc URL is held to the same address
+       * policy the settings page applies, in the deployment's own words.
+       */
+      if (node.subtype === AutomationAction.SEND_WEBHOOK) {
+        const endpointId = read(config['endpointId']);
+        if (endpointId) {
+          const enabled = liveEndpoints.get(endpointId);
+          if (enabled === undefined) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'endpointId',
+              message: 'That webhook endpoint is no longer in this workspace.',
+            });
+          } else if (!enabled) {
+            issues.push({
+              level: GraphIssueLevel.WARNING,
+              nodeId: node.id,
+              path: 'endpointId',
+              message:
+                'That webhook endpoint is disabled, so this step sends nothing until it is enabled.',
+            });
+          }
+        }
+
+        const url = read(config['url']);
+        if (url && !endpointId) {
+          try {
+            assertDeliverableUrl(url, { allowPrivate: this.config.webhooks.allowPrivateUrls });
+          } catch (error) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'url',
+              message:
+                error instanceof AppException ? error.message : 'That URL cannot be sent to.',
+            });
+          }
+        }
       }
 
       /*

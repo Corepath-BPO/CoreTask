@@ -22,6 +22,7 @@ import {
   ApiPaginatedEnvelopeResponse,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import {
   CurrentWorkspace,
   RequireWorkspaceRole,
@@ -67,6 +68,7 @@ export class TaskCommentsController {
   }
 
   @Post()
+  @Idempotent()
   @RequireWorkspaceRole(WorkspaceRole.MEMBER)
   @ApiOperation({ summary: 'Comment on a task' })
   @ApiEnvelopeResponse(CommentDto, { status: 201 })
@@ -110,6 +112,7 @@ export class TicketCommentsController {
   }
 
   @Post()
+  @Idempotent()
   @RequireWorkspaceRole(WorkspaceRole.MEMBER)
   @ApiOperation({ summary: 'Comment on a ticket' })
   @ApiEnvelopeResponse(CommentDto, { status: 201 })

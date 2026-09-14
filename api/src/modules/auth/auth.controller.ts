@@ -11,6 +11,7 @@ import {
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { buildClearCookieOptions, buildRefreshCookieOptions } from '../../common/utils/cookie.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { AUTH_THROTTLE, SESSION_THROTTLE } from '../../config/throttle.config';
@@ -23,6 +24,7 @@ import type { SessionContext } from './token.service';
 @ApiTags('Authentication')
 @Controller('auth')
 @Throttle(AUTH_THROTTLE)
+@SessionOnly()
 export class AuthController {
   constructor(
     private readonly auth: AuthService,

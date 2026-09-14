@@ -207,13 +207,24 @@ assignee.
 
 ## External actions
 
-The tab exists in the references. **No external action is implemented.**
-`SEND_EMAIL` and `SEND_WEBHOOK` are in `PLANNED_ACTIONS` and have contract
-entries only.
+`SEND_WEBHOOK` is implemented and is the one row on the External tab. Its
+configuration names a destination — `endpointId` (a webhook endpoint registered
+under Integrations, signed with its secret) or `url` (an ad-hoc address, sent
+unsigned) — and optional `extraFields`, key/value pairs merged into the payload
+as `data.extra`. No secret lives in a rule: every member can read a rule.
 
-The tab is kept for structural parity and says it will be available later, which
-is the same convention applied to a whole surface rather than one row. No fake
-integrations, and no tab quietly removed so that nobody asks.
+The runner does not send anything. It re-checks the endpoint (present, enabled)
+or the URL's syntax, then returns a `RuleWebhookRequest` on the action outcome,
+and `AutomationProcessor` queues it on the webhook queue once the run is over —
+the same arrangement as the events a rule raises. The worker's
+`WebhookDeliveryService.ruleSend` builds an `automation.webhook` payload
+(`data: { task, rule, trigger, extra }`), stores a delivery row carrying the
+`ruleId`, and delivers it with the usual retries. Whether an ad-hoc URL is one
+CoreTask may call (no private addresses unless `WEBHOOK_ALLOW_PRIVATE_URLS`) is
+decided at publish time by the validator and again at delivery time.
+
+`SEND_EMAIL` stays in `PLANNED_ACTIONS` with a contract entry only; a webhook
+into a mail tool covers the need until rules can send mail themselves.
 
 ## AI entries
 

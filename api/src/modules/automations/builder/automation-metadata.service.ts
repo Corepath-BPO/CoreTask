@@ -81,84 +81,95 @@ export class AutomationMetadataService {
   ): Promise<AutomationMetadataResponse> {
     await this.projects.requireProject(workspaceId, projectId);
 
-    const [sections, projects, statuses, priorities, members, fieldLinks] = await Promise.all([
-      /*
-       * This project's own sections, in the order the board shows them.
-       *
-       * There is no archive flag on a section — deleting one is a delete — so
-       * there is nothing to filter beyond the project. The scoping is the part
-       * that matters: a section list leaking another project's rows would offer
-       * a move across a tenant boundary, which the runner then refuses at
-       * execution time as a rule that mysteriously never works.
-       */
-      this.prisma.section.findMany({
-        where: { projectId },
-        orderBy: { position: 'asc' },
-        select: { id: true, name: true },
-      }),
-      /*
-       * Where a task can be moved to: every other live project in the
-       * workspace, each with its sections in board order. Scoped to the
-       * workspace for the same reason the sections above are — a project
-       * from another tenant offered here would be a move across a boundary
-       * that the runner then refuses as a rule that never works.
-       */
-      this.prisma.project.findMany({
-        where: { workspaceId, archivedAt: null, id: { not: projectId } },
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          color: true,
-          sections: { orderBy: { position: 'asc' }, select: { id: true, name: true } },
-        },
-      }),
-      this.statusesFor(workspaceId, projectId),
-      this.prisma.priorityDefinition.findMany({
-        // Archived priorities were being offered alongside live ones, so a rule
-        // could be built against a value nothing carries any more.
-        where: { workspaceId, isArchived: false },
-        orderBy: { level: 'asc' },
-        select: { id: true, name: true, colorToken: true },
-      }),
-      this.prisma.workspaceMember.findMany({
-        where: { workspaceId },
-        select: {
-          user: { select: { id: true, name: true, email: true, avatarUrl: true } },
-        },
-      }),
-      /*
-       * Through the project link, for its order.
-       *
-       * The fields used to be fetched directly and sorted by name, which put
-       * the generated catalogue rows in alphabetical order — a different order
-       * from the one the project's own list view shows the same fields in, and
-       * from the one somebody arranged them into. The link row carries the
-       * project's ordering, so the catalogue reads like the board does.
-       */
-      this.prisma.projectCustomField.findMany({
-        where: { projectId, customField: { workspaceId, isArchived: false } },
-        orderBy: { position: 'asc' },
-        select: {
-          customField: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              // The options come with the field because the generated condition
-              // and action rows are useless without them: "Risk is…" needs the
-              // values Risk can take, and a second round trip per field to
-              // fetch them would be one request per row in the catalogue.
-              options: {
-                where: { isArchived: false },
-                orderBy: { position: 'asc' },
-                select: { id: true, label: true, colorToken: true },
+    const [sections, projects, statuses, priorities, members, fieldLinks, webhookEndpoints] =
+      await Promise.all([
+        /*
+         * This project's own sections, in the order the board shows them.
+         *
+         * There is no archive flag on a section — deleting one is a delete — so
+         * there is nothing to filter beyond the project. The scoping is the part
+         * that matters: a section list leaking another project's rows would offer
+         * a move across a tenant boundary, which the runner then refuses at
+         * execution time as a rule that mysteriously never works.
+         */
+        this.prisma.section.findMany({
+          where: { projectId },
+          orderBy: { position: 'asc' },
+          select: { id: true, name: true },
+        }),
+        /*
+         * Where a task can be moved to: every other live project in the
+         * workspace, each with its sections in board order. Scoped to the
+         * workspace for the same reason the sections above are — a project
+         * from another tenant offered here would be a move across a boundary
+         * that the runner then refuses as a rule that never works.
+         */
+        this.prisma.project.findMany({
+          where: { workspaceId, archivedAt: null, id: { not: projectId } },
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            sections: { orderBy: { position: 'asc' }, select: { id: true, name: true } },
+          },
+        }),
+        this.statusesFor(workspaceId, projectId),
+        this.prisma.priorityDefinition.findMany({
+          // Archived priorities were being offered alongside live ones, so a rule
+          // could be built against a value nothing carries any more.
+          where: { workspaceId, isArchived: false },
+          orderBy: { level: 'asc' },
+          select: { id: true, name: true, colorToken: true },
+        }),
+        this.prisma.workspaceMember.findMany({
+          where: { workspaceId, user: { isServiceAccount: false } },
+          select: {
+            user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          },
+        }),
+        /*
+         * Through the project link, for its order.
+         *
+         * The fields used to be fetched directly and sorted by name, which put
+         * the generated catalogue rows in alphabetical order — a different order
+         * from the one the project's own list view shows the same fields in, and
+         * from the one somebody arranged them into. The link row carries the
+         * project's ordering, so the catalogue reads like the board does.
+         */
+        this.prisma.projectCustomField.findMany({
+          where: { projectId, customField: { workspaceId, isArchived: false } },
+          orderBy: { position: 'asc' },
+          select: {
+            customField: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                // The options come with the field because the generated condition
+                // and action rows are useless without them: "Risk is…" needs the
+                // values Risk can take, and a second round trip per field to
+                // fetch them would be one request per row in the catalogue.
+                options: {
+                  where: { isArchived: false },
+                  orderBy: { position: 'asc' },
+                  select: { id: true, label: true, colorToken: true },
+                },
               },
             },
           },
-        },
-      }),
-    ]);
+        }),
+        /*
+         * Where a "Send a webhook" step can send. Every endpoint, disabled ones
+         * included, so a rule already pointing at one can still show it; the
+         * step greys it out. The host stands in for the URL — see the type.
+         */
+        this.prisma.webhookEndpoint.findMany({
+          where: { workspaceId },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, url: true, enabled: true },
+        }),
+      ]);
 
     const customFields = fieldLinks.map((link) => link.customField);
 
@@ -168,6 +179,12 @@ export class AutomationMetadataService {
       conditions: conditionCatalogue(customFields),
       conditionFields: this.conditionFields(statuses, priorities, sections, members, customFields),
       sections,
+      webhookEndpoints: webhookEndpoints.map((row) => ({
+        id: row.id,
+        name: row.name,
+        host: hostOf(row.url),
+        enabled: row.enabled,
+      })),
       projects,
       statuses,
       priorities,
@@ -337,5 +354,14 @@ export class AutomationMetadataService {
       { field: 'createdAt', label: 'Created', valueKind: CONDITION_FIELD_KINDS.createdAt },
       { field: 'completedAt', label: 'Completed on', valueKind: CONDITION_FIELD_KINDS.completedAt },
     ];
+  }
+}
+
+/** The host of a URL, or the URL itself when it will not parse — never throws over display text. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }

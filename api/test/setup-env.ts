@@ -34,3 +34,7 @@ process.env['STORAGE_PUBLIC_ENDPOINT'] = process.env['STORAGE_ENDPOINT'] ?? '';
 
 process.env['RATE_LIMIT_MAX'] = '100000';
 process.env['AUTH_RATE_LIMIT_MAX'] = '100000';
+
+// The webhook suite delivers to a listener on 127.0.0.1, which the policy would
+// otherwise refuse as a private address.
+process.env['WEBHOOK_ALLOW_PRIVATE_URLS'] ??= 'true';

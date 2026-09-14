@@ -17,6 +17,9 @@ import { WorkspaceMembersService } from '../workspace-members/workspace-members.
 
 import type { CreateWorkspaceDto, UpdateWorkspaceDto } from './dto/workspace.dto';
 
+/** Service accounts behind API keys are members, but not people — they do not count. */
+const PEOPLE_ONLY = { user: { isServiceAccount: false } } as const;
+
 @Injectable()
 export class WorkspacesService {
   private readonly logger = new Logger(WorkspacesService.name);
@@ -41,7 +44,7 @@ export class WorkspacesService {
       include: {
         workspace: {
           include: {
-            _count: { select: { members: true, projects: true } },
+            _count: { select: { members: { where: PEOPLE_ONLY }, projects: true } },
           },
         },
       },
@@ -63,7 +66,7 @@ export class WorkspacesService {
 
     const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
-      include: { _count: { select: { members: true, projects: true } } },
+      include: { _count: { select: { members: { where: PEOPLE_ONLY }, projects: true } } },
     });
 
     if (!workspace) {
@@ -147,7 +150,7 @@ export class WorkspacesService {
     const workspace = await this.prisma.workspace.update({
       where: { id: workspaceId },
       data,
-      include: { _count: { select: { members: true, projects: true } } },
+      include: { _count: { select: { members: { where: PEOPLE_ONLY }, projects: true } } },
     });
 
     await this.activity.record({

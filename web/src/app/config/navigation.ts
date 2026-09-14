@@ -6,6 +6,7 @@ import {
   FolderKanban,
   Home,
   Inbox,
+  Plug,
   Settings,
   Ticket,
   Users,
@@ -67,7 +68,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     id: 'account',
-    items: [{ label: 'Settings', to: '/settings', icon: Settings }],
+    items: [
+      { label: 'Integrations', to: '/integrations', icon: Plug },
+      { label: 'Settings', to: '/settings', icon: Settings },
+    ],
   },
 ];
 

@@ -23,6 +23,7 @@ class WorkItemUserDto {
   @ApiProperty() name!: string;
   @ApiProperty() email!: string;
   @ApiProperty({ nullable: true }) avatarUrl!: string | null;
+  @ApiProperty({ required: false }) isServiceAccount?: boolean;
 }
 
 class WorkItemCustomFieldValueDto {
