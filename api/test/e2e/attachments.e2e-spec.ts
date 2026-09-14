@@ -282,7 +282,9 @@ describe('Attachments (e2e)', () => {
 
       await request(server())
         .post(
-          url(`/workspaces/${scope.workspaceId}/attachments/${created.body.data.attachment.id}/confirm`),
+          url(
+            `/workspaces/${scope.workspaceId}/attachments/${created.body.data.attachment.id}/confirm`,
+          ),
         )
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(400);
@@ -307,7 +309,9 @@ describe('Attachments (e2e)', () => {
 
       await request(server())
         .post(
-          url(`/workspaces/${scope.workspaceId}/attachments/${created.body.data.attachment.id}/confirm`),
+          url(
+            `/workspaces/${scope.workspaceId}/attachments/${created.body.data.attachment.id}/confirm`,
+          ),
         )
         .set('Authorization', `Bearer ${other.token}`)
         .expect(403);
@@ -373,6 +377,53 @@ describe('Attachments (e2e)', () => {
         .get(url(`/workspaces/${scope.workspaceId}/attachments/${attachment.id}/download`))
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(404);
+    });
+  });
+
+  describe('viewing inline', () => {
+    // The smallest valid PNG: one transparent pixel.
+    const PNG = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    it('hands back a URL that renders in place for a raster image', async () => {
+      const scope = await setupScope();
+      const attachment = await attach(scope, scope.owner, PNG, {
+        filename: 'pixel.png',
+        mimeType: 'image/png',
+      });
+
+      const response = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/attachments/${attachment.id}/view`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const fetched = await fetch(response.body.data.url);
+      expect(fetched.status).toBe(200);
+      expect(fetched.headers.get('content-disposition')).toBe('inline');
+      expect(fetched.headers.get('content-type')).toBe('image/png');
+    });
+
+    it('refuses anything that is not a raster image, SVG included', async () => {
+      const scope = await setupScope();
+      const text = await attach(scope, scope.owner, Buffer.from('not a picture'));
+      const svg = await attach(
+        scope,
+        scope.owner,
+        Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+        {
+          filename: 'shape.svg',
+          mimeType: 'image/svg+xml',
+        },
+      );
+
+      for (const attachment of [text, svg]) {
+        await request(server())
+          .get(url(`/workspaces/${scope.workspaceId}/attachments/${attachment.id}/view`))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(400);
+      }
     });
   });
 

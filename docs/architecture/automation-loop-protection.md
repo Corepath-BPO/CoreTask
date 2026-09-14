@@ -99,42 +99,58 @@ succeeded. A rule that does less than it says it does, reporting success, is
 the failure mode this codebase is otherwise careful to avoid. It should either
 refuse at publish time or record a truncation reason on the execution.
 
-## The gap that makes most of this dormant
+## How a chain continues
 
-Three of the four mechanisms sit on a path nothing currently reaches.
+`AutomationRunnerService.updateTask` writes the task and works out which events
+the write amounts to — the same ones `TasksService` and `ProjectWorkItemService`
+raise when a person makes that change. A section move is
+`TASK_MOVED_TO_SECTION`; a status change is `TASK_UPDATED` and
+`TASK_STATUS_CHANGED`, with `TASK_COMPLETED` when it lands on done; and so on.
+`CREATE_SUBTASK` raises `TASK_CREATED` per subtask and `SET_CUSTOM_FIELD` raises
+`CUSTOM_FIELD_CHANGED`. A write that changed nothing raises nothing: assigning
+the person already assigned is not an assignment.
 
-`AutomationRunnerService.updateTask` writes the task and stops:
+Each event is built by `follow`, which is where the guards above get their
+inputs:
 
 ```ts
-await this.prisma.task.update({ where: { id: taskId }, data });
-
-// Cascades are published by the caller rather than here: the runner has no
-// queue, deliberately, so it cannot enqueue work while holding a database
-// connection mid-execution.
-void ruleId;
-void event;
+correlationId: event.correlationId, // the same thread
+depth: event.depth + 1,             // one hop deeper
+causedByRuleId: rule.id,            // which rule did it
+actorId: event.actorId,             // who set it all going
 ```
 
-No caller publishes them. Nothing in `api/src` ever sets `causedByRuleId` — it
-is declared on `AutomationEvent` and read in exactly one place, the
-`BLOCK_SELF_RETRIGGER` check — and nothing ever passes a non-zero `depth`.
+The runner does not publish them. It has no queue, deliberately — it must never
+wait on Redis while holding a database connection mid-execution — so `handle`
+returns them alongside its counts and `AutomationProcessor` publishes them
+through `AutomationEventPublisher` once the run is over. A run that fails
+part-way has published nothing rather than half a chain.
+
+Rules on the same event cannot see each other's writes. The task is read once,
+before the first rule runs, and every rule's conditions are judged against that
+copy; an earlier rule's change reaches a later rule only as a new event at
+`depth + 1`, where everything above applies. Before this, four "when completed
+in this column, move to the next" rules walked a task through every column
+inside one execution at depth zero — a cascade none of the guards could see,
+because as far as they were concerned nothing had happened yet.
 
 So, today:
 
-| Mechanism              | Reachable?                               |
-| ---------------------- | ---------------------------------------- |
-| Correlation id         | yes — set on every execution             |
-| Depth limit            | no — `event.depth` is always 0           |
-| `BLOCK_SELF_RETRIGGER` | no — `causedByRuleId` is never populated |
-| `allowChaining`        | no — its test is `depth > 0`             |
-| Action cap             | yes                                      |
+| Mechanism              | Reachable?                                    |
+| ---------------------- | --------------------------------------------- |
+| Correlation id         | yes — inherited by every hop                  |
+| Depth limit            | yes — every hop is one deeper                 |
+| `BLOCK_SELF_RETRIGGER` | yes — every hop names the rule that caused it |
+| `allowChaining`        | yes — every hop has `depth > 0`               |
+| Action cap             | yes                                           |
+| Same-event snapshot    | yes — a sibling rule's write is not an input  |
 
-This is not a criticism of the design; the plumbing is deliberately in place
-ahead of the cascade that needs it, which is the right order to build it in. But
-a reader has to know that a rule cannot currently trigger another rule at all,
-and therefore that none of these guards has ever fired in production. The
-docstring above `updateTask` says it "re-publishes the event, tagged with the
-rule". It does not. Trust the body.
+This is what makes rules composable. "When the field changes, move it" and
+"when it arrives, add the checklist" are two rules somebody writes separately
+and expects to work together, and before the cascade existed the second ran
+only when the task was dragged by hand. The price is that the guards are now
+load-bearing: a rule cannot trigger another rule for ever, but it can trigger
+one for five hops, and `MAX_AUTOMATION_DEPTH` is the number that says so.
 
 ## Defence in depth against malformed data
 
@@ -189,17 +205,7 @@ execution. Nothing bounds the total work done by one correlation id, so five
 rules of twenty-five actions each is 125 writes attributed to one click, within
 every limit.
 
-**Cascade publication**, described above, without which the depth limit, the
-self-retrigger block and `allowChaining` are all unreachable.
-
 **A truncation signal.** The action cap should be visible when it bites.
-
-**An attribution fix in `recordSkipped`.** When the depth limit stops a chain,
-the skipped execution is recorded against whatever rule `findFirst` returns for
-that project and trigger — with no status filter, so it can name a draft or an
-archived rule that had nothing to do with the event. A depth-limit skip attached
-to the wrong rule is worse than one attached to none, because somebody will go
-and read that rule.
 
 ## Related
 

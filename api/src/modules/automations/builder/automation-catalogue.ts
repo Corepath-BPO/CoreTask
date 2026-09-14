@@ -1,8 +1,6 @@
 import {
   ACTION_LABEL,
   AUTOMATION_ACTIONS,
-  AUTOMATION_SELECTOR_CATEGORY,
-  AUTOMATION_TRIGGERS,
   AutomationAction,
   AutomationTrigger,
   CONDITION_OPERATOR,
@@ -13,13 +11,15 @@ import {
   TRIGGER_CONFIG_FORM,
   TRIGGER_CONFIG_FORM_LABEL,
   TRIGGER_CONFIG_FORMS_BY_TRIGGER,
-  TRIGGER_LABEL,
+  TRIGGER_GROUP,
   defaultOperatorForConditionField,
+  isComputedFieldType,
   isEvaluableOperator,
   operatorNeedsValue,
   operatorTakesMultipleValues,
   type ConditionOperator,
   type ConditionValueType,
+  type CustomFieldType,
   type TriggerConfigForm,
   type WorkspaceRole,
 } from '@coretask/contracts';
@@ -105,6 +105,18 @@ export interface CatalogueCustomField {
   type: string;
 }
 
+/**
+ * The fields a rule can watch, compare or write.
+ *
+ * A computed field is none of those: its value is never on the row the
+ * engine loads, and writing it would be overwritten by the next read. It is
+ * left out of every generated row rather than shown greyed, because there is
+ * no configuration under which it becomes available.
+ */
+function settable(fields: readonly CatalogueCustomField[]): CatalogueCustomField[] {
+  return fields.filter((field) => !isComputedFieldType(field.type as CustomFieldType));
+}
+
 /* -------------------------------------------------------------------------- */
 /* What the engine can actually do                                             */
 /* -------------------------------------------------------------------------- */
@@ -140,6 +152,11 @@ export const READABLE_TASK_FIELDS: readonly string[] = [
   'completed',
   'dueDate',
   'startDate',
+  // The rest of what the list view shows as a column, so a rule can ask what
+  // a person can see: the estimate, and the two dates the task itself keeps.
+  'estimatedMinutes',
+  'createdAt',
+  'completedAt',
 ];
 
 const READABLE = new Set(READABLE_TASK_FIELDS);
@@ -165,8 +182,15 @@ export const CONDITION_FIELD_KINDS = {
   createdById: ConditionValueKind.REFERENCE,
   title: ConditionValueKind.TEXT,
   description: ConditionValueKind.TEXT,
+  // Offered as "task or all subtasks completion status is…" and read by the
+  // runner, but missing here — so the validator refused every rule that used
+  // it as a field "no longer available", and the row could never be published.
+  completed: ConditionValueKind.BOOLEAN,
   dueDate: ConditionValueKind.DATE,
   startDate: ConditionValueKind.DATE,
+  estimatedMinutes: ConditionValueKind.NUMBER,
+  createdAt: ConditionValueKind.DATE,
+  completedAt: ConditionValueKind.DATE,
 } as const satisfies Record<string, ConditionValueKind>;
 
 /** The kind for a field key off the wire, which may be anything at all. */
@@ -180,12 +204,53 @@ export function conditionFieldKind(field: unknown): ConditionValueKind | undefin
  * Whether the runner can evaluate a condition about this field key.
  *
  * One rule for the hand-written entries and the generated custom-field ones
- * alike. Custom fields are absent from the set deliberately rather than by
- * omission: their values live in `task_custom_field_values`, a table the runner
- * never loads, so no key of the form `customField:<id>` can ever resolve.
+ * alike. A `customField:<id>` key resolves because the runner loads the task's
+ * value rows with the task and `readField` reads the populated column back —
+ * see `customFieldActual` beside it.
  */
 export function runnerCanReadField(fieldKey: string): boolean {
-  return READABLE.has(fieldKey);
+  return fieldKey.startsWith('customField:') || READABLE.has(fieldKey);
+}
+
+/** The field id inside a condition's `customField:<id>` key, or null. */
+export function customFieldConditionId(field: unknown): string | null {
+  if (typeof field !== 'string' || !field.startsWith('customField:')) return null;
+
+  return field.slice('customField:'.length);
+}
+
+/**
+ * The value kind a custom field's type means, for the validator.
+ *
+ * `conditionFieldKind` answers for the hand-written keys; a generated key names
+ * a field whose kind is a fact about that field's type, which only the caller
+ * holding the row can supply. Undefined for an unknown type, which the shared
+ * check reads as "no longer available" — the honest answer for both.
+ */
+export function kindForCustomFieldType(type: string | undefined): ConditionValueKind | undefined {
+  switch (type) {
+    case 'TEXT':
+    case 'URL':
+    case 'EMAIL':
+      return ConditionValueKind.TEXT;
+    case 'NUMBER':
+    case 'RATING':
+      return ConditionValueKind.NUMBER;
+    case 'DATE':
+      return ConditionValueKind.DATE;
+    // A formula is worked out on read; a rule can neither compare a value it
+    // cannot load off the row nor set one. It has no kind, so no row.
+    case 'FORMULA':
+      return undefined;
+    case 'CHECKBOX':
+      return ConditionValueKind.BOOLEAN;
+    case 'SINGLE_SELECT':
+    case 'MULTI_SELECT':
+    case 'PEOPLE':
+      return ConditionValueKind.REFERENCE;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -200,10 +265,12 @@ export function runnerCanReadField(fieldKey: string): boolean {
  * f428e58 fixed for the operators the panel could reach, and this is the same
  * check applied one step earlier, where the row is offered in the first place.
  *
- * It bites exactly once today. A checkbox offers "is checked" and "is not
- * checked", neither of which the engine can evaluate, so "Task or all subtasks
- * completion status is…" was an enabled row whose only possible product was a
- * rule that does nothing — a name with no working value behind it.
+ * It bit exactly once: a checkbox offers "is checked" and "is not checked",
+ * and for a while the engine could evaluate neither, so "Task or all subtasks
+ * completion status is…" and every checkbox custom field were greyed here. The
+ * runner now makes those comparisons itself (`DIRECT_CONDITION_OPERATORS`), so
+ * the gate lets them through — and stays, for the next operator somebody adds
+ * to a type's list before teaching the engine to run it.
  */
 function runnerCanCompare(fieldKey: string, valueType: ConditionValueType): boolean {
   return isEvaluableOperator(defaultOperatorForConditionField(fieldKey, valueType));
@@ -240,7 +307,7 @@ export const CONDITION_CATEGORY = {
   TASK_FIELD: 'Task field is',
   STATUS: 'Status is',
   TASK_DETAILS: 'Task details',
-  CUSTOM_FIELD: 'Custom field is',
+  CUSTOM_FIELD: 'Custom field is…',
   TASK_HAS: 'Task has',
 } as const;
 
@@ -258,6 +325,9 @@ export const ACTION_CATEGORY = {
 /* -------------------------------------------------------------------------- */
 /* Triggers                                                                    */
 /* -------------------------------------------------------------------------- */
+
+/** Shared by a trigger and a condition greyed for the same missing feature. */
+const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
 
 /**
  * Triggers nothing publishes, and why.
@@ -320,42 +390,251 @@ const TRIGGER_FORM_REASON =
   'The engine matches one section for equality; it cannot yet negate that test or match a list.';
 
 /**
- * The order the trigger picker reads its groups in.
+ * The order the trigger picker reads its groups in — Asana's order, with the
+ * two rows that belong to no group first.
  *
- * Needed because the entries come out in enum order, and enum order interleaves
- * the categories — "Status and workflow" appeared twice with Assignment between
- * the halves. A client grouping in array order, which is what the condition and
- * action catalogues expect it to do, would draw that heading twice.
+ * Needed because a client grouping in array order, which is what the condition
+ * and action catalogues expect it to do, would otherwise draw a heading twice
+ * the moment two entries of one group were separated by another's.
  */
 const TRIGGER_CATEGORY_ORDER: readonly string[] = [
-  AUTOMATION_SELECTOR_CATEGORY.WORK_ITEM,
-  AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-  AUTOMATION_SELECTOR_CATEGORY.ASSIGNMENT,
-  AUTOMATION_SELECTOR_CATEGORY.FIELDS,
-  AUTOMATION_SELECTOR_CATEGORY.COMMUNICATION,
+  TRIGGER_GROUP.UNGROUPED,
+  TRIGGER_GROUP.MOVED,
+  TRIGGER_GROUP.FIELD_CHANGED,
+  TRIGGER_GROUP.DUE_DATE,
+  TRIGGER_GROUP.START_DATE,
+  TRIGGER_GROUP.STATUS_CHANGED,
+  TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
+  TRIGGER_GROUP.ADDED_TO_TASK,
 ];
 
 /**
- * Every declared trigger, grouped, with the shapes its configuration may take.
+ * The picker's wording for the real triggers.
+ *
+ * A full record, not `TRIGGER_LABEL`: that one is a sentence — "When a task is
+ * moved to a section" — and the rule list and node summaries keep reading it.
+ * These are the rows read down a picker, worded the way Asana words them, and a
+ * new enum member fails to compile here until it says what its row reads.
+ */
+const TRIGGER_PICKER_LABEL: Record<AutomationTrigger, string> = {
+  TASK_CREATED: 'Task is added to this project',
+  TASK_UPDATED: 'Task is updated',
+  TASK_MOVED_TO_SECTION: 'Task is moved to a section',
+  TASK_STATUS_CHANGED: 'Status is changed',
+  TASK_PRIORITY_CHANGED: 'Priority is changed',
+  TASK_ASSIGNED: 'Task is assigned',
+  TASK_COMPLETED: 'Task or all subtasks completion status is changed',
+  TASK_DUE_DATE_CHANGED: 'Due date is changed',
+  TASK_START_DATE_CHANGED: 'Start date is changed',
+  TASK_ESTIMATE_CHANGED: 'Estimate is changed',
+  TASK_TITLE_CHANGED: 'Task name is changed',
+  TASK_DESCRIPTION_CHANGED: 'Task description is changed',
+  COMMENT_ADDED: 'Comment is added',
+  CUSTOM_FIELD_CHANGED: 'A custom field is changed',
+  TICKET_CREATED: 'Ticket is reported',
+  TICKET_STATUS_CHANGED: 'Ticket is changed…',
+};
+
+/**
+ * Said only where the row's own line would over-promise.
+ *
+ * Two labels above are Asana's wording for something this engine does half of,
+ * and the honest half belongs on the row rather than in a support ticket. The
+ * rest stay empty: a description that restates its label is a stutter.
+ */
+const TRIGGER_PICKER_DESCRIPTION: Partial<Record<AutomationTrigger, string>> = {
+  TASK_CREATED:
+    'Fires when a task is created in this project. Moving one in from elsewhere raises no event yet.',
+  TASK_COMPLETED:
+    'Fires when the task itself is completed, or when the last of its open subtasks is.',
+};
+
+/**
+ * Triggers the engine has no event for at all, offered greyed.
+ *
+ * Same convention as the unimplemented rows in `ACTION_SPECS`: a plain-string
+ * subtype outside the enum — a disabled row is never selectable, and the
+ * validator would refuse the subtype anyway — and a reason on every one,
+ * because a greyed row without one is a refusal with no explanation.
+ */
+interface PlannedTriggerSpec {
+  subtype: string;
+  label: string;
+  category: string;
+  reason: string;
+}
+
+const NOTHING_WATCHES_THE_CLOCK =
+  'Every trigger fires from an event on a task; nothing watches the clock, so a date drawing near or passing raises no event.';
+
+const PLANNED_TRIGGER_SPECS: readonly PlannedTriggerSpec[] = [
+  {
+    subtype: 'RUN_MANUALLY',
+    label: 'Rule is run manually',
+    category: TRIGGER_GROUP.UNGROUPED,
+    reason:
+      'There is no way to fire a rule by hand yet; every rule waits for an event from its project.',
+  },
+  {
+    subtype: 'SCHEDULED_TIME',
+    label: 'Scheduled time occurs…',
+    category: TRIGGER_GROUP.UNGROUPED,
+    reason: NOTHING_WATCHES_THE_CLOCK,
+  },
+  {
+    subtype: 'TASK_TYPE_CHANGED',
+    label: 'Task type is changed',
+    category: TRIGGER_GROUP.FIELD_CHANGED,
+    reason: 'A task and a ticket are separate records here, so a task carries no type to change.',
+  },
+  {
+    subtype: 'DUE_DATE_APPROACHING',
+    label: 'Due date is approaching',
+    category: TRIGGER_GROUP.DUE_DATE,
+    reason: NOTHING_WATCHES_THE_CLOCK,
+  },
+  {
+    subtype: 'TASK_OVERDUE',
+    label: 'Task is overdue',
+    category: TRIGGER_GROUP.DUE_DATE,
+    reason: NOTHING_WATCHES_THE_CLOCK,
+  },
+  {
+    subtype: 'START_DATE_APPROACHING',
+    label: 'Start date is approaching',
+    category: TRIGGER_GROUP.START_DATE,
+    reason: NOTHING_WATCHES_THE_CLOCK,
+  },
+  {
+    subtype: 'START_DATE_PASSED',
+    label: 'Start date has passed',
+    category: TRIGGER_GROUP.START_DATE,
+    reason: NOTHING_WATCHES_THE_CLOCK,
+  },
+  {
+    subtype: 'APPROVAL_STATUS_CHANGED',
+    label: 'Approval status is changed',
+    category: TRIGGER_GROUP.STATUS_CHANGED,
+    reason: NO_APPROVALS_REASON,
+  },
+  {
+    subtype: 'TASK_NO_LONGER_BLOCKED',
+    label: 'Task is no longer blocked',
+    category: TRIGGER_GROUP.STATUS_CHANGED,
+    reason:
+      'Nothing blocks one task on another here — only a BLOCKED status — so there is no event for a task coming unblocked.',
+  },
+  {
+    subtype: 'ATTACHMENT_ADDED',
+    label: 'Attachment is added',
+    category: TRIGGER_GROUP.ADDED_TO_TASK,
+    reason: 'Adding an attachment does not raise an automation event yet.',
+  },
+  {
+    subtype: 'COLLABORATOR_ADDED',
+    label: 'Collaborator is added',
+    category: TRIGGER_GROUP.ADDED_TO_TASK,
+    reason:
+      'A task has one assignee here rather than a collaborator list, so there is nobody to add that could fire this.',
+  },
+];
+
+/** The key a generated per-field *date* trigger row carries. Never a valid node
+    subtype — these rows are all disabled — but unique, so the client can key
+    and icon them; its icon map splits on the first colon. */
+export function customFieldTriggerKey(fieldId: string, kind: 'APPROACHING' | 'OVERDUE'): string {
+  return `customFieldTrigger:${fieldId}:${kind}`;
+}
+
+/**
+ * Asana's per-field trigger rows, generated from the project's own fields.
+ *
+ * "[Field] is changed" is real: it is `CUSTOM_FIELD_CHANGED` with the field
+ * pre-filled — the same shape the generated `SET_CUSTOM_FIELD` action rows use —
+ * and the runner narrows on that `fieldId`. The date variants stay greyed:
+ * they would need something watching the clock, and nothing does.
+ */
+function customFieldTriggerRows(fields: readonly CatalogueCustomField[]): AutomationTriggerEntry[] {
+  return settable(fields).flatMap((field) => {
+    const dateRow = (kind: 'APPROACHING' | 'OVERDUE', label: string): AutomationTriggerEntry => ({
+      subtype: customFieldTriggerKey(field.id, kind),
+      label,
+      description: '',
+      category: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
+      available: false,
+      reason: NOTHING_WATCHES_THE_CLOCK,
+      configForms: [],
+      fieldId: field.id,
+      fieldName: field.name,
+    });
+
+    return [
+      {
+        subtype: AutomationTrigger.CUSTOM_FIELD_CHANGED,
+        label: `${field.name} is changed`,
+        description: '',
+        category: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
+        available: true,
+        reason: null,
+        configForms: [],
+        fieldId: field.id,
+        fieldName: field.name,
+      },
+      // Only a date can approach or pass.
+      ...(field.type === 'DATE'
+        ? [
+            dateRow('APPROACHING', `${field.name} is approaching`),
+            dateRow('OVERDUE', `${field.name} is overdue`),
+          ]
+        : []),
+    ];
+  });
+}
+
+/**
+ * Every declared trigger plus the planned rows, grouped the way the picker
+ * shows them, with the shapes each configuration may take.
  *
  * Only `TASK_MOVED_TO_SECTION` offers forms. The rest need no narrowing beyond
  * the event itself, and an empty array on each of them would be one more list to
  * hold in step with the trigger enum for nothing.
  */
-export function triggerCatalogue(): AutomationTriggerEntry[] {
-  const entries = AUTOMATION_TRIGGERS.map((subtype) => {
+/**
+ * The real triggers in the order their rows read, within their groups.
+ *
+ * Enum order put "added to this project" above "moved to a section"; this is
+ * the picker's reading order, and the catalogue spec asserts every enum member
+ * appears exactly once so a new trigger cannot quietly fall out of this list.
+ */
+const REAL_TRIGGER_ORDER: readonly AutomationTrigger[] = [
+  AutomationTrigger.TASK_MOVED_TO_SECTION,
+  AutomationTrigger.TASK_CREATED,
+  AutomationTrigger.TICKET_CREATED,
+  AutomationTrigger.TASK_ASSIGNED,
+  AutomationTrigger.TASK_UPDATED,
+  AutomationTrigger.TASK_PRIORITY_CHANGED,
+  AutomationTrigger.TASK_TITLE_CHANGED,
+  AutomationTrigger.TASK_DESCRIPTION_CHANGED,
+  AutomationTrigger.TASK_ESTIMATE_CHANGED,
+  AutomationTrigger.TASK_DUE_DATE_CHANGED,
+  AutomationTrigger.TASK_START_DATE_CHANGED,
+  AutomationTrigger.TASK_STATUS_CHANGED,
+  AutomationTrigger.TICKET_STATUS_CHANGED,
+  AutomationTrigger.TASK_COMPLETED,
+  AutomationTrigger.CUSTOM_FIELD_CHANGED,
+  AutomationTrigger.COMMENT_ADDED,
+];
+
+export function triggerCatalogue(
+  fields: readonly CatalogueCustomField[],
+): AutomationTriggerEntry[] {
+  const real = REAL_TRIGGER_ORDER.map((subtype) => {
     const reason = triggerUnavailableReason(subtype);
 
     return {
       subtype,
-      label: TRIGGER_LABEL[subtype],
-      /*
-       * Empty rather than a copy of the label, which is what it used to be —
-       * invisible while the picker showed one of them, a stutter now that it
-       * shows both. Nothing useful is known to say here, and saying nothing is
-       * the honest version of that.
-       */
-      description: '',
+      label: TRIGGER_PICKER_LABEL[subtype],
+      description: TRIGGER_PICKER_DESCRIPTION[subtype] ?? '',
       category: triggerCategory(subtype),
       available: reason === null,
       reason,
@@ -363,8 +642,23 @@ export function triggerCatalogue(): AutomationTriggerEntry[] {
     };
   });
 
-  // Grouped by category, enum order preserved inside each — so the list stays
-  // the one somebody already knows, only gathered.
+  const planned = PLANNED_TRIGGER_SPECS.map((spec) => ({
+    subtype: spec.subtype,
+    label: spec.label,
+    description: '',
+    category: spec.category,
+    available: false,
+    reason: spec.reason,
+    configForms: [],
+  }));
+
+  /*
+   * Real rows before planned ones inside each group, generated field rows
+   * after the generic one they defer to — and the whole list gathered by
+   * category so no heading is ever drawn twice.
+   */
+  const entries = [...real, ...planned, ...customFieldTriggerRows(fields)];
+
   return TRIGGER_CATEGORY_ORDER.flatMap((category) =>
     entries.filter((entry) => entry.category === category),
   );
@@ -393,22 +687,33 @@ function configFormsFor(trigger: AutomationTrigger): TriggerConfigFormOption[] {
 /**
  * Which group a trigger sits under.
  *
- * The trigger picker is still grouped by `AUTOMATION_SELECTOR_CATEGORY`; only
- * the condition and action catalogues were respecified. Changing this one too
- * would be a rewording nobody asked for.
+ * A full record rather than a partial with a fallback: a new enum member filed
+ * under a default group is exactly the kind of quiet misplacement nobody
+ * notices until a user cannot find the row.
  */
 function triggerCategory(trigger: AutomationTrigger): string {
-  const byTrigger: Partial<Record<AutomationTrigger, string>> = {
-    COMMENT_ADDED: AUTOMATION_SELECTOR_CATEGORY.COMMUNICATION,
-    TASK_ASSIGNED: AUTOMATION_SELECTOR_CATEGORY.ASSIGNMENT,
-    CUSTOM_FIELD_CHANGED: AUTOMATION_SELECTOR_CATEGORY.FIELDS,
-    TASK_STATUS_CHANGED: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-    TASK_PRIORITY_CHANGED: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-    TASK_MOVED_TO_SECTION: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
-    TASK_COMPLETED: AUTOMATION_SELECTOR_CATEGORY.WORKFLOW,
+  const byTrigger: Record<AutomationTrigger, string> = {
+    TASK_CREATED: TRIGGER_GROUP.MOVED,
+    TASK_MOVED_TO_SECTION: TRIGGER_GROUP.MOVED,
+    // A ticket being reported is a work item arriving, which is the nearest
+    // thing this group means; the row is greyed either way.
+    TICKET_CREATED: TRIGGER_GROUP.MOVED,
+    TASK_ASSIGNED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_UPDATED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_PRIORITY_CHANGED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_TITLE_CHANGED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_DESCRIPTION_CHANGED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_ESTIMATE_CHANGED: TRIGGER_GROUP.FIELD_CHANGED,
+    TASK_DUE_DATE_CHANGED: TRIGGER_GROUP.DUE_DATE,
+    TASK_START_DATE_CHANGED: TRIGGER_GROUP.START_DATE,
+    TASK_STATUS_CHANGED: TRIGGER_GROUP.STATUS_CHANGED,
+    TASK_COMPLETED: TRIGGER_GROUP.STATUS_CHANGED,
+    TICKET_STATUS_CHANGED: TRIGGER_GROUP.STATUS_CHANGED,
+    CUSTOM_FIELD_CHANGED: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
+    COMMENT_ADDED: TRIGGER_GROUP.ADDED_TO_TASK,
   };
 
-  return byTrigger[trigger] ?? AUTOMATION_SELECTOR_CATEGORY.WORK_ITEM;
+  return byTrigger[trigger];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -433,7 +738,6 @@ interface ConditionSpec {
 }
 
 const FORMS_AND_EMAIL_REASON = 'Forms and inbound email are not built yet.';
-const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
 const TASK_ALONE_REASON =
   'The engine loads the task an event is about and nothing beside it, so this cannot be checked.';
 
@@ -514,6 +818,26 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     category: CONDITION_CATEGORY.TASK_FIELD,
     valueType: CONDITION_VALUE_TYPE.DATE,
   },
+  {
+    subtype: 'estimatedMinutes',
+    label: 'Estimate is…',
+    category: CONDITION_CATEGORY.TASK_FIELD,
+    valueType: CONDITION_VALUE_TYPE.NUMBER,
+    description: 'In minutes, as the estimate column holds it.',
+  },
+  {
+    subtype: 'createdAt',
+    label: 'Created is…',
+    category: CONDITION_CATEGORY.TASK_FIELD,
+    valueType: CONDITION_VALUE_TYPE.DATE,
+  },
+  {
+    subtype: 'completedAt',
+    label: 'Completed on is…',
+    category: CONDITION_CATEGORY.TASK_FIELD,
+    valueType: CONDITION_VALUE_TYPE.DATE,
+    description: 'The day the task was marked complete; empty while it is open.',
+  },
   /*
    * Priority is not in the specified list and is kept anyway: the runner reads
    * it, the old catalogue offered it, and dropping a working check to match a
@@ -547,12 +871,13 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.CHECKBOX,
     /*
-     * Available, but only for half of what the label promises. The runner reads
-     * `completedAt` on the task the event is about and never loads its
-     * subtasks, so the roll-up is not checked. Said here rather than left to be
-     * discovered: `reason` explains an unavailable row, and this row works.
+     * The runner reads both halves of the label: `completedAt` on the task the
+     * event is about, and — on the roll-up event raised for a parent whose last
+     * open subtask was just completed — the event itself. It compares them with
+     * "is checked", which it evaluates directly; a rule that says
+     * `completed IS true` over the API publishes and runs as well.
      */
-    description: 'Checks this task’s own completion. Whether its subtasks are all complete is not.',
+    description: 'Holds when this task is complete, or when its last open subtask just was.',
   },
   {
     subtype: 'TICKET',
@@ -618,21 +943,12 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
   },
 ];
 
-/**
- * Why a custom field cannot be asked about, though it can be written.
- *
- * The asymmetry is real rather than an oversight: `SET_CUSTOM_FIELD` upserts
- * into `task_custom_field_values`, and `readField` never reads that table. So
- * the same field is an available action and an unavailable condition, and
- * saying which is which is the only way that stops looking like a bug.
- */
-const CUSTOM_FIELD_CONDITION_REASON =
-  'A condition reads the task’s own columns, and custom field values are not among them.';
-
 /** What a custom field's type means for the operators its condition may use. */
 const VALUE_TYPE_BY_FIELD_TYPE: Record<string, ConditionValueType> = {
   TEXT: CONDITION_VALUE_TYPE.TEXT,
   NUMBER: CONDITION_VALUE_TYPE.NUMBER,
+  // A rating is a bounded whole number; the comparisons are the number ones.
+  RATING: CONDITION_VALUE_TYPE.NUMBER,
   DATE: CONDITION_VALUE_TYPE.DATE,
   CHECKBOX: CONDITION_VALUE_TYPE.CHECKBOX,
   SINGLE_SELECT: CONDITION_VALUE_TYPE.SINGLE_SELECT,
@@ -654,13 +970,19 @@ const VALUE_TYPE_BY_FIELD_TYPE: Record<string, ConditionValueType> = {
 export function conditionCatalogue(
   fields: readonly CatalogueCustomField[],
 ): AutomationConditionEntry[] {
-  const generated: AutomationConditionEntry[] = fields.map((field) => ({
+  const generated: AutomationConditionEntry[] = settable(fields).map((field) => ({
     ...toConditionEntry({
       subtype: customFieldKey(field.id),
       label: `${field.name} is…`,
       category: CONDITION_CATEGORY.CUSTOM_FIELD,
+      /*
+       * No refusal of its own — every type falls to the readable/comparable
+       * derivation like the hand-written rows. The many-valued types used to
+       * carry one here ("the engine compares one at a time"), which stopped
+       * being true when `conditionHolds` learned to read "is set to X" against
+       * a set as membership.
+       */
       valueType: VALUE_TYPE_BY_FIELD_TYPE[field.type] ?? CONDITION_VALUE_TYPE.TEXT,
-      reason: CUSTOM_FIELD_CONDITION_REASON,
     }),
     // The card renders the name as a token rather than baking it into the
     // label, so the words and the field they name stay distinguishable.
@@ -767,11 +1089,17 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'The section is re-checked against this project when the rule runs.',
   },
   {
-    subtype: 'MOVE_PROJECT',
-    label: 'Move or add to project…',
+    subtype: AutomationAction.MOVE_TO_PROJECT,
+    label: 'Move to another project…',
     category: ACTION_CATEGORY.MOVE_TASK,
-    reason:
-      'A task’s section, field values and view position all belong to its current project, and nothing yet decides what becomes of them on a move.',
+    /*
+     * What becomes of what the task carries is decided in the runner, and the
+     * description says the half somebody building the rule needs: the task
+     * lands in a section of the chosen project and keeps its field values.
+     * Only a move — a task lives in one project here, so there is no "add".
+     */
+    description:
+      'The task keeps its fields and lands in the chosen section, or the project’s first one.',
   },
   {
     subtype: 'REMOVE_FROM_PROJECT',
@@ -855,6 +1183,23 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     label: ACTION_LABEL.CLEAR_DUE_DATE,
     category: ACTION_CATEGORY.CHANGE_FIELD,
   },
+  {
+    subtype: AutomationAction.SET_START_DATE,
+    label: 'Change start date to…',
+    category: ACTION_CATEGORY.CHANGE_FIELD,
+    description: 'Takes a number of days from now rather than a fixed date.',
+  },
+  {
+    subtype: AutomationAction.CLEAR_START_DATE,
+    label: ACTION_LABEL.CLEAR_START_DATE,
+    category: ACTION_CATEGORY.CHANGE_FIELD,
+  },
+  {
+    subtype: AutomationAction.SET_ESTIMATE,
+    label: 'Change estimate to…',
+    category: ACTION_CATEGORY.CHANGE_FIELD,
+    description: 'A whole number of minutes.',
+  },
 
   // Create new
   {
@@ -868,9 +1213,8 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     subtype: AutomationAction.CREATE_SUBTASK,
     label: 'Create subtasks…',
     category: ACTION_CATEGORY.CREATE_NEW,
-    // Plural in the catalogue, singular in the engine. Worth saying, because
-    // the label is what somebody plans around.
-    description: 'Creates one subtask with a fixed title, in the parent’s project and section.',
+    description:
+      'Creates the listed subtasks in the parent’s project and section, each with its own assignee and due date where you set them.',
   },
   {
     subtype: 'CREATE_APPROVALS',
@@ -920,7 +1264,7 @@ const NOT_IMPLEMENTED_REASON = 'This is not an action the engine can run yet.';
 
 /** The action catalogue for one project, custom fields generated in place. */
 export function actionCatalogue(fields: readonly CatalogueCustomField[]): AutomationCatalogEntry[] {
-  const generated: AutomationCatalogEntry[] = fields.map((field) => ({
+  const generated: AutomationCatalogEntry[] = settable(fields).map((field) => ({
     ...toActionEntry({
       subtype: AutomationAction.SET_CUSTOM_FIELD,
       label: `Change ${field.name} to…`,

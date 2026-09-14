@@ -1,10 +1,12 @@
 import { AUTOMATION_STATE_COLOR, TRIGGER_LABEL } from '@coretask/contracts';
 import { useNavigate } from '@tanstack/react-router';
-import { Plus, Zap } from 'lucide-react';
+import { LibraryBig, Plus, Zap } from 'lucide-react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { AutomationRule } from '@/features/automations/api/automations.api';
+import { RuleLibraryDialog } from '@/features/automations/components/rule-library-dialog';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 
 /**
@@ -16,17 +18,20 @@ import { SemanticBadge } from '@/features/colors/components/semantic-badge';
  * search, which drops `?customize=` — the panel gives way to the canvas.
  */
 export function CustomizeRulesSection({
+  workspaceId,
   projectId,
   rules,
   isLoading,
   canManage,
 }: {
+  workspaceId: string | undefined;
   projectId: string;
   rules: AutomationRule[] | undefined;
   isLoading: boolean;
   canManage: boolean;
 }) {
   const navigate = useNavigate();
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const openRule = (ruleId: string) =>
     void navigate({
@@ -84,11 +89,32 @@ export function CustomizeRulesSection({
       ))}
 
       {canManage && (
-        <Button variant="outline" size="sm" className="w-full" onClick={newRule}>
-          <Plus />
-          New rule
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="flex-1" onClick={newRule}>
+            <Plus />
+            New rule
+          </Button>
+          {/* The workspace's saved rules, applied here. The dialog navigates to
+              the new draft, which drops `?customize=` the same way New rule does. */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={() => setLibraryOpen(true)}
+          >
+            <LibraryBig />
+            Rule library
+          </Button>
+        </div>
       )}
+
+      <RuleLibraryDialog
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        workspaceId={workspaceId}
+        projectId={projectId}
+        canManage={canManage}
+      />
     </div>
   );
 }

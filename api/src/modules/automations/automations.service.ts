@@ -5,6 +5,7 @@ import {
   GraphIssueLevel,
   WorkspaceRole,
   hasAtLeastRole,
+  rulesForSection,
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -47,18 +48,30 @@ export class AutomationsService {
   async list(workspaceId: string, projectId: string, sectionId?: string) {
     await this.projects.requireProject(workspaceId, projectId);
 
-    return this.prisma.automationRule.findMany({
+    const rules = await this.prisma.automationRule.findMany({
       where: {
         projectId,
         status: { not: AutomationRuleStatus.ARCHIVED },
-        // Section scoping reads the trigger config rather than a column: the
-        // section a rule watches is part of how it triggers, not a second
-        // relationship that could drift out of step with it.
-        ...(sectionId ? { triggerConfig: { path: ['sectionId'], equals: sectionId } } : {}),
       },
       include: ruleInclude,
       orderBy: { createdAt: 'desc' },
     });
+
+    /*
+     * Section scoping is worked out from the rule, not from a column.
+     *
+     * The section a rule belongs to is part of what it watches — a trigger
+     * scoped to the section, or a "Section is…" check — and a denormalised
+     * column would eventually disagree with the graph it was copied from.
+     *
+     * Read in memory rather than as a JSON path filter on the trigger, because
+     * the trigger is only half of it. A rule started from a section's lightning
+     * menu carries the section as a condition, and keeps it when its trigger is
+     * changed to "task completed"; the old filter saw only the trigger, so the
+     * rule stayed on the project while vanishing from the section it was made
+     * for. A project's rules are few, so nothing is lost by reading them all.
+     */
+    return sectionId ? rulesForSection(rules, sectionId) : rules;
   }
 
   async get(workspaceId: string, projectId: string, ruleId: string) {

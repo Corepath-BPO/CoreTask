@@ -16,7 +16,14 @@ const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as co
  */
 export const taskInclude = {
   assignee: { select: USER_SELECT },
-  _count: { select: { subtasks: { where: { archivedAt: null } } } },
+  _count: {
+    select: {
+      subtasks: { where: { archivedAt: null } },
+      // Live conversation and confirmed files: the bubble and clip a row shows.
+      comments: { where: { deletedAt: null } },
+      attachments: { where: { status: 'READY' } },
+    },
+  },
 } satisfies Prisma.TaskInclude;
 
 export type TaskWithRelations = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
@@ -28,7 +35,10 @@ export const taskDetailInclude = {
   section: { select: { id: true, name: true } },
   subtasks: {
     where: { archivedAt: null },
-    orderBy: { position: 'asc' },
+    // The id as tiebreak, because rows written before positions were set all
+    // share 0 — and ids are time-ordered, so a tie reads in creation order
+    // instead of whatever order the database felt like.
+    orderBy: [{ position: 'asc' }, { id: 'asc' }],
     include: taskInclude,
   },
 } satisfies Prisma.TaskInclude;
@@ -48,7 +58,9 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     priority: task.priority,
     position: task.position,
     startDate: task.startDate?.toISOString() ?? null,
+    startAt: task.startAt?.toISOString() ?? null,
     dueDate: task.dueDate?.toISOString() ?? null,
+    dueAt: task.dueAt?.toISOString() ?? null,
     completedAt: task.completedAt?.toISOString() ?? null,
     archivedAt: task.archivedAt?.toISOString() ?? null,
     estimatedMinutes: task.estimatedMinutes,
@@ -57,6 +69,8 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     createdById: task.createdById,
     subtaskCount: task._count.subtasks,
     completedSubtaskCount,
+    commentCount: task._count.comments,
+    attachmentCount: task._count.attachments,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };

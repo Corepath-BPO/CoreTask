@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { LogOut, Monitor, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { Keyboard, LogOut, Monitor, Moon, Settings, Sun, UserRound } from 'lucide-react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -16,11 +16,13 @@ import { useAuth } from '@/features/auth/hooks/use-auth';
 import { initials } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 import { useTheme, type Theme } from '@/stores/theme.store';
+import { useUiStore } from '@/stores/ui.store';
 
 export function UserMenu() {
   const user = useCurrentUser();
   const { signOut, logout } = useAuth();
   const { theme, setTheme } = useTheme();
+  const openShortcuts = useUiStore((state) => state.setShortcutsHelpOpen);
 
   if (!user) return null;
 
@@ -55,6 +57,10 @@ export function UserMenu() {
             <Settings />
             Settings
           </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => openShortcuts(true)}>
+          <Keyboard />
+          Keyboard shortcuts
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

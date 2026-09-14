@@ -10,6 +10,14 @@ function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimiti
   return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
 }
 
+/**
+ * Something to hang the popover from that is not the thing that opens it —
+ * a grid cell whose own button already decides when editing starts.
+ */
+function PopoverAnchor({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Anchor>) {
+  return <PopoverPrimitive.Anchor data-slot="popover-anchor" {...props} />;
+}
+
 function PopoverContent({
   className,
   align = 'center',
@@ -33,4 +41,4 @@ function PopoverContent({
   );
 }
 
-export { Popover, PopoverContent, PopoverTrigger };
+export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger };

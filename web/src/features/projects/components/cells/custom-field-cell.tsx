@@ -13,6 +13,7 @@ import {
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 import { cn, formatDate } from '@/lib/utils';
 
+import { CustomFieldValue, OptionBadge } from './custom-field-value';
 import { CellButton, EmptyCell } from './editable-cell';
 import {
   allowsManyPeople,
@@ -21,12 +22,14 @@ import {
   fromInputValue,
   isLongText,
   maxLengthFor,
+  maxRating,
   numberFormat,
   placeholderFor,
   toInputValue,
   wantsTime,
 } from './field-settings';
 import { LongTextCell } from './long-text-cell';
+import { RatingCell } from './rating-cell';
 import { useCellEditor } from './use-cell-editor';
 
 /**
@@ -48,6 +51,7 @@ export function CustomFieldCell({
   canEdit,
   taskTitle,
   onSave,
+  autoOpen = false,
 }: {
   field: CustomField;
   value: TaskCustomFieldValue | undefined;
@@ -55,6 +59,8 @@ export function CustomFieldCell({
   canEdit: boolean;
   taskTitle: string;
   onSave: (payload: Record<string, unknown>) => void;
+  /** Mount already editing — the bulk bar's picker has no read mode to click out of. */
+  autoOpen?: boolean;
 }) {
   const label = `${field.name} for "${taskTitle}"`;
 
@@ -95,6 +101,7 @@ export function CustomFieldCell({
           min={format.min}
           max={format.max}
           step={format.decimalPlaces > 0 ? 1 / 10 ** format.decimalPlaces : 1}
+          autoOpen={autoOpen}
           onCommit={(next) => onSave({ number: next === '' ? null : Number(next) })}
           // Formatted for reading only. The editor keeps the raw value, because
           // rounding what somebody typed the moment they look away is how 12.5
@@ -110,6 +117,28 @@ export function CustomFieldCell({
       );
     }
 
+    case CustomFieldType.RATING:
+      // Stars are their own editor, like a checkbox: one click sets, a click
+      // on the current star clears.
+      return (
+        <RatingCell
+          value={value?.number ?? null}
+          max={maxRating(field)}
+          canEdit={canEdit}
+          label={label}
+          onCommit={(number) => onSave({ number })}
+        />
+      );
+
+    case CustomFieldType.FORMULA:
+      // Worked out on read and never typed in. Read-only whatever the
+      // reader's role, and it says so on hover rather than looking broken.
+      return (
+        <span className="text-xs" title="Calculated from other fields">
+          <CustomFieldValue field={field} value={value} metadata={metadata} />
+        </span>
+      );
+
     case CustomFieldType.DATE: {
       const withTime = wantsTime(field);
 
@@ -119,6 +148,7 @@ export function CustomFieldCell({
           canEdit={canEdit}
           label={label}
           type={withTime ? 'datetime-local' : 'date'}
+          autoOpen={autoOpen}
           onCommit={(next) => onSave({ date: fromInputValue(next, withTime) })}
           render={(text) =>
             text ? (
@@ -149,6 +179,7 @@ export function CustomFieldCell({
           label={label}
           type="url"
           placeholder={placeholderFor(field)}
+          autoOpen={autoOpen}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) =>
             text ? (
@@ -178,6 +209,7 @@ export function CustomFieldCell({
           label={label}
           type="email"
           placeholder={placeholderFor(field)}
+          autoOpen={autoOpen}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) => text || <EmptyCell />}
         />
@@ -203,6 +235,7 @@ export function CustomFieldCell({
           type="text"
           placeholder={placeholderFor(field)}
           maxLength={maxLengthFor(field)}
+          autoOpen={autoOpen}
           onCommit={(next) => onSave({ text: next || null })}
           render={(text) => text || <EmptyCell />}
         />
@@ -215,6 +248,7 @@ export function CustomFieldCell({
           selected={value?.optionIds ?? []}
           canEdit={canEdit}
           label={label}
+          autoOpen={autoOpen}
           onCommit={(optionIds) => onSave({ optionIds })}
         />
       );
@@ -226,6 +260,7 @@ export function CustomFieldCell({
           selected={value?.optionIds ?? []}
           canEdit={canEdit}
           label={label}
+          autoOpen={autoOpen}
           onCommit={(optionIds) => onSave({ optionIds })}
         />
       );
@@ -238,6 +273,7 @@ export function CustomFieldCell({
           canEdit={canEdit}
           label={label}
           allowMany={allowsManyPeople(field)}
+          autoOpen={autoOpen}
           onCommit={(userIds) => onSave({ userIds })}
         />
       );
@@ -247,6 +283,11 @@ export function CustomFieldCell({
       // version. Shown as read-only rather than crashing the whole row.
       return <span className="text-xs text-muted-foreground">Unsupported field</span>;
   }
+}
+
+/** The choices a picker offers: hidden options stay out, whatever a cell holds. */
+function liveOptions(field: CustomField) {
+  return field.options.filter((option) => !option.isArchived);
 }
 
 /** Text, number, date, url and email differ only by input type and rendering. */
@@ -260,6 +301,7 @@ function ScalarCell({
   min,
   max,
   step,
+  autoOpen,
   onCommit,
   render,
 }: {
@@ -272,10 +314,11 @@ function ScalarCell({
   min?: number;
   max?: number;
   step?: number;
+  autoOpen?: boolean;
   onCommit: (value: string) => void;
   render: (value: string) => React.ReactNode;
 }) {
-  const editor = useCellEditor(initial, onCommit);
+  const editor = useCellEditor(initial, onCommit, { initiallyEditing: autoOpen });
 
   if (editor.editing) {
     return (
@@ -304,36 +347,25 @@ function ScalarCell({
   );
 }
 
-function OptionBadge({ field, optionId }: { field: CustomField; optionId: string }) {
-  const option = field.options.find((entry) => entry.id === optionId);
-
-  // An archived option still renders its label. That is the whole reason
-  // options archive rather than delete — a cell showing a bare uuid tells the
-  // reader nothing about what they chose.
-  if (!option) return <span className="text-xs text-muted-foreground">Unknown</span>;
-
-  return (
-    <SemanticBadge color={{ colorToken: option.colorToken, customColor: option.customColor }}>
-      {option.label}
-    </SemanticBadge>
-  );
-}
-
 function SelectCell({
   field,
   selected,
   canEdit,
   label,
+  autoOpen,
   onCommit,
 }: {
   field: CustomField;
   selected: string[];
   canEdit: boolean;
   label: string;
+  autoOpen?: boolean;
   onCommit: (optionIds: string[]) => void;
 }) {
   const current = selected[0] ?? '';
-  const editor = useCellEditor(current, (value) => onCommit(value ? [value] : []));
+  const editor = useCellEditor(current, (value) => onCommit(value ? [value] : []), {
+    initiallyEditing: autoOpen,
+  });
 
   if (editor.editing) {
     return (
@@ -352,7 +384,7 @@ function SelectCell({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">Clear</SelectItem>
-          {field.options.map((option) => (
+          {liveOptions(field).map((option) => (
             <SelectItem key={option.id} value={option.id}>
               <SemanticBadge
                 color={{ colorToken: option.colorToken, customColor: option.customColor }}
@@ -385,15 +417,17 @@ function MultiSelectCell({
   selected,
   canEdit,
   label,
+  autoOpen,
   onCommit,
 }: {
   field: CustomField;
   selected: string[];
   canEdit: boolean;
   label: string;
+  autoOpen?: boolean;
   onCommit: (optionIds: string[]) => void;
 }) {
-  const editor = useCellEditor('', () => undefined);
+  const editor = useCellEditor('', () => undefined, { initiallyEditing: autoOpen });
 
   if (editor.editing) {
     return (
@@ -403,7 +437,7 @@ function MultiSelectCell({
         onKeyDown={editor.onKeyDown}
         className="flex flex-wrap gap-1 rounded-md border border-input bg-background p-1"
       >
-        {field.options.map((option) => {
+        {liveOptions(field).map((option) => {
           const isOn = selected.includes(option.id);
 
           return (
@@ -471,6 +505,7 @@ function PeopleCell({
   canEdit,
   label,
   allowMany,
+  autoOpen,
   onCommit,
 }: {
   metadata: ProjectFieldMetadata | undefined;
@@ -478,10 +513,13 @@ function PeopleCell({
   canEdit: boolean;
   label: string;
   allowMany: boolean;
+  autoOpen?: boolean;
   onCommit: (userIds: string[]) => void;
 }) {
   const current = selected[0] ?? '';
-  const editor = useCellEditor(current, (value) => onCommit(value ? [value] : []));
+  const editor = useCellEditor(current, (value) => onCommit(value ? [value] : []), {
+    initiallyEditing: autoOpen,
+  });
   const people = metadata?.members ?? [];
 
   const names = selected

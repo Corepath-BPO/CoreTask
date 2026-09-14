@@ -6,7 +6,7 @@ import {
   WorkItemType,
 } from '@coretask/contracts';
 import type { ProjectWorkItem, UserRef, WorkItemStateRef } from '@coretask/types';
-import type { Prisma } from '@prisma/client';
+import { TaskStatus, type Prisma } from '@prisma/client';
 
 /**
  * Turning two different records into one row.
@@ -32,12 +32,28 @@ export const workItemTaskInclude = {
   statusDefinition: { select: { id: true, name: true, colorToken: true } },
   priorityDefinition: { select: { id: true, name: true, colorToken: true } },
   customFieldValues: true,
-  _count: { select: { subtasks: { where: { archivedAt: null } } } },
+  _count: {
+    select: {
+      subtasks: { where: { archivedAt: null } },
+      comments: { where: { deletedAt: null } },
+      attachments: { where: { status: 'READY' } },
+    },
+  },
+  // The statuses as well as the count, so the completed half of the rollup is
+  // real: it was a hard-coded zero, and "0/3" over three finished subtasks
+  // reads as a task nobody has touched.
+  subtasks: { where: { archivedAt: null }, select: { status: true } },
 } satisfies Prisma.TaskInclude;
 
 export const workItemTicketInclude = {
   assignee: { select: { id: true, name: true, email: true, avatarUrl: true } },
   reporter: { select: { id: true, name: true, email: true, avatarUrl: true } },
+  _count: {
+    select: {
+      comments: { where: { deletedAt: null } },
+      attachments: { where: { status: 'READY' } },
+    },
+  },
 } satisfies Prisma.TicketInclude;
 
 type TaskRow = Prisma.TaskGetPayload<{ include: typeof workItemTaskInclude }>;
@@ -101,11 +117,15 @@ export function taskToWorkItem(task: TaskRow): ProjectWorkItem {
     // consumer handle two shapes.
     assignees: task.assignee ? [userRef(task.assignee) as UserRef] : [],
     startDate: task.startDate?.toISOString() ?? null,
+    startAt: task.startAt?.toISOString() ?? null,
     dueDate: task.dueDate?.toISOString() ?? null,
+    dueAt: task.dueAt?.toISOString() ?? null,
     completedAt: task.completedAt?.toISOString() ?? null,
     archivedAt: task.archivedAt?.toISOString() ?? null,
     subtaskCount: task._count.subtasks,
-    completedSubtaskCount: 0,
+    completedSubtaskCount: task.subtasks.filter((row) => row.status === TaskStatus.DONE).length,
+    commentCount: task._count.comments,
+    attachmentCount: task._count.attachments,
     customFieldValues: task.customFieldValues.map((value) => ({
       fieldId: value.customFieldId,
       textValue: value.textValue,
@@ -148,11 +168,16 @@ export function ticketToWorkItem(ticket: TicketRow): ProjectWorkItem {
     priority: { id: ticket.priority, name: priority.name, colorToken: priority.colorToken },
     assignees: ticket.assignee ? [userRef(ticket.assignee) as UserRef] : [],
     startDate: null,
+    startAt: null,
     dueDate: ticket.dueDate?.toISOString() ?? null,
+    // A ticket's deadline is a day, never a time — nothing stores one.
+    dueAt: null,
     completedAt: ticket.resolvedAt?.toISOString() ?? null,
     archivedAt: ticket.archivedAt?.toISOString() ?? null,
     subtaskCount: 0,
     completedSubtaskCount: 0,
+    commentCount: ticket._count.comments,
+    attachmentCount: ticket._count.attachments,
     /*
      * Always empty, and honestly so.
      *

@@ -1,6 +1,7 @@
 import { API_PREFIX, MAX_AUTOMATION_DEPTH, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
 
+import type { AutomationEvent } from '../../src/modules/automations/automation-event.publisher';
 import { AutomationRunnerService } from '../../src/modules/automations/automation-runner.service';
 
 import {
@@ -25,7 +26,11 @@ describe('Automations (e2e)', () => {
 
   beforeAll(async () => {
     context = await createTestContext();
-    runner = new AutomationRunnerService(context.prisma);
+    // A relay that goes nowhere: these tests assert what the engine writes,
+    // and the broadcast to open tabs is fire-and-forget by design.
+    runner = new AutomationRunnerService(context.prisma, {
+      toProject: async () => undefined,
+    } as never);
   });
 
   beforeEach(async () => {
@@ -187,6 +192,64 @@ describe('Automations (e2e)', () => {
       const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
       return task?.assigneeId ?? null;
     };
+
+    it('moves the task into another project and raises the move there', async () => {
+      const scope = await setupScope();
+
+      const sibling = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Renewals' })
+        .expect(201);
+      const targetProjectId = sibling.body.data.id as string;
+      const targetSections = sibling.body.data.sections as { id: string }[];
+      const targetSectionId = targetSections[1]?.id ?? targetSections[0]?.id ?? '';
+
+      // Something already in the column, so "last" is a claim with a witness.
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ title: 'Already here', sectionId: targetSectionId })
+        .expect(201);
+
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_PROJECT',
+          parentId: 't',
+          configuration: { projectId: targetProjectId, targetSectionId },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      expect(task.projectId).toBe(targetProjectId);
+      expect(task.sectionId).toBe(targetSectionId);
+
+      const column = await context.prisma.task.findMany({
+        where: { sectionId: targetSectionId },
+        orderBy: { position: 'asc' },
+        select: { id: true },
+      });
+      expect(column.at(-1)?.id).toBe(scope.taskId);
+
+      /*
+       * The follow-up is a move raised in the project the task is now in:
+       * the rules that should hear a task arrive are that project's, and a
+       * rule here listening for moves must not see its own hand-off as one.
+       */
+      expect(result.executed).toBe(1);
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          trigger: 'TASK_MOVED_TO_SECTION',
+          projectId: targetProjectId,
+          after: expect.objectContaining({ sectionId: targetSectionId }),
+        }),
+      ]);
+    });
 
     it('evaluates a date condition instead of quietly never matching', async () => {
       /*
@@ -598,6 +661,37 @@ describe('Automations (e2e)', () => {
         where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId: field.id } },
       });
       expect(stored?.textValue).toBe('Large');
+    });
+
+    it('sets a start date as a day counted from now, and clears it', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'SET_START_DATE', configuration: { daysFromNow: 2 } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const expected = new Date();
+      expected.setUTCDate(expected.getUTCDate() + 2);
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.startDate?.toISOString().slice(0, 10)).toBe(expected.toISOString().slice(0, 10));
+      expect(task?.startAt).toBeNull();
+    });
+
+    it('sets an estimate, in whole minutes', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'SET_ESTIMATE', configuration: { minutes: 90 } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.estimatedMinutes).toBe(90);
     });
 
     it('still honours a rule stored under the old key names', async () => {
@@ -1178,7 +1272,15 @@ describe('Automations (e2e)', () => {
         name: 'Loop risk',
         nodes: [
           { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_STATUS_CHANGED', parentId: null },
-          { id: 'a', nodeType: 'ACTION', subtype: 'UPDATE_STATUS', parentId: 't' },
+          // With a status chosen: the warning is about the loop, and a step
+          // missing its setting is refused on its own account.
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'UPDATE_STATUS',
+            parentId: 't',
+            configuration: { statusDefinitionId: 'IN_PROGRESS' },
+          },
         ],
       });
 
@@ -1209,6 +1311,102 @@ describe('Automations (e2e)', () => {
 
       expect(result.issues.map((issue) => issue.message)).toContain(
         'That section is no longer in this project.',
+      );
+    });
+
+    it('refuses a move to this project, to another workspace, or into a section elsewhere', async () => {
+      /*
+       * A move names another project and, optionally, a section of *that*
+       * one. The rule's own project is not a destination, a project in
+       * another workspace is a tenant boundary, and a section that is not
+       * in the chosen project is the same reach one step down.
+       */
+      const scope = await setupScope();
+      const other = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const move = (configuration: Record<string, unknown>) =>
+        check(scope, ruleId, {
+          name: 'Hand-off',
+          nodes: [
+            { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+            {
+              id: 'a',
+              nodeType: 'ACTION',
+              subtype: 'MOVE_TO_PROJECT',
+              parentId: 't',
+              configuration,
+            },
+          ],
+        });
+
+      const own = await move({ projectId: scope.projectId });
+      expect(own.issues.map((issue) => issue.message)).toContain(
+        'The task is already in this project — choose another one.',
+      );
+
+      const foreign = await move({ projectId: other.projectId });
+      expect(foreign.issues.map((issue) => issue.message)).toContain(
+        'That project is no longer in this workspace.',
+      );
+
+      const sibling = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Renewals' })
+        .expect(201);
+
+      const strayed = await move({
+        projectId: sibling.body.data.id as string,
+        targetSectionId: scope.sectionId,
+      });
+      expect(strayed.issues.map((issue) => issue.message)).toContain(
+        'That section is no longer in the chosen project.',
+      );
+
+      const sound = await move({
+        projectId: sibling.body.data.id as string,
+        targetSectionId: (sibling.body.data.sections as { id: string }[])[1]?.id,
+      });
+      expect(sound.publishable).toBe(true);
+    });
+
+    it('refuses a subtask assigned to an outsider, or due on a day that is not one', async () => {
+      /*
+       * Each row's assignee is a reference like the assign action's, and a
+       * rule assigning a subtask to somebody outside the workspace is a reach
+       * across a tenant boundary, not a broken rule. The date is refused here
+       * because the runner would fail on it every time the rule ran.
+       */
+      const scope = await setupScope();
+      const other = await setupScope();
+      const ruleId = await draftWithNodes(scope, []);
+
+      const result = await check(scope, ruleId, {
+        name: 'Checklist',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'CREATE_SUBTASK',
+            parentId: 't',
+            configuration: {
+              subtasks: [
+                { title: 'Review', assigneeId: other.owner.userId },
+                { title: 'Sign off', dueDate: 'next Tuesday' },
+              ],
+            },
+          },
+        ],
+      });
+
+      expect(result.publishable).toBe(false);
+      expect(result.issues.map((issue) => issue.message)).toEqual(
+        expect.arrayContaining([
+          'That person is no longer a member of this workspace.',
+          'A subtask’s due date is not a real date.',
+        ]),
       );
     });
   });
@@ -1539,6 +1737,55 @@ describe('Automations (e2e)', () => {
       expect(other.body.data).toHaveLength(0);
     });
 
+    it('keeps a rule under its section when only a condition names it', async () => {
+      /*
+       * The rule a section's lightning menu starts: the trigger came from the
+       * click, and so did a "Section is…" check. Somebody then changed the
+       * trigger to "task completed" — the section is no longer on the trigger
+       * but the check still says which section the rule is about. It used to
+       * vanish from the section's list while staying on the project's.
+       */
+      const scope = await setupScope();
+
+      await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'When done in triage',
+          triggerType: 'TASK_COMPLETED',
+          triggerConfig: {},
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_COMPLETED', configuration: {} },
+            {
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              configuration: { field: 'sectionId', operator: 'EQUALS', value: scope.sectionId },
+            },
+            {
+              nodeType: 'ACTION',
+              subtype: 'MOVE_TO_SECTION',
+              configuration: { sectionId: scope.otherSectionId },
+            },
+          ],
+        })
+        .expect(201);
+
+      const matching = await request(server())
+        .get(`${rulesUrl(scope)}?sectionId=${scope.sectionId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      // Where the rule sends tasks is not where it lives.
+      const destination = await request(server())
+        .get(`${rulesUrl(scope)}?sectionId=${scope.otherSectionId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(matching.body.data.map((rule: { name: string }) => rule.name)).toEqual([
+        'When done in triage',
+      ]);
+      expect(destination.body.data).toHaveLength(0);
+    });
+
     it('refuses a member without the manager role', async () => {
       const scope = await setupScope();
 
@@ -1763,6 +2010,586 @@ describe('Automations (e2e)', () => {
 
   // -------------------------------------------------------------------------
   /**
+   * One rule setting off another.
+   *
+   * Driven the way the processor drives it — `handle`, then feed what came
+   * back in again — because the worker is a separate process the e2e app does
+   * not start. What is pinned is the contract between the two: every change a
+   * rule makes comes back as the event a person making that change would have
+   * raised, tagged so the guards at the top of `handle` can read it on the
+   * next hop.
+   */
+  describe('chaining', () => {
+    const trigger = { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' };
+
+    /** A published rule, scoped to a section, with the actions given. */
+    const publishRule = async (
+      scope: Scope,
+      name: string,
+      triggerConfig: Record<string, unknown>,
+      actions: Record<string, unknown>[],
+    ) => {
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name,
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig,
+          nodes: [trigger, ...actions],
+        })
+        .expect(201);
+
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      return created.body.data.id as string;
+    };
+
+    /** The one event a run raised, or a failure that says how many it raised. */
+    const soleEvent = (result: { events: AutomationEvent[] }): AutomationEvent => {
+      expect(result.events).toHaveLength(1);
+
+      return result.events[0] as AutomationEvent;
+    };
+
+    /**
+     * A published "when completed, if in `from`, then…" rule — the flat shape
+     * a rule started from a section's lightning menu keeps when its trigger is
+     * changed to "task completed".
+     */
+    const publishCompletedRule = async (
+      scope: Scope,
+      name: string,
+      from: string,
+      actions: Record<string, unknown>[],
+    ) => {
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name,
+          triggerType: 'TASK_COMPLETED',
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_COMPLETED', configuration: {} },
+            {
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              configuration: { field: 'sectionId', operator: 'IS', value: from },
+            },
+            ...actions,
+          ],
+        })
+        .expect(201);
+
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      return created.body.data.id as string;
+    };
+
+    const moveTo = (sectionId: string) => ({
+      nodeType: 'ACTION',
+      subtype: 'MOVE_TO_SECTION',
+      configuration: { sectionId },
+    });
+
+    /** The project's sections in column order; a new project has four. */
+    const sectionIds = async (scope: Scope) => {
+      const sections = await context.prisma.section.findMany({
+        where: { projectId: scope.projectId },
+        orderBy: { position: 'asc' },
+        select: { id: true },
+      });
+
+      return sections.map((section) => section.id);
+    };
+
+    /** Ticks the task complete, and returns the event a person doing so raises. */
+    const completeTask = async (scope: Scope) => {
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { status: 'DONE', completedAt: new Date() },
+      });
+
+      return {
+        ...moveEvent(scope),
+        trigger: 'TASK_COMPLETED' as const,
+        before: { status: 'TODO' },
+        after: { status: 'DONE' },
+      };
+    };
+
+    describe('several rules on one event', () => {
+      it('judges every rule on the task as the event found it, not on a sibling rule’s write', async () => {
+        /*
+         * The report that found this. Four "when completed in this column,
+         * move to the next" rules, one per column; ticking a task in the first
+         * column landed it in the last. Each rule re-read the task before
+         * checking its condition, so each saw the column the rule before it
+         * had just written — all at depth zero, where no loop guard looks.
+         */
+        const scope = await setupScope();
+        const [first = '', second = '', third = '', fourth = ''] = await sectionIds(scope);
+        expect(fourth).not.toBe('');
+
+        const opener = await publishCompletedRule(scope, 'First to second', first, [
+          moveTo(second),
+        ]);
+        const middle = await publishCompletedRule(scope, 'Second to third', second, [
+          moveTo(third),
+        ]);
+        const closer = await publishCompletedRule(scope, 'Third to fourth', third, [
+          moveTo(fourth),
+        ]);
+
+        const result = await runner.handle(await completeTask(scope));
+
+        expect(result).toMatchObject({ executed: 1, skipped: 2 });
+        const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+        expect(task.sectionId).toBe(second);
+
+        // The one move it did make reaches the next rule as an event of its
+        // own, one hop deeper, where chaining and the depth limit can see it.
+        expect(soleEvent(result)).toEqual(
+          expect.objectContaining({
+            trigger: 'TASK_MOVED_TO_SECTION',
+            entityId: scope.taskId,
+            depth: 1,
+            causedByRuleId: opener,
+            before: expect.objectContaining({ sectionId: first }),
+            after: expect.objectContaining({ sectionId: second }),
+          }),
+        );
+
+        const executions = new Map(
+          (await context.prisma.automationExecution.findMany()).map((row) => [row.ruleId, row]),
+        );
+        expect(executions.get(opener)?.status).toBe('COMPLETED');
+        expect(executions.get(middle)).toMatchObject({
+          status: 'SKIPPED',
+          skippedReason: expect.stringMatching(/condition not met/i),
+        });
+        expect(executions.get(closer)?.status).toBe('SKIPPED');
+      });
+
+      it('still runs every rule whose condition held, against the task as it now is', async () => {
+        // The snapshot is for judging, not for writing: a second rule that
+        // applies must act on what the first left, or the two would clobber
+        // each other and the second's "before" would be a lie.
+        const scope = await setupScope();
+        const [first = '', second = ''] = await sectionIds(scope);
+
+        await publishCompletedRule(scope, 'Move it on', first, [moveTo(second)]);
+        await publishCompletedRule(scope, 'Raise it', first, [
+          { nodeType: 'ACTION', subtype: 'UPDATE_PRIORITY', configuration: { priority: 'HIGH' } },
+        ]);
+
+        const result = await runner.handle(await completeTask(scope));
+
+        expect(result).toMatchObject({ executed: 2, skipped: 0 });
+        const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+        expect(task).toMatchObject({ sectionId: second, priority: 'HIGH' });
+
+        expect(result.events.map((raised) => raised.trigger)).toEqual([
+          'TASK_MOVED_TO_SECTION',
+          'TASK_UPDATED',
+          'TASK_PRIORITY_CHANGED',
+        ]);
+        // The priority change diffed against the moved task, not the morning's.
+        expect(result.events[1]?.before).toEqual(expect.objectContaining({ sectionId: second }));
+      });
+    });
+
+    it('lets a rule that moves a task set off the rule waiting in that section', async () => {
+      /*
+       * The report that found this. One rule moved a task to a section when a
+       * field changed; another added a subtask when a task arrived there. The
+       * second ran only when somebody dragged the task by hand, because a
+       * rule's move announced nothing — so the two rules each worked, and
+       * never together.
+       */
+      const scope = await setupScope();
+
+      const mover = await publishRule(scope, 'Move along', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_SECTION',
+          configuration: { sectionId: scope.otherSectionId },
+        },
+      ]);
+      const greeter = await publishRule(
+        scope,
+        'Add checklist',
+        { sectionId: scope.otherSectionId },
+        [
+          {
+            nodeType: 'ACTION',
+            subtype: 'CREATE_SUBTASK',
+            configuration: { subtasks: ['Review'] },
+          },
+        ],
+      );
+
+      const first = await runner.handle(moveEvent(scope));
+
+      // The first hop: only the mover matched, and its move came back as the
+      // event a drag into that section would have been — one hop deeper, on
+      // the same thread, and naming the rule that did it.
+      expect(first.executed).toBe(1);
+      expect(soleEvent(first)).toEqual(
+        expect.objectContaining({
+          trigger: 'TASK_MOVED_TO_SECTION',
+          entityType: 'TASK',
+          entityId: scope.taskId,
+          actorId: scope.owner.userId,
+          before: expect.objectContaining({ sectionId: scope.sectionId }),
+          after: expect.objectContaining({ sectionId: scope.otherSectionId }),
+          correlationId: moveEvent(scope).correlationId,
+          depth: 1,
+          causedByRuleId: mover,
+        }),
+      );
+
+      // The second hop, as the processor would deliver it.
+      const second = await runner.handle(soleEvent(first));
+
+      expect(second.executed).toBe(1);
+
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+      });
+      expect(subtasks.map((subtask) => subtask.title)).toEqual(['Review']);
+
+      // And the subtask's creation is announced in turn, a hop deeper again.
+      expect(soleEvent(second)).toEqual(
+        expect.objectContaining({
+          trigger: 'TASK_CREATED',
+          entityId: subtasks[0]?.id,
+          depth: 2,
+          causedByRuleId: greeter,
+        }),
+      );
+
+      const executions = await context.prisma.automationExecution.findMany({
+        orderBy: { depth: 'asc' },
+      });
+      expect(executions.map((execution) => [execution.ruleId, execution.depth])).toEqual([
+        [mover, 0],
+        [greeter, 1],
+      ]);
+    });
+
+    it('creates each subtask with the assignee and due date its row names', async () => {
+      /*
+       * A checklist is rarely three bare titles: the review goes to the
+       * reviewer and is due before the sign-off. Each row carries its own,
+       * and a row naming neither is created bare, as every row was before.
+       */
+      const scope = await setupScope();
+
+      await publishRule(scope, 'Checklist', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'CREATE_SUBTASK',
+          configuration: {
+            subtasks: [
+              { title: 'Review', assigneeId: scope.member.userId, dueInDays: 3 },
+              { title: 'Sign off', dueDate: '2030-01-15' },
+              'File it',
+            ],
+          },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+      expect(result.executed).toBe(1);
+
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+        orderBy: { position: 'asc' },
+      });
+
+      const inThreeDays = new Date();
+      inThreeDays.setUTCDate(inThreeDays.getUTCDate() + 3);
+      const day = (date: Date | null) => date?.toISOString().slice(0, 10) ?? null;
+
+      expect(
+        subtasks.map((subtask) => [subtask.title, subtask.assigneeId, day(subtask.dueDate)]),
+      ).toEqual([
+        ['Review', scope.member.userId, day(inThreeDays)],
+        ['Sign off', null, '2030-01-15'],
+        ['File it', null, null],
+      ]);
+
+      // A day, not a moment — what every date column holds.
+      expect(subtasks[0]?.dueDate?.toISOString()).toMatch(/T00:00:00\.000Z$/);
+      expect(subtasks[0]?.dueAt).toBeNull();
+
+      // The assignee follows the subtask, as one a rule assigns later does.
+      const followers = await context.prisma.follower.findMany({
+        where: { taskId: subtasks[0]?.id },
+      });
+      expect(followers.map((row) => row.userId)).toEqual([scope.member.userId]);
+
+      // Each creation is announced with what it was created as.
+      expect(result.events.map((raised) => raised.after)).toEqual([
+        expect.objectContaining({ title: 'Review', assigneeId: scope.member.userId }),
+        expect.objectContaining({ title: 'Sign off', dueDate: '2030-01-15T00:00:00.000Z' }),
+        expect.objectContaining({ title: 'File it', assigneeId: null, dueDate: null }),
+      ]);
+    });
+
+    it('creates a subtask unassigned, rather than not at all, when its person has left', async () => {
+      // The rule's job is the checklist. A departed name is noted in the log
+      // and refused by the validator the next time the rule is edited.
+      const scope = await setupScope();
+
+      await publishRule(scope, 'Checklist', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'CREATE_SUBTASK',
+          configuration: { subtasks: [{ title: 'Review', assigneeId: scope.member.userId }] },
+        },
+      ]);
+      await context.prisma.workspaceMember.deleteMany({
+        where: { workspaceId: scope.workspaceId, userId: scope.member.userId },
+      });
+
+      const result = await runner.handle(moveEvent(scope));
+      expect(result.executed).toBe(1);
+
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+      });
+      expect(subtasks.map((subtask) => [subtask.title, subtask.assigneeId])).toEqual([
+        ['Review', null],
+      ]);
+
+      const logs = await context.prisma.automationExecutionLog.findMany();
+      expect(logs.map((log) => [log.succeeded, log.message])).toEqual([
+        [true, expect.stringContaining('no longer in this workspace')],
+      ]);
+    });
+
+    it('announces nothing for a write that changed nothing', async () => {
+      const scope = await setupScope();
+
+      // Moves the task to the section it is already in.
+      await publishRule(scope, 'Stay put', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_SECTION',
+          configuration: { sectionId: scope.sectionId },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+
+      expect(result.executed).toBe(1);
+      expect(result.events).toEqual([]);
+    });
+
+    it('never hands a rule its own change back', async () => {
+      const scope = await setupScope();
+
+      // Listens for any move, and moves. Its own move must not be a second turn.
+      const ruleId = await publishRule(scope, 'Bounce', {}, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_SECTION',
+          configuration: { sectionId: scope.otherSectionId },
+        },
+      ]);
+
+      const first = await runner.handle(moveEvent(scope));
+      const second = await runner.handle(soleEvent(first));
+
+      expect(second.executed).toBe(0);
+      expect(await context.prisma.automationExecution.count({ where: { ruleId } })).toBe(1);
+    });
+
+    it('announces a status change the way a person’s edit is announced', async () => {
+      const scope = await setupScope();
+
+      await publishRule(scope, 'Finish', { sectionId: scope.sectionId }, [
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: 'DONE' } },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+
+      expect(result.events.map((next) => next.trigger)).toEqual([
+        'TASK_UPDATED',
+        'TASK_STATUS_CHANGED',
+        'TASK_COMPLETED',
+      ]);
+      expect(result.events[0]?.after).toEqual(
+        expect.objectContaining({ status: 'DONE', completedAt: expect.any(String) }),
+      );
+    });
+
+    it('announces a custom field a rule set, by id and by name, once', async () => {
+      const scope = await setupScope();
+
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Effort',
+          type: 'TEXT',
+          projects: { create: { projectId: scope.projectId } },
+        },
+      });
+
+      await publishRule(scope, 'Size it', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { fieldId: field.id, value: 'Large' },
+        },
+      ]);
+
+      const first = await runner.handle(moveEvent(scope));
+
+      expect(soleEvent(first)).toEqual(
+        expect.objectContaining({
+          trigger: 'CUSTOM_FIELD_CHANGED',
+          before: { fieldId: field.id, fieldName: 'Effort', value: null },
+          after: {
+            fieldId: field.id,
+            fieldName: 'Effort',
+            value: expect.objectContaining({ text: 'Large' }),
+          },
+        }),
+      );
+
+      // Writing the same value again is not a change.
+      const second = await runner.handle(moveEvent(scope));
+
+      expect(second.executed).toBe(1);
+      expect(second.events).toEqual([]);
+    });
+
+    it('raises the parent’s completion when the last of its subtasks is completed', async () => {
+      /*
+       * The other half of "task or all subtasks completed". A person finishing
+       * the last item on a checklist has finished the checklist, and a rule
+       * written for that only ever heard about the subtask. The roll-up is the
+       * engine's to work out: nothing in the request path knows the siblings.
+       */
+      const scope = await setupScope();
+
+      // Out of the watched section themselves, so the rule answers the parent
+      // and not the subtask that raised it.
+      const subtasks = await Promise.all(
+        ['Review', 'Assign', 'Schedule'].map((title, index) =>
+          context.prisma.task.create({
+            data: {
+              workspaceId: scope.workspaceId,
+              projectId: scope.projectId,
+              sectionId: null,
+              parentTaskId: scope.taskId,
+              title,
+              position: index,
+              createdById: scope.owner.userId,
+              ...(index < 2 ? { status: 'DONE', completedAt: new Date() } : {}),
+            },
+          }),
+        ),
+      );
+      const [, second, last] = subtasks;
+
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'When all tasks are complete',
+          triggerType: 'TASK_COMPLETED',
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_COMPLETED' },
+            {
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              configuration: { field: 'sectionId', operator: 'IS', value: scope.sectionId },
+            },
+            // The condition of the same name has to hold for the roll-up too,
+            // or the label promises a check the rule cannot pass.
+            {
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              configuration: { field: 'completed', operator: 'IS', value: true },
+            },
+            {
+              nodeType: 'ACTION',
+              subtype: 'MOVE_TO_SECTION',
+              configuration: { sectionId: scope.otherSectionId },
+            },
+          ],
+        })
+        .expect(201);
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const completedEvent = (subtaskId: string) => ({
+        ...moveEvent(scope),
+        trigger: 'TASK_COMPLETED' as const,
+        entityId: subtaskId,
+        after: { status: 'DONE' },
+      });
+
+      // The second of three: the checklist is not finished, so nothing rolls up.
+      const early = await runner.handle(completedEvent(second?.id ?? ''));
+      expect(early.events).toEqual([]);
+
+      await context.prisma.task.update({
+        where: { id: last?.id ?? '' },
+        data: { status: 'DONE', completedAt: new Date() },
+      });
+
+      const result = await runner.handle(completedEvent(last?.id ?? ''));
+
+      // The subtask is not in the watched section, so the rule skipped it.
+      // What came back is the same event for the parent, at the same depth: a
+      // person finishing the last subtask is still a person doing it.
+      expect(result.executed).toBe(0);
+      expect(soleEvent(result)).toEqual(
+        expect.objectContaining({
+          trigger: 'TASK_COMPLETED',
+          entityId: scope.taskId,
+          depth: 0,
+          correlationId: moveEvent(scope).correlationId,
+          after: expect.objectContaining({ allSubtasksCompleted: true, subtaskCount: 3 }),
+        }),
+      );
+
+      // Delivered, the rule runs on the parent — whose own column still says
+      // it is open, which is what the "completion status" condition has to see
+      // past.
+      const delivered = await runner.handle(soleEvent(result));
+      expect(delivered.executed).toBe(1);
+
+      const parent = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      expect(parent.sectionId).toBe(scope.otherSectionId);
+      expect(parent.completedAt).toBeNull();
+
+      // Once the parent is complete in its own right, the roll-up stays quiet:
+      // its own completion is the event, and a second would run every rule twice.
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { status: 'DONE', completedAt: new Date() },
+      });
+      const again = await runner.handle(completedEvent(last?.id ?? ''));
+      expect(again.events).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  /**
    * The catalogue, over the wire, answered from one project.
    *
    * The unit spec pins `available` to the engine; these pin the other half —
@@ -1811,13 +2638,14 @@ describe('Automations (e2e)', () => {
       name: string,
       type: 'SINGLE_SELECT' | 'NUMBER' = 'SINGLE_SELECT',
       projectId = scope.projectId,
+      position = 0,
     ) => {
       const field = await context.prisma.customField.create({
         data: {
           workspaceId: scope.workspaceId,
           name,
           type,
-          projects: { create: { projectId } },
+          projects: { create: { projectId, position } },
           ...(type === 'SINGLE_SELECT'
             ? {
                 options: {
@@ -1861,8 +2689,11 @@ describe('Automations (e2e)', () => {
 
     it('generates the custom field rows from the fields the project really has', async () => {
       const scope = await setupScope();
-      await addCustomField(scope, 'Risk', 'SINGLE_SELECT');
-      await addCustomField(scope, 'Effort', 'NUMBER');
+      // The catalogue lists fields in the order the project arranges them, not
+      // alphabetically, so the rows read the way the board does. Risk is added
+      // first but sits second on the project.
+      await addCustomField(scope, 'Risk', 'SINGLE_SELECT', scope.projectId, 1);
+      await addCustomField(scope, 'Effort', 'NUMBER', scope.projectId, 0);
 
       const metadata = await readMetadata(scope);
 
@@ -1873,7 +2704,9 @@ describe('Automations (e2e)', () => {
         metadata.customFields.find((field) => field.name === 'Risk')?.options.map((o) => o.label),
       ).toEqual(['Low', 'High']);
 
-      const generated = metadata.conditions.filter((entry) => entry.category === 'Custom field is');
+      const generated = metadata.conditions.filter(
+        (entry) => entry.category === 'Custom field is…',
+      );
       expect(generated.map((entry) => entry.label)).toEqual(['Effort is…', 'Risk is…']);
       expect(generated.map((entry) => entry.fieldName)).toEqual(['Effort', 'Risk']);
       expect(generated.every((entry) => entry.fieldId)).toBe(true);
@@ -1884,10 +2717,11 @@ describe('Automations (e2e)', () => {
       );
       expect(writes.map((entry) => entry.label)).toEqual(['Change Effort to…', 'Change Risk to…']);
       expect(writes.every((entry) => entry.subtype === 'SET_CUSTOM_FIELD')).toBe(true);
-      // The engine writes custom fields and cannot read them, so the same field
-      // is an available action and an unavailable check.
+      // The engine writes custom fields and reads them back for a check
+      // (`conditionHolds` compares by membership), so the same field is an
+      // available action and an available condition.
       expect(writes.every((entry) => entry.available)).toBe(true);
-      expect(generated.every((entry) => !entry.available && entry.reason)).toBe(true);
+      expect(generated.every((entry) => entry.available && !entry.reason)).toBe(true);
     });
 
     it('leaves out a field another project uses, and one that was archived', async () => {
@@ -1912,7 +2746,7 @@ describe('Automations (e2e)', () => {
 
       expect(metadata.customFields.map((field) => field.name)).toEqual(['Mine']);
       expect(
-        metadata.conditions.filter((entry) => entry.category === 'Custom field is').length,
+        metadata.conditions.filter((entry) => entry.category === 'Custom field is…').length,
       ).toBe(1);
     });
 

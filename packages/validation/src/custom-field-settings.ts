@@ -1,4 +1,12 @@
-import { CustomFieldType } from '@coretask/contracts';
+import {
+  CustomFieldType,
+  FORMULA_MAX_LENGTH,
+  RATING_DEFAULT_STARS,
+  RATING_MAX_STARS,
+  RATING_MIN_STARS,
+  UNIT_LABEL_MAX_LENGTH,
+  parseFormula,
+} from '@coretask/contracts';
 import { z } from 'zod';
 
 /**
@@ -28,11 +36,54 @@ export const peopleModeSchema = z.enum(['SINGLE', 'MULTIPLE']);
 /**
  * How a number is written down.
  *
- * `CURRENCY` is deliberately absent: it needs a currency code, a rounding rule
- * and a display position, and a format that renders "1.5" as "$1.50" without
- * storing which currency that is would be worse than not offering it.
+ * `CURRENCY` carries an ISO code and is rendered by the client through
+ * `Intl.NumberFormat`, so "1.5" reads as "€1.50" without the server knowing
+ * a symbol; `CUSTOM_UNIT` is a label beside the number — "5 pts", "3 hrs".
  */
-export const numberFormatSchema = z.enum(['PLAIN', 'PERCENTAGE']);
+export const numberFormatSchema = z.enum(['PLAIN', 'PERCENTAGE', 'CURRENCY', 'CUSTOM_UNIT']);
+
+export const unitPositionSchema = z.enum(['PREFIX', 'SUFFIX']);
+
+/**
+ * The display half, shared by NUMBER and FORMULA.
+ *
+ * The extra keys have no defaults on purpose: a document written before they
+ * existed must read back byte-identical, and a PLAIN number has no currency.
+ */
+const numberDisplayShape = {
+  numberFormat: numberFormatSchema.default('PLAIN'),
+  decimalPlaces: z.number().int().min(0).max(6).default(0),
+  currencyCode: z
+    .string()
+    .regex(/^[A-Z]{3}$/, 'Use a three-letter ISO currency code, such as USD.')
+    .optional(),
+  unitLabel: z.string().trim().min(1).max(UNIT_LABEL_MAX_LENGTH).optional(),
+  unitPosition: unitPositionSchema.optional(),
+};
+
+interface NumberDisplay {
+  numberFormat?: string;
+  currencyCode?: string;
+  unitLabel?: string;
+}
+
+function withDisplayRefinements<T extends z.ZodTypeAny>(schema: T) {
+  return schema
+    .refine(
+      (settings: unknown) => {
+        const display = settings as NumberDisplay;
+        return display.numberFormat !== 'CURRENCY' || Boolean(display.currencyCode);
+      },
+      { message: 'A currency format needs a currency code.', path: ['currencyCode'] },
+    )
+    .refine(
+      (settings: unknown) => {
+        const display = settings as NumberDisplay;
+        return display.numberFormat !== 'CUSTOM_UNIT' || Boolean(display.unitLabel);
+      },
+      { message: 'A custom unit needs a label.', path: ['unitLabel'] },
+    );
+}
 
 const textSettingsSchema = z.object({
   textMode: textModeSchema.default('SHORT'),
@@ -40,20 +91,21 @@ const textSettingsSchema = z.object({
   maxLength: z.number().int().min(1).max(10_000).optional(),
 });
 
-const numberSettingsSchema = z
-  .object({
-    numberFormat: numberFormatSchema.default('PLAIN'),
-    decimalPlaces: z.number().int().min(0).max(6).default(0),
-    minValue: z.number().optional(),
-    maxValue: z.number().optional(),
-  })
-  .refine(
-    (settings) =>
-      settings.minValue === undefined ||
-      settings.maxValue === undefined ||
-      settings.minValue <= settings.maxValue,
-    { message: 'The minimum must not be greater than the maximum.', path: ['minValue'] },
-  );
+const numberSettingsSchema = withDisplayRefinements(
+  z
+    .object({
+      ...numberDisplayShape,
+      minValue: z.number().optional(),
+      maxValue: z.number().optional(),
+    })
+    .refine(
+      (settings) =>
+        settings.minValue === undefined ||
+        settings.maxValue === undefined ||
+        settings.minValue <= settings.maxValue,
+      { message: 'The minimum must not be greater than the maximum.', path: ['minValue'] },
+    ),
+);
 
 const dateSettingsSchema = z.object({
   dateMode: dateModeSchema.default('DATE_ONLY'),
@@ -63,10 +115,14 @@ const peopleSettingsSchema = z.object({
   peopleMode: peopleModeSchema.default('SINGLE'),
 });
 
+/*
+ * No default value. Nothing ever applied one on create, Asana's fields have no
+ * defaults either, and `parseFieldSettings` drops unknown keys — so a document
+ * that still carries `defaultValue` reads back without it and nobody notices.
+ */
 const checkboxSettingsSchema = z.object({
   checkedLabel: z.string().max(40).optional(),
   uncheckedLabel: z.string().max(40).optional(),
-  defaultValue: z.boolean().default(false),
 });
 
 const selectSettingsSchema = z.object({
@@ -77,6 +133,36 @@ const selectSettingsSchema = z.object({
 const linkSettingsSchema = z.object({
   placeholder: z.string().max(80).optional(),
 });
+
+const ratingSettingsSchema = z.object({
+  maxRating: z
+    .number()
+    .int()
+    .min(RATING_MIN_STARS)
+    .max(RATING_MAX_STARS)
+    .default(RATING_DEFAULT_STARS),
+});
+
+/**
+ * Syntax only, here. Whether the fields a formula names exist on the project
+ * is the service's question, because only it holds the project.
+ */
+const formulaSettingsSchema = withDisplayRefinements(
+  z.object({
+    ...numberDisplayShape,
+    expression: z
+      .string()
+      .trim()
+      .min(1, 'Write a formula.')
+      .max(FORMULA_MAX_LENGTH)
+      .superRefine((expression, context) => {
+        const parsed = parseFormula(expression);
+        if (!parsed.ok) {
+          context.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error.message });
+        }
+      }),
+  }),
+);
 
 const emptySettingsSchema = z.object({});
 
@@ -97,6 +183,8 @@ const SETTINGS_BY_TYPE = {
   [CustomFieldType.MULTI_SELECT]: selectSettingsSchema,
   [CustomFieldType.URL]: linkSettingsSchema,
   [CustomFieldType.EMAIL]: linkSettingsSchema,
+  [CustomFieldType.RATING]: ratingSettingsSchema,
+  [CustomFieldType.FORMULA]: formulaSettingsSchema,
 } as const satisfies Record<CustomFieldType, z.ZodTypeAny>;
 
 export type CustomFieldSettings = {
@@ -122,9 +210,7 @@ export function parseFieldSettings<T extends CustomFieldType>(
 export function safeParseFieldSettings<T extends CustomFieldType>(
   type: T,
   settings: unknown,
-):
-  | { success: true; data: CustomFieldSettings[T] }
-  | { success: false; error: z.ZodError } {
+): { success: true; data: CustomFieldSettings[T] } | { success: false; error: z.ZodError } {
   const schema = SETTINGS_BY_TYPE[type] as z.ZodTypeAny;
   const result = schema.safeParse(settings ?? {});
 
@@ -135,5 +221,7 @@ export function safeParseFieldSettings<T extends CustomFieldType>(
 
 /** The defaults a newly created field of this type starts with. */
 export function defaultFieldSettings<T extends CustomFieldType>(type: T): CustomFieldSettings[T] {
-  return parseFieldSettings(type, {});
+  // A formula has no default expression; its blank document is what the
+  // editor starts from, and the API refuses to save it until one is written.
+  return parseFieldSettings(type, type === CustomFieldType.FORMULA ? { expression: '0' } : {});
 }

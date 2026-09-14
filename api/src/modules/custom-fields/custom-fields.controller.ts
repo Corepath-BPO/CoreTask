@@ -1,5 +1,5 @@
 import type { WorkspaceRole } from '@coretask/contracts';
-import type { CustomField, TaskCustomFieldValue } from '@coretask/types';
+import type { CustomField, RemoveFieldResult, TaskCustomFieldValue } from '@coretask/types';
 import {
   Body,
   Controller,
@@ -12,6 +12,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
@@ -33,9 +34,11 @@ import {
 import {
   CreateCustomFieldDto,
   CreateFieldOptionDto,
+  RemoveFieldQueryDto,
   SetCustomFieldValueDto,
   UpdateCustomFieldDto,
   UpdateFieldOptionDto,
+  UpdateWorkspaceCustomFieldDto,
 } from './dto/custom-field.dto';
 
 /**
@@ -137,20 +140,22 @@ export class CustomFieldsController {
   @Delete(':fieldId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Delete or archive a field',
+    summary: 'Remove a field from this project',
     description:
-      'Deleted outright when unused. Archived instead once tasks hold values, because the field is easy to recreate and its data is not.',
+      '`?mode=detach` keeps the definition in the library; `?mode=delete` removes it from every project, archiving instead of deleting once tasks hold values. Without `mode` the outcome is chosen from state: detached while another project uses it, archived when values exist, deleted otherwise. Refused while a formula on this project reads the field.',
   })
   @ApiParam({ name: 'fieldId', format: 'uuid' })
   @ApiEnvelopeResponse(RemoveFieldResultDto)
+  @ApiErrorResponseDoc(422, 'A formula on this project uses the field')
   remove(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
     @CurrentUser('id') userId: string,
     @CurrentWorkspace('role') role: WorkspaceRole,
-  ): Promise<{ deleted: boolean; archived: boolean }> {
-    return this.fields.remove(workspaceId, projectId, userId, role, fieldId);
+    @Query() query: RemoveFieldQueryDto,
+  ): Promise<RemoveFieldResult> {
+    return this.fields.remove(workspaceId, projectId, userId, role, fieldId, query.mode);
   }
 
   @Post(':fieldId/options')
@@ -205,6 +210,43 @@ export class CustomFieldsController {
 }
 
 /**
+ * The definition on its own, with no project in the URL.
+ *
+ * A field detached from its last project and archived has no association
+ * left to reach it through, so the project routes cannot restore it. This is
+ * the one route the library needs that they cannot provide.
+ */
+@ApiTags('Custom fields')
+@ApiBearerAuth()
+@Controller('workspaces/:workspaceId/custom-fields')
+@UseGuards(WorkspaceMemberGuard)
+@ApiParam({ name: 'workspaceId', format: 'uuid' })
+@ApiErrorResponseDoc(401, 'Missing or invalid access token')
+@ApiErrorResponseDoc(403, 'Only a workspace manager can change a field')
+export class WorkspaceCustomFieldsController {
+  constructor(private readonly fields: CustomFieldsService) {}
+
+  @Patch(':fieldId')
+  @ApiOperation({
+    summary: 'Rename, re-describe, archive or restore a field',
+    description:
+      'Acts on the definition, so the change is seen by every project using the field. `isArchived: false` restores an archived field to the library.',
+  })
+  @ApiParam({ name: 'fieldId', format: 'uuid' })
+  @ApiEnvelopeResponse(CustomFieldDto)
+  @ApiErrorResponseDoc(404, 'No such field in this workspace')
+  updateDefinition(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('fieldId', ParseUUIDPipe) fieldId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() dto: UpdateWorkspaceCustomFieldDto,
+  ): Promise<CustomField> {
+    return this.fields.updateDefinition(workspaceId, userId, role, fieldId, dto);
+  }
+}
+
+/**
  * Values live under the task, not the project: the task is what they belong to,
  * and the field id alone identifies which field within its project.
  */
@@ -228,6 +270,7 @@ export class TaskCustomFieldsController {
   @ApiEnvelopeResponse(TaskCustomFieldValueDto)
   @ApiErrorResponseDoc(400, 'The value does not fit the field definition')
   @ApiErrorResponseDoc(404, 'No such task or field')
+  @ApiErrorResponseDoc(422, 'The field is calculated and cannot be set')
   setValue(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,

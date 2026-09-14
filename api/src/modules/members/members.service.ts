@@ -166,6 +166,10 @@ export class MembersService {
         data: { leadId: null },
       });
 
+      // Nor following anything: a follower row would keep sending them the
+      // thread of a task they can no longer open.
+      await tx.follower.deleteMany({ where: { workspaceId, userId: target.userId } });
+
       await tx.workspaceMember.delete({ where: { id: memberId } });
 
       return {

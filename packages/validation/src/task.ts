@@ -1,5 +1,5 @@
 import {
-  DESCRIPTION_MAX_LENGTH,
+  RICH_TEXT_MAX_LENGTH,
   TASK_MAX_ESTIMATED_MINUTES,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -38,36 +38,62 @@ const estimatedMinutes = z
   .min(0, 'An estimate cannot be negative.')
   .max(TASK_MAX_ESTIMATED_MINUTES, 'That estimate is unrealistically large.');
 
-export const createTaskSchema = z.object({
-  title: taskTitleSchema,
-  description: z.string().trim().max(DESCRIPTION_MAX_LENGTH).optional(),
-  projectId: z.uuid().nullable().optional(),
-  sectionId: z.uuid().nullable().optional(),
-  parentTaskId: z.uuid().nullable().optional(),
-  status: taskStatusSchema.optional(),
-  priority: taskPrioritySchema.optional(),
-  assigneeId: z.uuid().nullable().optional(),
-  startDate: optionalDate.optional(),
-  dueDate: optionalDate.optional(),
-  estimatedMinutes: estimatedMinutes.nullable().optional(),
-  afterTaskId: z.uuid().nullable().optional(),
-});
+/**
+ * A time of day is a refinement of a date, never a replacement for one.
+ *
+ * `dueDate` is the calendar date and `dueAt` the exact instant when somebody
+ * chose a time — see docs/architecture/task-dates-and-rich-text.md. Sending a
+ * time while explicitly clearing the date is a contradiction, and the server
+ * would have to pick a side; refusing it here keeps both halves honest.
+ */
+const timeNeedsDate = (values: {
+  startDate?: string | null;
+  startAt?: string | null;
+  dueDate?: string | null;
+  dueAt?: string | null;
+}): boolean =>
+  !(values.dueDate === null && typeof values.dueAt === 'string') &&
+  !(values.startDate === null && typeof values.startAt === 'string');
+
+const TIME_NEEDS_DATE = { message: 'A time needs a date to go with it.', path: ['dueAt'] };
+
+export const createTaskSchema = z
+  .object({
+    title: taskTitleSchema,
+    description: z.string().trim().max(RICH_TEXT_MAX_LENGTH).optional(),
+    projectId: z.uuid().nullable().optional(),
+    sectionId: z.uuid().nullable().optional(),
+    parentTaskId: z.uuid().nullable().optional(),
+    status: taskStatusSchema.optional(),
+    priority: taskPrioritySchema.optional(),
+    assigneeId: z.uuid().nullable().optional(),
+    startDate: optionalDate.optional(),
+    startAt: optionalDate.optional(),
+    dueDate: optionalDate.optional(),
+    dueAt: optionalDate.optional(),
+    estimatedMinutes: estimatedMinutes.nullable().optional(),
+    afterTaskId: z.uuid().nullable().optional(),
+  })
+  .refine(timeNeedsDate, TIME_NEEDS_DATE);
 export type CreateTaskInput = z.input<typeof createTaskSchema>;
 
 export const updateTaskSchema = z
   .object({
     title: taskTitleSchema.optional(),
-    description: z.string().trim().max(DESCRIPTION_MAX_LENGTH).nullable().optional(),
+    description: z.string().trim().max(RICH_TEXT_MAX_LENGTH).nullable().optional(),
     status: taskStatusSchema.optional(),
     priority: taskPrioritySchema.optional(),
     assigneeId: z.uuid().nullable().optional(),
     startDate: optionalDate.optional(),
+    startAt: optionalDate.optional(),
     dueDate: optionalDate.optional(),
+    dueAt: optionalDate.optional(),
     estimatedMinutes: estimatedMinutes.nullable().optional(),
   })
   .refine((values) => Object.keys(values).length > 0, {
     message: 'Provide at least one field to update.',
-  });
+  })
+  .refine(timeNeedsDate, TIME_NEEDS_DATE);
 export type UpdateTaskInput = z.input<typeof updateTaskSchema>;
 
 export const moveTaskSchema = z.object({
@@ -86,7 +112,7 @@ export type MoveTaskInput = z.input<typeof moveTaskSchema>;
 export const taskFormSchema = z
   .object({
     title: taskTitleSchema,
-    description: z.string().trim().max(DESCRIPTION_MAX_LENGTH),
+    description: z.string().trim().max(RICH_TEXT_MAX_LENGTH),
     status: taskStatusSchema,
     priority: taskPrioritySchema,
     assigneeId: z.string(),

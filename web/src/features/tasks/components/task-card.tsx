@@ -1,22 +1,35 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TaskStatus } from '@coretask/contracts';
-import type { Task } from '@coretask/types';
-import { CalendarClock, ListChecks, MessageSquareText } from 'lucide-react';
+import { SystemField, TaskStatus, parseCustomFieldRef } from '@coretask/contracts';
+import type { ProjectFieldMetadata, Task } from '@coretask/types';
+import { AlignLeft, CalendarClock, ListChecks, MessageSquare, Paperclip } from 'lucide-react';
 
 import { TaskPriorityBadge } from '@/components/data-display/status-badge';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
+import { SemanticBadge } from '@/features/colors/components/semantic-badge';
+import { CustomFieldValue } from '@/features/projects/components/cells/custom-field-value';
 import { WorkItemTypeIcon } from '@/features/work-items/components/work-item-type-icon';
-import { isTicketRow } from '@/features/work-items/lib/work-item-row';
-import { cn, daysUntil, formatDate, formatDueDate } from '@/lib/utils';
+import { isTicketRow, type WorkItemRow } from '@/features/work-items/lib/work-item-row';
+import { cn, daysUntil, formatDate, formatDue, isOverdue } from '@/lib/utils';
 
 interface TaskCardProps {
   task: Task;
   onOpen: (taskId: string) => void;
   draggable?: boolean;
+  /** False while a sort or grouping owns the order; dragging still moves between columns. */
+  manualOrder?: boolean;
+  /** The view's chosen card fields, as `cardFields` names them. */
+  cardFields?: string[];
+  metadata?: ProjectFieldMetadata | undefined;
 }
 
-export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
+export function TaskCard({
+  task,
+  onOpen,
+  draggable = true,
+  cardFields = [],
+  metadata,
+}: TaskCardProps) {
   // `attributes` is deliberately not spread. It sets role="button" and tabindex
   // on this element, which — with the real <button> below — produces nested
   // interactive controls: invalid semantics, and a confusing double stop for
@@ -33,9 +46,10 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
 
   const done = task.status === TaskStatus.DONE;
   const days = task.dueDate !== null && !done ? daysUntil(task.dueDate) : null;
-  const overdue = days !== null && days < 0;
+  // A time makes the deadline a moment: 3pm today is late at 3:01.
+  const overdue = !done && isOverdue(task);
   // Today or tomorrow — the list's due-date cell draws the same green.
-  const dueNow = days === 0 || days === 1;
+  const dueNow = !overdue && (days === 0 || days === 1);
 
   return (
     <article
@@ -83,6 +97,8 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
       {(task.priority !== 'NONE' ||
         task.dueDate ||
         task.subtaskCount > 0 ||
+        task.commentCount > 0 ||
+        task.attachmentCount > 0 ||
         task.assignee ||
         task.description) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -102,7 +118,7 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
               <CalendarClock className="size-3" aria-hidden="true" />
               {/* A finished task is never "3d overdue" — the deadline stopped
                   mattering when it was completed, so show the plain date. */}
-              {done ? formatDate(task.dueDate) : formatDueDate(task.dueDate)}
+              {formatDue(task, { done })}
             </span>
           )}
 
@@ -116,11 +132,32 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
             </span>
           )}
 
+          {/* Asana's card glyphs: lines for a description, a bubble with the
+              number of comments, a clip with the number of files. The bubble
+              used to stand for the description, which read as "has comments"
+              to anyone who knows Asana. */}
           {task.description && (
-            <MessageSquareText
-              className="size-3 text-muted-foreground"
-              aria-label="Has a description"
-            />
+            <AlignLeft className="size-3 text-muted-foreground" aria-label="Has a description" />
+          )}
+
+          {task.commentCount > 0 && (
+            <span
+              className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground"
+              aria-label={`${task.commentCount} ${task.commentCount === 1 ? 'comment' : 'comments'}`}
+            >
+              <MessageSquare className="size-3" aria-hidden="true" />
+              {task.commentCount}
+            </span>
+          )}
+
+          {task.attachmentCount > 0 && (
+            <span
+              className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground"
+              aria-label={`${task.attachmentCount} ${task.attachmentCount === 1 ? 'attachment' : 'attachments'}`}
+            >
+              <Paperclip className="size-3" aria-hidden="true" />
+              {task.attachmentCount}
+            </span>
           )}
 
           {task.assignee && (
@@ -134,7 +171,101 @@ export function TaskCard({ task, onOpen, draggable = true }: TaskCardProps) {
           )}
         </div>
       )}
+
+      {/* The fields the view asked to see on a card, as Asana draws them:
+          a label and a value per line. A ticket carries no custom-field
+          values, so only its system fields appear. */}
+      {cardFields.length > 0 && (
+        <CardFields task={task} cardFields={cardFields} metadata={metadata} />
+      )}
     </article>
+  );
+}
+
+interface CardFieldLine {
+  ref: string;
+  label: string;
+  value: React.ReactNode;
+}
+
+function CardFields({
+  task,
+  cardFields,
+  metadata,
+}: {
+  task: Task;
+  cardFields: string[];
+  metadata: ProjectFieldMetadata | undefined;
+}) {
+  const row = task as Partial<WorkItemRow>;
+  const rows = cardFields
+    .map((ref): CardFieldLine | null => {
+      const customId = parseCustomFieldRef(ref);
+      if (customId) {
+        if (isTicketRow(task)) return null;
+        const field = metadata?.customFields.find((entry) => entry.id === customId);
+        if (!field || field.isArchived) return null;
+        const value = row.customFieldValues?.find((entry) => entry.customFieldId === customId);
+        return {
+          ref,
+          label: field.name,
+          value: <CustomFieldValue field={field} value={value} metadata={metadata} compact />,
+        };
+      }
+      switch (ref) {
+        case SystemField.STATUS: {
+          const status = row.workItem?.status;
+          return {
+            ref,
+            label: 'Status',
+            value: status ? (
+              <SemanticBadge color={{ colorToken: status.colorToken, customColor: null }}>
+                {status.name}
+              </SemanticBadge>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            ),
+          };
+        }
+        case SystemField.START_DATE:
+          return {
+            ref,
+            label: 'Start',
+            value: task.startDate ? (
+              formatDate(task.startDate)
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            ),
+          };
+        case SystemField.ESTIMATE:
+          return {
+            ref,
+            label: 'Estimate',
+            value: task.estimatedMinutes ? (
+              `${task.estimatedMinutes}m`
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            ),
+          };
+        case SystemField.CREATED_AT:
+          return { ref, label: 'Created', value: formatDate(task.createdAt) };
+        default:
+          return null;
+      }
+    })
+    .filter((entry): entry is CardFieldLine => entry !== null);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <dl className="mt-2 space-y-0.5 border-t pt-1.5 text-[11px]">
+      {rows.map((entry) => (
+        <div key={entry.ref} className="flex items-center justify-between gap-2">
+          <dt className="truncate text-muted-foreground">{entry.label}</dt>
+          <dd className="min-w-0 truncate text-right">{entry.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

@@ -49,6 +49,31 @@ export class CommentDto {
   })
   editedAt!: string | null;
 
+  @ApiProperty({ type: [CommentAuthorDto], description: 'Members named in the body.' })
+  mentions!: CommentAuthorDto[];
+
+  @ApiProperty({
+    type: 'array',
+    items: { type: 'object' },
+    description: 'Files posted with this comment; they belong to the task or ticket.',
+  })
+  attachments!: unknown[];
+
+  @ApiProperty({ example: 2 })
+  likeCount!: number;
+
+  @ApiProperty({ description: 'Whether the caller has liked it.' })
+  likedByMe!: boolean;
+
+  @ApiProperty({ type: [CommentAuthorDto], description: 'The first few people who liked it.' })
+  likedBy!: CommentAuthorDto[];
+
+  @ApiProperty({ format: 'date-time', nullable: true })
+  pinnedAt!: string | null;
+
+  @ApiProperty({ type: CommentAuthorDto, nullable: true })
+  pinnedBy!: CommentAuthorDto | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 

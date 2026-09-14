@@ -48,11 +48,33 @@ export class TaskDto {
   @ApiProperty({ example: 2000, description: 'Fractional ordering within the section.' })
   position!: number;
 
-  @ApiProperty({ format: 'date-time', nullable: true })
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date, at UTC midnight.',
+  })
   startDate!: string | null;
 
-  @ApiProperty({ format: 'date-time', nullable: true })
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact start instant; null means all day.',
+  })
+  startAt!: string | null;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date, at UTC midnight.',
+  })
   dueDate!: string | null;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact due instant; null means all day.',
+  })
+  dueAt!: string | null;
 
   @ApiProperty({
     format: 'date-time',
@@ -81,6 +103,12 @@ export class TaskDto {
 
   @ApiProperty({ example: 1 })
   completedSubtaskCount!: number;
+
+  @ApiProperty({ example: 2, description: 'Live comments; soft-deleted ones are not counted.' })
+  commentCount!: number;
+
+  @ApiProperty({ example: 1, description: 'Confirmed uploads only.' })
+  attachmentCount!: number;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { FollowersModule } from '../followers/followers.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
@@ -22,6 +23,7 @@ import { CommentsService } from './comments.service';
     NotificationsIntegrationModule,
     TasksModule,
     TicketsModule,
+    FollowersModule,
   ],
   controllers: [TaskCommentsController, TicketCommentsController, CommentsController],
   providers: [CommentsService],

@@ -2,7 +2,7 @@ import { type CreatableWorkItemType, type WorkItemType } from '@coretask/contrac
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { Section, Task } from '@coretask/types';
+import type { ProjectFieldMetadata, Section, Task } from '@coretask/types';
 import { GripVertical, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -31,6 +31,9 @@ interface SectionColumnProps {
   tasks: Task[];
   canEdit: boolean;
   canDelete: boolean;
+  manualOrder?: boolean;
+  cardFields?: string[];
+  metadata?: ProjectFieldMetadata | undefined;
   onRename: (sectionId: string, name: string) => void;
   onRequestDelete: (section: Section) => void;
   defaultType: CreatableWorkItemType;
@@ -44,6 +47,9 @@ export function SectionColumn({
   tasks,
   canEdit,
   canDelete,
+  manualOrder = true,
+  cardFields = [],
+  metadata,
   onRename,
   onRequestDelete,
   defaultType,
@@ -105,7 +111,9 @@ export function SectionColumn({
         isOver && 'ring-2 ring-primary/40',
       )}
     >
-      <header className="flex items-center gap-1 border-b px-3 py-2.5">
+      {/* `group` lets the lightning of a section with no rules wait for a
+          hover, the way Asana's does — see SectionAutomationPopover. */}
+      <header className="group flex items-center gap-1 border-b px-3 py-2.5">
         {/* What runs when a task lands here. Placed in the header because that
             is where someone asks the question. */}
         <SectionAutomationPopover
@@ -189,7 +197,15 @@ export function SectionColumn({
           strategy={verticalListSortingStrategy}
         >
           {tasks.map((task) => (
-            <TaskCard key={task.id} task={task} onOpen={onOpenTask} draggable={canEdit} />
+            <TaskCard
+              key={task.id}
+              task={task}
+              onOpen={onOpenTask}
+              draggable={canEdit}
+              manualOrder={manualOrder}
+              cardFields={cardFields}
+              metadata={metadata}
+            />
           ))}
         </SortableContext>
 

@@ -117,10 +117,20 @@ export const NotificationType = {
   COMMENT_CREATED: 'COMMENT_CREATED',
   MENTIONED: 'MENTIONED',
   WORKSPACE_INVITE: 'WORKSPACE_INVITE',
+  /** A followed task or ticket changed (due date); completion keeps its own type. */
+  TASK_UPDATED: 'TASK_UPDATED',
+  TICKET_UPDATED: 'TICKET_UPDATED',
+  /** A custom field flagged "notify collaborators" changed value. */
+  FIELD_CHANGED: 'FIELD_CHANGED',
 } as const;
 export type NotificationType = (typeof NotificationType)[keyof typeof NotificationType];
 export const NOTIFICATION_TYPES = Object.values(NotificationType);
 
+/**
+ * What an activity line records. The kind is a value here rather than a tag
+ * inside `metadata`, because the task panel's feed and the audit trail both
+ * key on it — a kind hidden in JSON cannot be queried.
+ */
 export const ActivityAction = {
   CREATED: 'CREATED',
   UPDATED: 'UPDATED',
@@ -134,6 +144,15 @@ export const ActivityAction = {
   MEMBER_ADDED: 'MEMBER_ADDED',
   MEMBER_REMOVED: 'MEMBER_REMOVED',
   MEMBER_ROLE_CHANGED: 'MEMBER_ROLE_CHANGED',
+  /** A custom field's value on a task changed. */
+  FIELD_CHANGED: 'FIELD_CHANGED',
+  ATTACHED: 'ATTACHED',
+  DETACHED: 'DETACHED',
+  FOLLOWED: 'FOLLOWED',
+  UNFOLLOWED: 'UNFOLLOWED',
+  SUBTASK_ADDED: 'SUBTASK_ADDED',
+  PINNED: 'PINNED',
+  UNPINNED: 'UNPINNED',
 } as const;
 export type ActivityAction = (typeof ActivityAction)[keyof typeof ActivityAction];
 export const ACTIVITY_ACTIONS = Object.values(ActivityAction);

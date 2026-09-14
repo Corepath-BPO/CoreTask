@@ -20,6 +20,8 @@ import { AutomationsModule } from './modules/automations/automations.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { DefinitionsModule } from './modules/definitions/definitions.module';
+import { FollowersApiModule } from './modules/followers/followers-api.module';
+import { FollowersModule } from './modules/followers/followers.module';
 import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -87,6 +89,8 @@ import { WebsocketModule } from './websocket/websocket.module';
     TasksModule,
     TicketsModule,
     CommentsModule,
+    FollowersModule,
+    FollowersApiModule,
     AttachmentsModule,
     ActivityLogsModule,
     NotificationsModule,

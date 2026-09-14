@@ -473,6 +473,34 @@ pnpm compose:validate
 - Task CRUD: board cards, drag between and within columns, inline composer,
   detail panel with one level of subtasks, assignee/priority/status/due date,
   archive and restore
+- Dates the way Asana keeps them: a start date beside the due date, an
+  optional time of day on each, one picker shared by the panel, the list and
+  subtasks, and calendar dates that read as the same day in every timezone —
+  see [Task dates, times and rich text](docs/architecture/task-dates-and-rich-text.md)
+- Rich-text descriptions on tasks and tickets — bold, lists, links, code,
+  headings, `@` mentions that notify, pasted pictures shown in place — stored
+  as HTML that the API sanitises before it stores anything
+- Multi-select in the List — click, shift-click, ctrl-click — with Asana's
+  bulk bar for assignee, due date, status, priority, section and archive,
+  backed by one bulk endpoint that takes the same paths a single edit does
+- Asana's Tab-key shortcuts (Tab+N, Tab+A, Tab+M, Tab+D, Tab+Y, Tab+T, Tab+C,
+  Tab+S, Ctrl+Enter) for the open task or the selected rows, and a `?` sheet
+  that lists them — see
+  [List selection, bulk edit and keyboard shortcuts](docs/architecture/list-selection-and-shortcuts.md)
+- Filter, Sort, Group and Options on the List and the Board, held in the
+  saved view: quick filters ("Just my tasks", "Due this week" as relative
+  dates the server resolves), up to five sorts across tasks and tickets in one
+  SQL ordering, grouping by status, priority, assignee or a select field with
+  drag-between-groups setting the value, columns and density under Options,
+  card fields on the Board, and "Save as my view" for anyone who may not
+  change the shared one — see
+  [Project views](docs/architecture/project-views.md)
+- Eleven custom field types including rating (stars) and formula (worked out
+  on read from the project's number and date fields), currency and custom-unit
+  formats, "notify collaborators when this field changes", a story per value
+  change, the bulk bar's Fields pill, hidden options, and Asana's "remove from
+  project / delete from workspace" choice with a library restore — see
+  [Custom field system](docs/architecture/custom-field-system.md)
 - My Tasks with filters and a rollup computed over the whole filter
 - Ticket queue: server-allocated `CORE-1001` keys, triage from the detail
   dialog, filters by person/status/type/priority, search that matches a pasted
@@ -486,11 +514,20 @@ pnpm compose:validate
 - Teams: named groups inside a workspace with a colour, an optional lead, a
   roster drawn from the workspace, and an optional owning team on each project
   with a filter to match. Deliberately _not_ a permission boundary — see below
-- Comment threads on tasks and tickets: post, edit in place (marked "edited"),
-  delete your own, manager moderation, and notifications to everyone already in
-  the conversation
+- Comment threads on tasks and tickets: rich text with inline pictures and
+  files posted with a comment, edit in place (marked "edited"), delete with a
+  confirm, likes, one pinned comment per thread, permalinks, drafts that
+  survive closing the panel, and older comments behind "Show earlier"
 - `@mentions` with a keyboard-navigable picker, stored in the comment text so
   editing stays honest, parsed server-side so a client cannot notify at will
+- Collaborators on every task and ticket — added when you create, are
+  assigned, comment or are mentioned; leave or add by hand — and they are who
+  a comment or a due-date change notifies
+- The task panel's activity feed: system stories ("moved to In Review",
+  "changed the due date from Sep 1 to Sep 12") interleaved with the comments,
+  with Asana's "All activity / Comments only" switch
+- Comment and attachment counts on list rows and board cards; image
+  thumbnails and a lightbox in the attachment strip
 - Read-only activity feed and a per-user notification inbox with unread counts
 - A dashboard driven entirely by live data — no fixtures anywhere in the app
 - Health endpoint, Swagger, structured logging with correlation ids
@@ -647,27 +684,32 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 
 ## Documentation
 
-| Document                                                                      | Covers                                                 |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------ |
-| [System overview](docs/architecture/system-overview.md)                       | Components, request flow, boundaries                   |
-| [Frontend](docs/architecture/frontend.md)                                     | Structure, state, data access, styling                 |
-| [Backend](docs/architecture/backend.md)                                       | Layering, envelope, guards, jobs                       |
-| [Database](docs/architecture/database.md)                                     | Schema, indexes, tenancy, ticket keys                  |
-| [Docker](docs/architecture/docker.md)                                         | Images, Compose layering, volumes                      |
-| [Authentication](docs/api/authentication.md)                                  | Token lifecycle, cookies, error codes                  |
-| [Custom field system](docs/architecture/custom-field-system.md)               | Types, settings, value storage, lifecycle              |
-| [Field library](docs/architecture/field-library.md)                           | Sharing one field across projects                      |
-| [List view columns](docs/architecture/list-view-columns.md)                   | Storage, pinning, sizing, the fixed Task column        |
-| [Custom fields API](docs/api/custom-fields.md)                                | Definitions, options, values, errors                   |
-| [View and column API](docs/api/project-view-columns.md)                       | Views, field catalog, task query                       |
-| [Field library migration](docs/database/custom-field-migration.md)            | Project→workspace move, with its verification run      |
-| [Project work items](docs/architecture/project-work-items.md)                 | One project, two views; tasks and tickets side by side |
-| [One dataset, two views](docs/architecture/project-views-shared-data.md)      | What List and Board share, and what each still owns    |
-| [Creating work items](docs/architecture/work-item-creation.md)                | Split button, quick add, and what the server checks    |
-| [List/Board synchronization](docs/architecture/list-board-synchronization.md) | Cache keys, invalidation, sockets, correlation ids     |
-| [Work items API](docs/api/project-work-items.md)                              | List, create, update, move; events and errors          |
-| [Work-item storage](docs/database/work-item-compatibility.md)                 | Why the tables stay separate, and the migrations       |
-| [Decision records](docs/decisions/)                                           | Why each major choice was made                         |
+| Document                                                                                     | Covers                                                                      |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [System overview](docs/architecture/system-overview.md)                                      | Components, request flow, boundaries                                        |
+| [Frontend](docs/architecture/frontend.md)                                                    | Structure, state, data access, styling                                      |
+| [Backend](docs/architecture/backend.md)                                                      | Layering, envelope, guards, jobs                                            |
+| [Database](docs/architecture/database.md)                                                    | Schema, indexes, tenancy, ticket keys                                       |
+| [Docker](docs/architecture/docker.md)                                                        | Images, Compose layering, volumes                                           |
+| [Authentication](docs/api/authentication.md)                                                 | Token lifecycle, cookies, error codes                                       |
+| [Task dates, times and rich text](docs/architecture/task-dates-and-rich-text.md)             | Date/instant pairs, overdue, the picker, sanitised HTML, mentions, pictures |
+| [List selection, bulk edit and shortcuts](docs/architecture/list-selection-and-shortcuts.md) | Multi-select rules, the bulk bar and route, Tab chords                      |
+| [Comments and collaboration](docs/architecture/comments-and-collaboration.md)                | Followers, who gets told, stories in the panel, rich-text threads           |
+| [Comments, followers and activity API](docs/api/comments-followers-activity.md)              | Threads by cursor, likes, pins, followers, an item's stories                |
+| [Custom field system](docs/architecture/custom-field-system.md)                              | Eleven types incl. rating and formula, formats, stories, remove modes       |
+| [Field library](docs/architecture/field-library.md)                                          | Sharing one field across projects                                           |
+| [List view columns](docs/architecture/list-view-columns.md)                                  | Storage, pinning, sizing, the fixed Task column                             |
+| [Custom fields API](docs/api/custom-fields.md)                                               | Definitions, formulas, remove modes, restore, options, values, errors       |
+| [Project views](docs/architecture/project-views.md)                                          | Saved views, the Filter/Sort/Group/Options toolbar, ordering across kinds   |
+| [View and column API](docs/api/project-view-columns.md)                                      | Views, field catalog, settings keys                                         |
+| [Field library migration](docs/database/custom-field-migration.md)                           | Project→workspace move, with its verification run                           |
+| [Project work items](docs/architecture/project-work-items.md)                                | One project, two views; tasks and tickets side by side                      |
+| [One dataset, two views](docs/architecture/project-views-shared-data.md)                     | What List and Board share, and what each still owns                         |
+| [Creating work items](docs/architecture/work-item-creation.md)                               | Split button, quick add, and what the server checks                         |
+| [List/Board synchronization](docs/architecture/list-board-synchronization.md)                | Cache keys, invalidation, sockets, correlation ids                          |
+| [Work items API](docs/api/project-work-items.md)                                             | List with view settings, create, update, move, bulk; events and errors      |
+| [Work-item storage](docs/database/work-item-compatibility.md)                                | Why the tables stay separate, and the migrations                            |
+| [Decision records](docs/decisions/)                                                          | Why each major choice was made                                              |
 
 ---
 

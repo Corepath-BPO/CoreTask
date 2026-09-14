@@ -8,8 +8,10 @@ import {
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import {
   AlertCircle,
+  BookmarkPlus,
   Copy,
   History,
+  LibraryBig,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -46,7 +48,11 @@ import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { formatRelativeTime } from '@/lib/utils';
 
 import type { AutomationRule } from '../api/automations.api';
+import { useAutomationMetadata } from '../builder/hooks/use-automation-graph';
 import { AutomationRunHistoryDialog } from '../components/automation-run-history-dialog';
+import { RuleLibraryDialog } from '../components/rule-library-dialog';
+import { SaveToLibraryDialog, type LibraryTarget } from '../components/save-to-library-dialog';
+import { collectRuleReferences } from '../lib/template-references';
 import {
   useAutomations,
   useDuplicateRule,
@@ -76,11 +82,37 @@ export function AutomationsPage() {
   const enable = useEnableRule(workspaceId, projectId);
   const duplicate = useDuplicateRule(workspaceId, projectId);
   const remove = useRemoveRule(workspaceId, projectId);
+  /* The project's names for what a rule points at, so the save dialog can say
+     "this rule names Incoming Request and To do" rather than listing ids. */
+  const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
 
   const [pendingRemove, setPendingRemove] = useState<AutomationRule | null>(null);
   const [historyRule, setHistoryRule] = useState<AutomationRule | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryTarget, setLibraryTarget] = useState<LibraryTarget | null>(null);
 
   const navigate = useNavigate();
+
+  /*
+   * Mounted on the empty state as well as the table: a project with no rules
+   * yet is exactly where starting from the library is most wanted.
+   */
+  const library = (
+    <>
+      <RuleLibraryDialog
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        workspaceId={workspaceId}
+        projectId={projectId}
+        canManage={canManage}
+      />
+      <SaveToLibraryDialog
+        workspaceId={workspaceId}
+        target={libraryTarget}
+        onOpenChange={(open) => !open && setLibraryTarget(null)}
+      />
+    </>
+  );
 
   if (isLoading) {
     return (
@@ -105,34 +137,47 @@ export function AutomationsPage() {
 
   if ((rules ?? []).length === 0) {
     return (
-      <EmptyState
-        icon={Zap}
-        title="No automations yet"
-        description="Rules react to project changes and act automatically, without relying on anyone to remember."
-        action={
-          canManage ? (
-            <Button
-              onClick={() =>
-                void navigate({
-                  to: '/projects/$projectId/automations/new',
-                  params: { projectId },
-                  search: {},
-                })
-              }
-            >
-              <Plus className="size-4" aria-hidden="true" />
-              New rule
-            </Button>
-          ) : undefined
-        }
-      />
+      <>
+        <EmptyState
+          icon={Zap}
+          title="No automations yet"
+          description="Rules react to project changes and act automatically, without relying on anyone to remember."
+          action={
+            canManage ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  onClick={() =>
+                    void navigate({
+                      to: '/projects/$projectId/automations/new',
+                      params: { projectId },
+                      search: {},
+                    })
+                  }
+                >
+                  <Plus className="size-4" aria-hidden="true" />
+                  New rule
+                </Button>
+                <Button variant="outline" onClick={() => setLibraryOpen(true)}>
+                  <LibraryBig className="size-4" aria-hidden="true" />
+                  Start from the library
+                </Button>
+              </div>
+            ) : undefined
+          }
+        />
+        {library}
+      </>
     );
   }
 
   return (
     <div className="space-y-3">
       {canManage && (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => setLibraryOpen(true)}>
+            <LibraryBig className="size-4" aria-hidden="true" />
+            Rule library
+          </Button>
           <Button
             size="sm"
             onClick={() =>
@@ -280,6 +325,28 @@ export function AutomationsPage() {
                           <Copy className="size-4" aria-hidden="true" />
                           Duplicate
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            setLibraryTarget({
+                              kind: 'rule',
+                              projectId,
+                              ruleId: rule.id,
+                              name: rule.name,
+                              description: rule.description,
+                              references: collectRuleReferences(
+                                rule.nodes.map((node) => ({
+                                  type: node.nodeType,
+                                  configuration: node.configuration,
+                                })),
+                                rule.triggerConfig,
+                                metadata,
+                              ),
+                            })
+                          }
+                        >
+                          <BookmarkPlus className="size-4" aria-hidden="true" />
+                          Save to library
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"
@@ -336,6 +403,8 @@ export function AutomationsPage() {
         rule={historyRule}
         onOpenChange={(open) => !open && setHistoryRule(null)}
       />
+
+      {library}
     </div>
   );
 }

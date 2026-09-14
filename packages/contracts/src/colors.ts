@@ -94,14 +94,38 @@ export const DEFAULT_STATUS_DEFINITIONS: readonly {
   colorToken: ColorToken;
   isDefault: boolean;
 }[] = [
-  { name: 'Backlog', slug: 'backlog', category: 'NOT_STARTED', colorToken: 'slate', isDefault: false },
+  {
+    name: 'Backlog',
+    slug: 'backlog',
+    category: 'NOT_STARTED',
+    colorToken: 'slate',
+    isDefault: false,
+  },
   { name: 'To Do', slug: 'todo', category: 'NOT_STARTED', colorToken: 'gray', isDefault: true },
-  { name: 'In Progress', slug: 'in-progress', category: 'ACTIVE', colorToken: 'blue', isDefault: false },
-  { name: 'In Review', slug: 'in-review', category: 'ACTIVE', colorToken: 'violet', isDefault: false },
+  {
+    name: 'In Progress',
+    slug: 'in-progress',
+    category: 'ACTIVE',
+    colorToken: 'blue',
+    isDefault: false,
+  },
+  {
+    name: 'In Review',
+    slug: 'in-review',
+    category: 'ACTIVE',
+    colorToken: 'violet',
+    isDefault: false,
+  },
   { name: 'Waiting', slug: 'waiting', category: 'BLOCKED', colorToken: 'amber', isDefault: false },
   { name: 'Blocked', slug: 'blocked', category: 'BLOCKED', colorToken: 'red', isDefault: false },
   { name: 'Done', slug: 'done', category: 'COMPLETED', colorToken: 'emerald', isDefault: false },
-  { name: 'Cancelled', slug: 'cancelled', category: 'CANCELLED', colorToken: 'gray', isDefault: false },
+  {
+    name: 'Cancelled',
+    slug: 'cancelled',
+    category: 'CANCELLED',
+    colorToken: 'gray',
+    isDefault: false,
+  },
 ];
 
 /**
@@ -144,7 +168,11 @@ export const AUTOMATION_STATE_COLOR = {
   DISABLED: 'slate',
 } as const satisfies Record<string, ColorToken>;
 
-/** Custom field types implemented today. Future types are added here first. */
+/**
+ * Custom field types implemented end to end: every one has an editor, a cell
+ * renderer and — except the computed one — filter operators. A type is added
+ * here when a task can hold a value of it, not when a picker can name it.
+ */
 export const CustomFieldType = {
   TEXT: 'TEXT',
   NUMBER: 'NUMBER',
@@ -155,6 +183,10 @@ export const CustomFieldType = {
   PEOPLE: 'PEOPLE',
   URL: 'URL',
   EMAIL: 'EMAIL',
+  /** One to N stars, stored as a number. */
+  RATING: 'RATING',
+  /** Worked out on read from the project's number and date fields; never stored. */
+  FORMULA: 'FORMULA',
 } as const;
 export type CustomFieldType = (typeof CustomFieldType)[keyof typeof CustomFieldType];
 export const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
@@ -163,6 +195,25 @@ export const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
 export const SELECT_FIELD_TYPES: readonly CustomFieldType[] = [
   CustomFieldType.SINGLE_SELECT,
   CustomFieldType.MULTI_SELECT,
+];
+
+/**
+ * Types whose value is computed rather than typed. Nothing writes them — not a
+ * cell, not the bulk bar, not a rule, not an import — and they are hidden from
+ * the pickers that write.
+ */
+export const COMPUTED_FIELD_TYPES: readonly CustomFieldType[] = [CustomFieldType.FORMULA];
+
+export function isComputedFieldType(type: string): boolean {
+  return (COMPUTED_FIELD_TYPES as readonly string[]).includes(type);
+}
+
+/** What a formula may name. */
+export const FORMULA_OPERAND_TYPES: readonly CustomFieldType[] = [
+  CustomFieldType.NUMBER,
+  CustomFieldType.RATING,
+  CustomFieldType.FORMULA,
+  CustomFieldType.DATE,
 ];
 
 export const ProjectViewType = {

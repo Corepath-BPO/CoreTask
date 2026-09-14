@@ -1,4 +1,5 @@
 import type {
+  BulkWorkItemPayload,
   CreateWorkItemPayload,
   MoveWorkItemPayload,
   ProjectWorkItem,
@@ -114,6 +115,27 @@ export function useUpdateProjectWorkItem(workspaceId: string | undefined, projec
       await invalidateProjectWork(workspaceId as string, projectId);
     },
     onError: (error) => reportError(error, 'Could not save that change.'),
+  });
+}
+
+/**
+ * One change applied to a selection.
+ *
+ * A single correlation id for the whole request: the server echoes it on every
+ * row's socket event, so this tab recognises all of them as its own and does
+ * one refresh instead of one per row.
+ */
+export function useBulkUpdateWorkItems(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: (payload: BulkWorkItemPayload) =>
+      workItemsApi.bulk(workspaceId as string, projectId, {
+        correlationId: nextCorrelationId(),
+        ...payload,
+      }),
+    onSuccess: async () => {
+      await invalidateProjectWork(workspaceId as string, projectId);
+    },
+    onError: (error) => reportError(error, 'Could not update those.'),
   });
 }
 

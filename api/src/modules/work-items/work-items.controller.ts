@@ -1,6 +1,12 @@
 import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
-import type { ProjectWorkItem, ProjectWorkItemPage } from '@coretask/types';
+import type {
+  BulkWorkItemResult,
+  ProjectWorkItem,
+  ProjectWorkItemPage,
+  ProjectWorkItemQuery,
+} from '@coretask/types';
 import {
+  bulkWorkItemSchema,
   createWorkItemSchema,
   moveWorkItemSchema,
   projectWorkItemQuerySchema,
@@ -28,7 +34,11 @@ import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
 import { AppException } from '../../common/exceptions/app.exception';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
-import { ProjectWorkItemDto, ProjectWorkItemPageDto } from './dto/work-item-response.dto';
+import {
+  BulkWorkItemResultDto,
+  ProjectWorkItemDto,
+  ProjectWorkItemPageDto,
+} from './dto/work-item-response.dto';
 import { ProjectWorkItemService } from './project-work-item.service';
 
 /**
@@ -78,7 +88,12 @@ export class WorkItemsController {
     description:
       'Tasks and tickets in one ordering, which is what both the List and the Board draw. ' +
       'They share a section’s position space, so the two kinds interleave by position rather ' +
-      'than being concatenated.',
+      'than being concatenated. The view’s settings ride on the request: `filters` and ' +
+      '`sorts` as JSON, `groupBy` as a field reference (it leads the ordering so groups never ' +
+      'split across a page), and `showCompleted=false` to hide done tasks and resolved ' +
+      'tickets. A filter a ticket cannot answer excludes tickets, except IS_EMPTY on a field ' +
+      'they do not hold. Sorting by a custom field puts tickets, which hold none, after every ' +
+      'valued task. Date values may be relative tokens such as `@today` or `@endOfWeek`.',
   })
   @ApiEnvelopeResponse(ProjectWorkItemPageDto)
   async list(
@@ -92,7 +107,8 @@ export class WorkItemsController {
       invalid('Invalid query.', parsed.error);
     }
 
-    return this.workItems.list(workspaceId, projectId, parsed.data);
+    // The schema widens `operator` to a string; the shape is the contract's.
+    return this.workItems.list(workspaceId, projectId, parsed.data as ProjectWorkItemQuery);
   }
 
   @Get(':workItemId')
@@ -131,6 +147,43 @@ export class WorkItemsController {
     }
 
     return this.workItems.create(workspaceId, projectId, userId, parsed.data);
+  }
+
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Apply one change to several work items',
+    description:
+      'What the List’s selection bar sends. Fields, a section, or archiving — applied to every ' +
+      'id in the order given through the same paths a single edit takes, so each row produces ' +
+      'its own activity, rules and socket events. Every id must be in this project, or nothing ' +
+      'is changed. Archiving needs MANAGER and is refused for tickets.',
+  })
+  @ApiEnvelopeResponse(BulkWorkItemResultDto)
+  @ApiErrorResponseDoc(400, 'A status or priority a ticket cannot hold, or a ticket to archive')
+  @ApiErrorResponseDoc(403, 'Archiving without MANAGER')
+  @ApiErrorResponseDoc(404, 'An id that is not in this project')
+  async bulk(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() body: unknown,
+  ): Promise<BulkWorkItemResult> {
+    this.assertMayWrite(role);
+
+    const parsed = bulkWorkItemSchema.safeParse(body);
+    if (!parsed.success) {
+      invalid('Invalid bulk request.', parsed.error);
+    }
+
+    // Archiving hides work from everyone, which is why the task route reserves
+    // it for managers; the bulk route holds the same line.
+    if (parsed.data.archived && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
+      throw AppException.forbidden('FORBIDDEN', 'Only a manager can archive.');
+    }
+
+    const items = await this.workItems.bulk(workspaceId, projectId, userId, parsed.data);
+    return { items };
   }
 
   @Patch(':workItemId')

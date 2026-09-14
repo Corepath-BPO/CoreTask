@@ -6,16 +6,20 @@ import {
   allowsManyPeople,
   checkboxLabel,
   formatNumber,
+  formulaExpression,
   fromInputValue,
   isLongText,
+  maxRating,
   numberFormat,
   placeholderFor,
   toInputValue,
   wantsTime,
 } from './field-settings';
 
-const field = (settings: Record<string, unknown>, type = CustomFieldType.TEXT): CustomField =>
-  ({ id: 'f-1', name: 'F', type, settings, options: [] }) as unknown as CustomField;
+const field = (
+  settings: Record<string, unknown>,
+  type: CustomFieldType = CustomFieldType.TEXT,
+): CustomField => ({ id: 'f-1', name: 'F', type, settings, options: [] }) as unknown as CustomField;
 
 describe('reading a field’s settings', () => {
   it('falls back to the default when a key is missing', () => {
@@ -71,6 +75,54 @@ describe('formatNumber', () => {
   it('keeps a zero bound rather than treating it as absent', () => {
     // `0` is falsy, and a minimum of zero is a real constraint.
     expect(numberFormat(field({ minValue: 0 })).min).toBe(0);
+  });
+
+  it('writes a currency through Intl, so the symbol and grouping are the locale’s', () => {
+    const format = numberFormat(
+      field({ numberFormat: 'CURRENCY', currencyCode: 'EUR', decimalPlaces: 2 }),
+    );
+
+    const text = formatNumber(1234.5, format);
+    expect(text).toContain('1,234.50');
+    expect(text).toMatch(/€|EUR/);
+  });
+
+  it('falls back to the code when the runtime cannot render the currency', () => {
+    const format = numberFormat(
+      field({ numberFormat: 'CURRENCY', currencyCode: 'ZZZ', decimalPlaces: 2 }),
+    );
+
+    // Either the runtime accepts an unknown code and prints it, or it throws
+    // and the fallback prints it. Both read as "ZZZ 1.50", never as blank.
+    expect(formatNumber(1.5, format)).toMatch(/ZZZ/);
+  });
+
+  it('puts a custom unit on the side it was asked for', () => {
+    expect(
+      formatNumber(5, numberFormat(field({ numberFormat: 'CUSTOM_UNIT', unitLabel: 'pts' }))),
+    ).toBe('5 pts');
+    expect(
+      formatNumber(
+        5,
+        numberFormat(
+          field({ numberFormat: 'CUSTOM_UNIT', unitLabel: '~', unitPosition: 'PREFIX' }),
+        ),
+      ),
+    ).toBe('~ 5');
+  });
+});
+
+describe('rating and formula settings', () => {
+  it('reads how many stars a rating has, defaulting to five', () => {
+    expect(maxRating(field({ maxRating: 7 }, CustomFieldType.RATING))).toBe(7);
+    expect(maxRating(field({}, CustomFieldType.RATING))).toBe(5);
+  });
+
+  it('reads a formula’s expression, empty when unset', () => {
+    expect(formulaExpression(field({ expression: '1 + 1' }, CustomFieldType.FORMULA))).toBe(
+      '1 + 1',
+    );
+    expect(formulaExpression(field({}, CustomFieldType.FORMULA))).toBe('');
   });
 });
 

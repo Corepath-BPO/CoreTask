@@ -1,6 +1,6 @@
 import { ALLOWED_UPLOAD_MIME_TYPES, MAX_ATTACHMENTS_PER_ITEM } from '@coretask/contracts';
 import type { Attachment } from '@coretask/types';
-import { Download, FileText, Image as ImageIcon, Paperclip, Trash2, Upload } from 'lucide-react';
+import { Download, MessageSquare, Paperclip, Trash2, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -27,9 +27,12 @@ import {
   useDownloadAttachment,
   useUploadAttachment,
 } from '../hooks/use-attachments';
+import { MAX_FILE_SIZE_MB, acceptUpload } from '../lib/accept-upload';
 import { formatBytes } from '../lib/format-bytes';
+import { isImage } from '../lib/is-image';
 
-const MAX_FILE_SIZE_MB = 25;
+import { AttachmentLightbox } from './attachment-lightbox';
+import { AttachmentThumbnail } from './attachment-thumbnail';
 
 interface AttachmentPanelProps {
   workspaceId: string | undefined;
@@ -38,12 +41,18 @@ interface AttachmentPanelProps {
   canManageAny: boolean;
 }
 
+/**
+ * Asana's attachment strip: a row of cards, a picture on each that is one,
+ * the name and size underneath, a viewer behind every picture. Files posted
+ * with a comment are here too — they belong to the item — and say so.
+ */
 export function AttachmentPanel({ workspaceId, parent, canManageAny }: AttachmentPanelProps) {
   const currentUser = useCurrentUser();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Attachment | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
 
   const { data: attachments, isLoading } = useAttachments(workspaceId, parent);
   const upload = useUploadAttachment(workspaceId, parent);
@@ -51,23 +60,8 @@ export function AttachmentPanel({ workspaceId, parent, canManageAny }: Attachmen
   const remove = useDeleteAttachment(workspaceId, parent);
 
   const files = attachments ?? [];
+  const pictures = files.filter(isImage);
   const full = files.length >= MAX_ATTACHMENTS_PER_ITEM;
-
-  /**
-   * Checked here as well as on the server so the person picking a 400 MB video
-   * finds out immediately rather than after uploading it. The API still decides.
-   */
-  const accept = (file: File): boolean => {
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      toast.error(`${file.name} is larger than ${MAX_FILE_SIZE_MB} MB.`);
-      return false;
-    }
-    if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type)) {
-      toast.error(`${file.name} is not a supported file type.`);
-      return false;
-    }
-    return true;
-  };
 
   const send = (list: FileList | null) => {
     const chosen = [...(list ?? [])];
@@ -81,7 +75,7 @@ export function AttachmentPanel({ workspaceId, parent, canManageAny }: Attachmen
     // One at a time, so the progress bar means something and a rejected file
     // does not take the rest of the selection down with it.
     for (const file of chosen) {
-      if (!accept(file)) continue;
+      if (!acceptUpload(file)) continue;
 
       upload.mutate(
         { file, onProgress: setProgress },
@@ -166,60 +160,85 @@ export function AttachmentPanel({ workspaceId, parent, canManageAny }: Attachmen
       </div>
 
       {isLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-full" />
+        <div className="flex gap-3">
+          <Skeleton className="h-36 w-40" />
+          <Skeleton className="h-36 w-40" />
         </div>
       ) : files.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing attached yet.</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="flex flex-wrap gap-3">
           {files.map((file) => {
             const mine = file.uploadedBy?.id === currentUser?.id;
+            const pictureIndex = pictures.findIndex((picture) => picture.id === file.id);
 
             return (
               <li
                 key={file.id}
                 aria-label={`Attachment ${file.filename}`}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+                className="group/card flex w-40 flex-col overflow-hidden rounded-lg border border-border bg-card"
               >
-                <FileIcon mimeType={file.mimeType} />
+                <AttachmentThumbnail
+                  workspaceId={workspaceId}
+                  attachment={file}
+                  onOpen={pictureIndex >= 0 ? () => setOpen(pictureIndex) : undefined}
+                  className="h-24 w-full rounded-none border-0 border-b"
+                />
 
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{file.filename}</p>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-0 space-y-0.5 p-2">
+                  <p className="truncate text-xs font-medium text-foreground" title={file.filename}>
+                    {file.filename}
+                  </p>
+                  <p className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
                     {formatBytes(file.sizeBytes)}
                     {file.uploadedBy ? ` · ${file.uploadedBy.name}` : ''}
+                    {file.commentId && (
+                      <MessageSquare
+                        className="size-3 shrink-0"
+                        aria-label="Posted with a comment"
+                      />
+                    )}
                   </p>
                 </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Download ${file.filename}`}
-                  disabled={download.isPending}
-                  onClick={() => download.mutate(file.id)}
-                >
-                  <Download className="size-4" aria-hidden="true" />
-                </Button>
-
-                {(mine || canManageAny) && (
+                <div className="mt-auto flex items-center justify-end gap-0.5 border-t px-1 py-0.5">
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
-                    aria-label={`Remove ${file.filename}`}
-                    onClick={() => setPendingDelete(file)}
+                    size="icon-sm"
+                    className="size-7"
+                    aria-label={`Download ${file.filename}`}
+                    disabled={download.isPending}
+                    onClick={() => download.mutate(file.id)}
                   >
-                    <Trash2 className="size-4 text-destructive" aria-hidden="true" />
+                    <Download className="size-3.5" aria-hidden="true" />
                   </Button>
-                )}
+
+                  {(mine || canManageAny) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7"
+                      aria-label={`Remove ${file.filename}`}
+                      onClick={() => setPendingDelete(file)}
+                    >
+                      <Trash2 className="size-3.5 text-destructive" aria-hidden="true" />
+                    </Button>
+                  )}
+                </div>
               </li>
             );
           })}
         </ul>
       )}
+
+      <AttachmentLightbox
+        workspaceId={workspaceId}
+        images={pictures}
+        index={open}
+        onIndexChange={setOpen}
+      />
 
       <AlertDialog
         open={pendingDelete !== null}
@@ -229,8 +248,7 @@ export function AttachmentPanel({ workspaceId, parent, canManageAny }: Attachmen
           <AlertDialogHeader>
             <AlertDialogTitle>Remove this attachment?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{pendingDelete?.filename}” is deleted from storage as well, so this cannot be
-              undone.
+              “{pendingDelete?.filename}” is deleted from storage as well, so this cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -245,12 +263,6 @@ export function AttachmentPanel({ workspaceId, parent, canManageAny }: Attachmen
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </section>
   );
-}
-
-function FileIcon({ mimeType }: { mimeType: string }) {
-  const Icon = mimeType.startsWith('image/') ? ImageIcon : FileText;
-  return <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }

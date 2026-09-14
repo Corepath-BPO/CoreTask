@@ -9,6 +9,7 @@ import type {
 } from '@coretask/contracts';
 
 import type { UserRef } from './work-items.js';
+import type { SetCustomFieldValuePayload, ViewFilterCondition, ViewSort } from './project-view.js';
 
 /**
  * One row of a project, whatever it is underneath.
@@ -45,14 +46,21 @@ export interface ProjectWorkItem {
   priority: WorkItemStateRef | null;
 
   assignees: UserRef[];
+  /** Calendar dates at UTC midnight; the instants beside them only when a time was set. */
   startDate: string | null;
+  startAt: string | null;
   dueDate: string | null;
+  dueAt: string | null;
   completedAt: string | null;
   /** Non-null means archived. */
   archivedAt: string | null;
 
   subtaskCount: number;
   completedSubtaskCount: number;
+  /** Live comments — soft-deleted ones are not counted. */
+  commentCount: number;
+  /** Confirmed uploads only. */
+  attachmentCount: number;
 
   /**
    * Empty for types whose values are not stored yet — see
@@ -136,6 +144,17 @@ export interface ProjectWorkItemQuery {
   includeSubtaskSummary?: boolean;
   cursor?: string | null;
   limit?: number;
+  /**
+   * The view's effective settings, carried on the request rather than a view
+   * id: the UI must apply a change instantly, whether or not the caller may
+   * persist it. Sent as JSON in the query string.
+   */
+  filters?: ViewFilterCondition[];
+  sorts?: ViewSort[];
+  /** Leads the ordering, so groups never fragment across a page boundary. */
+  groupBy?: string | null;
+  /** False hides done tasks and resolved tickets. Absent means true. */
+  showCompleted?: boolean;
 }
 
 export interface ProjectWorkItemPage {
@@ -162,7 +181,9 @@ export interface CreateWorkItemPayload {
   priorityId?: string | null;
   assigneeIds?: string[];
   startDate?: string | null;
+  startAt?: string | null;
   dueDate?: string | null;
+  dueAt?: string | null;
   /** Insert after this sibling. `null` places it first; omitted appends. */
   afterId?: string | null;
   customFieldValues?: Record<string, unknown>;
@@ -180,7 +201,10 @@ export interface UpdateWorkItemPayload {
   priorityId?: string | null;
   assigneeIds?: string[];
   startDate?: string | null;
+  /** Tasks only; a ticket keeps date-only deadlines. */
+  startAt?: string | null;
   dueDate?: string | null;
+  dueAt?: string | null;
   correlationId?: string;
 }
 
@@ -191,4 +215,30 @@ export interface MoveWorkItemPayload {
   afterId?: string | null;
   beforeId?: string | null;
   correlationId?: string;
+}
+
+/**
+ * One change applied to a selection — what the List's bulk bar sends.
+ *
+ * The fields are the ones a selection can sensibly share: no title, no
+ * description. `sectionId` moves every row (appended in the order given, so
+ * they keep their relative order); `archived` archives, tasks only.
+ */
+export interface BulkWorkItemPayload {
+  workItemIds: string[];
+  update?: Pick<
+    UpdateWorkItemPayload,
+    'statusId' | 'priorityId' | 'assigneeIds' | 'startDate' | 'startAt' | 'dueDate' | 'dueAt'
+  > & {
+    /** Field values keyed by field id, applied to every task; tickets are skipped. */
+    customFieldValues?: Record<string, SetCustomFieldValuePayload>;
+  };
+  sectionId?: string | null;
+  archived?: true;
+  correlationId?: string;
+}
+
+export interface BulkWorkItemResult {
+  /** Every row touched, in the order it was named, as it now stands. */
+  items: ProjectWorkItem[];
 }

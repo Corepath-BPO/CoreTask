@@ -25,6 +25,7 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
 import { PersonAvatar } from '@/components/data-display/person-avatar';
+import { RichTextEditor } from '@/components/forms/rich-text-editor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -45,11 +46,12 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel';
+import { useAttachFiles } from '@/features/attachments/hooks/use-paste-to-attach';
+import type { CommentComposerHandle } from '@/features/comments/components/comment-composer';
 import { CommentThread } from '@/features/comments/components/comment-thread';
+import { CollaboratorsRow } from '@/features/followers/components/collaborators-row';
 import { CustomFieldCell } from '@/features/projects/components/cells/custom-field-cell';
-import { useCellEditor } from '@/features/projects/components/cells/use-cell-editor';
 import { FieldTypeIcon } from '@/features/projects/components/field-picker/field-type-icon';
 import {
   useFieldMetadata,
@@ -67,8 +69,22 @@ import { isTicketRow, toWorkItemRow } from '@/features/work-items/lib/work-item-
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { queryClient, queryKeys } from '@/lib/api/query-client';
 import { usePanelFocus } from '@/lib/hooks/use-panel-focus';
+import { toEditorHtml } from '@/lib/rich-text';
+import { SHORTCUT_PRIORITY, useShortcutActions } from '@/lib/shortcuts/shortcut-registry';
 import { textWidth } from '@/lib/text-width';
-import { cn, daysUntil, formatDate, formatDueDate, percentage } from '@/lib/utils';
+import {
+  calendarDateFromNow,
+  cn,
+  daysUntil,
+  formatDate,
+  formatDue,
+  formatDueDate,
+  formatSchedule,
+  isOverdue,
+  percentage,
+  type Schedule,
+} from '@/lib/utils';
+import { useCurrentUser } from '@/stores/auth.store';
 
 import {
   useArchiveTask,
@@ -77,6 +93,7 @@ import {
   useTaskDetail,
   useUpdateTask,
 } from '../hooks/use-tasks';
+import { TaskDatePopover } from './task-date-popover';
 
 const UNASSIGNED = '__unassigned__';
 const NO_SECTION = '__none__';
@@ -84,6 +101,8 @@ const NO_SECTION = '__none__';
 interface TaskDetailDialogProps {
   workspaceId: string | undefined;
   taskId: string | null;
+  /** A comment the link named: the thread scrolls to it and lights it up. */
+  linkedCommentId?: string | null | undefined;
   onClose: () => void;
   role: WorkspaceRole;
 }
@@ -95,7 +114,13 @@ interface TaskDetailDialogProps {
  * panel is a place you poke at one field at a time, and a modal form would make
  * every tweak a two-step transaction.
  */
-export function TaskDetailDialog({ workspaceId, taskId, onClose, role }: TaskDetailDialogProps) {
+export function TaskDetailDialog({
+  workspaceId,
+  taskId,
+  linkedCommentId,
+  onClose,
+  role,
+}: TaskDetailDialogProps) {
   const { data: task, isLoading } = useTaskDetail(workspaceId, taskId);
 
   if (!taskId) return null;
@@ -128,6 +153,7 @@ export function TaskDetailDialog({ workspaceId, taskId, onClose, role }: TaskDet
             workspaceId={workspaceId}
             role={role}
             onClose={onClose}
+            linkedCommentId={linkedCommentId}
           />
         )}
       </DialogContent>
@@ -143,6 +169,7 @@ export function TaskDetailDialog({ workspaceId, taskId, onClose, role }: TaskDet
 export function TaskDetailPanel({
   workspaceId,
   taskId,
+  linkedCommentId,
   onClose,
   role,
   projectId,
@@ -345,6 +372,8 @@ export function TaskDetailPanel({
               role={role}
               onClose={onClose}
               onOpenTask={onOpenTask}
+              linkedCommentId={linkedCommentId}
+              active={open}
               metadata={metadata}
               customFieldValues={workItemRow?.customFieldValues}
               onSaveField={(fieldId, value) =>
@@ -436,6 +465,10 @@ interface TaskDetailBodyProps {
   /** This item's stored values, straight off the work-item record. */
   customFieldValues?: TaskCustomFieldValue[] | undefined;
   onSaveField?: ((fieldId: string, value: Record<string, unknown>) => void) | undefined;
+  /** False while the panel is slid away: it stays mounted, but its chords must not. */
+  active?: boolean;
+  /** A comment the link named, for the thread to scroll to. */
+  linkedCommentId?: string | null | undefined;
 }
 
 function TaskDetailBody({
@@ -447,8 +480,11 @@ function TaskDetailBody({
   metadata,
   customFieldValues,
   onSaveField,
+  active = true,
+  linkedCommentId,
 }: TaskDetailBodyProps) {
   const { data: members } = useWorkspaceMembers(workspaceId);
+  const me = useCurrentUser();
   // Already cached by the board in the common case, so this is usually free.
   const { data: project } = useProject(workspaceId, task.projectId ?? '');
   const updateTask = useUpdateTask(workspaceId);
@@ -465,6 +501,23 @@ function TaskDetailBody({
   const canArchive = hasAtLeastRole(role, WorkspaceRole.MANAGER);
   const ticket = isTicketRow(task);
 
+  /*
+   * What the thread, the files and the collaborators hang off. A ticket row
+   * opened here keeps its ticket identity: its comments, attachments and
+   * followers live on the ticket routes, and the task ones would 404.
+   */
+  const itemParent = useMemo(
+    () =>
+      ticket
+        ? ({ kind: 'ticket', id: task.id } as const)
+        : ({ kind: 'task', id: task.id } as const),
+    [ticket, task.id],
+  );
+
+  // The same parent the AttachmentPanel below is given, so a pasted image and
+  // a dropped one land in the same list — and, being pictures, in the text.
+  const attachFiles = useAttachFiles(workspaceId, itemParent, canEdit);
+
   /* The project chip: the task endpoint embeds it; the work-item fallback
      does not, but the project query already has everything the chip shows. */
   const projectRef =
@@ -474,7 +527,13 @@ function TaskDetailBody({
       : null);
 
   const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description ?? '');
+  /*
+   * What the description last saved as, so a blur that changed nothing does
+   * not write. Seeded in the editor's own shape: a plain-text description
+   * from before the editor reads back as paragraphs, and comparing against
+   * the raw stored text would save it on the very first blur.
+   */
+  const lastDescription = useRef<string | null>(toEditorHtml(task.description) || null);
   const [subtaskTitle, setSubtaskTitle] = useState('');
   const [addingSubtask, setAddingSubtask] = useState(false);
   /** Where a right-click landed, and on which subtask — Asana's row menu. */
@@ -507,14 +566,50 @@ function TaskDetailBody({
 
   /*
    * Display-first, as the List's due-date cell reads: the resting state is
-   * "Tomorrow" in the app's own words, and the date input only exists while
-   * editing. The always-on input it replaces was uncontrolled and saved on
-   * every change — each arrow press in the segmented control fired a mutation.
+   * "Tomorrow" in the app's own words — "Sep 1 – Sep 5, 3:00 PM" once a start
+   * or a time is set — and the picker only exists while it is open.
    */
-  const dueEditor = useCellEditor(task.dueDate?.slice(0, 10) ?? '', (value) =>
-    save({ dueDate: value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null }),
-  );
+  const [dateOpen, setDateOpen] = useState(false);
   const dueDays = task.dueDate && !taskDone ? daysUntil(task.dueDate) : null;
+  const dueLate = !taskDone && isOverdue(task);
+
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const composerRef = useRef<CommentComposerHandle>(null);
+
+  const dueOn = (daysFromNow: number) =>
+    save({ dueDate: calendarDateFromNow(daysFromNow), dueAt: null });
+
+  /*
+   * Asana's chords, for the task on screen. Registered above the list's own
+   * handlers so Tab+A assigns this task rather than the rows behind it, and
+   * only while the panel is actually open — it stays mounted while hidden.
+   * `null` claims a chord this task cannot answer (a ticket has no subtasks),
+   * so it does not fall through to the list either.
+   */
+  useShortcutActions(
+    {
+      assign: canEdit ? () => setAssigneeOpen(true) : null,
+      assignToMe: canEdit && me ? () => save({ assigneeId: me.id }) : null,
+      dueDate: canEdit ? () => setDateOpen(true) : null,
+      dueToday: canEdit ? () => dueOn(0) : null,
+      dueTomorrow: canEdit ? () => dueOn(1) : null,
+      comment: () => composerRef.current?.focus(),
+      subtask: canEdit && !ticket ? () => setAddingSubtask(true) : null,
+      toggleComplete:
+        canEdit && !ticket
+          ? () => save({ status: taskDone ? TaskStatus.TODO : TaskStatus.DONE })
+          : null,
+      archive:
+        canArchive && !ticket && task.archivedAt === null
+          ? () =>
+              archiveTask.mutate(
+                { taskId: task.id, archived: false },
+                { onSuccess: () => onClose() },
+              )
+          : null,
+    },
+    { enabled: active, priority: SHORTCUT_PRIORITY.panel },
+  );
 
   /*
    * The field-group gutter, sized to the longest field name — measured in the
@@ -567,6 +662,8 @@ function TaskDetailBody({
           <Select
             value={task.assigneeId ?? UNASSIGNED}
             onValueChange={(value) => save({ assigneeId: value === UNASSIGNED ? null : value })}
+            open={assigneeOpen}
+            onOpenChange={setAssigneeOpen}
             disabled={!canEdit}
           >
             <SelectTrigger
@@ -600,39 +697,31 @@ function TaskDetailBody({
         </FieldRow>
 
         <FieldRow label="Due date">
-          {dueEditor.editing ? (
-            <Input
-              type="date"
-              autoFocus
-              value={dueEditor.draft}
-              onChange={(event) => dueEditor.setDraft(event.target.value)}
-              onBlur={dueEditor.commit}
-              onKeyDown={dueEditor.onKeyDown}
-              aria-label="Due date"
-              className="h-8 w-fit px-2 text-sm"
-            />
-          ) : (
+          <TaskDatePopover
+            schedule={task}
+            onSave={(changes) => save(changes)}
+            open={dateOpen}
+            onOpenChange={setDateOpen}
+            // A ticket's deadline is a day: no start date, no time of day.
+            dateOnly={ticket}
+          >
             <button
               type="button"
-              onClick={dueEditor.open}
+              onClick={() => setDateOpen(true)}
               disabled={!canEdit}
               aria-label="Due date"
               className={cn(
                 'h-8 rounded-md px-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
                 canEdit && 'cursor-pointer',
                 !task.dueDate && 'text-muted-foreground',
-                dueDays !== null && dueDays < 0 && 'text-destructive',
-                (dueDays === 0 || dueDays === 1) && 'text-success',
+                dueLate && 'text-destructive',
+                !dueLate && (dueDays === 0 || dueDays === 1) && 'text-success',
               )}
             >
               {/* A finished task is never "3d overdue" — show the plain date. */}
-              {task.dueDate
-                ? taskDone
-                  ? formatDate(task.dueDate)
-                  : formatDueDate(task.dueDate)
-                : 'No due date'}
+              {task.dueDate ? formatSchedule(task, { done: taskDone }) : 'No due date'}
             </button>
-          )}
+          </TaskDatePopover>
         </FieldRow>
 
         <FieldRow label="Dependencies">
@@ -739,18 +828,26 @@ function TaskDetailBody({
 
       <section className="space-y-1">
         <h3 className="text-sm font-semibold">Description</h3>
-        <Textarea
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          onBlur={() =>
-            description !== (task.description ?? '') &&
-            save({ description: description.trim() || null })
-          }
+        <RichTextEditor
+          initialValue={task.description}
+          editable={canEdit}
           placeholder={`What is this ${ticket ? 'Ticket' : 'task'} about?`}
-          rows={3}
-          disabled={!canEdit}
-          aria-label="Description"
-          className="resize-none border-0 px-0 shadow-none focus-visible:ring-0"
+          ariaLabel="Description"
+          workspaceId={workspaceId}
+          mentionables={members?.map((member) => member.user)}
+          // A pasted screenshot becomes an attachment, as it did from the
+          // textarea, and then a picture where it was pasted. Other files
+          // stay in the attachments strip; text pastes stay the editor's.
+          onFiles={(files, insertImage) =>
+            attachFiles(files, (attachment) =>
+              insertImage({ attachmentId: attachment.id, alt: attachment.filename }),
+            )
+          }
+          onBlur={(html) => {
+            if (html === lastDescription.current) return;
+            lastDescription.current = html;
+            save({ description: html });
+          }}
         />
       </section>
 
@@ -973,15 +1070,37 @@ function TaskDetailBody({
 
       <Separator />
 
+      {/* Asana keeps collaborators at the foot of the panel, above the thread
+          they will be told about. The ticket-backed panel gets the same row
+          keyed by the ticket's UUID. */}
+      <CollaboratorsRow workspaceId={workspaceId} parent={itemParent} role={role} />
+
+      <Separator />
+
       <AttachmentPanel
         workspaceId={workspaceId}
-        parent={{ kind: 'task', id: task.id }}
+        parent={itemParent}
         canManageAny={hasAtLeastRole(role, WorkspaceRole.MANAGER)}
       />
 
       <Separator />
 
-      <CommentThread workspaceId={workspaceId} parent={{ kind: 'task', id: task.id }} role={role} />
+      <CommentThread
+        workspaceId={workspaceId}
+        parent={itemParent}
+        role={role}
+        composerRef={composerRef}
+        focusCommentId={linkedCommentId ?? null}
+        // Where a copied link lands: the project's List when the task has a
+        // project, My Tasks otherwise — the same places a notification opens.
+        permalink={(commentId) =>
+          ticket && task.workItem.details.kind === 'TICKET'
+            ? `/tickets?ticket=${task.workItem.details.key}&comment=${commentId}`
+            : task.projectId
+              ? `/projects/${task.projectId}/list?task=${task.id}&comment=${commentId}`
+              : `/my-tasks?task=${task.id}&comment=${commentId}`
+        }
+      />
     </>
   );
 }
@@ -1011,75 +1130,56 @@ function SubtaskTail({
   subtask: Task;
   canEdit: boolean;
   members: { user: { id: string; name: string; avatarUrl: string | null } }[];
-  onSave: (payload: { dueDate: string | null } | { assigneeId: string | null }) => void;
+  onSave: (payload: Partial<Schedule> | { assigneeId: string | null }) => void;
 }) {
   const [editingDate, setEditingDate] = useState(false);
   const [pickingAssignee, setPickingAssignee] = useState(false);
 
   const done = subtask.status === TaskStatus.DONE;
   const days = subtask.dueDate && !done ? daysUntil(subtask.dueDate) : null;
-
-  const commitDate = (value: string) => {
-    setEditingDate(false);
-    if (value === (subtask.dueDate?.slice(0, 10) ?? '')) return;
-    onSave({ dueDate: value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null });
-  };
+  const late = !done && isOverdue(subtask);
 
   const ghost =
     'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground opacity-0 transition-opacity hover:border-foreground hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100';
 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
-      {editingDate ? (
-        <Input
-          type="date"
-          autoFocus
-          defaultValue={subtask.dueDate?.slice(0, 10) ?? ''}
-          onBlur={(event) => commitDate(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              commitDate(event.currentTarget.value);
-            }
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              // The panel's own Escape must not fire: cancelling the date is
-              // not closing the pane.
-              event.stopPropagation();
-              setEditingDate(false);
-            }
-          }}
-          aria-label={`Due date for "${subtask.title}"`}
-          className="h-6 w-fit px-1 text-xs"
-        />
-      ) : subtask.dueDate ? (
-        <button
-          type="button"
-          disabled={!canEdit}
-          onClick={() => setEditingDate(true)}
-          aria-label={`Due date for "${subtask.title}"`}
-          className={cn(
-            'shrink-0 rounded px-1 text-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
-            canEdit && 'cursor-pointer hover:bg-muted',
-            days !== null && days < 0
-              ? 'text-destructive'
-              : days === 0 || days === 1
-                ? 'text-success'
-                : 'text-muted-foreground',
-          )}
-        >
-          {done ? formatDate(subtask.dueDate) : formatDueDate(subtask.dueDate)}
-        </button>
-      ) : canEdit ? (
-        <button
-          type="button"
-          onClick={() => setEditingDate(true)}
-          aria-label={`Set a due date for "${subtask.title}"`}
-          className={ghost}
-        >
-          <Calendar className="size-3.5" aria-hidden="true" />
-        </button>
-      ) : null}
+      <TaskDatePopover
+        schedule={subtask}
+        onSave={onSave}
+        open={editingDate}
+        onOpenChange={setEditingDate}
+        align="end"
+      >
+        {subtask.dueDate ? (
+          <button
+            type="button"
+            disabled={!canEdit}
+            onClick={() => setEditingDate(true)}
+            aria-label={`Due date for "${subtask.title}"`}
+            className={cn(
+              'shrink-0 rounded px-1 text-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+              canEdit && 'cursor-pointer hover:bg-muted',
+              late
+                ? 'text-destructive'
+                : days === 0 || days === 1
+                  ? 'text-success'
+                  : 'text-muted-foreground',
+            )}
+          >
+            {formatDue(subtask, { done })}
+          </button>
+        ) : canEdit ? (
+          <button
+            type="button"
+            onClick={() => setEditingDate(true)}
+            aria-label={`Set a due date for "${subtask.title}"`}
+            className={ghost}
+          >
+            <Calendar className="size-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+      </TaskDatePopover>
 
       {pickingAssignee ? (
         <Select

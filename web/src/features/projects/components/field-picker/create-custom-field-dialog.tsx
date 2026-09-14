@@ -24,7 +24,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 
-import { useCreateCustomField } from '../../hooks/use-project-views';
+import { useCreateCustomField, useFieldMetadata } from '../../hooks/use-project-views';
 
 import { FieldConfigPanel } from './field-config-panel';
 import { FieldTypeIcon } from './field-type-icon';
@@ -69,7 +69,11 @@ export function CreateCustomFieldDialog({
 
   const createField = useCreateCustomField(workspaceId, projectId);
 
-  const problems = draftProblems(draft);
+  // The project's fields, which a formula may name.
+  const { data: metadata } = useFieldMetadata(workspaceId, projectId);
+  const referenceFields = metadata?.customFields ?? [];
+
+  const problems = draftProblems(draft, referenceFields);
   const valid = problems.length === 0;
   const meta = FIELD_TYPE_META[draft.type];
 
@@ -107,6 +111,7 @@ export function CreateCustomFieldDialog({
                 name: draft.name.trim(),
                 type: draft.type,
                 isRequired: draft.isRequired,
+                notifyOnChange: draft.notifyOnChange,
                 settings: draft.settings,
                 ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
                 ...(meta.hasOptions
@@ -163,13 +168,21 @@ export function CreateCustomFieldDialog({
           {duplicate && (
             <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
               <p className="flex items-start gap-2 text-sm">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <AlertTriangle
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <span>
                   A field named “{duplicate.name}” already exists in this workspace, used by{' '}
                   {duplicate.usageCount === 1 ? '1 project' : `${duplicate.usageCount} projects`}.
                 </span>
               </p>
-              <Button type="button" variant="outline" size="sm" onClick={() => onUseExisting(duplicate)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onUseExisting(duplicate)}
+              >
                 Use the existing field
               </Button>
             </div>
@@ -177,7 +190,7 @@ export function CreateCustomFieldDialog({
 
           <Separator />
 
-          <FieldConfigPanel draft={draft} onChange={setDraft} />
+          <FieldConfigPanel draft={draft} onChange={setDraft} referenceFields={referenceFields} />
 
           <Separator />
 
@@ -192,14 +205,28 @@ export function CreateCustomFieldDialog({
             />
           </div>
 
+          {/* A formula is worked out, not filled in, so "required" would ask
+              for something nobody can give. */}
+          {!meta.isComputed && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={draft.isRequired}
+                onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })}
+                className="size-4 cursor-pointer rounded border-input accent-primary"
+              />
+              Required on this project
+            </label>
+          )}
+
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={draft.isRequired}
-              onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })}
+              checked={draft.notifyOnChange}
+              onChange={(event) => setDraft({ ...draft, notifyOnChange: event.target.checked })}
               className="size-4 cursor-pointer rounded border-input accent-primary"
             />
-            Required on this project
+            Notify task collaborators when this field&apos;s value changes
           </label>
 
           {/* Listed rather than only disabling the button: "Create is greyed
@@ -217,7 +244,12 @@ export function CreateCustomFieldDialog({
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="submit" form="create-field" disabled={!valid} loading={createField.isPending}>
+          <Button
+            type="submit"
+            form="create-field"
+            disabled={!valid}
+            loading={createField.isPending}
+          >
             Create field
           </Button>
         </DialogFooter>

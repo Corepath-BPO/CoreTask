@@ -93,3 +93,25 @@ duplicate definition.
 Attaching brings the field's options and settings with it, because they belong to
 the definition. That is what makes reuse worth having — the second project gets
 the same choices, not an empty select it has to fill in again.
+
+A formula comes only where its operands already are: attaching one to a project
+that lacks a field it reads is refused, naming the formula, rather than landing
+a column that is blank on every row.
+
+## Removing and restoring
+
+Taking a field off a project is Asana's two-way choice, asked in a dialog rather
+than guessed from state. **Remove from this project** (`?mode=detach`) drops the
+association and leaves the definition in the library, options, values and all,
+for the other projects that use it or for later. **Delete from the workspace**
+(`?mode=delete`) drops every project's association and deletes the definition —
+unless any task holds a value for it, in which case it is archived instead,
+because a field is easy to recreate and its data is not. The dialog says how
+many other projects would lose it. A field that a formula on the project reads
+cannot leave until the formula does.
+
+An archived field is reachable through no project route, since it has no
+association left. The library dialog's **Show archived** filter lists them, and
+**Restore** calls the workspace-scoped `PATCH /workspaces/:ws/custom-fields/:id`
+with `isArchived: false` — the definition comes back to the library with every
+value it held, and adding it to a project is a second, deliberate step.

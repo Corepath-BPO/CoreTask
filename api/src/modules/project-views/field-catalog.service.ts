@@ -146,9 +146,11 @@ export class FieldCatalogService {
       // `isInView` rather than filtering them out: a field already in the view
       // is shown ticked and disabled, because silently omitting it reads as the
       // search having failed to find it.
-      systemFields: SYSTEM_FIELD_CATALOG.filter((field) =>
-        matches(field.label, field.description),
-      ).map((field) => ({ ...field, isInView: visible.has(field.key) })),
+      // Columns only: the title is always there and a section repeats the
+      // card heading. Both stay real filter, sort and group keys elsewhere.
+      systemFields: SYSTEM_FIELD_CATALOG.filter((field) => field.isColumn)
+        .filter((field) => matches(field.label, field.description))
+        .map((field) => ({ ...field, isInView: visible.has(field.key) })),
 
       /*
        * Marked rather than filtered, the same as the system fields above.

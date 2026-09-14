@@ -61,9 +61,10 @@ Costs:
 - five is a guess. It is generous enough for real workflows and small enough that
   a cycle burns little, but no measurement informed it
 - `causedByRuleId` must be threaded through every event a rule causes. The
-  plumbing exists; **cascade re-publishing is not yet implemented**, so mechanism
-  1 is currently protecting against a case that cannot arise. That is deliberate
-  — the guard should predate the capability, not follow it
+  plumbing came first — the guard predating the capability, deliberately — and
+  the cascade followed on 2026-09-10: the runner returns the events its actions
+  raised and `AutomationProcessor` publishes them, each tagged with the rule and
+  one hop deeper
 - no per-rule execution lock. Two events for the same task arriving together can
   interleave; worker concurrency of 2 narrows the window rather than closing it
 

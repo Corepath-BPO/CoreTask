@@ -1,10 +1,11 @@
 import { Plus, Search } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CreateWorkspaceDialog } from '@/features/workspaces/components/create-workspace-dialog';
+import { MOD_KEY } from '@/lib/shortcuts/shortcut-definitions';
 
 import { MobileNav } from './mobile-nav';
 import { NotificationMenu } from './notification-menu';
@@ -14,30 +15,11 @@ import { UserMenu } from './user-menu';
  * Application top bar: mobile nav trigger, global search, create, notifications,
  * account menu.
  */
-/**
- * Resolved once at module load rather than in an effect: the platform cannot
- * change during a session, and a state update on mount would cost every screen
- * an extra render just to relabel one key hint.
- */
-const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
-
 export function Topbar() {
   const [createOpen, setCreateOpen] = useState(false);
 
-  // Global search is not implemented yet, but the shortcut is reserved so muscle
-  // memory does not have to be relearned later.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        toast('Global search is coming in the next phase');
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
+  // Ctrl/Cmd+K itself is answered by the app-wide shortcut listener — see
+  // `useGlobalShortcuts` — so the hint here and the key stay one thing.
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border/75 bg-background/88 px-3 backdrop-blur-xl sm:px-5">
       <MobileNav />
@@ -50,7 +32,7 @@ export function Topbar() {
         <Search className="size-4 shrink-0" aria-hidden="true" />
         <span className="flex-1 text-left">Search tasks, tickets, projects…</span>
         <kbd className="hidden rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-block">
-          {IS_MAC ? '⌘' : 'Ctrl'} K
+          {MOD_KEY} K
         </kbd>
       </button>
 

@@ -3,6 +3,15 @@ packages:
   - "api"
   - "packages/*"
 
+# Pinned one release back. The Docker images install with pnpm 11, whose
+# supply-chain policy refuses any package published within the last day or so,
+# and 1.12.1 (a transitive dependency of the description editor) landed on
+# 2026-09-02. Declared here for pnpm 10+ and again under `pnpm.overrides` in
+# package.json for the pnpm 9 on developer machines; both must agree or one of
+# them will call the lockfile stale. Drop both once the release has aged.
+overrides:
+  prosemirror-transform: 1.12.0
+
 # pnpm >= 10 blocks dependency lifecycle scripts unless they are approved here.
 # Only packages that legitimately need to compile or fetch a native binary are
 # allowed; everything else stays sandboxed.

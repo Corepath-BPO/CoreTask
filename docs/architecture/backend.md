@@ -252,18 +252,26 @@ Deletion is soft. Activity entries point at the comment row, and a dangling
 reference in an audit trail is worse than a row nothing renders. Every endpoint
 treats a soft-deleted comment as absent, including edit, which 404s.
 
-Notifications go to everyone already involved: the assignee, the reporter or
-creator, and anyone who has commented before. Replying is how you join a thread
-— without that last group a two-person conversation goes silent for whichever of
-them is not the assignee. Recipients are a `Set`, so someone who is reporter,
-assignee and prior commenter is notified once, and the actor is always removed.
+Notifications go to the item's **followers** — Asana's collaborators. The
+assignee, the creator or reporter, everyone who has commented and everyone who
+was mentioned are added to that list as they become involved, so replying is
+still how you join a thread; and anyone can leave it, which is what makes the
+list worth persisting. The actor is always removed, and someone who was named
+in the comment gets `MENTIONED` instead. See
+[comments-and-collaboration.md](comments-and-collaboration.md).
+
+Bodies are rich text — the same sanitised HTML a description holds — and the
+thread pages by cursor, likes, pins and shows the files posted with each
+comment; the same document covers all of it.
 
 ### Mentions
 
-A mention lives **in the comment text**, as `@[Ada Lovelace](uuid)`, not as a
-list of ids sent alongside a plain body. The format is defined once in
-`@coretask/contracts` so the composer, the renderer and the API parser cannot
-drift apart.
+A mention lives **in the comment text** — as `<span data-mention="uuid">`
+now that comments are rich text, and as `@[Ada Lovelace](uuid)` in rows
+written before that, which are converted on read — not as a list of ids sent
+alongside the body. Both shapes are defined once in `@coretask/contracts`
+(`parseAnyMentionIds` reads either) so the composer, the renderer and the
+API parser cannot drift apart.
 
 Storing it in the text is what makes editing honest: deleting the token deletes
 the mention, and there is no second list to fall out of sync with what the
@@ -286,8 +294,8 @@ Two edge cases decide the shape of the rest:
 
 Being named is a stronger signal than being subscribed, so it sends `MENTIONED`
 and suppresses the generic `COMMENT_CREATED` for those recipients — one comment
-never arrives twice. Notification bodies run through `stripMentionTokens`,
-because a notification is plain text and `@[Ada](uuid)` is markup.
+never arrives twice. Notification bodies run through `htmlToText`, because a
+notification is plain text and a comment is markup.
 
 ### List rollups
 

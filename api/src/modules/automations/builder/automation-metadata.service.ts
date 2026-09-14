@@ -1,4 +1,5 @@
 import {
+  ConditionValueKind,
   TASK_PRIORITIES,
   TASK_PRIORITY_DISPLAY,
   TASK_STATUS_DISPLAY,
@@ -21,6 +22,8 @@ import {
   actionCatalogue,
   capabilities,
   conditionCatalogue,
+  customFieldKey,
+  kindForCustomFieldType,
   permissionsFor,
   triggerCatalogue,
   type AutomationCapabilities,
@@ -78,7 +81,7 @@ export class AutomationMetadataService {
   ): Promise<AutomationMetadataResponse> {
     await this.projects.requireProject(workspaceId, projectId);
 
-    const [sections, statuses, priorities, members, customFields] = await Promise.all([
+    const [sections, projects, statuses, priorities, members, fieldLinks] = await Promise.all([
       /*
        * This project's own sections, in the order the board shows them.
        *
@@ -92,6 +95,23 @@ export class AutomationMetadataService {
         where: { projectId },
         orderBy: { position: 'asc' },
         select: { id: true, name: true },
+      }),
+      /*
+       * Where a task can be moved to: every other live project in the
+       * workspace, each with its sections in board order. Scoped to the
+       * workspace for the same reason the sections above are — a project
+       * from another tenant offered here would be a move across a boundary
+       * that the runner then refuses as a rule that never works.
+       */
+      this.prisma.project.findMany({
+        where: { workspaceId, archivedAt: null, id: { not: projectId } },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          sections: { orderBy: { position: 'asc' }, select: { id: true, name: true } },
+        },
       }),
       this.statusesFor(workspaceId, projectId),
       this.prisma.priorityDefinition.findMany({
@@ -107,32 +127,48 @@ export class AutomationMetadataService {
           user: { select: { id: true, name: true, email: true, avatarUrl: true } },
         },
       }),
-      this.prisma.customField.findMany({
-        where: { workspaceId, isArchived: false, projects: { some: { projectId } } },
-        orderBy: { name: 'asc' },
+      /*
+       * Through the project link, for its order.
+       *
+       * The fields used to be fetched directly and sorted by name, which put
+       * the generated catalogue rows in alphabetical order — a different order
+       * from the one the project's own list view shows the same fields in, and
+       * from the one somebody arranged them into. The link row carries the
+       * project's ordering, so the catalogue reads like the board does.
+       */
+      this.prisma.projectCustomField.findMany({
+        where: { projectId, customField: { workspaceId, isArchived: false } },
+        orderBy: { position: 'asc' },
         select: {
-          id: true,
-          name: true,
-          type: true,
-          // The options come with the field because the generated condition and
-          // action rows are useless without them: "Risk is…" needs the values
-          // Risk can take, and a second round trip per field to fetch them
-          // would be one request per row in the catalogue.
-          options: {
-            where: { isArchived: false },
-            orderBy: { position: 'asc' },
-            select: { id: true, label: true, colorToken: true },
+          customField: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              // The options come with the field because the generated condition
+              // and action rows are useless without them: "Risk is…" needs the
+              // values Risk can take, and a second round trip per field to
+              // fetch them would be one request per row in the catalogue.
+              options: {
+                where: { isArchived: false },
+                orderBy: { position: 'asc' },
+                select: { id: true, label: true, colorToken: true },
+              },
+            },
           },
         },
       }),
     ]);
 
+    const customFields = fieldLinks.map((link) => link.customField);
+
     return {
-      triggers: triggerCatalogue(),
+      triggers: triggerCatalogue(customFields),
       actions: actionCatalogue(customFields),
       conditions: conditionCatalogue(customFields),
-      conditionFields: this.conditionFields(statuses, priorities, sections, members),
+      conditionFields: this.conditionFields(statuses, priorities, sections, members, customFields),
       sections,
+      projects,
       statuses,
       priorities,
       members: members.map((row) => row.user),
@@ -183,12 +219,47 @@ export class AutomationMetadataService {
    * is what the picked row is configured with.
    */
   private conditionFields(
-    statuses: { id: string; name: string }[],
-    priorities: { id: string; name: string }[],
+    statuses: { id: string; name: string; colorToken: string }[],
+    priorities: { id: string; name: string; colorToken: string }[],
     sections: { id: string; name: string }[],
     members: { user: { id: string; name: string } }[],
+    customFields: { id: string; name: string; type: string; options: CustomFieldOption[] }[],
   ): ConditionFieldDefinition[] {
+    /*
+     * The custom fields, under the same keys their conditions store.
+     *
+     * Without these the form for "[Field] is…" had no definition to resolve —
+     * no label, no options — so the value control could not offer the field's
+     * own choices and the card printed option ids at people.
+     *
+     * The colour comes with each option because the builder renders the value
+     * as the tinted chip the board shows it as — a colourless "Renewed" beside
+     * a green one elsewhere reads as a different value.
+     */
+    const generated: ConditionFieldDefinition[] = customFields.map((field) => ({
+      field: customFieldKey(field.id),
+      label: field.name,
+      valueKind: kindForCustomFieldType(field.type) ?? ConditionValueKind.TEXT,
+      /*
+       * A people field's choices are the workspace's members — it defines no
+       * options of its own, and without these the form fell back to a bare
+       * text box asking somebody to type a user id.
+       */
+      ...(field.type === 'PEOPLE'
+        ? { options: members.map((row) => ({ value: row.user.id, label: row.user.name })) }
+        : field.options.length > 0
+          ? {
+              options: field.options.map((option) => ({
+                value: option.id,
+                label: option.label,
+                colorToken: option.colorToken,
+              })),
+            }
+          : {}),
+    }));
+
     return [
+      ...generated,
       /*
        * Definitions when the workspace has them, the legacy enum when it does
        * not.
@@ -205,18 +276,27 @@ export class AutomationMetadataService {
         label: 'Status',
         valueKind: CONDITION_FIELD_KINDS.status,
         options: statuses.length
-          ? statuses.map((row) => ({ value: row.id, label: row.name }))
-          : TASK_STATUSES.map((value) => ({ value, label: TASK_STATUS_DISPLAY[value].name })),
+          ? statuses.map((row) => ({ value: row.id, label: row.name, colorToken: row.colorToken }))
+          : TASK_STATUSES.map((value) => ({
+              value,
+              label: TASK_STATUS_DISPLAY[value].name,
+              colorToken: TASK_STATUS_DISPLAY[value].colorToken,
+            })),
       },
       {
         field: 'priority',
         label: 'Priority',
         valueKind: CONDITION_FIELD_KINDS.priority,
         options: priorities.length
-          ? priorities.map((row) => ({ value: row.id, label: row.name }))
+          ? priorities.map((row) => ({
+              value: row.id,
+              label: row.name,
+              colorToken: row.colorToken,
+            }))
           : TASK_PRIORITIES.map((value) => ({
               value,
               label: TASK_PRIORITY_DISPLAY[value].name,
+              colorToken: TASK_PRIORITY_DISPLAY[value].colorToken,
             })),
       },
       {
@@ -249,6 +329,13 @@ export class AutomationMetadataService {
       { field: 'description', label: 'Description', valueKind: CONDITION_FIELD_KINDS.description },
       { field: 'dueDate', label: 'Due date', valueKind: CONDITION_FIELD_KINDS.dueDate },
       { field: 'startDate', label: 'Start date', valueKind: CONDITION_FIELD_KINDS.startDate },
+      {
+        field: 'estimatedMinutes',
+        label: 'Estimate',
+        valueKind: CONDITION_FIELD_KINDS.estimatedMinutes,
+      },
+      { field: 'createdAt', label: 'Created', valueKind: CONDITION_FIELD_KINDS.createdAt },
+      { field: 'completedAt', label: 'Completed on', valueKind: CONDITION_FIELD_KINDS.completedAt },
     ];
   }
 }

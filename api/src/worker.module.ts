@@ -11,6 +11,7 @@ import { AutomationProcessor } from './jobs/automation/automation.processor';
 import { MaintenanceProcessor } from './jobs/maintenance/maintenance.processor';
 import { JobsModule } from './jobs/jobs.module';
 import { AttachmentSweeperModule } from './modules/attachments/attachment-sweeper.module';
+import { AutomationEventsModule } from './modules/automations/automation-events.module';
 import { AutomationRunnerModule } from './modules/automations/automation-runner.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -34,6 +35,9 @@ import { RedisModule } from './redis/redis.module';
     EmailModule,
     AttachmentSweeperModule,
     AutomationRunnerModule,
+    // The publisher as well as the runner: a rule's change is announced back
+    // onto the queue so the next rule in a chain gets its turn.
+    AutomationEventsModule,
   ],
   providers: [EmailProcessor, MaintenanceProcessor, AutomationProcessor],
 })

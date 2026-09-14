@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { cn, daysUntil, formatDate, formatDueDate, humanizeEnum } from '@/lib/utils';
+import { cn, formatDue, humanizeEnum, isOverdue } from '@/lib/utils';
 
 import { TaskDetailDialog } from '../components/task-detail-dialog';
 import { useTasks } from '../hooks/use-tasks';
@@ -53,8 +53,13 @@ export function MyTasksPage() {
    * link is an entry condition, not an ongoing relationship. An effect that kept
    * them in step would reopen the dialog every time the user closed it.
    */
-  const routeSearch: Partial<{ task: string }> = useSearch({ strict: false });
-  const linkedTask = routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
+  const routeSearch: Partial<{ task: string; comment: string }> = useSearch({ strict: false });
+  const linkedTask =
+    routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
+  const linkedComment =
+    linkedTask && routeSearch.comment && UUID_PATTERN.test(routeSearch.comment)
+      ? routeSearch.comment
+      : null;
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(linkedTask);
 
@@ -252,6 +257,7 @@ export function MyTasksPage() {
       <TaskDetailDialog
         workspaceId={workspaceId}
         taskId={openTaskId}
+        linkedCommentId={openTaskId === linkedTask ? linkedComment : null}
         onClose={() => setOpenTaskId(null)}
         role={role}
       />
@@ -261,7 +267,7 @@ export function MyTasksPage() {
 
 function TaskRow({ task, onOpen }: { task: Task; onOpen: (taskId: string) => void }) {
   const done = task.status === TaskStatus.DONE;
-  const overdue = task.dueDate !== null && !done && daysUntil(task.dueDate) < 0;
+  const overdue = !done && isOverdue(task);
 
   return (
     <li>
@@ -297,7 +303,7 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: (taskId: string) => voi
               )}
             >
               {/* Completed work is not overdue; show the date, not a countdown. */}
-              {done ? formatDate(task.dueDate) : formatDueDate(task.dueDate)}
+              {formatDue(task, { done })}
             </span>
           )}
           {task.assignee ? (

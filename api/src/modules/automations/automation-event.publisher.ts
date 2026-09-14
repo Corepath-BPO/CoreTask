@@ -14,7 +14,15 @@ export interface AutomationEvent {
   trigger: AutomationTrigger;
   entityType: 'TASK' | 'TICKET' | 'COMMENT';
   entityId: string;
-  /** Who caused it. Null when a rule did. */
+  /**
+   * The person whose change started this.
+   *
+   * Carried through a chain rather than dropped when a rule caused the hop: the
+   * rule's write is a consequence of what that person did, which is what the
+   * activity feed says of it. `causedByRuleId` says whether a rule was the
+   * proximate cause; this says who set it all going. Null only when nothing
+   * identifiable did.
+   */
   actorId?: string | null;
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;

@@ -58,11 +58,24 @@ export const DEFAULT_SECTION_NAMES: readonly string[] = [
 export const MAX_SECTIONS_PER_PROJECT = 50;
 
 export const DESCRIPTION_MAX_LENGTH = 10_000;
+/**
+ * Task and ticket descriptions are stored as sanitised HTML — see
+ * docs/architecture/task-dates-and-rich-text.md — and markup costs characters,
+ * so they get twice the room a plain-text description does.
+ */
+export const RICH_TEXT_MAX_LENGTH = 20_000;
 
 export const COMMENT_MIN_LENGTH = 1;
-export const COMMENT_MAX_LENGTH = 20_000;
+/** Comments are rich text, stored the same way descriptions are, so they share the room. */
+export const COMMENT_MAX_LENGTH = RICH_TEXT_MAX_LENGTH;
 /** A thread loads in one request up to this many; beyond it, paging kicks in. */
 export const COMMENT_PAGE_LIMIT = 50;
+/** Files posted with one comment. The item's own cap still applies on top. */
+export const MAX_ATTACHMENTS_PER_COMMENT = 10;
+/** How many likers a comment names; the count says the rest. */
+export const COMMENT_LIKERS_PREVIEW = 12;
+/** A notification body is a line, not a page. */
+export const NOTIFICATION_BODY_LENGTH = 280;
 
 export const TASK_TITLE_MIN_LENGTH = 1;
 export const TASK_TITLE_MAX_LENGTH = 500;
@@ -87,6 +100,25 @@ export const TICKET_NUMBER_START = 1000;
 /** How many entries the dashboard's activity feed and inbox request. */
 export const ACTIVITY_FEED_LIMIT = 20;
 export const ACTIVITY_FEED_MAX_LIMIT = 100;
+/** One page of a task's or ticket's own stories. */
+export const ITEM_ACTIVITY_PAGE_LIMIT = 100;
+
+/** Ceiling per request when adding collaborators to an item. */
+export const MAX_FOLLOWERS_PER_ADD = 50;
+
+/** A formula is an expression, not a program. */
+export const FORMULA_MAX_LENGTH = 500;
+/** How deep formulas may refer to other formulas. */
+export const FORMULA_MAX_DEPTH = 5;
+export const FORMULA_MAX_REFERENCES = 20;
+/** A rating field's star count. */
+export const RATING_MIN_STARS = 3;
+export const RATING_MAX_STARS = 10;
+export const RATING_DEFAULT_STARS = 5;
+/** A unit label beside a number: "pts", "hrs", "kg". */
+export const UNIT_LABEL_MAX_LENGTH = 12;
+/** How many custom fields one bulk edit may set at once. */
+export const BULK_FIELD_VALUE_LIMIT = 10;
 export const NOTIFICATION_FEED_LIMIT = 30;
 export const NOTIFICATION_FEED_MAX_LIMIT = 100;
 
@@ -138,6 +170,19 @@ export const DOWNLOAD_URL_TTL_SECONDS = 300;
 export const PENDING_UPLOAD_TTL_MINUTES = 60;
 
 export const MAX_ATTACHMENTS_PER_ITEM = 25;
+
+/**
+ * The attachment types a description may show inline.
+ *
+ * Raster images only. An SVG is an accepted upload, but rendered from the
+ * storage origin it can carry script — it stays a download, never a picture.
+ */
+export const INLINE_IMAGE_MIME_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+];
 export const FILENAME_MAX_LENGTH = 255;
 
 /** Upload guardrails enforced by the storage integration. */

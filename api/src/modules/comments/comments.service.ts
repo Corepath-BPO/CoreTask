@@ -1,26 +1,30 @@
 import {
   ActivityAction,
   ActivityEntity,
+  AttachmentStatus,
   CommentEntity,
   MAX_MENTIONS_PER_COMMENT,
+  NOTIFICATION_BODY_LENGTH,
   NotificationType,
   ServerEvent,
   WorkspaceRole,
   hasAtLeastRole,
-  parseMentionIds,
-  stripMentionTokens,
+  parseAnyMentionIds,
 } from '@coretask/contracts';
-import type { Comment } from '@coretask/types';
+import type { Comment, CommentListMeta } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
-import type { Comment as PrismaComment, Prisma } from '@prisma/client';
+import { Prisma, type Comment as PrismaComment } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PaginatedResult } from '../../common/types/api.types';
-import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
+import { buildPaginationMeta } from '../../common/utils/pagination.util';
+import { htmlToText, normalizeCommentBody } from '../../common/utils/rich-text.util';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { FollowersService } from '../followers/followers.service';
+import { linkOf, type ItemLink } from '../followers/item-ref';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
 
@@ -35,9 +39,7 @@ interface CommentParent {
    * named — a comment on a task has `ticketId: null` — so the filter is exact
    * rather than "task matches, ticket unconstrained".
    */
-  link: { taskId: string | null; ticketId: string | null };
-  /** Everyone with a standing interest, before the actor is removed. */
-  watchers: (string | null)[];
+  link: ItemLink;
   label: string;
   /** In-app path the notification links to. */
   actionUrl: string;
@@ -54,24 +56,27 @@ export class CommentsService {
     private readonly activity: ActivityLogsService,
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationDispatcher,
+    private readonly followers: FollowersService,
   ) {}
 
   async listForTask(
     workspaceId: string,
+    viewerId: string,
     taskId: string,
     query: CommentListQueryDto,
-  ): Promise<PaginatedResult<Comment>> {
+  ): Promise<PaginatedResult<Comment, CommentListMeta>> {
     const parent = await this.resolveTask(workspaceId, taskId);
-    return this.list(workspaceId, parent, query);
+    return this.list(workspaceId, parent, viewerId, query);
   }
 
   async listForTicket(
     workspaceId: string,
+    viewerId: string,
     idOrKey: string,
     query: CommentListQueryDto,
-  ): Promise<PaginatedResult<Comment>> {
+  ): Promise<PaginatedResult<Comment, CommentListMeta>> {
     const parent = await this.resolveTicket(workspaceId, idOrKey);
-    return this.list(workspaceId, parent, query);
+    return this.list(workspaceId, parent, viewerId, query);
   }
 
   async createForTask(
@@ -112,12 +117,13 @@ export class CommentsService {
       select: { userId: true },
     });
     const alreadyMentioned = new Set(before.map((row) => row.userId));
-    const mentioned = await this.resolveMentions(workspaceId, dto.body);
+    const body = this.requireBody(dto.body);
+    const mentioned = await this.resolveMentions(workspaceId, body);
 
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
       data: {
-        body: dto.body,
+        body,
         // `editedAt` is what the UI reads to mark a comment "edited", so it is
         // set here rather than derived from `updatedAt`, which any write moves.
         editedAt: new Date(),
@@ -131,13 +137,20 @@ export class CommentsService {
       include: commentInclude,
     });
 
-    const comment = toCommentDto(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.COMMENT_UPDATED, comment);
+    const comment = toCommentDto(updated, userId);
+    this.realtime.emitToWorkspace(
+      workspaceId,
+      ServerEvent.COMMENT_UPDATED,
+      toCommentDto(updated, null),
+    );
 
     // Only people the edit *added*. Fixing a typo must not re-ping everyone who
     // was already named.
     const newlyMentioned = mentioned.filter((id) => !alreadyMentioned.has(id));
     if (newlyMentioned.length > 0) {
+      // Being named makes you a collaborator, on an edit as on a fresh post.
+      await this.followers.ensure(workspaceId, linkOf(existing), newlyMentioned);
+
       const parent = await this.resolveParentOf(workspaceId, existing);
       if (parent) {
         await this.notifyMentioned(workspaceId, userId, parent, updated, newlyMentioned);
@@ -199,32 +212,173 @@ export class CommentsService {
   // Internals
   // -------------------------------------------------------------------------
 
+  /**
+   * The latest window of a thread, oldest first within it, or the window
+   * before `before`. The pinned comment rides in the first page whatever its
+   * age, because the top of the thread is where it is shown.
+   */
   private async list(
     workspaceId: string,
     parent: CommentParent,
+    viewerId: string | null,
     query: CommentListQueryDto,
-  ): Promise<PaginatedResult<Comment>> {
+  ): Promise<PaginatedResult<Comment, CommentListMeta>> {
     const where: Prisma.CommentWhereInput = {
       workspaceId,
       ...parent.link,
       deletedAt: null,
     };
+    const limit = query.limit;
 
-    const [total, comments] = await Promise.all([
+    const [total, newestFirst, pinned] = await Promise.all([
       this.prisma.comment.count({ where }),
       this.prisma.comment.findMany({
-        where,
+        where: { ...where, ...(query.before ? { id: { lt: query.before } } : {}) },
         include: commentInclude,
-        // Oldest first: a conversation reads top to bottom.
-        orderBy: { createdAt: 'asc' },
-        ...toSkipTake(query),
+        orderBy: { id: 'desc' },
+        take: limit + 1,
+      }),
+      query.before
+        ? Promise.resolve(null)
+        : this.prisma.comment.findFirst({
+            where: { ...where, pinnedAt: { not: null } },
+            include: commentInclude,
+          }),
+    ]);
+
+    const hasEarlier = newestFirst.length > limit;
+    // Back to reading order: a conversation reads top to bottom.
+    const page = newestFirst.slice(0, limit).reverse();
+
+    if (pinned && !page.some((comment) => comment.id === pinned.id)) {
+      page.unshift(pinned);
+    }
+
+    const earliest = newestFirst.slice(0, limit).at(-1);
+    const meta: CommentListMeta = {
+      ...buildPaginationMeta({ page: 1, limit }, total),
+      hasEarlier,
+      earliestId: hasEarlier ? (earliest?.id ?? null) : null,
+      pinnedCommentId: pinned?.id ?? null,
+    };
+
+    return new PaginatedResult(
+      page.map((comment: CommentWithAuthor) => toCommentDto(comment, viewerId)),
+      meta,
+    );
+  }
+
+  /** A thumbs-up. Liking twice is one like; the row's key says so. */
+  async like(workspaceId: string, userId: string, commentId: string): Promise<Comment> {
+    await this.requireComment(workspaceId, commentId);
+
+    try {
+      await this.prisma.commentLike.create({ data: { commentId, userId } });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+        throw error;
+      }
+    }
+
+    return this.reread(workspaceId, commentId, userId);
+  }
+
+  async unlike(workspaceId: string, userId: string, commentId: string): Promise<Comment> {
+    await this.requireComment(workspaceId, commentId);
+    await this.prisma.commentLike.deleteMany({ where: { commentId, userId } });
+    return this.reread(workspaceId, commentId, userId);
+  }
+
+  /**
+   * Pins a comment to the top of its thread — one per thread, so pinning
+   * replaces whatever was pinned before. Authors and managers only; a pin is
+   * a statement about the thread, not a reaction to it.
+   */
+  async pin(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+    commentId: string,
+  ): Promise<Comment> {
+    const existing = await this.requireComment(workspaceId, commentId);
+    this.assertMayPin(existing, userId, role);
+
+    await this.prisma.$transaction([
+      this.prisma.comment.updateMany({
+        where: { workspaceId, ...linkOf(existing), pinnedAt: { not: null } },
+        data: { pinnedAt: null, pinnedById: null },
+      }),
+      this.prisma.comment.update({
+        where: { id: commentId },
+        data: { pinnedAt: new Date(), pinnedById: userId },
       }),
     ]);
 
-    return new PaginatedResult(
-      comments.map((comment: CommentWithAuthor) => toCommentDto(comment)),
-      buildPaginationMeta(query, total),
+    await this.recordPin(workspaceId, userId, existing, ActivityAction.PINNED);
+    return this.reread(workspaceId, commentId, userId);
+  }
+
+  async unpin(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+    commentId: string,
+  ): Promise<Comment> {
+    const existing = await this.requireComment(workspaceId, commentId);
+    this.assertMayPin(existing, userId, role);
+
+    if (existing.pinnedAt !== null) {
+      await this.prisma.comment.update({
+        where: { id: commentId },
+        data: { pinnedAt: null, pinnedById: null },
+      });
+      await this.recordPin(workspaceId, userId, existing, ActivityAction.UNPINNED);
+    }
+
+    return this.reread(workspaceId, commentId, userId);
+  }
+
+  private assertMayPin(comment: PrismaComment, userId: string, role: WorkspaceRole): void {
+    if (comment.authorId !== userId && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
+      throw AppException.forbidden(
+        'FORBIDDEN',
+        'Only the author or a workspace manager can pin a comment.',
+      );
+    }
+  }
+
+  private async recordPin(
+    workspaceId: string,
+    userId: string,
+    comment: PrismaComment,
+    action: typeof ActivityAction.PINNED | typeof ActivityAction.UNPINNED,
+  ): Promise<void> {
+    await this.activity.record({
+      workspaceId,
+      actorId: userId,
+      action,
+      entity: comment.taskId ? ActivityEntity.TASK : ActivityEntity.TICKET,
+      entityId: (comment.taskId ?? comment.ticketId) as string,
+      summary: action === ActivityAction.PINNED ? 'Pinned a comment' : 'Unpinned a comment',
+      metadata: { commentId: comment.id },
+    });
+  }
+
+  /** The comment as it now stands, announced to the room and returned to the caller. */
+  private async reread(workspaceId: string, commentId: string, viewerId: string): Promise<Comment> {
+    const row = await this.prisma.comment.findUniqueOrThrow({
+      where: { id: commentId },
+      include: commentInclude,
+    });
+
+    // Emitted without a viewer: `likedByMe` is somebody else's to compute.
+    this.realtime.emitToWorkspace(
+      workspaceId,
+      ServerEvent.COMMENT_UPDATED,
+      toCommentDto(row, null),
     );
+
+    return toCommentDto(row, viewerId);
   }
 
   private async create(
@@ -233,17 +387,52 @@ export class CommentsService {
     parent: CommentParent,
     dto: CreateCommentDto,
   ): Promise<Comment> {
-    const mentioned = await this.resolveMentions(workspaceId, dto.body);
+    const body = this.requireBody(dto.body);
+    const mentioned = await this.resolveMentions(workspaceId, body);
+    const attachmentIds = [...new Set(dto.attachmentIds ?? [])];
 
-    const created = await this.prisma.comment.create({
-      data: {
-        workspaceId,
-        authorId: userId,
-        body: dto.body,
-        ...parent.link,
-        mentions: { create: mentioned.map((id) => ({ userId: id })) },
-      },
-      include: commentInclude,
+    /*
+     * The files were uploaded to the item while the comment was being written
+     * — it did not exist yet — and are claimed here. Only the author's own
+     * confirmed files on this item, not already shown by another comment: the
+     * count of rows the update touched is the check, and anything short of
+     * the full list means one of them was somebody else's, elsewhere, or
+     * still uploading. In one transaction, so a refused claim leaves no
+     * comment behind.
+     */
+    const created = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.comment.create({
+        data: {
+          workspaceId,
+          authorId: userId,
+          body,
+          ...parent.link,
+          mentions: { create: mentioned.map((id) => ({ userId: id })) },
+        },
+      });
+
+      if (attachmentIds.length > 0) {
+        const claimed = await tx.attachment.updateMany({
+          where: {
+            id: { in: attachmentIds },
+            workspaceId,
+            ...parent.link,
+            status: AttachmentStatus.READY,
+            uploaderId: userId,
+            commentId: null,
+          },
+          data: { commentId: row.id },
+        });
+
+        if (claimed.count !== attachmentIds.length) {
+          throw AppException.badRequest(
+            'BAD_REQUEST',
+            'Some attachments are not on this item, are not yours, or are already in a comment.',
+          );
+        }
+      }
+
+      return tx.comment.findUniqueOrThrow({ where: { id: row.id }, include: commentInclude });
     });
 
     await this.activity.record({
@@ -256,10 +445,20 @@ export class CommentsService {
       metadata: { entity: parent.entity },
     });
 
-    const comment = toCommentDto(created);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.COMMENT_CREATED, comment);
+    const comment = toCommentDto(created, userId);
+    this.realtime.emitToWorkspace(
+      workspaceId,
+      ServerEvent.COMMENT_CREATED,
+      toCommentDto(created, null),
+    );
+
+    // Joining a thread by replying is the signal that you care about it, and
+    // being named is a stronger one: both make you a collaborator, before the
+    // fan-out below decides who hears about this comment.
+    await this.followers.ensure(workspaceId, parent.link, [userId, ...mentioned]);
+
     await this.notifyMentioned(workspaceId, userId, parent, created, mentioned);
-    await this.notifyWatchers(workspaceId, userId, parent, created, mentioned);
+    await this.notifyFollowers(workspaceId, userId, parent, created, mentioned);
     this.logger.log(
       { commentId: created.id, entity: parent.entity, mentions: mentioned.length },
       'Comment created',
@@ -278,8 +477,26 @@ export class CommentsService {
    * Erroring would mean an old comment could no longer be edited at all, which
    * is a worse outcome than a mention that quietly stops resolving.
    */
+  /**
+   * The body as it will be stored: sanitised HTML, whatever shape arrived.
+   * Markup with nothing in it is refused the way whitespace is — the DTO
+   * cannot tell `<p></p>` from a sentence, so the check lives here.
+   */
+  private requireBody(raw: string): string {
+    const body = normalizeCommentBody(raw);
+    if (!body) {
+      throw AppException.unprocessable('VALIDATION_FAILED', 'Write something first.');
+    }
+    return body;
+  }
+
+  /** Words only, for an inbox line; a comment that is just a picture says so. */
+  private notificationBody(body: string): string {
+    return htmlToText(body).slice(0, NOTIFICATION_BODY_LENGTH) || '(image)';
+  }
+
   private async resolveMentions(workspaceId: string, body: string): Promise<string[]> {
-    const ids = parseMentionIds(body).slice(0, MAX_MENTIONS_PER_COMMENT);
+    const ids = parseAnyMentionIds(body).slice(0, MAX_MENTIONS_PER_COMMENT);
     if (ids.length === 0) return [];
 
     const members = await this.prisma.workspaceMember.findMany({
@@ -328,8 +545,8 @@ export class CommentsService {
           workspaceId,
           type: NotificationType.MENTIONED,
           title: `${actor?.name ?? 'Someone'} mentioned you on ${parent.label}`,
-          // Tokens are markup; a notification body is plain text.
-          body: stripMentionTokens(comment.body),
+          // Markup in, words out: a notification body is plain text.
+          body: this.notificationBody(comment.body),
           entity: ActivityEntity.COMMENT,
           entityId: comment.id,
           actionUrl: parent.actionUrl,
@@ -339,34 +556,23 @@ export class CommentsService {
   }
 
   /**
-   * Notifies everyone already involved: the people the work is assigned to or
-   * was reported by, plus anyone who has commented on it before.
-   *
-   * Joining a thread by replying is the signal that you care about it — without
-   * that, a two-person conversation goes silent for one of them the moment they
-   * are not the assignee.
+   * Notifies the item's collaborators — Asana's rule. The creator, the
+   * assignee, everyone who has commented and everyone who was mentioned are
+   * already following (see `FollowersService.ensure`), and anyone who left
+   * the task is not, which is the whole point of letting people leave.
    */
-  private async notifyWatchers(
+  private async notifyFollowers(
     workspaceId: string,
     actorId: string,
     parent: CommentParent,
     comment: PrismaComment,
     mentioned: string[],
   ): Promise<void> {
-    const priorAuthors = await this.prisma.comment.findMany({
-      where: { workspaceId, ...parent.link, deletedAt: null, authorId: { not: actorId } },
-      select: { authorId: true },
-      distinct: ['authorId'],
-    });
+    const followerIds = await this.followers.followerIds(workspaceId, parent.link);
 
     // Anyone named has already had the stronger `MENTIONED` notification.
     const alreadyTold = new Set([actorId, ...mentioned]);
-
-    const recipients = new Set(
-      [...parent.watchers, ...priorAuthors.map((row) => row.authorId)].filter(
-        (id): id is string => typeof id === 'string' && !alreadyTold.has(id),
-      ),
-    );
+    const recipients = new Set(followerIds.filter((id) => !alreadyTold.has(id)));
 
     if (recipients.size === 0) return;
 
@@ -382,7 +588,7 @@ export class CommentsService {
           workspaceId,
           type: NotificationType.COMMENT_CREATED,
           title: `${actor?.name ?? 'Someone'} commented on ${parent.label}`,
-          body: stripMentionTokens(comment.body),
+          body: this.notificationBody(comment.body),
           entity: ActivityEntity.COMMENT,
           entityId: comment.id,
           actionUrl: parent.actionUrl,
@@ -397,7 +603,6 @@ export class CommentsService {
     return {
       entity: CommentEntity.TASK,
       link: { taskId: task.id, ticketId: null },
-      watchers: [task.assigneeId, task.createdById],
       label: `“${task.title}”`,
       actionUrl: `/my-tasks?task=${task.id}`,
     };
@@ -409,7 +614,6 @@ export class CommentsService {
     return {
       entity: CommentEntity.TICKET,
       link: { taskId: null, ticketId: ticket.id },
-      watchers: [ticket.assigneeId, ticket.reporterId],
       label: ticket.key,
       actionUrl: `/tickets?ticket=${ticket.key}`,
     };

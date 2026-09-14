@@ -7,6 +7,11 @@ import {
   operatorsForConditionField,
   toFilterOperator,
   CONDITION_VALUE_TYPE,
+  CONDITION_VALUE_TYPE_VALUES,
+  ConditionValueKind,
+  DIRECT_CONDITION_OPERATORS,
+  DIRECT_OPERATOR_VALUE_KIND,
+  OPERATORS_BY_VALUE_TYPE,
 } from './index.js';
 
 /*
@@ -71,5 +76,54 @@ describe('operatorsForConditionField', () => {
 
     expect(status).toContain(CONDITION_OPERATOR.IS_EMPTY);
     expect(status.length).toBeGreaterThan(3);
+  });
+});
+
+/*
+ * The comparisons with no filter behind them are still comparisons. They used
+ * to answer "not evaluable", which greyed every checkbox row in the catalogue
+ * and refused every date or number rule that reached for one at publish.
+ */
+describe('the direct comparisons', () => {
+  it('count as evaluable without translating to a filter', () => {
+    for (const operator of DIRECT_CONDITION_OPERATORS) {
+      expect({ operator, evaluable: isEvaluableOperator(operator) }).toEqual({
+        operator,
+        evaluable: true,
+      });
+      expect(toFilterOperator(operator)).toBeNull();
+    }
+  });
+
+  it('name the kind of value each one is about', () => {
+    expect(DIRECT_OPERATOR_VALUE_KIND[CONDITION_OPERATOR.IS_CHECKED]).toBe(
+      ConditionValueKind.BOOLEAN,
+    );
+    expect(DIRECT_OPERATOR_VALUE_KIND[CONDITION_OPERATOR.BETWEEN]).toBe(ConditionValueKind.NUMBER);
+    expect(DIRECT_OPERATOR_VALUE_KIND[CONDITION_OPERATOR.IS_WITHIN_NEXT]).toBe(
+      ConditionValueKind.DATE,
+    );
+
+    for (const operator of DIRECT_CONDITION_OPERATORS) {
+      expect(DIRECT_OPERATOR_VALUE_KIND[operator]).toBeDefined();
+    }
+  });
+
+  /*
+   * The guard behind "every field type, every comparison": nothing a value
+   * type's list offers may be a comparison nothing can run. Before the direct
+   * ones existed, the checkbox list failed this outright and the date and
+   * number lists failed it for three entries each.
+   */
+  it('leave every operator any value type offers with a comparison behind it', () => {
+    for (const valueType of CONDITION_VALUE_TYPE_VALUES) {
+      for (const operator of OPERATORS_BY_VALUE_TYPE[valueType]) {
+        expect({ valueType, operator, evaluable: isEvaluableOperator(operator) }).toEqual({
+          valueType,
+          operator,
+          evaluable: true,
+        });
+      }
+    }
   });
 });

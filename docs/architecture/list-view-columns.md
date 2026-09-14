@@ -31,6 +31,14 @@ tables. Columns are read as a whole and written as a whole; splitting them into
 rows would buy ordering and constraints that a JSON array already gives, at the
 cost of a join on every read.
 
+The column list is edited from **Options → Fields**, where Asana keeps it; the
+standalone Fields button is gone. The same menu holds the row density
+(`COMFORTABLE` or `COMPACT`, applied as `data-density` on the scrolling pane)
+and "Show completed tasks". Toggling and reordering are pure functions in
+`column-layout.ts` (`toggleColumn`, `moveColumnBy`), and the title can never
+be toggled off. Which system fields are offered as columns comes from
+`SYSTEM_FIELD_CATALOG`'s `isColumn` flag in `@coretask/contracts`.
+
 ## What a view can actually show
 
 `visibleColumns(columns, metadata)` filters at render, and drops two things:

@@ -15,12 +15,26 @@ import { AlertCircle, LockKeyhole } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProject } from '@/features/projects/hooks/use-projects';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
-import { useCreateRule, usePublishRule } from '../../hooks/use-automations';
+import { RuleLibraryDialog } from '../../components/rule-library-dialog';
+import { SaveToLibraryDialog, type LibraryTarget } from '../../components/save-to-library-dialog';
+import { findStarter, makeStarterNodes } from '../../lib/starter-templates';
+import { collectRuleReferences } from '../../lib/template-references';
+import { useCreateRule, usePublishRule, useRemoveRule } from '../../hooks/use-automations';
 import {
   useAutomationGraph,
   useAutomationMetadata,
@@ -64,14 +78,25 @@ import { AutomationCanvas } from './automation-canvas';
  * from that section's menu means "when a task lands here" was the whole point of
  * the click, and asking again would be asking somebody to repeat themselves.
  */
-function blankRule(projectId: string, sectionId: string | undefined): AutomationRuleGraph {
-  const nodes = makeDefaultNodes(sectionId);
+function blankRule(
+  projectId: string,
+  sectionId: string | undefined,
+  starterKey: string | undefined,
+): AutomationRuleGraph {
+  /*
+   * A starter arrives already shaped — its trigger and steps drawn, its blanks
+   * unanswered — and named, so the rule list can tell it from an untitled
+   * draft. An unknown key is a blank canvas rather than an error: a stale link
+   * to a starter that was renamed should still open something.
+   */
+  const starter = findStarter(starterKey);
+  const nodes = starter ? makeStarterNodes(starter, sectionId) : makeDefaultNodes(sectionId);
 
   return {
     id: '',
     projectId,
-    name: '',
-    description: null,
+    name: starter?.name ?? '',
+    description: starter?.description ?? null,
     status: AutomationRuleStatus.DRAFT,
     version: 0,
     // Chaining allowed by default, matching the column: a new rule behaves the
@@ -100,6 +125,7 @@ export function AutomationBuilderPage({
   projectId,
   ruleId,
   sectionId,
+  starter,
   onDirtyChange,
   onClose,
 }: {
@@ -108,6 +134,8 @@ export function AutomationBuilderPage({
   ruleId: string | null;
   /** Set when this was started from a section's lightning menu. */
   sectionId?: string;
+  /** A starter's key, when begun from the library's list of them. */
+  starter?: string;
   /** Reported outward so the wrapper can ask before discarding unsaved work. */
   onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
@@ -138,6 +166,10 @@ export function AutomationBuilderPage({
   const saveGraph = useSaveGraph(workspaceId, projectId);
   const createRule = useCreateRule(workspaceId, projectId);
   const publishRule = usePublishRule(workspaceId, projectId);
+  const removeRule = useRemoveRule(workspaceId, projectId);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [libraryTarget, setLibraryTarget] = useState<LibraryTarget | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   /*
    * A rule that does not exist yet, held here rather than written first.
@@ -152,7 +184,7 @@ export function AutomationBuilderPage({
    * had been drawn on it the moment anything else on the page changed.
    */
   const [blank] = useState<AutomationRuleGraph | null>(() =>
-    ruleId === null ? blankRule(projectId, sectionId) : null,
+    ruleId === null ? blankRule(projectId, sectionId, starter) : null,
   );
 
   const rule = fetched ?? blank;
@@ -448,6 +480,17 @@ export function AutomationBuilderPage({
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;
 
+  /** The one section a section-scoped trigger watches, for the library to carry over. */
+  const watchedSectionId =
+    triggerNode?.subtype === 'TASK_MOVED_TO_SECTION' &&
+    typeof triggerNode.configuration['sectionId'] === 'string' &&
+    triggerNode.configuration['sectionId'] !== ''
+      ? (triggerNode.configuration['sectionId'] as string)
+      : undefined;
+  const watchedSectionName = watchedSectionId
+    ? metadata?.sections.find((entry) => entry.id === watchedSectionId)?.name
+    : undefined;
+
   const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
     setAnswering(null);
     setAddingAt(target);
@@ -466,8 +509,8 @@ export function AutomationBuilderPage({
     setRail({
       kind: 'choose',
       catalogue: 'triggers',
-      title: 'When this happens…',
-      description: 'Choose what starts this rule.',
+      title: 'When…',
+      description: 'Add a trigger that sets the rule in motion.',
       entries: metadata?.triggers ?? [],
     });
   };
@@ -519,7 +562,10 @@ export function AutomationBuilderPage({
     }
 
     if (!addingAt) {
-      setTrigger(entry.subtype);
+      // "[Field] is changed" is one subtype per field only in its label; the
+      // field itself rides in the configuration, exactly as the generated
+      // action rows below carry theirs.
+      setTrigger(entry.subtype, entry.fieldId ? { fieldId: entry.fieldId } : {});
       return;
     }
 
@@ -572,17 +618,18 @@ export function AutomationBuilderPage({
   /**
    * Choosing what starts the rule.
    *
-   * The settings go with it: a section id means nothing to "when a task is
+   * The old settings go with it: a section id means nothing to "when a task is
    * created", and carrying it across would leave a rule configured for a trigger
-   * it no longer has. Whoever picks again picks the details again.
+   * it no longer has. Whoever picks again picks the details again — except what
+   * the chosen row itself already said, which is the `configuration` handed in.
    */
-  const setTrigger = (subtype: string) => {
+  const setTrigger = (subtype: string, configuration: Record<string, unknown> = {}) => {
     if (!triggerNode) return;
 
     setEdits((previous) => ({
       ...previous,
       retyped: { ...previous.retyped, [triggerNode.id]: subtype },
-      configured: { ...previous.configured, [triggerNode.id]: {} },
+      configured: { ...previous.configured, [triggerNode.id]: configuration },
     }));
 
     setRail({ kind: 'configure', nodeId: triggerNode.id });
@@ -745,6 +792,41 @@ export function AutomationBuilderPage({
     }
   };
 
+  /**
+   * Into the library, as it stands on screen.
+   *
+   * Saved first when there is anything to save: the endpoint snapshots the
+   * stored rule, and a template of the version before the last edit is a
+   * template of a rule nobody meant. A rule that has never been written gets
+   * its real id here too, and moves to it, so the builder is not left on a
+   * blank address holding a rule that now exists.
+   */
+  const saveToLibrary = async () => {
+    if (!rule) return;
+
+    try {
+      const savedId = dirty || isNew ? await persist() : rule.id;
+      if (!savedId) return;
+      if (isNew) await goToSaved(savedId);
+
+      setLibraryTarget({
+        kind: 'rule',
+        projectId,
+        ruleId: savedId,
+        name: currentName.trim(),
+        description: settings.description || null,
+        references: collectRuleReferences(
+          realNodes.map((node) => ({ type: node.type, configuration: node.configuration })),
+          triggerNode?.configuration,
+          metadata,
+        ),
+      });
+    } catch {
+      // The save reports its own failure; there is nothing to put in the
+      // library until it succeeds.
+    }
+  };
+
   /*
    * Saving lost its button, so it needs a key.
    *
@@ -849,8 +931,68 @@ export function AutomationBuilderPage({
         publishing={publishRule.isPending}
         canPublish={blocking.length === 0 && !saving}
         onPublish={() => void publish()}
+        /*
+         * Only a saved rule can be taken away; a brand-new canvas has nothing
+         * behind it, and closing the builder already discards it.
+         */
+        {...(ruleId !== null ? { onDelete: () => setConfirmingDelete(true) } : {})}
+        onSaveToLibrary={() => void saveToLibrary()}
+        canSaveToLibrary={!unnamed && Boolean(triggerNode?.subtype) && !saving}
+        onBrowseLibrary={() => setLibraryOpen(true)}
+        canBrowseLibrary={!dirty && !saving}
         onClose={onClose}
       />
+
+      <SaveToLibraryDialog
+        workspaceId={workspaceId}
+        target={libraryTarget}
+        onOpenChange={(open) => !open && setLibraryTarget(null)}
+      />
+
+      {/*
+        The library, from the canvas. A template applied here becomes a draft
+        of its own and the builder moves to it — which is why the button is off
+        while this canvas has unsaved work. The section this rule watches, if it
+        watches one, goes with it, so a section-scoped template lands on the
+        same column.
+      */}
+      <RuleLibraryDialog
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        workspaceId={workspaceId}
+        projectId={projectId}
+        canManage={canManage}
+        {...(watchedSectionId ? { sectionId: watchedSectionId } : {})}
+        {...(watchedSectionName ? { sectionName: watchedSectionName } : {})}
+      />
+
+      <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {rule.status === AutomationRuleStatus.DRAFT ? 'Delete' : 'Archive'} “
+              {currentName || 'this rule'}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {rule.status === AutomationRuleStatus.DRAFT
+                ? 'This draft has never been published, so nothing else is affected.'
+                : 'It stops running, and its history stays so you can still see what it changed.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmingDelete(false);
+                if (ruleId === null) return;
+                removeRule.mutate(ruleId, { onSuccess: () => onClose() });
+              }}
+            >
+              {rule.status === AutomationRuleStatus.DRAFT ? 'Delete rule' : 'Archive rule'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/*
         `flex-1`, now that there is a flex line to grow along.
@@ -959,6 +1101,23 @@ export function AutomationBuilderPage({
           }
           onDelete={deleteNode}
           onChoose={chooseFromRail}
+          /*
+           * The breadcrumb's way back to the list a step was chosen from.
+           *
+           * A rule started from a section's lightning menu arrives with its
+           * trigger already set, and the card's hover menu was the only route
+           * back to the trigger list — which reads as no route at all. The
+           * pickers this opens replace in place: a trigger chosen again
+           * retypes the same node, a branch row chosen again asks a different
+           * question of the same row.
+           */
+          onReopenCatalogue={(nodeId) => {
+            const node = realNodes.find((entry) => entry.id === nodeId);
+            if (!node) return;
+
+            if (node.type === 'TRIGGER') openTriggerPicker();
+            else openConditionPicker(nodeId);
+          }}
           rule={rule}
           settings={settings}
           onSettingsChange={(next) => setSettingsEdits((previous) => ({ ...previous, ...next }))}

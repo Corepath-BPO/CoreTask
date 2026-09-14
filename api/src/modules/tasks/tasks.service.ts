@@ -6,12 +6,23 @@ import {
   ServerEvent,
   TaskStatus,
 } from '@coretask/contracts';
-import type { Task, TaskDetail, TaskListMeta, TaskListSummary } from '@coretask/types';
+import type {
+  Task,
+  TaskCustomFieldValue,
+  TaskDetail,
+  TaskListMeta,
+  TaskListSummary,
+} from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Task as PrismaTask } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
+import {
+  changedTaskFields,
+  fieldChangeTriggers,
+  taskFieldSnapshot,
+} from '../automations/task-field-triggers';
 import {
   compileFilters,
   compileSorts,
@@ -20,10 +31,27 @@ import {
 import { PaginatedResult } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
 import { planPlacement, type OrderedItem } from '../../common/utils/position.util';
+import { normalizeRichText } from '../../common/utils/rich-text.util';
+import {
+  initialSchedule,
+  resolveSchedule,
+  startOfTodayUtc,
+} from '../../common/utils/schedule.util';
 import { PrismaService } from '../../database/prisma.service';
+import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
+import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import {
+  diffItemStories,
+  snapshotFromTask,
+  type SnapshotRefs,
+} from '../activity-logs/item-stories';
+import { toValueDto } from '../custom-fields/custom-field-value.mapper';
+import { FormulaValuesService } from '../custom-fields/formula-values.service';
+import { FollowersService } from '../followers/followers.service';
+import { taskLink, taskRef } from '../followers/item-ref';
 
 import type { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
 import {
@@ -56,6 +84,10 @@ export class TasksService {
     private readonly realtime: RealtimeGateway,
     private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
+    private readonly mentions: DescriptionMentionNotifier,
+    private readonly followers: FollowersService,
+    private readonly followerNotifier: FollowerNotifier,
+    private readonly formulas: FormulaValuesService,
   ) {}
 
   async list(
@@ -140,13 +172,17 @@ export class TasksService {
       this.customFieldValues(tasks.map((task) => task.id)),
     ]);
 
-    return new PaginatedResult(
+    // Formula values last, from the stored rows just read: worked out per
+    // page and never stored, so they are always right.
+    const rows = await this.formulas.decorateTasks(
+      projectId,
       tasks.map((task) => ({
         ...toTaskDto(task, completed.get(task.id) ?? 0),
         customFieldValues: customFieldValues.get(task.id) ?? [],
       })),
-      { ...buildPaginationMeta(query, total), summary },
     );
+
+    return new PaginatedResult(rows, { ...buildPaginationMeta(query, total), summary });
   }
 
   /**
@@ -192,36 +228,27 @@ export class TasksService {
       this.customFieldValues(ids),
     ]);
 
-    return subtasks.map((task) => ({
-      ...toTaskDto(task, completed.get(task.id) ?? 0),
-      customFieldValues: customFieldValues.get(task.id) ?? [],
-    }));
+    return this.formulas.decorateTasks(
+      projectId,
+      subtasks.map((task) => ({
+        ...toTaskDto(task, completed.get(task.id) ?? 0),
+        customFieldValues: customFieldValues.get(task.id) ?? [],
+      })),
+    );
   }
 
-  /** Every custom field value for a page of tasks, grouped by task. */
-  private async customFieldValues(
-    taskIds: string[],
-  ): Promise<Map<string, Record<string, unknown>[]>> {
+  /** Every stored custom field value for a page of tasks, grouped by task. */
+  private async customFieldValues(taskIds: string[]): Promise<Map<string, TaskCustomFieldValue[]>> {
     if (taskIds.length === 0) return new Map();
 
     const rows = await this.prisma.taskCustomFieldValue.findMany({
       where: { taskId: { in: taskIds } },
     });
 
-    const grouped = new Map<string, Record<string, unknown>[]>();
+    const grouped = new Map<string, TaskCustomFieldValue[]>();
 
     for (const row of rows) {
-      const value = {
-        customFieldId: row.customFieldId,
-        text: row.textValue,
-        // Decimal keeps precision in PostgreSQL; JSON has no such type, and the
-        // range is far inside what a double represents exactly.
-        number: row.numberValue === null ? null : Number(row.numberValue),
-        date: row.dateValue?.toISOString() ?? null,
-        checkbox: row.booleanValue,
-        optionIds: row.optionIds,
-        userIds: row.userIds,
-      };
+      const value = toValueDto(row);
 
       const bucket = grouped.get(row.taskId);
       if (bucket) bucket.push(value);
@@ -269,6 +296,8 @@ export class TasksService {
 
     const plan = planPlacement(siblings, dto.afterTaskId);
     const status = dto.status ?? TaskStatus.TODO;
+    const start = initialSchedule({ date: dto.startDate, at: dto.startAt }, 'start');
+    const due = initialSchedule({ date: dto.dueDate, at: dto.dueAt }, 'due');
 
     const created = await this.prisma.$transaction(async (tx) => {
       await this.applyRebalance(tx, plan.rebalance);
@@ -280,14 +309,16 @@ export class TasksService {
           sectionId: placement.sectionId,
           parentTaskId: dto.parentTaskId ?? null,
           title: dto.title,
-          description: dto.description ?? null,
+          description: normalizeRichText(dto.description) ?? null,
           status,
           ...(dto.priority ? { priority: dto.priority } : {}),
           position: plan.position,
           assigneeId: dto.assigneeId ?? null,
           createdById: userId,
-          startDate: toDate(dto.startDate),
-          dueDate: toDate(dto.dueDate),
+          startDate: start.date,
+          startAt: start.at,
+          dueDate: due.date,
+          dueAt: due.at,
           completedAt: status === TaskStatus.DONE ? new Date() : null,
           estimatedMinutes: dto.estimatedMinutes ?? null,
         },
@@ -305,8 +336,25 @@ export class TasksService {
       metadata: { projectId: created.projectId, sectionId: created.sectionId },
     });
 
+    // The parent's feed says a subtask arrived; the subtask's own line above
+    // says it was created. Two readers, two lines.
+    if (parent) {
+      await this.activity.record({
+        workspaceId,
+        actorId: userId,
+        action: ActivityAction.SUBTASK_ADDED,
+        entity: ActivityEntity.TASK,
+        entityId: parent.id,
+        summary: `Added subtask “${created.title}”`,
+        metadata: { subtaskId: created.id, title: created.title },
+      });
+    }
+
     const task = toTaskDto(created);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_CREATED, task);
+
+    // The creator and the assignee follow from the start, as in Asana.
+    await this.followers.ensure(workspaceId, taskLink(created.id), [userId, created.assigneeId]);
 
     if (created.projectId) {
       await this.automation.publish({
@@ -321,6 +369,16 @@ export class TasksService {
     }
 
     await this.notifyAssignment(workspaceId, userId, created, null);
+    await this.mentions.notify({
+      workspaceId,
+      actorId: userId,
+      entity: 'TASK',
+      entityId: created.id,
+      label: `“${created.title}”`,
+      actionUrl: `/my-tasks?task=${created.id}`,
+      before: null,
+      after: created.description,
+    });
 
     return task;
   }
@@ -336,11 +394,26 @@ export class TasksService {
 
     const data: Prisma.TaskUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
-    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.description !== undefined) data.description = normalizeRichText(dto.description);
     if (dto.priority !== undefined) data.priority = dto.priority;
-    if (dto.startDate !== undefined) data.startDate = toDate(dto.startDate);
-    if (dto.dueDate !== undefined) data.dueDate = toDate(dto.dueDate);
     if (dto.estimatedMinutes !== undefined) data.estimatedMinutes = dto.estimatedMinutes;
+
+    // The date and its time move as a pair — see `resolveSchedule`.
+    const start = resolveSchedule(
+      { date: existing.startDate, at: existing.startAt },
+      { date: dto.startDate, at: dto.startAt },
+      'start',
+    );
+    if (start.date !== undefined) data.startDate = start.date;
+    if (start.at !== undefined) data.startAt = start.at;
+
+    const due = resolveSchedule(
+      { date: existing.dueDate, at: existing.dueAt },
+      { date: dto.dueDate, at: dto.dueAt },
+      'due',
+    );
+    if (due.date !== undefined) data.dueDate = due.date;
+    if (due.at !== undefined) data.dueAt = due.at;
     if (dto.assigneeId !== undefined) {
       data.assignee = dto.assigneeId ? { connect: { id: dto.assigneeId } } : { disconnect: true };
     }
@@ -366,24 +439,35 @@ export class TasksService {
       include: taskInclude,
     });
 
-    await this.activity.record({
-      workspaceId,
-      actorId: userId,
-      action:
-        dto.status !== undefined && dto.status !== existing.status
-          ? ActivityAction.STATUS_CHANGED
-          : ActivityAction.UPDATED,
-      entity: ActivityEntity.TASK,
-      entityId: taskId,
-      summary:
-        dto.status !== undefined && dto.status !== existing.status
-          ? `Moved "${updated.title}" to ${dto.status.replace(/_/g, ' ').toLowerCase()}`
-          : `Updated task "${updated.title}"`,
-      metadata: { fields: Object.keys(data) },
-    });
+    /*
+     * One story per property that moved, so the panel reads "changed the due
+     * date from Sep 1 to Sep 12" rather than "updated task". An edit the diff
+     * cannot describe — the estimate, say — still leaves the plain line.
+     */
+    const stories = diffItemStories(
+      snapshotFromTask(existing, await this.refsFor(existing.assigneeId, updated.assignee)),
+      snapshotFromTask(updated, { assignee: this.assigneeRef(updated.assignee) }),
+      'task',
+    );
+    const context = { workspaceId, actorId: userId, entity: ActivityEntity.TASK, entityId: taskId };
+    if (stories.length > 0) {
+      await this.activity.recordStories(context, stories);
+    } else {
+      await this.activity.record({
+        ...context,
+        action: ActivityAction.UPDATED,
+        summary: `Updated task "${updated.title}"`,
+        metadata: { fields: Object.keys(data) },
+      });
+    }
 
     const task = await this.withSubtaskRollup(updated);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, task);
+
+    if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
+      await this.followers.ensure(workspaceId, taskLink(updated.id), [updated.assigneeId]);
+    }
+    await this.followerNotifier.notifyStories(taskRef(workspaceId, updated), userId, stories);
 
     /*
      * Announced after the write has landed, never before: a rule must react to
@@ -402,6 +486,9 @@ export class TasksService {
       if (existing.completedAt === null && updated.completedAt !== null) {
         triggers.push(AutomationTrigger.TASK_COMPLETED);
       }
+      // The fields a rule can watch on their own — the same derivation the
+      // list view's edits and a rule's own writes use.
+      triggers.push(...fieldChangeTriggers(changedTaskFields(existing, updated)));
 
       for (const trigger of [...new Set(triggers)]) {
         await this.automation.publish({
@@ -415,16 +502,30 @@ export class TasksService {
             status: existing.status,
             priority: existing.priority,
             assigneeId: existing.assigneeId,
+            ...taskFieldSnapshot(existing),
           },
           after: {
             status: updated.status,
             priority: updated.priority,
             assigneeId: updated.assigneeId,
+            ...taskFieldSnapshot(updated),
           },
         });
       }
     }
     await this.notifyAssignment(workspaceId, userId, updated, existing.assigneeId);
+    if (dto.description !== undefined) {
+      await this.mentions.notify({
+        workspaceId,
+        actorId: userId,
+        entity: 'TASK',
+        entityId: updated.id,
+        label: `“${updated.title}”`,
+        actionUrl: `/my-tasks?task=${updated.id}`,
+        before: existing.description,
+        after: updated.description,
+      });
+    }
 
     return task;
   }
@@ -465,15 +566,23 @@ export class TasksService {
     });
 
     if (existing.sectionId !== dto.sectionId) {
-      await this.activity.record({
-        workspaceId,
-        actorId: userId,
-        action: ActivityAction.UPDATED,
-        entity: ActivityEntity.TASK,
-        entityId: taskId,
-        summary: `Moved "${updated.title}" to ${section?.name ?? 'no section'}`,
-        metadata: { from: existing.sectionId, to: dto.sectionId },
-      });
+      const from = existing.sectionId
+        ? await this.prisma.section.findUnique({
+            where: { id: existing.sectionId },
+            select: { id: true, name: true },
+          })
+        : null;
+
+      await this.activity.recordStories(
+        { workspaceId, actorId: userId, entity: ActivityEntity.TASK, entityId: taskId },
+        diffItemStories(
+          snapshotFromTask(existing, { section: from ? { id: from.id, label: from.name } : null }),
+          snapshotFromTask(updated, {
+            section: section ? { id: section.id, label: section.name } : null,
+          }),
+          'task',
+        ),
+      );
     }
 
     const task = await this.withSubtaskRollup(updated);
@@ -606,12 +715,19 @@ export class TasksService {
 
   /** Rollup over the whole filter, not just the current page. */
   private async summarize(where: Prisma.TaskWhereInput, total: number): Promise<TaskListSummary> {
+    const now = new Date();
     const [completed, overdue, unassigned] = await Promise.all([
       this.prisma.task.count({ where: { ...where, status: TaskStatus.DONE } }),
       this.prisma.task.count({
         where: {
           ...where,
-          dueDate: { lt: new Date() },
+          /*
+           * A task with a time is late the moment that instant passes; one
+           * without is late only once its calendar day is over. Comparing the
+           * date column against "now" made a task due today overdue from a
+           * minute past midnight UTC.
+           */
+          OR: [{ dueAt: { lt: now } }, { dueAt: null, dueDate: { lt: startOfTodayUtc(now) } }],
           status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] },
         },
       }),
@@ -729,6 +845,36 @@ export class TasksService {
     }
   }
 
+  private assigneeRef(
+    assignee: { id: string; name: string } | null,
+  ): { id: string; label: string } | null {
+    return assignee ? { id: assignee.id, label: assignee.name } : null;
+  }
+
+  /**
+   * The previous assignee as a story ref. The row before the write carries
+   * only the id, so the name is looked up — unless it is the same person the
+   * write left in place, whose name is already in hand.
+   */
+  private async refsFor(
+    previousAssigneeId: string | null,
+    current: { id: string; name: string } | null,
+  ): Promise<SnapshotRefs> {
+    if (!previousAssigneeId) return { assignee: null };
+    if (current && current.id === previousAssigneeId) {
+      return { assignee: this.assigneeRef(current) };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: previousAssigneeId },
+      select: { id: true, name: true },
+    });
+
+    return {
+      assignee: user ? this.assigneeRef(user) : { id: previousAssigneeId, label: 'Someone' },
+    };
+  }
+
   private async assertAssigneeIsMember(
     workspaceId: string,
     assigneeId: string | null | undefined,
@@ -792,9 +938,4 @@ export class TasksService {
       actionUrl: task.projectId ? `/projects/${task.projectId}` : '/my-tasks',
     });
   }
-}
-
-function toDate(value: string | null | undefined): Date | null | undefined {
-  if (value === undefined) return undefined;
-  return value === null ? null : new Date(value);
 }

@@ -136,6 +136,17 @@ export interface AutomationMetadata {
   conditions: AutomationCatalogEntry[];
   conditionFields: ConditionFieldDefinition[];
   sections: { id: string; name: string }[];
+  /**
+   * The workspace's other live projects, each with its sections, for the step
+   * that moves a task out of this project.
+   *
+   * Sent with the metadata rather than fetched per pick: the panel needs the
+   * target's sections the moment a project is chosen, and a round trip on
+   * every pick would leave the section box empty while it arrived. This
+   * project is left out — a move to where the task already is is not a move —
+   * and so are archived ones.
+   */
+  projects: { id: string; name: string; color: string; sections: { id: string; name: string }[] }[];
   statuses: { id: string; name: string; colorToken: string }[];
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
@@ -196,6 +207,13 @@ export interface ConditionFieldDefinition {
   field: string;
   label: string;
   valueKind: ConditionValueKind;
-  /** Present for ENUM and REFERENCE fields, so the form can offer real values. */
-  options?: { value: string; label: string }[];
+  /**
+   * Present for ENUM and REFERENCE fields, so the form can offer real values.
+   *
+   * The colour rides along where the row has one — a status, a priority, a
+   * select option — because the builder shows the value as the same tinted chip
+   * the rest of the app shows it as, and a form offering "In Progress" in plain
+   * text beside a board showing it in blue reads as two different values.
+   */
+  options?: { value: string; label: string; colorToken?: string }[];
 }

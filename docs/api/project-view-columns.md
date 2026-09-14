@@ -92,24 +92,35 @@ enumerate another workspace's fields.
 
 ## Tasks for a view
 
-`POST /api/v1/workspaces/:workspaceId/projects/:projectId/tasks/query`
-
-`POST` rather than `GET`: filters nest arbitrarily, and a URL long enough to hold
-them is a URL that gets truncated by something in the middle.
+The List and the Board read `GET …/work-items` with the view's settings on the
+request — see [project-work-items.md](project-work-items.md#query-settings).
+The settings keys a view stores, and sends:
 
 ```json
 {
-  "filters": [{ "field": "custom:019f…", "operator": "IS_ANY_OF", "value": ["019f…"] }],
-  "sort": [{ "field": "dueDate", "direction": "asc" }],
-  "groupBy": "sectionId"
+  "columns": [{ "field": "title", "width": 300 }],
+  "filters": {
+    "combinator": "AND",
+    "conditions": [{ "field": "custom:019f…", "operator": "IN", "value": ["019f…"] }]
+  },
+  "sorts": [{ "field": "dueDate", "direction": "ASC" }],
+  "groupBy": "status",
+  "density": "COMPACT",
+  "cardFields": ["status", "custom:019f…"],
+  "showCompleted": false
 }
 ```
+
+`POST …/tasks/query` remains for the task-only legacy path; it takes the same
+`filters` and `sorts` but refuses a custom-field sort with `400`, which the
+work-items route serves.
 
 Filtering, sorting and grouping all happen in PostgreSQL. A project with ten
 thousand tasks must not ship all of them for the browser to hide most.
 
 Operators are declared per field _kind_, so a new custom field is filterable and
-sortable the moment it exists — no frontend change.
+sortable the moment it exists — no frontend change. A formula has no kind and is
+refused by name.
 
 ## Supporting reads
 

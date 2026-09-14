@@ -180,6 +180,32 @@ export function canonicalOperator(operator: string): string {
 }
 
 /**
+ * The verb a custom field's comparison reads with, where it has one of its own.
+ *
+ * A select-type custom field says "is set to" rather than "is" — "Outcome is
+ * set to Renewed" is the sentence the reference writes for these, and it is a
+ * better one: the field *was set* to that option by somebody, where a section
+ * simply *is* where the task sits. Only the option-holding custom fields talk
+ * this way; a text or number field keeps the generic verbs, and the built-in
+ * fields keep the wording their cards have always had.
+ *
+ * Null where the convention has nothing to say, so every caller falls back to
+ * the shared labels rather than each keeping a copy of this rule.
+ */
+export function customFieldSetVerb(
+  definition: Pick<ConditionFieldDefinition, 'field' | 'options'> | undefined,
+  operator: string,
+): string | null {
+  if (!definition?.options || !definition.field.startsWith('customField:')) return null;
+
+  const canonical = canonicalOperator(operator);
+  if (canonical === CONDITION_OPERATOR.IS) return 'is set to';
+  if (canonical === CONDITION_OPERATOR.IS_NOT) return 'is not set to';
+
+  return null;
+}
+
+/**
  * An option in "Choose an option", read as the sentence it will become.
  *
  * The reference offers "Section is…" rather than "is", because the field is
@@ -188,14 +214,17 @@ export function canonicalOperator(operator: string): string {
  * what they are answering. With the field in the words, the option is the
  * condition.
  */
-export function operatorOptionLabel(fieldLabel: string, operator: string): string {
-  const verb = operatorLabel(operator);
+export function operatorOptionLabel(
+  definition: ConditionFieldDefinition | undefined,
+  operator: string,
+): string {
+  const verb = customFieldSetVerb(definition, operator) ?? operatorLabel(operator);
 
   // The ellipsis promises a second question; the emptiness checks ask nothing
   // further, so promising one would be a lie.
   const asks = operatorNeedsValue(operator as ConditionOperator);
 
-  return `${fieldLabel} ${verb}${asks ? '…' : ''}`;
+  return `${definition?.label ?? ''} ${verb}${asks ? '…' : ''}`;
 }
 
 /** How an operator reads. Humanised rather than shouted when it is a stranger. */
@@ -217,11 +246,27 @@ export function valueFieldLabel(
   definition: ConditionFieldDefinition,
   valueType: ConditionValueType,
   multiple: boolean,
+  operator = '',
 ): string {
+  // "Within the next…" asks how far ahead to look, whatever the field holds.
+  if (operator === CONDITION_OPERATOR.IS_WITHIN_NEXT) return 'Enter a number of days';
+
   if (definition.field === 'sectionId') {
     // "is one of" takes a set, and asking for "a column/section" beside a list
     // of checkboxes tells somebody they may pick one when they may pick several.
     return multiple ? 'Choose one or more options for column/section' : 'Choose a column/section';
+  }
+
+  /*
+   * A custom field's options are asked for by the field's own name — "Choose an
+   * option for Outcome" — because "Choose a value" beside a list of coloured
+   * chips does not say whose chips they are, and a rule touching two fields
+   * would ask the same anonymous question twice.
+   */
+  if (definition.field.startsWith('customField:') && definition.options) {
+    return multiple
+      ? `Choose one or more options for ${definition.label}`
+      : `Choose an option for ${definition.label}`;
   }
 
   switch (valueType) {
@@ -308,7 +353,8 @@ export function summariseCondition(
   const operator = configuration['operator'];
   if (typeof operator !== 'string' || operator === '') return `${label} …`;
 
-  const words = operatorLabel(canonicalOperator(operator));
+  const words =
+    customFieldSetVerb(definition, operator) ?? operatorLabel(canonicalOperator(operator));
 
   if (!withValue) return `${label} ${words}`;
 
@@ -320,7 +366,13 @@ export function summariseCondition(
     resolveValueLabel(definition, value),
   );
 
-  return values.length > 0 ? `${label} ${words} ${values.join(', ')}` : `${label} ${words} …`;
+  if (values.length === 0) return `${label} ${words} …`;
+
+  // A day count reads as one — "is within the next 3 days", not "…next 3".
+  const unit =
+    operator === CONDITION_OPERATOR.IS_WITHIN_NEXT ? (values[0] === '1' ? ' day' : ' days') : '';
+
+  return `${label} ${words} ${values.join(', ')}${unit}`;
 }
 
 /** One value, in the project's own words rather than in the database's. */

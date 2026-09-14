@@ -1,13 +1,19 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { WebsocketModule } from '../../websocket/websocket.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
-import { CustomFieldsController, TaskCustomFieldsController } from './custom-fields.controller';
+import {
+  CustomFieldsController,
+  TaskCustomFieldsController,
+  WorkspaceCustomFieldsController,
+} from './custom-fields.controller';
 import { CustomFieldsService } from './custom-fields.service';
+import { FormulaValuesService } from './formula-values.service';
 
 @Module({
   /*
@@ -21,9 +27,16 @@ import { CustomFieldsService } from './custom-fields.service';
     ActivityLogsModule,
     AutomationEventsModule,
     WebsocketModule,
+    NotificationsIntegrationModule,
   ],
-  controllers: [CustomFieldsController, TaskCustomFieldsController],
-  providers: [CustomFieldsService],
-  exports: [CustomFieldsService],
+  controllers: [
+    CustomFieldsController,
+    WorkspaceCustomFieldsController,
+    TaskCustomFieldsController,
+  ],
+  // `FormulaValuesService` is exported for the list paths that decorate rows
+  // with computed values; it depends on Prisma alone.
+  providers: [CustomFieldsService, FormulaValuesService],
+  exports: [CustomFieldsService, FormulaValuesService],
 })
 export class CustomFieldsModule {}

@@ -1,20 +1,23 @@
-import { SystemField, type CreatableWorkItemType, type WorkItemType } from '@coretask/contracts';
-import type { ProjectFieldMetadata, Task, TaskCustomFieldValue, ViewColumn } from '@coretask/types';
+import {
+  SystemField,
+  TaskStatus,
+  type CreatableWorkItemType,
+  type WorkItemType,
+} from '@coretask/contracts';
+import type {
+  BulkWorkItemPayload,
+  ProjectFieldMetadata,
+  Task,
+  TaskCustomFieldValue,
+  ViewColumn,
+  ViewSettings,
+} from '@coretask/types';
 
 /** A task as this view receives it — the task plus its field values. */
 type TaskRow = Task & { customFieldValues?: TaskCustomFieldValue[] };
-import {
-  ArrowUpDown,
-  ChevronDown,
-  ChevronRight,
-  ListFilter,
-  Plus,
-  Rows3,
-  Search,
-  Settings2,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
@@ -23,7 +26,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useMoveTaskToSection } from '@/features/tasks/hooks/use-tasks';
 import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-task-drop';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
-import { cn, formatDate } from '@/lib/utils';
+import { SHORTCUT_PRIORITY, useShortcutActions } from '@/lib/shortcuts/shortcut-registry';
+import { calendarDateFromNow, cn, formatDate } from '@/lib/utils';
+import { useCurrentUser } from '@/stores/auth.store';
 
 import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/use-project-views';
 import { useCreateSection, useProject, useRenameSection } from '../hooks/use-projects';
@@ -52,21 +57,41 @@ const SECTION_HEADER_CHROME = 80;
 function sectionLabelWidth(text: string): number {
   return textWidth(text, '600 14px');
 }
-import { groupBySection, ORPHAN_GROUP_ID, type Group } from '../lib/group-by-section';
+import { ORPHAN_GROUP_ID } from '../lib/group-by-section';
+import { groupRows, type RowGroup } from '../lib/group-rows';
+import { groupValueChange, isManualOrder } from '../lib/group-value';
+import { DEFAULT_VIEW_SETTINGS } from '../lib/view-settings';
+import { SemanticBadge } from '@/features/colors/components/semantic-badge';
+import {
+  escapeBelongsElsewhere,
+  isInteractiveTarget,
+  rangeBetween,
+  toggle as toggleSelected,
+  visibleOrder,
+} from '../lib/selection';
+import { BulkActionBar, type BulkActionBarHandle } from './bulk-action-bar';
 import { ListDndContext, RowDragHandle, SectionDropZone } from './list-row-dnd';
 import { useRowDropTarget } from './use-row-drop-target';
 import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
 import { CreateSectionDialog } from './create-section-dialog';
 import { CreateWorkItemDialog } from '@/features/work-items/components/create-work-item-dialog';
 import { ProjectWorkItemCreateButton } from '@/features/work-items/components/project-work-item-create-button';
-import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
 import {
+  QuickCreateWorkItemRow,
+  type QuickCreateWorkItemRowHandle,
+} from '@/features/work-items/components/quick-create-work-item-row';
+import {
+  useBulkUpdateWorkItems,
   useCreateProjectWorkItem,
   useProjectWorkItems,
   useUpdateProjectWorkItem,
 } from '@/features/work-items/hooks/use-project-work-items';
 import { toWorkItemUpdate } from '@/features/work-items/lib/cell-payload';
-import { toWorkItemRow } from '@/features/work-items/lib/work-item-row';
+import {
+  isTicketRow,
+  toWorkItemRow,
+  type WorkItemRow,
+} from '@/features/work-items/lib/work-item-row';
 import { ViewToolbar } from './view-toolbar-slot';
 import { CustomFieldCell } from './cells/custom-field-cell';
 import { EmptyCell } from './cells/editable-cell';
@@ -75,6 +100,7 @@ import {
   AssigneeCell,
   DueDateCell,
   PriorityCell,
+  StartDateCell,
   StatusCell,
   TitleCell,
 } from './cells/system-cells';
@@ -82,15 +108,41 @@ import {
 import { EditCustomFieldDialog } from './field-picker/edit-custom-field-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { ColumnHeaderTable } from './column-header';
-import { ColumnManager } from './column-manager';
+import { ViewToolbarControls } from './toolbar/view-toolbar-controls';
+
+/** The selected rows and the last plain click, which a shift range extends from. */
+interface Selection {
+  ids: ReadonlySet<string>;
+  anchor: string | null;
+}
+
+const NO_SELECTION: Selection = { ids: new Set(), anchor: null };
+
+/*
+ * A selected row's tint, mixed solid rather than laid over: the frozen title
+ * cell has to stay opaque to cover the gridlines behind it, and a translucent
+ * tint would let a line show through it once the grid is scrolled.
+ */
+const SELECTED_BG = 'bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-background))]';
+const SELECTED_BG_HOVER =
+  'hover:bg-[color-mix(in_oklab,var(--color-primary)_16%,var(--color-background))]';
 
 interface ProjectListViewProps {
   workspaceId: string | undefined;
   projectId: string;
   canEdit: boolean;
+  /** Whether the bulk bar offers Archive — the task route's MANAGER rule. */
+  canArchive?: boolean;
   columns: ViewColumn[];
   onColumnsChange: (columns: ViewColumn[]) => void;
   onOpenTask: (taskId: string) => void;
+  /** The open view's settings; the toolbar edits them through `onSettingsChange`. */
+  settings?: ViewSettings;
+  onSettingsChange?: ((patch: Partial<ViewSettings>) => void) | undefined;
+  /** Whether a change is written to the view, or kept as a draft to save as a new one. */
+  canPersist?: boolean;
+  dirty?: boolean;
+  onSaveAs?: (() => void) | undefined;
 }
 
 /**
@@ -105,15 +157,46 @@ export function ProjectListView({
   workspaceId,
   projectId,
   canEdit,
+  canArchive = false,
   columns: allColumns,
   onColumnsChange,
   onOpenTask,
+  settings = DEFAULT_VIEW_SETTINGS,
+  onSettingsChange,
+  canPersist = true,
+  dirty = false,
+  onSaveAs,
 }: ProjectListViewProps) {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   // Asana keeps the search as a bare icon until it is needed.
   const [searchOpen, setSearchOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  /*
+   * Asana's multi-select: click a row, shift-click a range, ctrl-click to add
+   * one. The anchor is the last plain click, which is what a shift range
+   * extends from. Held as ids rather than rows so a refetch cannot leave the
+   * selection pointing at stale objects.
+   */
+  const [selection, setSelection] = useState<Selection>(NO_SELECTION);
+  const selected = selection.ids;
+  const bulkBarRef = useRef<BulkActionBarHandle>(null);
+  /** The first section's add row — where Tab+N lands. */
+  const firstRowRef = useRef<QuickCreateWorkItemRowHandle>(null);
+  const me = useCurrentUser();
+
+  /*
+   * A different project, or a different search, is a different set of rows; a
+   * selection made against the old one would act on rows nobody can see.
+   * Reset during render rather than in an effect, so the stale set never
+   * reaches the screen for a frame.
+   */
+  const [selectionScope, setSelectionScope] = useState({ projectId, search: debounced });
+  if (selectionScope.projectId !== projectId || selectionScope.search !== debounced) {
+    setSelectionScope({ projectId, search: debounced });
+    setSelection(NO_SELECTION);
+  }
 
   /** Non-null while the fuller create form is open, holding what it starts from. */
   const [composing, setComposing] = useState<{
@@ -137,7 +220,17 @@ export function ProjectListView({
   const { data, isLoading, isError } = useProjectWorkItems(workspaceId, projectId, {
     ...(debounced ? { search: debounced } : {}),
     includeCustomFields: true,
+    // The view's settings ride on the request, so a change applies at once —
+    // whether or not this person may save it.
+    ...(settings.filters.conditions.length > 0 ? { filters: settings.filters.conditions } : {}),
+    ...(settings.sorts.length > 0 ? { sorts: settings.sorts } : {}),
+    ...(settings.groupBy && settings.groupBy !== SystemField.SECTION
+      ? { groupBy: settings.groupBy }
+      : {}),
+    ...(settings.showCompleted === false ? { showCompleted: false } : {}),
   });
+  const filtersActive = settings.filters.conditions.length > 0 || settings.showCompleted === false;
+  const manualOrder = isManualOrder(settings);
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
   const renameSection = useRenameSection(workspaceId, projectId);
@@ -145,6 +238,7 @@ export function ProjectListView({
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
   const createSection = useCreateSection(workspaceId, projectId);
   const updateWorkItem = useUpdateProjectWorkItem(workspaceId, projectId);
+  const bulk = useBulkUpdateWorkItems(workspaceId, projectId);
   const [addingSection, setAddingSection] = useState(false);
   /** The custom field whose edit dialog is open, by id. */
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -161,14 +255,13 @@ export function ProjectListView({
     title: string;
     sectionId?: string | undefined;
     parentId?: string | undefined;
-  }) => {
-    await createWorkItem.mutateAsync({
+  }) =>
+    createWorkItem.mutateAsync({
       type: input.type,
       title: input.title,
       ...(input.sectionId ? { sectionId: input.sectionId } : {}),
       ...(input.parentId ? { parentId: input.parentId } : {}),
     });
-  };
 
   /*
    * Horizontal scroll is tracked so the frozen column can grow a shadow only
@@ -184,7 +277,47 @@ export function ProjectListView({
    */
   const tasks = useMemo(() => (data?.items ?? []).map(toWorkItemRow), [data]);
 
-  const groups = useMemo(() => groupBySection(tasks, metadata), [tasks, metadata]);
+  const groups = useMemo(
+    () => groupRows(tasks, settings.groupBy, metadata),
+    [tasks, settings.groupBy, metadata],
+  );
+
+  /**
+   * Gives a row the value a group stands for: a status, an assignee, a
+   * select option. The move is the section case; the rest are edits.
+   */
+  const applyGroupValue = (group: RowGroup, row: TaskRow) => {
+    const change = groupValueChange(settings.groupBy, group, row as WorkItemRow, metadata);
+    if (!change) return;
+    switch (change.kind) {
+      case 'move':
+        moveTask.mutate({
+          taskId: row.id,
+          payload: { sectionId: change.sectionId, afterTaskId: null },
+        });
+        return;
+      case 'update':
+        updateWorkItem.mutate({ workItemId: row.id, payload: change.payload });
+        return;
+      case 'field':
+        setFieldValue.mutate({ taskId: row.id, fieldId: change.fieldId, value: change.payload });
+        return;
+      case 'refused':
+        toast.error(change.reason);
+    }
+  };
+
+  /** The rows as drawn, for shift ranges; the selection, as rows, for the bar. */
+  const order = useMemo(() => visibleOrder(groups, collapsed), [groups, collapsed]);
+  const selectedRows = useMemo(
+    () => tasks.filter((task) => selected.has(task.id)),
+    [tasks, selected],
+  );
+  // The project's first section, whatever the rows are grouped by: it is
+  // where a row added under a value heading is filed before the value is set.
+  const firstSectionId =
+    metadata?.sections[0]?.id ??
+    groups.find((group) => group.kind === 'section' && group.id !== ORPHAN_GROUP_ID)?.id;
 
   /** What the Name column may never shrink past — see `sectionLabelWidth`. */
   const titleMinWidth = useMemo(() => {
@@ -401,6 +534,22 @@ export function ProjectListView({
   ) => {
     if (!canEdit) return;
 
+    /*
+     * With a sort or a value grouping in charge, a drop cannot reorder — but
+     * a drop into another group still means "give it this value". Within the
+     * same group it means nothing, and nothing happens.
+     */
+    if (!manualOrder) {
+      const row = tasks.find((task) => task.id === taskId);
+      const destination =
+        target.type === 'column'
+          ? groups.find((group) => group.id === target.sectionId)
+          : groups.find((group) => group.tasks.some((task) => task.id === target.id));
+      if (!row || !destination || destination.tasks.some((task) => task.id === taskId)) return;
+      applyGroupValue(destination, row);
+      return;
+    }
+
     const dropGroups: TaskGroups = Object.fromEntries(
       groups
         .filter((group) => group.id !== ORPHAN_GROUP_ID)
@@ -424,6 +573,113 @@ export function ProjectListView({
       return next;
     });
 
+  const clearSelection = useCallback(() => setSelection(NO_SELECTION), []);
+
+  const selectRow = (id: string, modifiers: { shift: boolean; toggle: boolean }) => {
+    setSelection((previous) => {
+      // A range keeps its anchor, so the next shift-click extends from the
+      // same place rather than from the end of the last range.
+      if (modifiers.shift) {
+        const range = rangeBetween(order, previous.anchor, id);
+        return {
+          ids: new Set([...(modifiers.toggle ? previous.ids : []), ...range]),
+          anchor: previous.anchor ?? id,
+        };
+      }
+      return {
+        ids: modifiers.toggle ? toggleSelected(previous.ids, id) : new Set([id]),
+        anchor: id,
+      };
+    });
+  };
+
+  /*
+   * Escape clears the selection — in the capture phase, so it runs ahead of
+   * the task panel's own Escape whatever order the two mounted in. The panel
+   * honours `defaultPrevented`, so the first Escape clears and the second
+   * closes the panel, which is Asana's order. A field or an open picker under
+   * the caret keeps its own Escape.
+   */
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (escapeBelongsElsewhere(event.target)) return;
+      event.preventDefault();
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, [selected.size, clearSelection]);
+
+  /** One change for every selected row, then the selection is spent. */
+  const runBulk = (change: Omit<BulkWorkItemPayload, 'workItemIds'>, verb: string) => {
+    const workItemIds = [...selected];
+    const ticketCount = selectedRows.filter(isTicketRow).length;
+    const noun = ticketCount > 0 ? 'items' : workItemIds.length === 1 ? 'task' : 'tasks';
+    // A field value lands on tasks only; the toast says so rather than
+    // letting "Set Severity on 4 items" imply the ticket changed too.
+    const skipped =
+      change.update?.customFieldValues && ticketCount > 0
+        ? ` (${ticketCount === 1 ? '1 ticket' : `${ticketCount} tickets`} skipped)`
+        : '';
+    bulk.mutate(
+      { workItemIds, ...change },
+      {
+        onSuccess: () => {
+          clearSelection();
+          toast.success(`${verb} ${workItemIds.length} ${noun}${skipped}`);
+        },
+      },
+    );
+  };
+
+  const hasSelection = canEdit && selectedRows.length > 0;
+  const selectionHasTicket = selectedRows.some(isTicketRow);
+  const selectionDone = selectedRows.every((row) => row.status === TaskStatus.DONE);
+
+  /*
+   * Asana's chords, for the rows on screen. Tab+N opens the first section's
+   * add row; the rest apply to the selection and are offered only while there
+   * is one, so with nothing selected the keys fall silent rather than acting
+   * on nothing. The task panel registers above this while it is open.
+   */
+  useShortcutActions(
+    {
+      newTask: canEdit
+        ? () => {
+            if (firstRowRef.current) firstRowRef.current.open();
+            else setComposing({ type: defaultType });
+          }
+        : undefined,
+      assign: hasSelection ? () => bulkBarRef.current?.openAssignee() : undefined,
+      dueDate: hasSelection ? () => bulkBarRef.current?.openDueDate() : undefined,
+      assignToMe:
+        hasSelection && me
+          ? () => runBulk({ update: toWorkItemUpdate({ assigneeId: me.id }) }, 'Assigned')
+          : undefined,
+      dueToday: hasSelection
+        ? () => runBulk({ update: { dueDate: calendarDateFromNow(0), dueAt: null } }, 'Rescheduled')
+        : undefined,
+      dueTomorrow: hasSelection
+        ? () => runBulk({ update: { dueDate: calendarDateFromNow(1), dueAt: null } }, 'Rescheduled')
+        : undefined,
+      toggleComplete:
+        hasSelection && !selectionHasTicket
+          ? () =>
+              runBulk(
+                { update: { statusId: selectionDone ? TaskStatus.TODO : TaskStatus.DONE } },
+                'Updated',
+              )
+          : undefined,
+      archive:
+        hasSelection && canArchive && !selectionHasTicket
+          ? () => bulkBarRef.current?.openArchive()
+          : undefined,
+    },
+    { priority: SHORTCUT_PRIORITY.list },
+  );
+
   return (
     <div className="space-y-3">
       {/* Asana's toolbar row: create on the left, everything else trailing.
@@ -441,22 +697,16 @@ export function ProjectListView({
           />
 
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-              <ListFilter />
-              Filter
-            </Button>
-            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-              <ArrowUpDown />
-              Sort
-            </Button>
-            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-              <Rows3 />
-              Group
-            </Button>
-            <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-              <Settings2 />
-              Options
-            </Button>
+            <ViewToolbarControls
+              viewType="LIST"
+              settings={settings}
+              metadata={metadata}
+              meId={me?.id}
+              canPersist={canPersist}
+              dirty={dirty}
+              onChange={(patch) => onSettingsChange?.(patch)}
+              onSaveAs={() => onSaveAs?.()}
+            />
 
             {searchOpen || search !== '' ? (
               <div className="relative w-44">
@@ -488,18 +738,6 @@ export function ProjectListView({
                 <Search />
               </Button>
             )}
-
-            <ColumnManager
-              columns={columns}
-              metadata={metadata}
-              onChange={onColumnsChange}
-              trigger={
-                <Button variant="outline" size="sm">
-                  <SlidersHorizontal className="size-4" aria-hidden="true" />
-                  Fields
-                </Button>
-              }
-            />
           </div>
         </div>
       </ViewToolbar>
@@ -516,7 +754,7 @@ export function ProjectListView({
             <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
-      ) : groups.length === 0 || (debounced && tasks.length === 0) ? (
+      ) : groups.length === 0 || ((debounced || filtersActive) && tasks.length === 0) ? (
         /*
          * Only when there is genuinely nothing to show — no tasks *and* no
          * sections to put them in. A project with sections renders its table
@@ -526,11 +764,19 @@ export function ProjectListView({
          */
         <EmptyState
           icon={SlidersHorizontal}
-          title={debounced ? 'Nothing matches that search' : 'No tasks yet'}
+          title={
+            debounced
+              ? 'Nothing matches that search'
+              : filtersActive
+                ? 'No tasks match these filters'
+                : 'No tasks yet'
+          }
           description={
             debounced
               ? 'Try a different term, or clear the search.'
-              : 'Add a task on the board to see it here.'
+              : filtersActive
+                ? 'Loosen a filter, or clear them all from the Filter menu.'
+                : 'Add a task on the board to see it here.'
           }
         />
       ) : (
@@ -553,6 +799,7 @@ export function ProjectListView({
             if (stripsRef.current) stripsRef.current.style.clipPath = clip;
           }}
           className="overflow-auto"
+          data-density={settings.density.toLowerCase()}
         >
           <ListDndContext onDrop={handleDrop}>
             {/* `isolate` so the negative-z gridlines stay inside this box
@@ -574,7 +821,10 @@ export function ProjectListView({
                * it the labels float unanchored between the toolbar and the
                * first section.
                */}
-              <div ref={headerRef} className="sticky top-0 z-30 border-y border-border bg-background">
+              <div
+                ref={headerRef}
+                className="sticky top-0 z-30 border-y border-border bg-background"
+              >
                 <ColumnHeaderTable
                   columns={shown}
                   metadata={metadata}
@@ -646,7 +896,9 @@ export function ProjectListView({
                        */}
                       <h3
                         className={cn(
-                          'sticky top-[var(--list-header-h,30px)] z-20 bg-background px-2 py-1.5',
+                          // `group` lets the lightning of a section with no
+                          // rules wait for a hover — see SectionAutomationPopover.
+                          'group sticky top-[var(--list-header-h,30px)] z-20 bg-background px-2 py-1.5',
                           isOver && 'bg-gradient-to-r from-primary/5 to-primary/5',
                         )}
                       >
@@ -673,12 +925,15 @@ export function ProjectListView({
                               <TaskRows
                                 key={task.id}
                                 task={task}
+                                selected={selected.has(task.id)}
+                                onSelect={canEdit ? selectRow : undefined}
                                 workspaceId={workspaceId}
                                 projectId={projectId}
                                 columns={shown}
                                 metadata={metadata}
                                 canEdit={canEdit}
                                 pinned={{ ...pinned, scrolled }}
+                                manualOrder={manualOrder}
                                 onOpenTask={onOpenTask}
                                 /*
                                  * Through the shared mutation, whatever the row
@@ -706,23 +961,46 @@ export function ProjectListView({
                             {/*
                         The add row lives inside the table so it lines up with
                         the rows above it, and spans every column because it is
-                        one field rather than a row of cells. The orphan bucket
-                        is excluded: it is not a section, so nothing can be
-                        filed into it.
+                        one field rather than a row of cells. Held to the title
+                        column's width all the same — the open input is flat,
+                        so without the cap typed text would run straight across
+                        the column rules. The orphan bucket is excluded: it is
+                        not a section, so nothing can be filed into it.
                       */}
                             {group.id !== ORPHAN_GROUP_ID && (
                               <tr className="border-b border-border">
                                 <td colSpan={shown.length + 2} className="p-0">
-                                  <div className="sticky left-0 w-fit min-w-[320px]">
+                                  <div
+                                    className="sticky left-0"
+                                    style={{ width: shown[0] ? columnWidth(shown[0]) : 320 }}
+                                  >
                                     <QuickCreateWorkItemRow
+                                      ref={
+                                        group.id === (firstSectionId ?? groups[0]?.id)
+                                          ? firstRowRef
+                                          : undefined
+                                      }
                                       defaultType={defaultType}
                                       sectionName={group.name}
                                       pending={createWorkItem.isPending}
                                       plain
                                       className="pl-10"
-                                      onCreate={({ type, title }) =>
-                                        create({ type, title, sectionId: group.id })
-                                      }
+                                      onCreate={async ({ type, title }) => {
+                                        // Under a value heading the row is filed
+                                        // in the first section, then given the
+                                        // heading's value — so it lands where it
+                                        // was typed.
+                                        if (group.kind === 'section') {
+                                          await create({ type, title, sectionId: group.id });
+                                          return;
+                                        }
+                                        const created = await create({
+                                          type,
+                                          title,
+                                          ...(firstSectionId ? { sectionId: firstSectionId } : {}),
+                                        });
+                                        applyGroupValue(group, toWorkItemRow(created));
+                                      }}
                                     />
                                   </div>
                                 </td>
@@ -816,6 +1094,37 @@ export function ProjectListView({
         it opens from, so reopening it for a different section builds a fresh
         form instead of carrying the last one's answers across.
       */}
+      {/* Asana's selection bar, the moment anything is selected. */}
+      {canEdit && selectedRows.length > 0 && (
+        <BulkActionBar
+          ref={bulkBarRef}
+          count={selectedRows.length}
+          members={metadata?.members ?? []}
+          sections={metadata?.sections ?? []}
+          hasTicket={selectedRows.some(isTicketRow)}
+          taskCount={selectedRows.filter((row) => !isTicketRow(row)).length}
+          fields={metadata?.customFields ?? []}
+          metadata={metadata}
+          canArchive={canArchive}
+          pending={bulk.isPending}
+          onAssign={(assigneeId) =>
+            runBulk({ update: toWorkItemUpdate({ assigneeId }) }, 'Assigned')
+          }
+          onSchedule={(changes) => runBulk({ update: toWorkItemUpdate(changes) }, 'Rescheduled')}
+          onStatus={(status) => runBulk({ update: toWorkItemUpdate({ status }) }, 'Updated')}
+          onPriority={(priority) => runBulk({ update: toWorkItemUpdate({ priority }) }, 'Updated')}
+          onMove={(sectionId) => runBulk({ sectionId }, 'Moved')}
+          onFieldValue={(field, payload) =>
+            runBulk(
+              { update: { customFieldValues: { [field.id]: payload } } },
+              `Set ${field.name} on`,
+            )
+          }
+          onArchive={() => runBulk({ archived: true }, 'Archived')}
+          onClear={clearSelection}
+        />
+      )}
+
       <CreateSectionDialog
         open={addingSection}
         onOpenChange={setAddingSection}
@@ -855,11 +1164,15 @@ interface RowProps {
   metadata: ProjectFieldMetadata | undefined;
   canEdit: boolean;
   pinned: PinnedLayout & { scrolled: boolean };
+  /** False while a sort or a value grouping owns the order: no drag handle. */
+  manualOrder?: boolean;
   onOpenTask: (taskId: string) => void;
   onSaveTask: (taskId: string, payload: Record<string, unknown>) => void;
   onSaveField: (taskId: string, fieldId: string, value: Record<string, unknown>) => void;
   /** Absent when the caller cannot create — the row then offers nothing. */
   onAddSubtask?: ((parentId: string, title: string) => Promise<unknown>) | undefined;
+  /** Absent when rows cannot be selected — a read-only view. Top-level rows only. */
+  onSelect?: ((id: string, modifiers: { shift: boolean; toggle: boolean }) => void) | undefined;
 }
 
 /**
@@ -873,7 +1186,12 @@ interface RowProps {
 // `onAddSubtask` is pulled out rather than left in `shared`: the row below is a
 // plain `<tr>` and has no use for it, and spreading it there would hand a child
 // row a handler for creating children of its own.
-function TaskRows({ task, onAddSubtask, ...shared }: RowProps & { task: TaskRow }) {
+function TaskRows({
+  task,
+  onAddSubtask,
+  selected,
+  ...shared
+}: RowProps & { task: TaskRow; selected: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   const {
@@ -887,6 +1205,7 @@ function TaskRows({ task, onAddSubtask, ...shared }: RowProps & { task: TaskRow 
       <Row
         {...shared}
         task={task}
+        selected={selected}
         expanded={expanded}
         onToggleExpand={task.subtaskCount > 0 ? () => setExpanded((open) => !open) : undefined}
       />
@@ -927,7 +1246,10 @@ function TaskRows({ task, onAddSubtask, ...shared }: RowProps & { task: TaskRow 
       {expanded && !isLoading && onAddSubtask && (
         <tr className="border-b border-border last:border-0">
           <td colSpan={shared.columns.length + 2} className="p-0">
-            <div className="sticky left-0 w-fit min-w-[320px] pl-8">
+            <div
+              className="sticky left-0 pl-8"
+              style={{ width: shared.columns[0] ? columnWidth(shared.columns[0]) : 320 }}
+            >
               <QuickCreateWorkItemRow
                 defaultType="TASK"
                 sectionName={task.title}
@@ -955,19 +1277,48 @@ function Row({
   onOpenTask,
   onSaveTask,
   onSaveField,
+  onSelect,
+  selected = false,
+  manualOrder = true,
 }: RowProps & {
   task: TaskRow;
   depth?: number;
   expanded?: boolean;
   onToggleExpand?: () => void;
+  selected?: boolean;
 }) {
   const drop = useRowDropTarget(task.id);
+
+  // Subtasks belong to their parent and sit out of multi-select, as they sit
+  // out of dragging: a bulk move would quietly promote one.
+  const selectable = depth === 0 && canEdit && onSelect !== undefined;
+  const isSelected = selectable && selected;
 
   return (
     <tr
       ref={depth === 0 ? drop.ref : undefined}
+      aria-selected={selectable ? isSelected : undefined}
+      // A click on the row's own padding selects; one on a control is that
+      // control's. Shift extends from the anchor, ctrl/cmd adds or removes.
+      onClick={
+        selectable
+          ? (event) => {
+              if (isInteractiveTarget(event.target)) return;
+              onSelect(task.id, { shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey });
+            }
+          : undefined
+      }
+      // Shift-click would otherwise select the text between the two rows.
+      onMouseDown={
+        selectable
+          ? (event) => {
+              if (event.shiftKey) event.preventDefault();
+            }
+          : undefined
+      }
       className={cn(
         'group border-b border-border last:border-0 hover:bg-muted/30',
+        isSelected && [SELECTED_BG, SELECTED_BG_HOVER],
         // A line where the row would land, rather than a filled highlight that
         // hides the row it is about to sit beside.
         drop.isOver && depth === 0 && 'shadow-[inset_0_2px_0_0_var(--color-primary)]',
@@ -987,6 +1338,7 @@ function Row({
               // The column rules are drawn once behind the whole list; a
               // pinned cell is opaque and covers them, so it carries its own.
               left !== undefined && 'sticky z-10 border-r border-border/60 bg-background',
+              left !== undefined && isSelected && SELECTED_BG,
               column.field === pinned.lastPinned &&
                 pinned.scrolled &&
                 'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
@@ -999,13 +1351,17 @@ function Row({
               canEdit={canEdit}
               // Only top-level rows drag: a subtask belongs to its parent, and
               // moving one into a section would quietly promote it.
-              draggable={canEdit && depth === 0}
+              draggable={canEdit && manualOrder && depth === 0}
               depth={depth}
               expanded={expanded}
               onToggleExpand={onToggleExpand}
               onOpen={() => onOpenTask(task.id)}
               onSaveTask={(payload) => onSaveTask(task.id, payload)}
               onSaveField={(fieldId, value) => onSaveField(task.id, fieldId, value)}
+              selected={isSelected}
+              onToggleSelect={
+                selectable ? () => onSelect(task.id, { shift: false, toggle: true }) : undefined
+              }
             />
           </td>
         );
@@ -1036,14 +1392,16 @@ function SectionHeader({
   onToggle,
   onRename,
 }: {
-  group: Group;
+  group: RowGroup;
   projectId: string;
   collapsed: boolean;
   canEdit: boolean;
   onToggle: () => void;
   onRename: (name: string) => void;
 }) {
-  const isRealSection = group.id !== ORPHAN_GROUP_ID;
+  // A value heading — a status, an assignee, an option — has no name to
+  // rename and no section for a rule to belong to.
+  const isRealSection = group.kind === 'section' && group.id !== ORPHAN_GROUP_ID;
 
   const editor = useCellEditor(group.name, (name) => {
     const trimmed = name.trim();
@@ -1093,6 +1451,12 @@ function SectionHeader({
         >
           {group.name}
         </button>
+      ) : group.kind === 'value' && group.color ? (
+        // The value's own chip, so a status heading looks like the status
+        // chip in the rows beneath it.
+        <span className="min-w-0 px-1">
+          <SemanticBadge color={group.color}>{group.name}</SemanticBadge>
+        </span>
       ) : (
         <span className="min-w-0 truncate px-1 text-sm font-semibold text-foreground">
           {group.name}
@@ -1213,6 +1577,8 @@ function Cell({
   onOpen,
   onSaveTask,
   onSaveField,
+  selected,
+  onToggleSelect,
 }: {
   task: TaskRow;
   field: string;
@@ -1225,6 +1591,8 @@ function Cell({
   onOpen: () => void;
   onSaveTask: (payload: Record<string, unknown>) => void;
   onSaveField: (fieldId: string, payload: Record<string, unknown>) => void;
+  selected?: boolean;
+  onToggleSelect?: (() => void) | undefined;
 }) {
   const shared = {
     task,
@@ -1245,6 +1613,8 @@ function Cell({
           expanded={expanded}
           onToggleExpand={onToggleExpand}
           dragHandle={draggable ? <RowDragHandle taskId={task.id} title={task.title} /> : undefined}
+          selected={selected}
+          onToggleSelect={onToggleSelect}
         />
       );
     case SystemField.ASSIGNEE:
@@ -1257,11 +1627,7 @@ function Cell({
       return <DueDateCell {...shared} />;
 
     case SystemField.START_DATE:
-      return (
-        <span className="text-xs">
-          {task.startDate ? formatDate(task.startDate) : <EmptyCell />}
-        </span>
-      );
+      return <StartDateCell {...shared} />;
     case SystemField.COMPLETED_AT:
       return (
         <span className="text-xs">

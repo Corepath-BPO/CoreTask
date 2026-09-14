@@ -7,6 +7,14 @@ import { expect, test } from './fixtures';
  * fixture arrives already signed in as the demo owner; see `fixtures.ts`.
  */
 
+/** Deleting asks first, as Asana does; every clean-up answers the question. */
+const confirmDelete = async (page: import('@playwright/test').Page) => {
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: /^delete$/i })
+    .click();
+};
+
 /** Unique per run, so a rerun never collides with what the last one left. */
 const stamp = () => `probe-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -32,7 +40,7 @@ test.describe('ticket comments', () => {
     await dialog.getByRole('button', { name: /^comment$/i }).click();
 
     await expect(dialog.getByText(body)).toBeVisible();
-    await expect(dialog.getByLabel(/write a comment/i)).toHaveValue('');
+    await expect(dialog.getByLabel(/write a comment/i)).toHaveText('');
 
     // Clean up so the seeded thread stays as the seed left it.
     await dialog
@@ -40,6 +48,7 @@ test.describe('ticket comments', () => {
       .filter({ hasText: body })
       .getByRole('button', { name: /delete/i })
       .click();
+    await confirmDelete(page);
     await expect(dialog.getByText(body)).toHaveCount(0);
   });
 
@@ -75,6 +84,8 @@ test.describe('ticket comments', () => {
       .filter({ hasText: revised })
       .getByRole('button', { name: /delete/i })
       .click();
+
+    await confirmDelete(page);
     await expect(dialog.getByText(revised)).toHaveCount(0);
   });
 
@@ -98,6 +109,8 @@ test.describe('ticket comments', () => {
       .filter({ hasText: body })
       .getByRole('button', { name: /delete/i })
       .click();
+
+    await confirmDelete(page);
     await expect(reopened.getByText(body)).toHaveCount(0);
   });
 });
@@ -129,8 +142,9 @@ test.describe('mentions', () => {
 
     await options.getByRole('option', { name: /maya okafor/i }).click();
 
-    // The chip is what shows; the token stays in the textarea value.
-    await expect(box).toHaveValue(/@\[Maya Okafor\]\([0-9a-f-]{36}\) $/);
+    // The chip is what the box holds — never a raw token.
+    await expect(box.locator('[data-mention]')).toHaveText('@Maya Okafor');
+    await expect(box).not.toContainText('](');
   });
 
   test('picks with the keyboard without submitting the comment', async ({ page }) => {
@@ -143,7 +157,7 @@ test.describe('mentions', () => {
     // Enter belongs to the picker while it is open.
     await box.press('Enter');
     await expect(dialog.getByRole('listbox')).toHaveCount(0);
-    await expect(box).toHaveValue(/@\[[^\]]+\]\([0-9a-f-]{36}\) $/);
+    await expect(box.locator('[data-mention]')).toHaveCount(1);
   });
 
   test('does not open the picker on an e-mail address', async ({ page }) => {
@@ -170,6 +184,8 @@ test.describe('mentions', () => {
     await expect(posted).not.toContainText('](');
 
     await posted.getByRole('button', { name: /delete/i }).click();
+
+    await confirmDelete(page);
     await expect(dialog.getByText(marker)).toHaveCount(0);
   });
 });
@@ -193,6 +209,8 @@ test.describe('task comments', () => {
       .filter({ hasText: body })
       .getByRole('button', { name: /delete/i })
       .click();
+
+    await confirmDelete(page);
     await expect(dialog.getByText(body)).toHaveCount(0);
   });
 });

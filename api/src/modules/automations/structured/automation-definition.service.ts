@@ -35,6 +35,7 @@ import {
   collectReferences,
   type CheckableDefinition,
   type DefinitionIssue,
+  type DefinitionReference,
   type ReferenceKind,
 } from './automation-definition.references';
 import { convertLegacyRule } from './automation-legacy.converter';
@@ -427,45 +428,70 @@ export class AutomationDefinitionService {
     const statusIds = idsOf(ConfigKind.STATUS);
     const priorityIds = idsOf(ConfigKind.PRIORITY);
     const fieldIds = idsOf(ConfigKind.CUSTOM_FIELD);
+    const targetProjectIds = idsOf(ConfigKind.PROJECT);
+    const targetSectionIds = idsOf(ConfigKind.PROJECT_SECTION);
 
-    const [sections, members, statuses, priorities, fields] = await Promise.all([
-      sectionIds.length
-        ? this.prisma.section.findMany({
-            where: { id: { in: sectionIds }, projectId },
-            select: { id: true },
-          })
-        : [],
-      memberIds.length
-        ? this.prisma.workspaceMember.findMany({
-            where: { workspaceId, userId: { in: memberIds } },
-            select: { userId: true },
-          })
-        : [],
-      statusIds.length
-        ? this.prisma.statusDefinition.findMany({
-            /* A project's own statuses and the workspace-wide set both count —
-             * the second is what a project inherits when it defines none. */
-            where: {
-              id: { in: statusIds },
-              workspaceId,
-              OR: [{ projectId }, { projectId: null }],
-            },
-            select: { id: true },
-          })
-        : [],
-      priorityIds.length
-        ? this.prisma.priorityDefinition.findMany({
-            where: { id: { in: priorityIds }, workspaceId },
-            select: { id: true },
-          })
-        : [],
-      fieldIds.length
-        ? this.prisma.customField.findMany({
-            where: { id: { in: fieldIds }, workspaceId, isArchived: false },
-            select: { id: true },
-          })
-        : [],
-    ]);
+    const [sections, members, statuses, priorities, fields, targetProjects, targetSections] =
+      await Promise.all([
+        sectionIds.length
+          ? this.prisma.section.findMany({
+              where: { id: { in: sectionIds }, projectId },
+              select: { id: true },
+            })
+          : [],
+        memberIds.length
+          ? this.prisma.workspaceMember.findMany({
+              where: { workspaceId, userId: { in: memberIds } },
+              select: { userId: true },
+            })
+          : [],
+        statusIds.length
+          ? this.prisma.statusDefinition.findMany({
+              /* A project's own statuses and the workspace-wide set both count —
+               * the second is what a project inherits when it defines none. */
+              where: {
+                id: { in: statusIds },
+                workspaceId,
+                OR: [{ projectId }, { projectId: null }],
+              },
+              select: { id: true },
+            })
+          : [],
+        priorityIds.length
+          ? this.prisma.priorityDefinition.findMany({
+              where: { id: { in: priorityIds }, workspaceId },
+              select: { id: true },
+            })
+          : [],
+        fieldIds.length
+          ? this.prisma.customField.findMany({
+              where: { id: { in: fieldIds }, workspaceId, isArchived: false },
+              select: { id: true },
+            })
+          : [],
+        targetProjectIds.length
+          ? /* Another live project of this workspace. The rule's own is not a
+             * destination — a move to where the task already is is not a move —
+             * and an archived one would land the task somewhere nobody looks. */
+            this.prisma.project.findMany({
+              where: {
+                id: { in: targetProjectIds },
+                workspaceId,
+                archivedAt: null,
+                NOT: { id: projectId },
+              },
+              select: { id: true },
+            })
+          : [],
+        targetSectionIds.length
+          ? /* Scoped below, per reference, to the project the same action chose;
+             * the query only asks that the section be somewhere in this workspace. */
+            this.prisma.section.findMany({
+              where: { id: { in: targetSectionIds }, workspaceId },
+              select: { id: true, projectId: true },
+            })
+          : [],
+      ]);
 
     const live: Record<ReferenceKind, Set<string>> = {
       SECTION: new Set(sections.map((row) => row.id)),
@@ -473,10 +499,22 @@ export class AutomationDefinitionService {
       STATUS: new Set(statuses.map((row) => row.id)),
       PRIORITY: new Set(priorities.map((row) => row.id)),
       CUSTOM_FIELD: new Set(fields.map((row) => row.id)),
+      PROJECT: new Set(targetProjects.map((row) => row.id)),
+      PROJECT_SECTION: new Set(targetSections.map((row) => row.id)),
     };
+    const sectionProject = new Map(targetSections.map((row) => [row.id, row.projectId]));
+
+    const isLive = (reference: DefinitionReference) =>
+      live[reference.kind].has(reference.id) &&
+      // A target section has to be in the project chosen beside it, not merely
+      // exist: one from a third project would be as much of a reach as one
+      // from another workspace.
+      (reference.kind !== ConfigKind.PROJECT_SECTION ||
+        !reference.scope ||
+        sectionProject.get(reference.id) === reference.scope);
 
     return references
-      .filter((reference) => !live[reference.kind].has(reference.id))
+      .filter((reference) => !isLive(reference))
       .map((reference) => ({
         level: GraphIssueLevel.ERROR,
         nodeId: reference.branchId,
@@ -571,6 +609,8 @@ const MISSING_REFERENCE: Record<ReferenceKind, string> = {
   STATUS: 'That status is not available in this project.',
   PRIORITY: 'That priority is not available in this workspace.',
   CUSTOM_FIELD: 'That field is not in this workspace.',
+  PROJECT: 'That project is not in this workspace, or is the one the rule is in.',
+  PROJECT_SECTION: 'That section is not in the chosen project.',
 };
 
 /** The shared validator's issues, in the tagged shape the two paths merge into. */

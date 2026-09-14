@@ -40,21 +40,41 @@ export function maxLengthFor(field: CustomField): number | undefined {
 }
 
 export function checkboxLabel(field: CustomField, checked: boolean): string | undefined {
-  const value = read<string | undefined>(field, checked ? 'checkedLabel' : 'uncheckedLabel', undefined);
+  const value = read<string | undefined>(
+    field,
+    checked ? 'checkedLabel' : 'uncheckedLabel',
+    undefined,
+  );
   return value?.trim() ? value : undefined;
 }
 
+export type NumberFormatKind = 'PLAIN' | 'PERCENTAGE' | 'CURRENCY' | 'CUSTOM_UNIT';
+
 export interface NumberFormat {
+  kind: NumberFormatKind;
   decimalPlaces: number;
+  /** Kept for the cells that only ask this one question. */
   isPercentage: boolean;
+  /** ISO 4217, present when `kind` is CURRENCY. */
+  currencyCode: string | undefined;
+  /** "pts", "hrs" — present when `kind` is CUSTOM_UNIT. */
+  unitLabel: string | undefined;
+  unitPosition: 'PREFIX' | 'SUFFIX';
   min: number | undefined;
   max: number | undefined;
 }
 
+/** NUMBER and FORMULA share the display half of their settings. */
 export function numberFormat(field: CustomField): NumberFormat {
+  const kind = read<NumberFormatKind>(field, 'numberFormat', 'PLAIN');
+
   return {
+    kind,
     decimalPlaces: read(field, 'decimalPlaces', 0),
-    isPercentage: read<string>(field, 'numberFormat', 'PLAIN') === 'PERCENTAGE',
+    isPercentage: kind === 'PERCENTAGE',
+    currencyCode: read<string | undefined>(field, 'currencyCode', undefined),
+    unitLabel: read<string | undefined>(field, 'unitLabel', undefined),
+    unitPosition: read<'PREFIX' | 'SUFFIX'>(field, 'unitPosition', 'SUFFIX'),
     min: read<number | undefined>(field, 'minValue', undefined),
     max: read<number | undefined>(field, 'maxValue', undefined),
   };
@@ -66,10 +86,50 @@ export function numberFormat(field: CustomField): NumberFormat {
  * Formatted only for display. The editor still shows the raw value, because
  * rounding what somebody typed the moment they stop looking at it is how a
  * "12.5" becomes "13" without anyone deciding it should.
+ *
+ * A currency goes through `Intl`, which knows the symbol, the grouping and
+ * the side the symbol sits on for the reader's locale — nothing here has to.
+ * A code the runtime does not know falls back to "EUR 1.50" rather than to
+ * a blank cell.
  */
 export function formatNumber(value: number, format: NumberFormat): string {
   const text = value.toFixed(format.decimalPlaces);
-  return format.isPercentage ? `${text}%` : text;
+
+  switch (format.kind) {
+    case 'PERCENTAGE':
+      return `${text}%`;
+    case 'CURRENCY': {
+      const code = format.currencyCode ?? '';
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: 'currency',
+          currency: code,
+          minimumFractionDigits: format.decimalPlaces,
+          maximumFractionDigits: format.decimalPlaces,
+        }).format(value);
+      } catch {
+        return code ? `${code} ${text}` : text;
+      }
+    }
+    case 'CUSTOM_UNIT': {
+      const unit = format.unitLabel?.trim();
+      if (!unit) return text;
+      return format.unitPosition === 'PREFIX' ? `${unit} ${text}` : `${text} ${unit}`;
+    }
+    default:
+      return text;
+  }
+}
+
+/** How many stars a rating field offers; the API's default when unset. */
+export function maxRating(field: CustomField): number {
+  const stars = read<number>(field, 'maxRating', 5);
+  return Number.isInteger(stars) && stars >= 1 ? stars : 5;
+}
+
+/** A formula's stored expression, referencing fields by `{field:<id>}`. */
+export function formulaExpression(field: CustomField): string {
+  return read<string>(field, 'expression', '');
 }
 
 /**
@@ -112,10 +172,11 @@ export function fromInputValue(raw: string, withTime: boolean): string | null {
 }
 
 /** The types whose cells are a plain input plus a rendering. */
-export const SCALAR_INPUT_TYPE: Partial<Record<CustomFieldType, 'text' | 'number' | 'url' | 'email'>> =
-  {
-    [CustomFieldType.TEXT]: 'text',
-    [CustomFieldType.NUMBER]: 'number',
-    [CustomFieldType.URL]: 'url',
-    [CustomFieldType.EMAIL]: 'email',
-  };
+export const SCALAR_INPUT_TYPE: Partial<
+  Record<CustomFieldType, 'text' | 'number' | 'url' | 'email'>
+> = {
+  [CustomFieldType.TEXT]: 'text',
+  [CustomFieldType.NUMBER]: 'number',
+  [CustomFieldType.URL]: 'url',
+  [CustomFieldType.EMAIL]: 'email',
+};

@@ -43,6 +43,12 @@ export class CustomFieldDto {
   @ApiProperty({ example: false })
   isRequired!: boolean;
 
+  @ApiProperty({
+    example: false,
+    description: 'Collaborators are notified when this field’s value changes on a task.',
+  })
+  notifyOnChange!: boolean;
+
   @ApiProperty({ example: false })
   isArchived!: boolean;
 
@@ -97,4 +103,7 @@ export class RemoveFieldResultDto {
 
   @ApiProperty({ example: true, description: 'True when values existed, so it was archived.' })
   archived!: boolean;
+
+  @ApiProperty({ example: 1, description: 'How many projects it was removed from.' })
+  detachedProjects!: number;
 }

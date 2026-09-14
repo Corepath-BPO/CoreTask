@@ -83,6 +83,11 @@ Both support create, inline edit, assign, status, priority, due date, open
 details, and the per-section automation popover. A capability present in one and
 missing from the other is a bug, not a design.
 
+Each view type is its own `ProjectView` row with its own settings, so the List
+and the Board share data but not toolbar state — as in Asana, a filter on the
+List does not narrow the Board. The four toolbar menus are the same component
+on both; see [project-views.md](./project-views.md#the-toolbar).
+
 ## See also
 
 - [Project work items](./project-work-items.md)

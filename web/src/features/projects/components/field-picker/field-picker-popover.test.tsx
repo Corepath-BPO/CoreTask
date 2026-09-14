@@ -21,6 +21,8 @@ vi.mock('../../hooks/use-project-views', () => ({
   useFieldCatalog: () => ({ ...catalogState, refetch }),
   useAttachField: () => ({ mutate: attachMutate, isPending: false }),
   useCreateCustomField: () => ({ mutate: createMutate, isPending: false }),
+  // The builder reads the project's fields for a formula to name; none here.
+  useFieldMetadata: () => ({ data: undefined }),
 }));
 
 const catalog = (overrides: Partial<FieldCatalog> = {}): FieldCatalog => ({
@@ -30,6 +32,7 @@ const catalog = (overrides: Partial<FieldCatalog> = {}): FieldCatalog => ({
       label: 'Single-select',
       description: 'Choose one coloured option',
       hasOptions: true,
+      isComputed: false,
     },
   ],
   systemFields: [
@@ -61,7 +64,9 @@ const open = async (onChange = vi.fn()) => {
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-  await waitFor(() => expect(screen.getByLabelText('Search or create a field')).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByLabelText('Search or create a field')).toBeInTheDocument(),
+  );
 
   return onChange;
 };
@@ -142,10 +147,7 @@ describe('FieldPickerPopover', () => {
     const onChange = await open();
     fireEvent.click(screen.getByText('Risk'));
 
-    expect(onChange).toHaveBeenCalledWith([
-      { field: SystemField.TITLE },
-      { field: 'custom:f-1' },
-    ]);
+    expect(onChange).toHaveBeenCalledWith([{ field: SystemField.TITLE }, { field: 'custom:f-1' }]);
   });
 
   it('attaches a library field before adding its column', async () => {
@@ -176,10 +178,7 @@ describe('FieldPickerPopover', () => {
     const [, handlers] = attachMutate.mock.calls[0];
     handlers.onSuccess();
 
-    expect(onChange).toHaveBeenCalledWith([
-      { field: SystemField.TITLE },
-      { field: 'custom:f-9' },
-    ]);
+    expect(onChange).toHaveBeenCalledWith([{ field: SystemField.TITLE }, { field: 'custom:f-9' }]);
   });
 
   it('offers to create a field named after the search term', async () => {
@@ -189,9 +188,7 @@ describe('FieldPickerPopover', () => {
       target: { value: 'Delivery risk' },
     });
 
-    await waitFor(() =>
-      expect(screen.getByText(/Create custom field/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/Create custom field/)).toBeInTheDocument());
     expect(screen.getByText('Delivery risk')).toBeInTheDocument();
   });
 

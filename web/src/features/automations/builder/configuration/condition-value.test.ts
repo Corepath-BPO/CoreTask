@@ -54,7 +54,9 @@ describe('choosing a condition from the catalogue', () => {
   it.each([
     [CONDITION_VALUE_TYPE.TEXT, 'IS'],
     [CONDITION_VALUE_TYPE.SINGLE_SELECT, 'IS'],
-    [CONDITION_VALUE_TYPE.MULTI_SELECT, 'CONTAINS'],
+    // IS, like a single select: against a set the runner reads it as
+    // membership, so "is set to X" means X is among what is held.
+    [CONDITION_VALUE_TYPE.MULTI_SELECT, 'IS'],
     [CONDITION_VALUE_TYPE.PEOPLE, 'IS'],
     [CONDITION_VALUE_TYPE.DATE, 'IS'],
     [CONDITION_VALUE_TYPE.NUMBER, 'EQUALS'],
@@ -88,19 +90,18 @@ describe('choosing a condition from the catalogue', () => {
   });
 
   /*
-   * A checkbox is the type that has none. Both its comparisons — "is checked"
-   * and "is not checked" — are absent from the runner's table, which is why the
-   * catalogue greys the one row that would use them. Should such a row ever be
-   * reached anyway, writing the field alone leaves the step visibly unfinished
-   * rather than quietly broken.
+   * A checkbox used to be the type that had none: "is checked" and "is not
+   * checked" were absent from the runner's table, so the row was greyed and a
+   * step reached anyway was written with the field alone. The runner makes
+   * the comparison itself now, and the row opens on it like every other.
    */
-  it('writes the field alone rather than a comparison nothing performs', () => {
+  it('writes the checkbox comparison, now that the engine performs it', () => {
     expect(
       conditionFromCatalogueEntry({
         subtype: 'completed',
         valueType: CONDITION_VALUE_TYPE.CHECKBOX,
       }),
-    ).toEqual({ field: 'completed' });
+    ).toEqual({ field: 'completed', operator: 'IS_CHECKED' });
   });
 
   /*

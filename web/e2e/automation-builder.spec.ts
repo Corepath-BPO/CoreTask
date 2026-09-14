@@ -123,6 +123,17 @@ async function connect(): Promise<Api> {
   );
   expect(field.ok(), `could not create the field: ${field.status()}`).toBe(true);
 
+  /*
+   * And a checkbox, which is the type the report was about: it showed as a
+   * list column and not as a trigger. Every type gets its rows, and the
+   * picker has to list this one beside the select.
+   */
+  const checkbox = await request.post(
+    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/custom-fields`,
+    { headers, data: { name: `Renewed ${RUN}`, type: 'CHECKBOX' } },
+  );
+  expect(checkbox.ok(), `could not create the checkbox field: ${checkbox.status()}`).toBe(true);
+
   return {
     request,
     headers,
@@ -1293,6 +1304,48 @@ test.describe('the automation builder', () => {
 
     await expect(groups).toHaveCount(1);
     await expect(groups.first()).toHaveAttribute('aria-label', heading);
+  });
+
+  test('lists a trigger row for every field, whatever its type', async ({ page }) => {
+    /*
+     * The report: a checkbox field showed as a list column and not under
+     * "Custom field is changed", where only the select appeared. The row is
+     * generated per field regardless of type; what was stale was the
+     * builder's cached catalogue. Opened fresh, the picker lists both.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^More for: When a task/ }).click();
+    await page.getByRole('menuitem', { name: /change trigger/i }).click();
+
+    const rail = inspector(page);
+    await expect(
+      rail.getByRole('option', { name: new RegExp(`Effort ${RUN}.*is changed`) }),
+    ).toBeEnabled();
+    await expect(
+      rail.getByRole('option', { name: new RegExp(`Renewed ${RUN}.*is changed`) }),
+    ).toBeEnabled();
+  });
+
+  test('a checkbox field is a check the engine can make', async ({ page }) => {
+    /*
+     * "Is checked" used to have no comparison behind it, so every checkbox row
+     * — and the completion check — was greyed with "no comparison for this
+     * kind of value yet". The runner makes it itself now, so the row has to be
+     * live, and choosing it has to land on that comparison.
+     */
+    const rail = await openConditionCatalogue(page);
+
+    const row = rail.getByRole('option', { name: new RegExp(`Renewed ${RUN}.*is`) });
+    await expect(row).toBeEnabled();
+    await row.click();
+
+    await expect(rail.getByLabel('Choose an option')).toContainText(/is checked/);
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain(`Renewed ${RUN} is checked`);
   });
 
   test('renders in dark mode too', async ({ page }) => {

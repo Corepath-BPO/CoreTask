@@ -1,13 +1,31 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type { NotificationType } from '@coretask/contracts';
-import type { ActivityEntry, NotificationFeed } from '@coretask/types';
+import type { ActivityEntry, ItemActivityPage, NotificationFeed } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
+
+/** One item's stories: which item, and where the previous page ended. */
+export interface ItemActivityQuery {
+  entity: 'TASK' | 'TICKET';
+  entityId: string;
+  before?: string;
+  limit?: number;
+}
 
 export const activityApi = {
   list: (workspaceId: string, limit?: number): Promise<ActivityEntry[]> =>
     apiClient.get<ActivityEntry[]>(ApiRoutes.activity.list(workspaceId), {
       params: limit ? { limit } : undefined,
+    }),
+
+  forItem: (workspaceId: string, query: ItemActivityQuery): Promise<ItemActivityPage> =>
+    apiClient.get<ItemActivityPage>(ApiRoutes.activity.forItem(workspaceId), {
+      params: {
+        entity: query.entity,
+        entityId: query.entityId,
+        ...(query.before ? { before: query.before } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      },
     }),
 };
 

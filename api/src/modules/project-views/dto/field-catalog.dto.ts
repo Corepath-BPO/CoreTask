@@ -22,7 +22,8 @@ export class FieldCatalogQueryDto {
   visible?: string;
 
   @ApiPropertyOptional({
-    description: 'Pass `false` to skip the workspace library and return only this project’s fields.',
+    description:
+      'Pass `false` to skip the workspace library and return only this project’s fields.',
     enum: ['true', 'false'],
   })
   @IsOptional()
@@ -47,6 +48,11 @@ class FieldTypeDto {
 
   @ApiProperty({ description: 'Whether creating it requires a list of options first.' })
   hasOptions!: boolean;
+
+  @ApiProperty({
+    description: 'Worked out on read and never typed in; hidden from every editor and picker.',
+  })
+  isComputed!: boolean;
 }
 
 class SystemFieldDto {

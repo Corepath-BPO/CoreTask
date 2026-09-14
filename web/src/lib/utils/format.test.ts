@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 
-import { daysUntil, formatDueDate, humanizeEnum, initials, percentage } from './format';
+import {
+  asLocalDate,
+  daysUntil,
+  formatDate,
+  formatDueDate,
+  humanizeEnum,
+  initials,
+  percentage,
+} from './format';
+
+describe('asLocalDate', () => {
+  it('reads an ISO calendar date as that day at local midnight', () => {
+    const local = asLocalDate('2026-09-05T00:00:00.000Z');
+    expect([local.getFullYear(), local.getMonth(), local.getDate()]).toEqual([2026, 8, 5]);
+    expect(local.getHours()).toBe(0);
+  });
+
+  it('accepts the bare date form too', () => {
+    expect(asLocalDate('2026-09-05').getDate()).toBe(5);
+  });
+
+  it('leaves an instant with a clock alone', () => {
+    const instant = '2026-09-05T17:30:00.000Z';
+    expect(asLocalDate(instant).getTime()).toBe(new Date(instant).getTime());
+  });
+
+  it('formats a calendar date as the day it names', () => {
+    expect(formatDate('2026-09-05T00:00:00.000Z')).toBe('Sep 5');
+  });
+});
 
 describe('initials', () => {
   it('takes the first and last name initials', () => {

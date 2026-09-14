@@ -6,6 +6,7 @@ import {
   type WorkItemEventPayload,
 } from '@coretask/contracts';
 import type {
+  BulkWorkItemPayload,
   CreateWorkItemPayload,
   MoveWorkItemPayload,
   ProjectWorkItem,
@@ -14,14 +15,35 @@ import type {
   UpdateWorkItemPayload,
 } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
-import { ActivityAction, ActivityEntity, Prisma } from '@prisma/client';
+import {
+  ActivityAction,
+  ActivityEntity,
+  Prisma,
+  TicketPriority,
+  TicketStatus,
+} from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { planPlacement } from '../../common/utils/position.util';
 import { PrismaService } from '../../database/prisma.service';
+import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
+import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { diffItemStories, snapshotFromWorkItem } from '../activity-logs/item-stories';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
+import { fieldChangeTriggers } from '../automations/task-field-triggers';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { FormulaValuesService } from '../custom-fields/formula-values.service';
+import { FollowersService } from '../followers/followers.service';
+import { taskLink, taskRef, ticketLink, ticketRef, type ItemRef } from '../followers/item-ref';
+import { FieldMetadataService } from '../project-views/field-metadata.service';
+import { compileOrder } from '../project-views/lib/order-compiler';
+import {
+  compileFilters,
+  compileTicketFilters,
+  type CustomFieldMap,
+} from '../project-views/lib/query-compiler';
 import { ProjectsService } from '../projects/projects.service';
 
 import {
@@ -33,6 +55,7 @@ import {
 } from './lib/work-item.mapper';
 import { TaskWorkItemRepository } from './repositories/task-work-item.repository';
 import { TicketWorkItemRepository } from './repositories/ticket-work-item.repository';
+import { WorkItemOrderRepository } from './repositories/work-item-order.repository';
 
 /**
  * One way in and out of a project's work items, whatever backs them.
@@ -58,6 +81,13 @@ export class ProjectWorkItemService {
     private readonly activity: ActivityLogsService,
     private readonly automation: AutomationEventPublisher,
     private readonly realtime: RealtimeGateway,
+    private readonly mentions: DescriptionMentionNotifier,
+    private readonly followers: FollowersService,
+    private readonly followerNotifier: FollowerNotifier,
+    private readonly customFields: CustomFieldsService,
+    private readonly formulas: FormulaValuesService,
+    private readonly fieldMetadata: FieldMetadataService,
+    private readonly order: WorkItemOrderRepository,
   ) {}
 
   /**
@@ -79,9 +109,37 @@ export class ProjectWorkItemService {
     const wantsTasks = types.includes(WorkItemType.TASK);
     const wantsTickets = types.includes(WorkItemType.TICKET);
 
+    /*
+     * The view's settings, compiled once for both kinds. The field map is
+     * read only when something refers to a field, so the plain read — no
+     * filter, no sort — costs exactly what it always did.
+     */
+    const conditions = query.filters ?? [];
+    const wantsFields =
+      conditions.length > 0 || Boolean(query.sorts?.length) || Boolean(query.groupBy);
+    const customFields = wantsFields
+      ? await this.fieldMetadata.customFieldMap(workspaceId, projectId)
+      : new Map();
+    const taskFilters = compileFilters(conditions, customFields);
+    const ticketFilters = compileTicketFilters(conditions, customFields);
+
+    if (query.sorts?.length || query.groupBy) {
+      return this.listOrdered(workspaceId, projectId, query, {
+        wantsTasks,
+        wantsTickets,
+        customFields,
+        taskFilters,
+        ticketFilters,
+      });
+    }
+
     const [tasks, tickets] = await Promise.all([
-      wantsTasks ? this.tasks.list(workspaceId, projectId, query) : Promise.resolve([]),
-      wantsTickets ? this.tickets.list(workspaceId, projectId, query) : Promise.resolve([]),
+      wantsTasks
+        ? this.tasks.list(workspaceId, projectId, query, taskFilters)
+        : Promise.resolve([]),
+      wantsTickets
+        ? this.tickets.list(workspaceId, projectId, query, ticketFilters)
+        : Promise.resolve([]),
     ]);
 
     const items = [...tasks.map(taskToWorkItem), ...tickets.map(ticketToWorkItem)].sort(
@@ -96,11 +154,66 @@ export class ProjectWorkItemService {
      * to `limit` first would drop items that sort into the middle.
      */
     const limit = query.limit ?? 200;
-    const page = items.slice(0, limit);
+    // Formula values are worked out for the page that is going out, not for
+    // every row that was read.
+    const page = await this.formulas.decorateWorkItems(projectId, items.slice(0, limit));
 
     return {
       items: page,
       nextCursor: items.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
+   * The ordered read: a sort, or a group key, that both kinds must obey at
+   * once.
+   *
+   * Two id allowlists from Prisma, one raw ordering over them, one hydration
+   * per kind in the order the database gave. The default path above is
+   * untouched, so a view with no sort reads exactly as it always has.
+   */
+  private async listOrdered(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectWorkItemQuery,
+    scope: {
+      wantsTasks: boolean;
+      wantsTickets: boolean;
+      customFields: CustomFieldMap;
+      taskFilters: Prisma.TaskWhereInput[];
+      ticketFilters: Prisma.TicketWhereInput[] | 'NONE';
+    },
+  ): Promise<ProjectWorkItemPage> {
+    const plan = compileOrder(query.sorts ?? [], query.groupBy ?? null, scope.customFields);
+
+    const [taskIds, ticketIds] = await Promise.all([
+      scope.wantsTasks
+        ? this.tasks.listIds(workspaceId, projectId, query, scope.taskFilters)
+        : Promise.resolve([]),
+      scope.wantsTickets
+        ? this.tickets.listIds(workspaceId, projectId, query, scope.ticketFilters)
+        : Promise.resolve([]),
+    ]);
+
+    const limit = query.limit ?? 200;
+    const ordered = await this.order.orderIds(taskIds, ticketIds, plan, limit + 1);
+    const page = ordered.slice(0, limit);
+
+    const [tasks, tickets] = await Promise.all([
+      this.tasks.hydrate(page.filter((row) => row.kind === 'TASK').map((row) => row.id)),
+      this.tickets.hydrate(page.filter((row) => row.kind === 'TICKET').map((row) => row.id)),
+    ]);
+    const byId = new Map<string, ProjectWorkItem>();
+    for (const task of tasks) byId.set(task.id, taskToWorkItem(task));
+    for (const ticket of tickets) byId.set(ticket.id, ticketToWorkItem(ticket));
+
+    const items = page
+      .map((row) => byId.get(row.id))
+      .filter((item): item is ProjectWorkItem => item !== undefined);
+
+    return {
+      items: await this.formulas.decorateWorkItems(projectId, items),
+      nextCursor: ordered.length > limit ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
 
@@ -116,7 +229,13 @@ export class ProjectWorkItemService {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Work item not found.');
     }
 
-    return item;
+    return this.withFormulas(projectId, item);
+  }
+
+  /** One item with its formula values, the shape every single-item response takes. */
+  private async withFormulas(projectId: string, item: ProjectWorkItem): Promise<ProjectWorkItem> {
+    const [decorated] = await this.formulas.decorateWorkItems(projectId, [item]);
+    return decorated ?? item;
   }
 
   async create(
@@ -165,6 +284,18 @@ export class ProjectWorkItemService {
       },
     });
 
+    if (created.parentId) {
+      await this.activity.record({
+        workspaceId,
+        actorId: userId,
+        action: ActivityAction.SUBTASK_ADDED,
+        entity: ActivityEntity.TASK,
+        entityId: created.parentId,
+        summary: `Added subtask “${created.title}”`,
+        metadata: { subtaskId: created.id, title: created.title },
+      });
+    }
+
     await this.automation.publish({
       workspaceId,
       projectId,
@@ -181,6 +312,17 @@ export class ProjectWorkItemService {
 
     this.emit(ServerEvent.WORK_ITEM_CREATED, created, userId, {
       ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
+    });
+
+    await this.followers.ensure(workspaceId, this.linkOf(created), [
+      userId,
+      ...created.assignees.map((assignee) => assignee.id),
+    ]);
+
+    await this.mentions.notify({
+      ...this.mentionTarget(created, userId),
+      before: null,
+      after: created.description,
     });
 
     /*
@@ -214,17 +356,30 @@ export class ProjectWorkItemService {
         : await this.tasks.update(workspaceId, workItemId, payload);
 
     const changedFields = this.changedFields(before, updated);
-    if (changedFields.length === 0) return updated;
+    if (changedFields.length === 0) return this.withFormulas(projectId, updated);
 
-    await this.activity.record({
+    const itemWord = updated.type === WorkItemType.TICKET ? 'ticket' : 'task';
+    const stories = diffItemStories(
+      snapshotFromWorkItem(before),
+      snapshotFromWorkItem(updated),
+      itemWord,
+    );
+    const context = {
       workspaceId,
       actorId: userId,
-      action: ActivityAction.UPDATED,
       entity: updated.type === WorkItemType.TICKET ? ActivityEntity.TICKET : ActivityEntity.TASK,
       entityId: updated.id,
-      summary: this.describe(updated, 'Updated'),
-      metadata: { projectId, workItemType: updated.type, changedFields, source: 'USER' },
-    });
+    };
+    if (stories.length > 0) {
+      await this.activity.recordStories(context, stories);
+    } else {
+      await this.activity.record({
+        ...context,
+        action: ActivityAction.UPDATED,
+        summary: this.describe(updated, 'Updated'),
+        metadata: { projectId, workItemType: updated.type, changedFields, source: 'USER' },
+      });
+    }
 
     for (const trigger of this.triggersFor(before, updated, changedFields)) {
       await this.automation.publish({
@@ -234,8 +389,22 @@ export class ProjectWorkItemService {
         entityType: updated.type === WorkItemType.TICKET ? 'TICKET' : 'TASK',
         entityId: updated.id,
         actorId: userId,
-        before: { status: before.status?.id, priority: before.priority?.id },
-        after: { status: updated.status?.id, priority: updated.priority?.id },
+        before: {
+          status: before.status?.id,
+          priority: before.priority?.id,
+          title: before.title,
+          dueDate: before.dueDate,
+          startDate: before.startDate,
+          estimatedMinutes: estimateOf(before),
+        },
+        after: {
+          status: updated.status?.id,
+          priority: updated.priority?.id,
+          title: updated.title,
+          dueDate: updated.dueDate,
+          startDate: updated.startDate,
+          estimatedMinutes: estimateOf(updated),
+        },
         ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
       });
     }
@@ -245,13 +414,30 @@ export class ProjectWorkItemService {
       ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
     });
 
+    if (changedFields.includes('assignees')) {
+      await this.followers.ensure(
+        workspaceId,
+        this.linkOf(updated),
+        updated.assignees.map((assignee) => assignee.id),
+      );
+    }
+    await this.followerNotifier.notifyStories(this.refOf(updated), userId, stories);
+
+    if (changedFields.includes('description')) {
+      await this.mentions.notify({
+        ...this.mentionTarget(updated, userId),
+        before: before.description,
+        after: updated.description,
+      });
+    }
+
     this.realtime.emitToWorkspace(
       workspaceId,
       updated.type === WorkItemType.TICKET ? ServerEvent.TICKET_UPDATED : ServerEvent.TASK_UPDATED,
       updated,
     );
 
-    return updated;
+    return this.withFormulas(projectId, updated);
   }
 
   /**
@@ -282,24 +468,49 @@ export class ProjectWorkItemService {
         ? await this.tickets.move(workspaceId, workItemId, sectionId, plan.position)
         : await this.tasks.move(workspaceId, workItemId, sectionId, plan.position);
 
-    await this.activity.record({
-      workspaceId,
-      actorId: userId,
-      // No MOVED action exists in the enum, and inventing one would need a
-      // migration every reader of the feed then has to handle. The metadata
-      // below says which sections, which is the part anybody wants.
-      action: ActivityAction.UPDATED,
-      entity: moved.type === WorkItemType.TICKET ? ActivityEntity.TICKET : ActivityEntity.TASK,
-      entityId: moved.id,
-      summary: this.describe(moved, 'Moved'),
-      metadata: {
-        projectId,
-        workItemType: moved.type,
-        fromSectionId: before.sectionId,
-        toSectionId: moved.sectionId,
-        source: 'USER',
-      },
-    });
+    /*
+     * A section story, with both names, when the column changed. A drag that
+     * only reordered within the column is not a story anyone reads — Asana
+     * shows nothing for it either — but it stays in the audit trail as before.
+     */
+    const entity = moved.type === WorkItemType.TICKET ? ActivityEntity.TICKET : ActivityEntity.TASK;
+    if (before.sectionId !== moved.sectionId) {
+      const sections = await this.prisma.section.findMany({
+        where: {
+          id: { in: [before.sectionId, moved.sectionId].filter((id): id is string => !!id) },
+        },
+        select: { id: true, name: true },
+      });
+      const ref = (id: string | null) => {
+        const section = sections.find((row) => row.id === id);
+        return section ? { id: section.id, label: section.name } : null;
+      };
+
+      await this.activity.recordStories(
+        { workspaceId, actorId: userId, entity, entityId: moved.id },
+        diffItemStories(
+          snapshotFromWorkItem(before, { section: ref(before.sectionId) }),
+          snapshotFromWorkItem(moved, { section: ref(moved.sectionId) }),
+          moved.type === WorkItemType.TICKET ? 'ticket' : 'task',
+        ),
+      );
+    } else {
+      await this.activity.record({
+        workspaceId,
+        actorId: userId,
+        action: ActivityAction.UPDATED,
+        entity,
+        entityId: moved.id,
+        summary: this.describe(moved, 'Moved'),
+        metadata: {
+          projectId,
+          workItemType: moved.type,
+          fromSectionId: before.sectionId,
+          toSectionId: moved.sectionId,
+          source: 'USER',
+        },
+      });
+    }
 
     if (before.sectionId !== moved.sectionId) {
       await this.automation.publish({
@@ -327,10 +538,187 @@ export class ProjectWorkItemService {
       position: moved.position,
     });
 
-    return moved;
+    return this.withFormulas(projectId, moved);
+  }
+
+  /**
+   * One change, applied to a selection.
+   *
+   * Each row goes through the same `update`, `move` and archive paths a single
+   * edit takes, so the activity feed, the rules engine and every open tab see
+   * twenty ordinary changes rather than one unfamiliar event — deliberately not
+   * one transaction. What *is* checked up front is everything that could fail
+   * part-way: every id has to be in this project, and a vocabulary a ticket
+   * cannot hold is refused before the first task is written.
+   *
+   * The rows are handled in the order named, which is the order they were
+   * selected on screen; a move appends, so they keep that order in the new
+   * section.
+   */
+  async bulk(
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    payload: BulkWorkItemPayload,
+  ): Promise<ProjectWorkItem[]> {
+    await this.projects.requireProject(workspaceId, projectId);
+
+    const items = await this.findMany(workspaceId, projectId, payload.workItemIds);
+    const hasTicket = items.some((item) => item.type === WorkItemType.TICKET);
+
+    if (hasTicket && payload.archived) {
+      throw AppException.badRequest('BAD_REQUEST', 'Tickets cannot be archived from here.');
+    }
+
+    if (hasTicket && payload.update) {
+      const { statusId, priorityId } = payload.update;
+      if (statusId && !(statusId in TicketStatus)) {
+        throw AppException.badRequest('BAD_REQUEST', 'That status does not apply to a ticket.');
+      }
+      if (priorityId && !(priorityId in TicketPriority)) {
+        throw AppException.badRequest('BAD_REQUEST', 'That priority does not apply to a ticket.');
+      }
+    }
+
+    const correlation = payload.correlationId ? { correlationId: payload.correlationId } : {};
+
+    /*
+     * Field values are split from the row update and checked before any row
+     * is written: every field must be on this project and every value must
+     * fit its field, or the edit fails whole rather than three rows in. Each
+     * row then goes through `setValue` like a single cell edit, so it gets
+     * the same story, the same rule trigger and the same realtime push.
+     */
+    const { customFieldValues, ...rowUpdate } = payload.update ?? {};
+    const fieldValues = Object.entries(customFieldValues ?? {});
+    const fields = await this.customFields.requireProjectFields(
+      workspaceId,
+      projectId,
+      fieldValues.map(([fieldId]) => fieldId),
+    );
+    for (const [fieldId, value] of fieldValues) {
+      const field = fields.get(fieldId);
+      if (field) await this.customFields.validateValue(workspaceId, field, value);
+    }
+
+    const hasRowUpdate = Object.keys(rowUpdate).length > 0;
+    const results: ProjectWorkItem[] = [];
+
+    for (const item of items) {
+      let current = item;
+
+      if (hasRowUpdate) {
+        current = await this.update(workspaceId, projectId, userId, item.id, {
+          ...rowUpdate,
+          ...correlation,
+        });
+      }
+
+      // Tickets hold no custom-field values, so they are skipped rather than
+      // refused: a mixed selection still gets its tasks changed.
+      if (fieldValues.length > 0 && item.type === WorkItemType.TASK) {
+        for (const [fieldId, value] of fieldValues) {
+          await this.customFields.setValue(workspaceId, item.id, userId, fieldId, value, {
+            source: 'BULK',
+            correlationId: payload.correlationId,
+          });
+        }
+        current = await this.getById(workspaceId, projectId, item.id);
+      }
+
+      if (payload.sectionId !== undefined) {
+        current = await this.move(workspaceId, projectId, userId, item.id, {
+          targetSectionId: payload.sectionId,
+          ...correlation,
+        });
+      }
+
+      if (payload.archived) {
+        current = await this.archive(workspaceId, projectId, userId, current, correlation);
+      }
+
+      results.push(current);
+    }
+
+    return results;
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * Archives one task through the shared layer.
+   *
+   * Tasks only — the caller has already refused tickets. Announced as an update
+   * of `archivedAt` on the project room, which is what the List listens for,
+   * and as the legacy `task:archived` on the workspace, which the board and
+   * older listeners still expect.
+   */
+  private async archive(
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    before: ProjectWorkItem,
+    correlation: { correlationId?: string },
+  ): Promise<ProjectWorkItem> {
+    if (before.archivedAt !== null) return before;
+
+    const archived = await this.tasks.archive(workspaceId, before.id);
+
+    await this.activity.record({
+      workspaceId,
+      actorId: userId,
+      action: ActivityAction.ARCHIVED,
+      entity: ActivityEntity.TASK,
+      entityId: archived.id,
+      summary: this.describe(archived, 'Archived'),
+      metadata: { projectId, workItemType: archived.type, source: 'USER' },
+    });
+
+    this.emit(ServerEvent.WORK_ITEM_UPDATED, archived, userId, {
+      changedFields: ['archivedAt'],
+      ...correlation,
+    });
+    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_ARCHIVED, archived);
+
+    return archived;
+  }
+
+  /**
+   * Every named row, in the order named — or a 404 naming none of them.
+   *
+   * Checked before anything is written so a selection that strays into another
+   * project (a stale tab, a forged id) changes nothing at all, rather than the
+   * rows that happened to come first.
+   */
+  private async findMany(
+    workspaceId: string,
+    projectId: string,
+    ids: string[],
+  ): Promise<ProjectWorkItem[]> {
+    const [tasks, tickets] = await Promise.all([
+      this.prisma.task.findMany({
+        where: { id: { in: ids }, workspaceId, projectId },
+        include: workItemTaskInclude,
+      }),
+      this.prisma.ticket.findMany({
+        where: { id: { in: ids }, workspaceId, projectId },
+        include: workItemTicketInclude,
+      }),
+    ]);
+
+    const byId = new Map<string, ProjectWorkItem>();
+    for (const task of tasks) byId.set(task.id, taskToWorkItem(task));
+    for (const ticket of tickets) byId.set(ticket.id, ticketToWorkItem(ticket));
+
+    if (byId.size !== ids.length) {
+      throw AppException.notFound(
+        'RESOURCE_NOT_FOUND',
+        'Some of those work items are not in this project.',
+      );
+    }
+
+    return ids.map((id) => byId.get(id) as ProjectWorkItem);
+  }
 
   private async find(
     workspaceId: string,
@@ -456,8 +844,13 @@ export class ProjectWorkItemService {
     if (before.description !== after.description) fields.push('description');
     if (before.status?.id !== after.status?.id) fields.push('status');
     if (before.priority?.id !== after.priority?.id) fields.push('priority');
-    if (before.dueDate !== after.dueDate) fields.push('dueDate');
-    if (before.startDate !== after.startDate) fields.push('startDate');
+    // A changed time counts as a changed date: "due date changed" is what a
+    // rule watching the deadline means, whether the day or the hour moved.
+    if (before.dueDate !== after.dueDate || before.dueAt !== after.dueAt) fields.push('dueDate');
+    if (before.startDate !== after.startDate || before.startAt !== after.startAt) {
+      fields.push('startDate');
+    }
+    if (estimateOf(before) !== estimateOf(after)) fields.push('estimatedMinutes');
 
     const assignees = (item: ProjectWorkItem) =>
       item.assignees
@@ -495,8 +888,46 @@ export class ProjectWorkItemService {
     if (before.completedAt === null && after.completedAt !== null) {
       triggers.push(AutomationTrigger.TASK_COMPLETED);
     }
+    // The fields a rule can watch on their own. Tickets raise none of these:
+    // a rule's actions operate on tasks, and the ticket triggers stay greyed.
+    if (after.type !== WorkItemType.TICKET) {
+      triggers.push(...fieldChangeTriggers(changedFields));
+    }
 
     return [...new Set(triggers)];
+  }
+
+  /** The follower link for whichever table backs this item. */
+  private linkOf(item: ProjectWorkItem) {
+    return item.type === WorkItemType.TICKET ? ticketLink(item.id) : taskLink(item.id);
+  }
+
+  /** The item as a notification names it. */
+  private refOf(item: ProjectWorkItem): ItemRef {
+    return item.details.kind === 'TICKET'
+      ? ticketRef(item.workspaceId, { id: item.id, key: item.details.key })
+      : taskRef(item.workspaceId, item);
+  }
+
+  /** Who a description names, and where its notification should lead. */
+  private mentionTarget(item: ProjectWorkItem, actorId: string) {
+    const shared = { workspaceId: item.workspaceId, actorId, entityId: item.id };
+
+    if (item.details.kind === 'TICKET') {
+      return {
+        ...shared,
+        entity: 'TICKET' as const,
+        label: item.details.key,
+        actionUrl: `/tickets?ticket=${item.details.key}`,
+      };
+    }
+
+    return {
+      ...shared,
+      entity: 'TASK' as const,
+      label: `“${item.title}”`,
+      actionUrl: `/my-tasks?task=${item.id}`,
+    };
   }
 
   private describe(item: ProjectWorkItem, verb: string): string {
@@ -536,3 +967,8 @@ export class ProjectWorkItemService {
 
 /** Kept next to the service so a repository and its caller agree on the shape. */
 export type WorkItemPrismaClient = Prisma.TransactionClient;
+
+/** A task's estimate, off its details; a ticket carries none. */
+function estimateOf(item: ProjectWorkItem): number | null {
+  return item.details.kind === 'TASK' ? item.details.estimatedMinutes : null;
+}

@@ -8,13 +8,18 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, TicketPriority, TicketStatus } from '@prisma/client';
 
 import { AppException } from '../../../common/exceptions/app.exception';
+import { normalizeRichText } from '../../../common/utils/rich-text.util';
+import { toCalendarDate } from '../../../common/utils/schedule.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { ticketToWorkItem, workItemTicketInclude } from '../lib/work-item.mapper';
 
+import { ORDER_CANDIDATE_LIMIT } from './task-work-item.repository';
+
 type TicketRow = Prisma.TicketGetPayload<{ include: typeof workItemTicketInclude }>;
 
+/** A ticket's deadline is a calendar date; whatever clock arrives is dropped. */
 const toDate = (value: string | null | undefined): Date | null | undefined =>
-  value === undefined ? undefined : value === null ? null : new Date(value);
+  value === undefined ? undefined : value === null ? null : toCalendarDate(value);
 
 /** Statuses that mean the work is finished, for the timestamps below. */
 const RESOLVED_STATUSES = new Set<TicketStatus>([TicketStatus.RESOLVED, TicketStatus.CLOSED]);
@@ -35,27 +40,72 @@ export class TicketWorkItemRepository {
     workspaceId: string,
     projectId: string,
     query: ProjectWorkItemQuery,
+    filters: readonly Prisma.TicketWhereInput[] | 'NONE' = [],
   ): Promise<TicketRow[]> {
+    // A filter a ticket can never satisfy: nothing to ask the database.
+    if (filters === 'NONE') return [];
+
     return this.prisma.ticket.findMany({
-      where: {
-        workspaceId,
-        projectId,
-        ...(query.includeArchived ? {} : { archivedAt: null }),
-        ...(query.sectionId === undefined ? {} : { sectionId: query.sectionId }),
-        ...(query.search
-          ? {
-              OR: [
-                { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } },
-                // The key too: pasting `CORE-1042` is how people look for one.
-                { key: { contains: query.search, mode: Prisma.QueryMode.insensitive } },
-              ],
-            }
-          : {}),
-      },
+      where: this.buildWhere(workspaceId, projectId, query, filters),
       include: workItemTicketInclude,
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
       take: (query.limit ?? 200) + 1,
     });
+  }
+
+  /** The ids that match, for the ordered path; see the task repository. */
+  async listIds(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectWorkItemQuery,
+    filters: readonly Prisma.TicketWhereInput[] | 'NONE',
+  ): Promise<string[]> {
+    if (filters === 'NONE') return [];
+
+    const rows = await this.prisma.ticket.findMany({
+      where: this.buildWhere(workspaceId, projectId, query, filters),
+      select: { id: true },
+      take: ORDER_CANDIDATE_LIMIT,
+    });
+    return rows.map((row) => row.id);
+  }
+
+  /** Full rows for ids already ordered, returned in that order. */
+  async hydrate(ids: readonly string[]): Promise<TicketRow[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.ticket.findMany({
+      where: { id: { in: [...ids] } },
+      include: workItemTicketInclude,
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.map((id) => byId.get(id)).filter((row): row is TicketRow => row !== undefined);
+  }
+
+  private buildWhere(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectWorkItemQuery,
+    filters: readonly Prisma.TicketWhereInput[],
+  ): Prisma.TicketWhereInput {
+    return {
+      workspaceId,
+      projectId,
+      ...(query.includeArchived ? {} : { archivedAt: null }),
+      // "Completed" for a ticket is resolved: the timestamp both RESOLVED and
+      // CLOSED carry.
+      ...(query.showCompleted === false ? { resolvedAt: null } : {}),
+      ...(query.sectionId === undefined ? {} : { sectionId: query.sectionId }),
+      ...(query.search
+        ? {
+            OR: [
+              { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } },
+              // The key too: pasting `CORE-1042` is how people look for one.
+              { key: { contains: query.search, mode: Prisma.QueryMode.insensitive } },
+            ],
+          }
+        : {}),
+      ...(filters.length > 0 ? { AND: [...filters] } : {}),
+    };
   }
 
   async create(
@@ -104,7 +154,7 @@ export class TicketWorkItemRepository {
           number,
           key: `${workspace.ticketPrefix}-${number}`,
           title: payload.title,
-          description: payload.description ?? null,
+          description: normalizeRichText(payload.description) ?? null,
           status,
           ...(this.readPriority(payload.priorityId)
             ? { priority: this.readPriority(payload.priorityId) as TicketPriority }
@@ -139,7 +189,9 @@ export class TicketWorkItemRepository {
       where: { id: ticketId },
       data: {
         ...(payload.title === undefined ? {} : { title: payload.title }),
-        ...(payload.description === undefined ? {} : { description: payload.description }),
+        ...(payload.description === undefined
+          ? {}
+          : { description: normalizeRichText(payload.description) }),
         ...(status ? { status } : {}),
         ...(this.readPriority(payload.priorityId)
           ? { priority: this.readPriority(payload.priorityId) as TicketPriority }

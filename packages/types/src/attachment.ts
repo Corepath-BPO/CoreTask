@@ -13,6 +13,8 @@ export interface Attachment {
   workspaceId: string;
   taskId: string | null;
   ticketId: string | null;
+  /** The comment this file was posted with, if any. */
+  commentId: string | null;
   filename: string;
   mimeType: string;
   /** Actual stored size, not what the uploader claimed. */

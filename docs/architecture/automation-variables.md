@@ -121,11 +121,12 @@ first cut is:
 | `RULE`  | the rule's own name, for attributing an automated comment     |
 | `FIELD` | a custom field's value on this task, by field id              |
 
-`ACTOR` needs a fallback rendering: `AutomationEvent.actorId` is explicitly null
-when a rule caused the event, so "who did this" has no answer in a cascade. A
-variable that renders as an empty string in that case would produce sentences
-with holes in them; it needs a defined substitute, decided once, rather than per
-call site.
+`ACTOR` still needs a fallback rendering. `AutomationEvent.actorId` is carried
+through a cascade — a rule's hop names the person whose change set it going,
+not null — so "who did this" usually has an answer, but an event nothing
+identifiable raised has none. A variable that renders as an empty string in
+that case would produce sentences with holes in them; it needs a defined
+substitute, decided once, rather than per call site.
 
 ## Not yet implemented
 

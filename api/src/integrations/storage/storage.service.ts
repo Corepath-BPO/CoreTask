@@ -187,6 +187,32 @@ export class StorageService implements OnModuleDestroy {
   }
 
   /**
+   * A short-lived URL that renders in place — an image inside a description.
+   *
+   * Inline is the one thing {@link presignDownload} refuses to do, and for a
+   * reason: the caller has to have checked the type first. Only raster images
+   * come through here; an SVG rendered from the storage origin can carry
+   * script.
+   */
+  async presignView(
+    objectKey: string,
+    mimeType: string,
+  ): Promise<{ url: string; expiresInSeconds: number }> {
+    const url = await getSignedUrl(
+      this.presigningClient,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        ResponseContentDisposition: 'inline',
+        ResponseContentType: mimeType,
+      }),
+      { expiresIn: DOWNLOAD_URL_TTL_SECONDS },
+    );
+
+    return { url, expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS };
+  }
+
+  /**
    * Reads back what storage holds, or null when nothing is there.
    *
    * This is the step that turns the client's declaration into a fact. Without

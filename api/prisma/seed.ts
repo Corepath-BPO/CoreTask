@@ -573,10 +573,15 @@ async function upsertTask(input: {
     : prisma.task.create({ data: input });
 }
 
+/**
+ * A calendar date, at UTC midnight — the shape every date column holds. A
+ * seeded task is "due Friday", never "due Friday at five": the time of day
+ * lives in `dueAt`, and the seed sets none.
+ */
 function daysFromNow(days: number): Date {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
-  date.setUTCHours(17, 0, 0, 0);
+  date.setUTCHours(0, 0, 0, 0);
   return date;
 }
 

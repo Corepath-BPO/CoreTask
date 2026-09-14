@@ -11,6 +11,8 @@ const createMutate = vi.fn();
 
 vi.mock('../../hooks/use-project-views', () => ({
   useCreateCustomField: () => ({ mutate: createMutate, isPending: false }),
+  // The builder reads the project's fields for a formula to name; none here.
+  useFieldMetadata: () => ({ data: undefined }),
 }));
 
 const libraryField = (overrides: Partial<CatalogCustomField> = {}): CatalogCustomField => ({
@@ -26,9 +28,7 @@ const libraryField = (overrides: Partial<CatalogCustomField> = {}): CatalogCusto
   ...overrides,
 });
 
-const open = (
-  props: Partial<Parameters<typeof CreateCustomFieldDialog>[0]> = {},
-) => {
+const open = (props: Partial<Parameters<typeof CreateCustomFieldDialog>[0]> = {}) => {
   const onCreated = vi.fn();
   const onUseExisting = vi.fn();
 
@@ -132,7 +132,10 @@ describe('CreateCustomFieldDialog', () => {
     submit();
 
     const [payload] = createMutate.mock.calls[0];
-    expect(payload.options.map((option: { label: string }) => option.label)).toEqual(['High', 'Low']);
+    expect(payload.options.map((option: { label: string }) => option.label)).toEqual([
+      'High',
+      'Low',
+    ]);
   });
 
   it('keeps the options when switching between two select types', () => {

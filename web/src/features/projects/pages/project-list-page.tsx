@@ -5,9 +5,17 @@ import { useState } from 'react';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
+import { useCurrentUser } from '@/stores/auth.store';
 
 import { ProjectListView } from '../components/project-list-view';
-import { useProjectViews, useSaveViewSettings } from '../hooks/use-project-views';
+import { SaveViewDialog } from '../components/toolbar/save-view-dialog';
+import {
+  canPersistView,
+  useActiveView,
+  useCreateProjectView,
+  useProjectViews,
+  useViewSettingsEditor,
+} from '../hooks/use-project-views';
 import { TaskDetailPanel } from '@/features/tasks/components/task-detail-dialog';
 
 /** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
@@ -16,28 +24,41 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 /**
  * The List tab.
  *
- * Column choices are held in the saved view, not in local state or
- * localStorage: someone who arranges a view on a laptop expects it on a second
- * machine, and a shared view has to look the same to everyone who opens it.
+ * Everything the toolbar changes — columns, filters, sorts, grouping, density —
+ * is held in the saved view, not in local state or localStorage: someone who
+ * arranges a view on a laptop expects it on a second machine, and a shared
+ * view has to look the same to everyone who opens it. The editor hook applies
+ * a change at once and writes it a moment later; somebody who may not write
+ * to this view keeps a draft and is offered "Save as my view" instead.
  */
 export function ProjectListPage({ projectId }: { projectId: string }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  const me = useCurrentUser();
 
   const { data: views, isLoading } = useProjectViews(workspaceId, projectId);
-  const saveSettings = useSaveViewSettings(workspaceId, projectId);
 
   /*
-   * The open panel lives in the URL, not component state: a reload restores
-   * it, the panel's Copy link can copy it, and Back closes it. Re-validated
-   * here because `useSearch({ strict: false })` returns the raw parameters —
-   * same rule as the tickets page.
+   * The open panel and the open view live in the URL, not component state: a
+   * reload restores them, the panel's Copy link can copy it, and Back closes
+   * the panel. Re-validated here because `useSearch({ strict: false })`
+   * returns the raw parameters — same rule as the tickets page.
    */
   const navigate = useNavigate();
-  const routeSearch: Partial<{ task: string }> = useSearch({ strict: false });
+  const routeSearch: Partial<{ task: string; comment: string; view: string }> = useSearch({
+    strict: false,
+  });
   const openTaskId =
     routeSearch.task && UUID_PATTERN.test(routeSearch.task) ? routeSearch.task : null;
+  const linkedCommentId =
+    openTaskId && routeSearch.comment && UUID_PATTERN.test(routeSearch.comment)
+      ? routeSearch.comment
+      : null;
+  const requestedViewId =
+    routeSearch.view && UUID_PATTERN.test(routeSearch.view) ? routeSearch.view : undefined;
+
+  const viewSearch = requestedViewId ? { view: requestedViewId } : {};
 
   /*
    * Opening pushes — Back closes the panel. Swapping tasks replaces, so Back
@@ -49,7 +70,7 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
     void navigate({
       to: '/projects/$projectId/list',
       params: { projectId },
-      search: { task: taskId },
+      search: { ...viewSearch, task: taskId },
       replace: openTaskId !== null,
       resetScroll: false,
     });
@@ -58,26 +79,19 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
     void navigate({
       to: '/projects/$projectId/list',
       params: { projectId },
-      search: {},
+      search: viewSearch,
       replace: true,
       resetScroll: false,
     });
 
-  const listView = views?.find((view) => view.type === ProjectViewType.LIST);
+  const listView = useActiveView(views, ProjectViewType.LIST, requestedViewId);
+  const canPersist = canPersistView(listView, me?.id, role);
+  const editor = useViewSettingsEditor({ workspaceId, projectId, view: listView, canPersist });
 
-  /*
-   * Applied locally as well as saved, so reordering a column is immediate
-   * rather than waiting on a round trip. The server remains the record — a
-   * failed save surfaces as a toast and the next load shows what was actually
-   * stored.
-   */
-  const [pendingColumns, setPendingColumns] = useState<ViewColumn[] | null>(null);
-  const columns = pendingColumns ?? listView?.settings.columns ?? [];
+  const [savingAs, setSavingAs] = useState(false);
+  const createView = useCreateProjectView(workspaceId, projectId);
 
-  const onColumnsChange = (next: ViewColumn[]) => {
-    setPendingColumns(next);
-    if (listView) saveSettings(listView.id, { ...listView.settings, columns: next });
-  };
+  const onColumnsChange = (next: ViewColumn[]) => editor.update({ columns: next });
 
   if (isLoading) {
     return (
@@ -95,9 +109,43 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
         workspaceId={workspaceId}
         projectId={projectId}
         canEdit={hasAtLeastRole(role, WorkspaceRole.MEMBER)}
-        columns={columns}
+        // Archiving hides work from everyone, so the bulk bar offers it to
+        // the same people the task route does.
+        canArchive={hasAtLeastRole(role, WorkspaceRole.MANAGER)}
+        columns={editor.settings.columns}
         onColumnsChange={onColumnsChange}
         onOpenTask={openTask}
+        settings={editor.settings}
+        onSettingsChange={editor.update}
+        canPersist={canPersist}
+        dirty={editor.dirty}
+        onSaveAs={() => setSavingAs(true)}
+      />
+
+      {/* A personal copy of the draft, for somebody who may not write to
+          this view. It opens at `?view=<id>` so the link keeps it. */}
+      <SaveViewDialog
+        open={savingAs}
+        pending={createView.isPending}
+        onOpenChange={setSavingAs}
+        onSave={(name) =>
+          createView.mutate(
+            { name, type: ProjectViewType.LIST, scope: 'PERSONAL', settings: editor.settings },
+            {
+              onSuccess: (created) => {
+                setSavingAs(false);
+                editor.revert();
+                void navigate({
+                  to: '/projects/$projectId/list',
+                  params: { projectId },
+                  search: { view: created.id },
+                  replace: true,
+                  resetScroll: false,
+                });
+              },
+            },
+          )
+        }
       />
 
       {/* The same task editor the board opens, slid in from the right the way
@@ -105,6 +153,7 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
       <TaskDetailPanel
         workspaceId={workspaceId}
         taskId={openTaskId}
+        linkedCommentId={linkedCommentId}
         role={role}
         projectId={projectId}
         onOpenTask={openTask}

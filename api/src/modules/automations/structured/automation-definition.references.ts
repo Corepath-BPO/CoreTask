@@ -6,6 +6,9 @@ import {
   GraphIssueLevel,
   operatorNeedsValue,
   operatorTakesMultipleValues,
+  subtaskEntries,
+  subtaskProblems,
+  subtaskTitles,
   type ConditionOperator,
 } from '@coretask/contracts';
 import type {
@@ -69,15 +72,25 @@ export const ConfigKind = {
   STATUS: 'STATUS',
   PRIORITY: 'PRIORITY',
   CUSTOM_FIELD: 'CUSTOM_FIELD',
+  /** Another live project in the workspace — where a move lands. */
+  PROJECT: 'PROJECT',
+  /**
+   * A section of the project the same action names, rather than of the
+   * rule's own. Its own kind because the lookup is scoped differently: a
+   * `SECTION` has to be in this project, and this has to be in that one.
+   */
+  PROJECT_SECTION: 'PROJECT_SECTION',
   /** A value whose shape follows the field it is being written to. */
   ANY: 'ANY',
+  /** The rows of a subtask step — titles, each with its own assignee and due date. */
+  SUBTASKS: 'SUBTASKS',
 } as const;
 export type ConfigKind = (typeof ConfigKind)[keyof typeof ConfigKind];
 
 /** The kinds that name a row, and so can be checked against the database. */
 export type ReferenceKind = Extract<
   ConfigKind,
-  'SECTION' | 'MEMBER' | 'STATUS' | 'PRIORITY' | 'CUSTOM_FIELD'
+  'SECTION' | 'MEMBER' | 'STATUS' | 'PRIORITY' | 'CUSTOM_FIELD' | 'PROJECT' | 'PROJECT_SECTION'
 >;
 
 interface ConfigField {
@@ -115,6 +128,13 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
   ],
   UNASSIGN_USER: [],
   MOVE_TO_SECTION: [{ key: 'sectionId', kind: ConfigKind.SECTION, required: true }],
+  MOVE_TO_PROJECT: [
+    { key: 'projectId', kind: ConfigKind.PROJECT, required: true },
+    // Optional: left blank, the runner lands the task in the project's first
+    // section. Under its own key so the checks that read `sectionId` as "a
+    // section of this project" never see it.
+    { key: 'targetSectionId', kind: ConfigKind.PROJECT_SECTION, required: false },
+  ],
   UPDATE_STATUS: [
     { key: 'status', aliases: ['statusDefinitionId'], kind: ConfigKind.STATUS, required: true },
   ],
@@ -128,6 +148,9 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
   ],
   SET_DUE_DATE: [{ key: 'daysFromNow', kind: ConfigKind.NUMBER, required: false }],
   CLEAR_DUE_DATE: [],
+  SET_START_DATE: [{ key: 'daysFromNow', kind: ConfigKind.NUMBER, required: false }],
+  CLEAR_START_DATE: [],
+  SET_ESTIMATE: [{ key: 'minutes', kind: ConfigKind.NUMBER, required: true }],
   SET_CUSTOM_FIELD: [
     { key: 'fieldId', aliases: ['customFieldId'], kind: ConfigKind.CUSTOM_FIELD, required: true },
     { key: 'value', kind: ConfigKind.ANY, required: false },
@@ -143,7 +166,10 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
     { key: 'title', kind: ConfigKind.TEXT, required: false },
     { key: 'body', kind: ConfigKind.TEXT, required: false },
   ],
-  CREATE_SUBTASK: [{ key: 'title', kind: ConfigKind.TEXT, required: true }],
+  CREATE_SUBTASK: [
+    // The list, or the single title the action stored before it held one.
+    { key: 'subtasks', aliases: ['title'], kind: ConfigKind.SUBTASKS, required: true },
+  ],
 };
 
 /**
@@ -173,6 +199,12 @@ export interface DefinitionReference {
   /** The branch it belongs to, or null when it came from the trigger. */
   branchId: string | null;
   path: string;
+  /**
+   * For a `PROJECT_SECTION`, the project the section has to belong to — the
+   * one the same action chose. Absent for every other kind, whose scope is
+   * the rule's own project or the workspace.
+   */
+  scope?: string;
 }
 
 /** A definition read only for the trigger and branches the checks walk. */
@@ -192,7 +224,13 @@ export interface CheckableDefinition {
 export function collectReferences(definition: CheckableDefinition): DefinitionReference[] {
   const references: DefinitionReference[] = [];
 
-  const add = (kind: ReferenceKind, value: unknown, branchId: string | null, path: string) => {
+  const add = (
+    kind: ReferenceKind,
+    value: unknown,
+    branchId: string | null,
+    path: string,
+    scope?: string,
+  ) => {
     for (const id of idsIn(value)) {
       /*
        * Only uuid-shaped values are looked up. The id columns are `@db.Uuid`,
@@ -201,7 +239,7 @@ export function collectReferences(definition: CheckableDefinition): DefinitionRe
        * message into a 500. Whether a non-uuid belongs here at all is decided
        * by `checkShapes`, which knows if the field had to be a reference.
        */
-      if (isUuid(id)) references.push({ kind, id, branchId, path });
+      if (isUuid(id)) references.push({ kind, id, branchId, path, ...(scope ? { scope } : {}) });
     }
   };
 
@@ -232,6 +270,7 @@ type AddReference = (
   value: unknown,
   branchId: string | null,
   path: string,
+  scope?: string,
 ) => void;
 
 function addConditionReferences(
@@ -270,10 +309,35 @@ function addActionReferences(
   action: AutomationActionDefinition,
 ): void {
   for (const field of ACTION_CONFIG[action.actionType] ?? []) {
+    // Each row's assignee is a member reference like the assign action's,
+    // reported against its own row so the failure names which one.
+    if (field.kind === ConfigKind.SUBTASKS) {
+      subtaskEntries(action.configuration).forEach((entry, index) => {
+        add(
+          ConfigKind.MEMBER,
+          entry.assigneeId,
+          branchId,
+          `actions.${action.id}.subtasks.${index}.assigneeId`,
+        );
+      });
+      continue;
+    }
+
     if (!isReferenceKind(field.kind)) continue;
 
     const value = valueOf(action.configuration, field);
-    if (value !== undefined) add(field.kind, value, branchId, `actions.${action.id}.${field.key}`);
+    if (value === undefined) continue;
+
+    // A target section is looked up in the project the same action chose,
+    // so the choice travels with the reference. No project chosen means the
+    // section can be checked against nothing — it is reported as unfinished
+    // by `checkAction`, not as missing here.
+    const scope =
+      field.kind === ConfigKind.PROJECT_SECTION
+        ? idsIn(action.configuration['projectId']).find(isUuid)
+        : undefined;
+
+    add(field.kind, value, branchId, `actions.${action.id}.${field.key}`, scope);
   }
 }
 
@@ -496,8 +560,14 @@ function checkAction(
   }
 
   for (const field of ACTION_CONFIG[action.actionType] ?? []) {
-    const value = valueOf(action.configuration, field);
     const path = `${base}.${field.key}`;
+
+    if (field.kind === ConfigKind.SUBTASKS) {
+      issues.push(...checkSubtasks(action.configuration, branch.id, path));
+      continue;
+    }
+
+    const value = valueOf(action.configuration, field);
 
     if (value === undefined || value === null || value === '') {
       if (field.required) {
@@ -543,6 +613,8 @@ function checkKind(
     case ConfigKind.SECTION:
     case ConfigKind.MEMBER:
     case ConfigKind.CUSTOM_FIELD:
+    case ConfigKind.PROJECT:
+    case ConfigKind.PROJECT_SECTION:
       return isUuid(value)
         ? []
         : [error('This setting has to name a real one.', branchId, path, true)];
@@ -563,6 +635,31 @@ function checkKind(
     default:
       return [];
   }
+}
+
+/**
+ * A subtask step, judged as the list it holds rather than as one entry.
+ *
+ * Empty is unfinished — the draft saves — and so is a row whose date has not
+ * been chosen yet. A date that is not one blocks the draft: no form produces
+ * it, and the runner would fail on it every time.
+ */
+function checkSubtasks(
+  configuration: Record<string, unknown>,
+  branchId: string,
+  path: string,
+): DefinitionIssue[] {
+  const issues: DefinitionIssue[] = [];
+
+  if (subtaskTitles(configuration).length === 0) {
+    issues.push(error('This action still needs to be set up.', branchId, path, false));
+  }
+
+  for (const problem of subtaskProblems(configuration)) {
+    issues.push(error(problem.message, branchId, path, !problem.incomplete));
+  }
+
+  return issues;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -594,6 +691,8 @@ function isReferenceKind(kind: ConfigKind): kind is ReferenceKind {
     kind === ConfigKind.MEMBER ||
     kind === ConfigKind.STATUS ||
     kind === ConfigKind.PRIORITY ||
-    kind === ConfigKind.CUSTOM_FIELD
+    kind === ConfigKind.CUSTOM_FIELD ||
+    kind === ConfigKind.PROJECT ||
+    kind === ConfigKind.PROJECT_SECTION
   );
 }

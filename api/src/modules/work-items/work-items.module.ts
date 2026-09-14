@@ -1,14 +1,19 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { WebsocketModule } from '../../websocket/websocket.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
+import { FollowersModule } from '../followers/followers.module';
+import { ProjectViewsModule } from '../project-views/project-views.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
 import { ProjectWorkItemService } from './project-work-item.service';
 import { TaskWorkItemRepository } from './repositories/task-work-item.repository';
 import { TicketWorkItemRepository } from './repositories/ticket-work-item.repository';
+import { WorkItemOrderRepository } from './repositories/work-item-order.repository';
 import { WorkItemsController } from './work-items.controller';
 
 /**
@@ -30,9 +35,22 @@ import { WorkItemsController } from './work-items.controller';
     ActivityLogsModule,
     AutomationEventsModule,
     WebsocketModule,
+    NotificationsIntegrationModule,
+    FollowersModule,
+    // Formula values on every row, and the one validated path a bulk edit
+    // writes field values through.
+    CustomFieldsModule,
+    // The project's field map, which a filter or sort naming a custom field
+    // is compiled against. Nothing in the views module imports this one back.
+    ProjectViewsModule,
   ],
   controllers: [WorkItemsController],
-  providers: [ProjectWorkItemService, TaskWorkItemRepository, TicketWorkItemRepository],
+  providers: [
+    ProjectWorkItemService,
+    TaskWorkItemRepository,
+    TicketWorkItemRepository,
+    WorkItemOrderRepository,
+  ],
   exports: [ProjectWorkItemService],
 })
 export class WorkItemsModule {}

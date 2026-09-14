@@ -1,5 +1,5 @@
 import { WorkspaceRole } from '@coretask/contracts';
-import type { Comment } from '@coretask/types';
+import type { Comment, CommentListMeta } from '@coretask/types';
 import {
   Body,
   Controller,
@@ -50,15 +50,20 @@ export class TaskCommentsController {
   constructor(private readonly comments: CommentsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List a task’s comments', description: 'Oldest first.' })
+  @ApiOperation({
+    summary: 'List a task’s comments',
+    description:
+      'The latest window, oldest first within it. `meta.hasEarlier` and `meta.earliestId` page backwards; the pinned comment rides in the first page.',
+  })
   @ApiPaginatedEnvelopeResponse(CommentDto)
   @ApiErrorResponseDoc(404, 'No such task in this workspace')
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') userId: string,
     @Query() query: CommentListQueryDto,
-  ): Promise<PaginatedResult<Comment>> {
-    return this.comments.listForTask(workspaceId, taskId, query);
+  ): Promise<PaginatedResult<Comment, CommentListMeta>> {
+    return this.comments.listForTask(workspaceId, userId, taskId, query);
   }
 
   @Post()
@@ -98,9 +103,10 @@ export class TicketCommentsController {
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
+    @CurrentUser('id') userId: string,
     @Query() query: CommentListQueryDto,
-  ): Promise<PaginatedResult<Comment>> {
-    return this.comments.listForTicket(workspaceId, idOrKey, query);
+  ): Promise<PaginatedResult<Comment, CommentListMeta>> {
+    return this.comments.listForTicket(workspaceId, userId, idOrKey, query);
   }
 
   @Post()
@@ -171,5 +177,66 @@ export class CommentsController {
     @CurrentWorkspace('role') role: string,
   ): Promise<{ deleted: true }> {
     return this.comments.remove(workspaceId, userId, role as WorkspaceRole, commentId);
+  }
+
+  @Post(':commentId/like')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @ApiOperation({ summary: 'Like a comment', description: 'Idempotent. Returns the comment.' })
+  @ApiEnvelopeResponse(CommentDto, { status: 201 })
+  @ApiErrorResponseDoc(404, 'No such comment in this workspace')
+  like(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<Comment> {
+    return this.comments.like(workspaceId, userId, commentId);
+  }
+
+  @Delete(':commentId/like')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Take back a like', description: 'Idempotent. Returns the comment.' })
+  @ApiEnvelopeResponse(CommentDto)
+  @ApiErrorResponseDoc(404, 'No such comment in this workspace')
+  unlike(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<Comment> {
+    return this.comments.unlike(workspaceId, userId, commentId);
+  }
+
+  @Post(':commentId/pin')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @ApiOperation({
+    summary: 'Pin a comment to the top of its thread',
+    description: 'Authors and MANAGER+. One per thread: pinning replaces the previous pin.',
+  })
+  @ApiEnvelopeResponse(CommentDto, { status: 201 })
+  @ApiErrorResponseDoc(403, 'Not the author, and not a manager')
+  @ApiErrorResponseDoc(404, 'No such comment in this workspace')
+  pin(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: string,
+  ): Promise<Comment> {
+    return this.comments.pin(workspaceId, userId, role as WorkspaceRole, commentId);
+  }
+
+  @Delete(':commentId/pin')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unpin a comment' })
+  @ApiEnvelopeResponse(CommentDto)
+  @ApiErrorResponseDoc(403, 'Not the author, and not a manager')
+  @ApiErrorResponseDoc(404, 'No such comment in this workspace')
+  unpin(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: string,
+  ): Promise<Comment> {
+    return this.comments.unpin(workspaceId, userId, role as WorkspaceRole, commentId);
   }
 }

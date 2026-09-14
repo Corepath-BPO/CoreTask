@@ -10,6 +10,7 @@ import {
 import type { TicketDetail, UpdateTicketPayload } from '@coretask/types';
 
 import { TicketPriorityBadge, TicketStatusBadge } from '@/components/data-display/status-badge';
+import { RichTextView } from '@/components/forms/rich-text-editor';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -30,10 +31,12 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel';
 import { CommentThread } from '@/features/comments/components/comment-thread';
+import { CollaboratorsRow } from '@/features/followers/components/collaborators-row';
 import { useProjects } from '@/features/projects/hooks/use-projects';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import {
   cn,
+  daysUntil,
   formatDate,
   formatDueDate,
   formatRelativeTime,
@@ -47,6 +50,8 @@ interface TicketDetailDialogProps {
   workspaceId: string | undefined;
   /** A UUID or a key such as `CORE-1001`. Null closes the dialog. */
   idOrKey: string | null;
+  /** A comment the link named: the thread scrolls to it and lights it up. */
+  linkedCommentId?: string | null | undefined;
   onClose: () => void;
   role: WorkspaceRole;
 }
@@ -56,6 +61,7 @@ const NONE = '__none__';
 export function TicketDetailDialog({
   workspaceId,
   idOrKey,
+  linkedCommentId,
   onClose,
   role,
 }: TicketDetailDialogProps) {
@@ -80,7 +86,13 @@ export function TicketDetailDialog({
         {ticket && (
           // Remounting on identity change resets every uncontrolled child, so
           // opening a second ticket cannot inherit the first one's state.
-          <TicketDetailBody key={ticket.id} ticket={ticket} workspaceId={workspaceId} role={role} />
+          <TicketDetailBody
+            key={ticket.id}
+            ticket={ticket}
+            workspaceId={workspaceId}
+            role={role}
+            linkedCommentId={linkedCommentId ?? null}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -91,10 +103,12 @@ function TicketDetailBody({
   ticket,
   workspaceId,
   role,
+  linkedCommentId,
 }: {
   ticket: TicketDetail;
   workspaceId: string | undefined;
   role: WorkspaceRole;
+  linkedCommentId: string | null;
 }) {
   const updateTicket = useUpdateTicket(workspaceId);
   const { data: members } = useWorkspaceMembers(workspaceId);
@@ -126,7 +140,11 @@ function TicketDetailBody({
       </DialogHeader>
 
       {ticket.description && (
-        <p className="whitespace-pre-wrap text-sm text-muted-foreground">{ticket.description}</p>
+        <RichTextView
+          html={ticket.description}
+          workspaceId={workspaceId}
+          className="text-muted-foreground"
+        />
       )}
 
       <Separator />
@@ -277,7 +295,7 @@ function TicketDetailBody({
                 // A finished ticket is not late; show the date, not a countdown.
                 !closed &&
                   ticket.status !== TicketStatus.RESOLVED &&
-                  new Date(ticket.dueDate) < new Date() &&
+                  daysUntil(ticket.dueDate) < 0 &&
                   'font-medium text-destructive',
               )}
             >
@@ -303,6 +321,14 @@ function TicketDetailBody({
 
       <Separator />
 
+      <CollaboratorsRow
+        workspaceId={workspaceId}
+        parent={{ kind: 'ticket', id: ticket.id }}
+        role={role}
+      />
+
+      <Separator />
+
       {/* Keyed by UUID rather than key, for the same reason as the thread. */}
       <AttachmentPanel
         workspaceId={workspaceId}
@@ -318,6 +344,8 @@ function TicketDetailBody({
         workspaceId={workspaceId}
         parent={{ kind: 'ticket', id: ticket.id }}
         role={role}
+        focusCommentId={linkedCommentId}
+        permalink={(commentId) => `/tickets?ticket=${ticket.key}&comment=${commentId}`}
       />
     </>
   );

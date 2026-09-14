@@ -10,6 +10,7 @@ import type {
 } from '@coretask/contracts';
 
 import type { PaginationMeta } from './api.js';
+import type { Attachment } from './attachment.js';
 
 /** Minimal user projection embedded in list responses. */
 export interface UserRef {
@@ -138,8 +139,14 @@ export interface Task {
   priority: TaskPriority;
   /** Fractional; only meaningful relative to siblings in the same section. */
   position: number;
+  /** The calendar date, at UTC midnight. Read the date part; never the clock. */
   startDate: string | null;
+  /** The exact start instant when a time was chosen. Null means all day. */
+  startAt: string | null;
+  /** The calendar date, at UTC midnight. Read the date part; never the clock. */
   dueDate: string | null;
+  /** The exact due instant when a time was chosen. Null means all day. */
+  dueAt: string | null;
   completedAt: string | null;
   /** Non-null means archived. */
   archivedAt: string | null;
@@ -149,6 +156,10 @@ export interface Task {
   createdById: string;
   subtaskCount: number;
   completedSubtaskCount: number;
+  /** Live comments — soft-deleted ones are not counted. */
+  commentCount: number;
+  /** Confirmed uploads only. */
+  attachmentCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -171,7 +182,11 @@ export interface CreateTaskPayload {
   priority?: TaskPriority;
   assigneeId?: string | null;
   startDate?: string | null;
+  /** Only meaningful with a `startDate`; the server clears it with the date. */
+  startAt?: string | null;
   dueDate?: string | null;
+  /** Only meaningful with a `dueDate`; the server clears it with the date. */
+  dueAt?: string | null;
   estimatedMinutes?: number | null;
   /** Insert after this sibling. `null` places it first; omitted appends. */
   afterTaskId?: string | null;
@@ -184,7 +199,9 @@ export interface UpdateTaskPayload {
   priority?: TaskPriority;
   assigneeId?: string | null;
   startDate?: string | null;
+  startAt?: string | null;
   dueDate?: string | null;
+  dueAt?: string | null;
   estimatedMinutes?: number | null;
 }
 
@@ -297,12 +314,35 @@ export interface Comment {
    * falls back to the label.
    */
   mentions: UserRef[];
+  /** Files posted with this comment. They belong to the item; the comment shows them. */
+  attachments: Attachment[];
+  likeCount: number;
+  /** Whether the person reading it has liked it. */
+  likedByMe: boolean;
+  /** The first few people who liked it, for the tooltip. */
+  likedBy: UserRef[];
+  /** Non-null when pinned to the top of its thread. */
+  pinnedAt: string | null;
+  pinnedBy: UserRef | null;
   createdAt: string;
   updatedAt: string;
 }
 
+/** A thread page: the latest window, and how to ask for the one before it. */
+export interface CommentListMeta extends PaginationMeta {
+  /** True when older comments exist beyond this page. */
+  hasEarlier: boolean;
+  /** Pass back as `before` to load the page before this one. */
+  earliestId: string | null;
+  /** The pinned comment's id, if any — it rides in the first page whatever its age. */
+  pinnedCommentId: string | null;
+}
+
 export interface CreateCommentPayload {
+  /** Rich text — the same sanitised HTML a description holds. */
   body: string;
+  /** Attachments already uploaded to the item by the author, to show under the comment. */
+  attachmentIds?: string[];
 }
 
 export interface UpdateCommentPayload {

@@ -32,6 +32,10 @@ export const attachmentsApi = {
   download: (workspaceId: string, attachmentId: string): Promise<AttachmentDownload> =>
     apiClient.get<AttachmentDownload>(ApiRoutes.attachments.download(workspaceId, attachmentId)),
 
+  /** A short-lived URL that renders inline — an image in a description. */
+  view: (workspaceId: string, attachmentId: string): Promise<AttachmentDownload> =>
+    apiClient.get<AttachmentDownload>(ApiRoutes.attachments.view(workspaceId, attachmentId)),
+
   remove: (workspaceId: string, attachmentId: string): Promise<{ deleted: boolean }> =>
     apiClient.delete<{ deleted: boolean }>(ApiRoutes.attachments.remove(workspaceId, attachmentId)),
 };

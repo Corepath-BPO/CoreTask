@@ -16,14 +16,20 @@ BullMQ queue: coretask.automation
 AutomationRunnerService.handle(event)
         │
         ├─ depth >= 5?            → SKIPPED execution, stop
-        ├─ find ACTIVE rules for (project, trigger)
-        ├─ rule caused this event? → skip that rule
-        ├─ trigger config matches?  → else skip
-        ├─ every condition holds?   → else SKIPPED with a reason
-        └─ run each action, logging every attempt
+        ├─ find ACTIVE rules for (project, trigger), oldest first
+        ├─ read the task once — the snapshot every rule's conditions see
+        └─ for each rule:
+             ├─ rule caused this event? → skip that rule
+             ├─ trigger config matches?  → else skip
+             ├─ every condition holds against the snapshot? → else SKIPPED with a reason
+             └─ run each action against the live row, logging every attempt
                 ▼
         AutomationExecution + AutomationExecutionLog rows
         ActivityLog entry naming the rule
+                │
+                ▼
+        Events for what the actions changed → AutomationProcessor publishes
+        them back onto the queue, one hop deeper, tagged with the rule
 ```
 
 **Rules never run inside the request that triggered them.** A rule with four
@@ -31,15 +37,24 @@ actions must not add its latency to the click that caused it, and a failing rule
 must not fail the user's own edit. `AutomationEventPublisher` never throws for
 the same reason: a queue outage degrades automation, it does not break editing.
 
+**Rules on one event cannot see each other's writes.** The task is read once,
+before the first rule runs, and every rule's conditions are judged against that
+copy. What a rule's actions change reaches the other rules only as the follow-on
+event those actions raise, one hop deeper, where the chaining guards apply.
+Without this, four "when completed in this column, move to the next" rules
+walked a task through every column inside one execution at depth zero,
+invisible to every guard. Actions do share the live row, so a second rule that
+applies writes on top of what the first left rather than over it.
+
 ## Module layout, and why it is split
 
 Three modules where one would seem simpler:
 
-| Module                   | Depends on                  | Used by                                      |
-| ------------------------ | --------------------------- | -------------------------------------------- |
-| `AutomationEventsModule` | the queue only              | `TasksModule` — anything that changes a task |
-| `AutomationRunnerModule` | Prisma only                 | `WorkerModule`                               |
-| `AutomationsModule`      | Projects, workspace members | the API, for rule CRUD                       |
+| Module                   | Depends on                  | Used by                                                                                       |
+| ------------------------ | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `AutomationEventsModule` | the queue only              | `TasksModule` — anything that changes a task; `WorkerModule`, to announce what a rule changed |
+| `AutomationRunnerModule` | Prisma only                 | `WorkerModule`                                                                                |
+| `AutomationsModule`      | Projects, workspace members | the API, for rule CRUD                                                                        |
 
 The split is not tidiness. Importing a full domain module into the worker stopped
 it booting during the attachments milestone — `TasksService` pulls in
@@ -67,12 +82,52 @@ through every rule's nodes.
 - the trigger is one the engine understands
 - there is at least one action
 - every action is one the engine can run
+- every action has the setting it cannot run without — a section to move to,
+  somebody to assign, a status, a field, the text of a comment
 - a section named in the trigger still exists
 
 Each of these otherwise fails **silently at run time** — a rule with no action
 does nothing, one naming a deleted section never matches, and an unrunnable
 action would report success for something that never happened. All problems are
 returned at once so a builder can show them together.
+
+## The rule library
+
+The same rule is wanted in project after project — "assign the lead when a task
+lands in Review" is one rule everywhere, with a different Review. `duplicate`
+copies a rule beside itself; the library (`AutomationTemplate`,
+`library/automation-templates.service.ts`) is how a rule crosses to another
+project.
+
+**A template is a snapshot, not a link.** The graph is copied into a
+workspace-scoped row when somebody saves it, and the rule goes on being edited,
+paused and archived without touching it. A template that changed under everyone
+who had already used it would be a rule nobody wrote. It is stored as JSON in
+the shape `POST /automations` accepts rather than as node rows: a template is
+never executed, validated in place or edited, only read whole and written into a
+new draft, so a second node table would be structure with no query to serve.
+
+**Ids are translated on the way in, by name.** A rule's sections, statuses,
+custom fields and options are ids from the project it was saved in. The service
+records the names behind them at save time (the `references` column), and
+`apply` matches each against the target project: kept when the project has the
+same row, matched by name when it does not, otherwise cleared and reported. The
+names are recorded rather than looked up later because the source project may
+have renamed or deleted them by then — the template is the record of what the
+rule meant. Members and priorities are workspace-wide and travel as they are.
+
+**Apply creates a draft, never a live rule.** What could not be matched is left
+blank and listed in the response, the builder shows the blanks as unanswered
+steps, and `publish` refuses an action missing its setting — which is the only
+reason that refusal exists on the structural validator at all. Refusing the
+apply instead would make the library useless for exactly the rules it is for.
+
+**Starters are the client's, not the database's.** The library dialog also
+offers a fixed list of common rules (`web/src/features/automations/lib/
+starter-templates.ts`). A starter names no section, person or field, so nothing
+about it belongs to a workspace; choosing one opens the builder with the shape
+drawn and the blanks unanswered, and nothing is written until the draft is
+saved. The server never sees a starter as such.
 
 ## Loop protection
 
@@ -95,6 +150,17 @@ Plus `MAX_ACTIONS_PER_EXECUTION` (25) as a backstop on a single runaway rule.
 
 A stopped chain writes a `SKIPPED` execution with a reason. A silent halt would
 be indistinguishable from a rule that never matched.
+
+## Subtask roll-up
+
+`TASK_COMPLETED` fires for the task itself, and — the other half of the
+trigger's label — for a parent whose last open subtask was just completed. The
+request paths never look at siblings; `AutomationRunnerService.subtaskRollup`
+works it out from the subtask's own event and raises the same event again for
+the parent, on the same correlation id and at the same depth, since a person
+finishing the last subtask is still a person doing it. The parent is not marked
+complete by this. The event carries `allSubtasksCompleted: true`, and the
+"completion status" condition reads that as well as the task's own column.
 
 ## Outcomes
 
@@ -137,9 +203,6 @@ detail already lives in `AutomationExecutionLog` for anyone debugging.
 - **Branches and delays are modelled but not executed.** `AutomationNodeType`
   includes `BRANCH` and `DELAY`; the runner ignores both. Publishing a rule
   containing one will succeed and the node will be skipped.
-- **Cascades are not re-published.** An action that changes a task does not
-  currently emit a follow-on event, so a rule cannot yet trigger another rule.
-  The depth and correlation plumbing exists for when it does.
 - **Ticket triggers are declared but not wired.** `TICKET_CREATED` and
   `TICKET_STATUS_CHANGED` are in the contract; `TicketsService` does not publish.
 - **Actions listed in `PLANNED_ACTIONS`** (email, webhook, delay, and the rest)

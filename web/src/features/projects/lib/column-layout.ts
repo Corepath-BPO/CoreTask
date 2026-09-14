@@ -66,6 +66,36 @@ export function columnWidth(column: ViewColumn): number {
 }
 
 /**
+ * Shows or hides a column.
+ *
+ * The task name is the row's identity and its link to the detail dialog;
+ * hiding it would leave a table of attributes belonging to nothing, so it is
+ * never toggled off.
+ */
+export function toggleColumn(columns: ViewColumn[], field: string): ViewColumn[] {
+  if (field === SystemField.TITLE) return columns;
+  return columns.some((column) => column.field === field)
+    ? columns.filter((column) => column.field !== field)
+    : [...columns, { field }];
+}
+
+/** Moves a column one place up or down the list; a no-op at either end. */
+export function moveColumnBy(
+  columns: ViewColumn[],
+  field: string,
+  direction: -1 | 1,
+): ViewColumn[] {
+  const index = columns.findIndex((column) => column.field === field);
+  const target = index + direction;
+  if (index === -1 || target < 0 || target >= columns.length) return columns;
+
+  const next = [...columns];
+  const [moved] = next.splice(index, 1);
+  if (moved) next.splice(target, 0, moved);
+  return next;
+}
+
+/**
  * The Task column's own floor. It holds the expander, the drag handle and the
  * only text identifying the row — at the general 60px minimum a drag can
  * crush it into a sliver of nothing, so it stops earlier.

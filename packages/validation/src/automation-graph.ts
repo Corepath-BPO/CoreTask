@@ -5,7 +5,10 @@ import {
   BranchKey,
   GraphIssueLevel,
   isFallbackBranch,
+  DIRECT_OPERATOR_VALUE_KIND,
+  isDirectOperator,
   OPERATORS_BY_VALUE_KIND,
+  operatorNeedsValue,
   operatorTakesValue,
   toFilterOperator,
   PLACEHOLDER_NODE_TYPE,
@@ -14,8 +17,6 @@ import {
   type ConditionValueKind,
 } from '@coretask/contracts';
 import { z } from 'zod';
-
-import { uuidSchema } from './common.js';
 
 /* -------------------------------------------------------------------------- */
 /* Wire schemas                                                                */
@@ -212,6 +213,23 @@ export function validateGraphStructure(
   }
 
   /*
+   * An action with its setting missing.
+   *
+   * "Move to a section" with no section, "Assign" with nobody named: each
+   * published, went ACTIVE, and failed on every run with a message in an
+   * execution log nobody was watching — the same silence as an unanswered
+   * condition, from the other side of the rule. The canvas already draws the
+   * gap as an "Unspecified" chip; this is what makes the chip a reason Publish
+   * is off rather than a decoration. It is also what a rule started from the
+   * library relies on: a reference the new project could not match is left
+   * blank on purpose, and blank has to mean "not yet publishable".
+   */
+  for (const node of actions) {
+    const missing = missingActionSetting(node.subtype, node.configuration ?? {});
+    if (missing) error(missing.message, node.id, missing.path);
+  }
+
+  /*
    * A question nobody answered.
    *
    * The builder starts a rule with a condition card already on the canvas, so
@@ -294,6 +312,73 @@ export function validateGraphStructure(
   for (const issue of validateFallback(nodes)) issues.push(issue);
 
   return issues;
+}
+
+/**
+ * What each action cannot run without, under the keys the runner reads.
+ *
+ * Only the setting whose absence is a failure, not every setting. A due date
+ * with no offset means today, a notification with nobody named goes to the
+ * assignee, a subtask step is checked for titles by the server — those are
+ * rules, not gaps, and refusing them would refuse what somebody built. Both
+ * spellings where two are in circulation: the runner reads either, and a rule
+ * stored under the older one must not stop publishing on the release that
+ * added this check.
+ */
+const ACTION_REQUIREMENTS: Readonly<
+  Record<string, { keys: readonly string[]; path: string; message: string }>
+> = {
+  ASSIGN_USER: { keys: ['userId', 'assigneeId'], path: 'userId', message: 'Choose who to assign.' },
+  MOVE_TO_SECTION: {
+    keys: ['sectionId'],
+    path: 'sectionId',
+    message: 'Choose a section to move to.',
+  },
+  // The section is optional — left blank, the task lands in the project's
+  // first section — so only the project is what the move cannot do without.
+  MOVE_TO_PROJECT: {
+    keys: ['projectId'],
+    path: 'projectId',
+    message: 'Choose a project to move to.',
+  },
+  UPDATE_STATUS: {
+    keys: ['status', 'statusDefinitionId'],
+    path: 'status',
+    message: 'Choose a status.',
+  },
+  UPDATE_PRIORITY: {
+    keys: ['priority', 'priorityDefinitionId'],
+    path: 'priority',
+    message: 'Choose a priority.',
+  },
+  SET_CUSTOM_FIELD: {
+    keys: ['fieldId', 'customFieldId'],
+    path: 'fieldId',
+    message: 'Choose a field to set.',
+  },
+  ADD_COMMENT: { keys: ['body'], path: 'body', message: 'Write the comment.' },
+  SET_ESTIMATE: { keys: ['minutes'], path: 'minutes', message: 'Enter the estimate in minutes.' },
+};
+
+/**
+ * The setting an action is missing, or null when it has what it needs.
+ *
+ * An action this table does not know is not refused here — whether it exists
+ * at all is the server's question, and it asks it in its own words.
+ */
+export function missingActionSetting(
+  subtype: string,
+  configuration: Record<string, unknown>,
+): { path: string; message: string } | null {
+  const requirement = ACTION_REQUIREMENTS[subtype];
+  if (!requirement) return null;
+
+  const present = requirement.keys.some((key) => {
+    const value = configuration[key];
+    return typeof value === 'string' ? value.trim() !== '' : value !== undefined && value !== null;
+  });
+
+  return present ? null : { path: requirement.path, message: requirement.message };
 }
 
 /**
@@ -425,6 +510,13 @@ function validateBranches(nodes: readonly ValidatableNode[]): GraphIssue[] {
  */
 export function operatorFitsValueKind(operator: string, kind: ConditionValueKind): boolean {
   /*
+   * The runner's own comparisons fit exactly the kind they are about — a
+   * checkbox is checked, a number is between two others, a date is today —
+   * and have no filter to translate to, so they are answered first.
+   */
+  if (isDirectOperator(operator)) return DIRECT_OPERATOR_VALUE_KIND[operator] === kind;
+
+  /*
    * Translated first, because the builder and this table name the same
    * comparison differently.
    *
@@ -488,9 +580,18 @@ export function validateCondition(
     });
   }
 
-  // Also translated: "is one of" with no sections chosen has to be caught as a
-  // missing value, not waved through because the name was unrecognised.
-  if (operatorTakesValue(toFilterOperator(operator) ?? (operator as FilterOperator))) {
+  /*
+   * Also translated: "is one of" with no sections chosen has to be caught as a
+   * missing value, not waved through because the name was unrecognised. A
+   * direct comparison answers for itself, having no filter to translate to:
+   * "is checked" and "is today" carry their whole question in the operator,
+   * "between" and "within the next" do not.
+   */
+  const takesValue = isDirectOperator(operator)
+    ? operatorNeedsValue(operator)
+    : operatorTakesValue(toFilterOperator(operator) ?? (operator as FilterOperator));
+
+  if (takesValue) {
     const value = configuration['value'];
 
     if (value === undefined || value === null || value === '') {

@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
+import { FollowersModule } from '../followers/followers.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
 import { TicketsController } from './tickets.controller';
@@ -14,6 +15,7 @@ import { TicketsService } from './tickets.service';
     WorkspaceMembersModule,
     ActivityLogsModule,
     NotificationsIntegrationModule,
+    FollowersModule,
   ],
   controllers: [TicketsController],
   providers: [TicketsService],

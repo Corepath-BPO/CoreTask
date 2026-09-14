@@ -10,11 +10,13 @@ import {
 
 type Node = Parameters<typeof validateGraphStructure>[0][number];
 
+// An action that has what it needs: the check for a missing setting is its own
+// test below, and every other test is about something else.
 const node = (over: Partial<Node> = {}): Node => ({
   id: 'n-1',
   type: AutomationNodeType.ACTION,
   subtype: 'ASSIGN_USER',
-  configuration: {},
+  configuration: { userId: 'user-1' },
   parentId: 'trigger-1',
   branchKey: null,
   ...over,
@@ -109,6 +111,47 @@ describe('graph structure', () => {
     expect(messages([trigger(), node({ id: 'p', type: 'PLACEHOLDER' })])).toContain(
       'Finish choosing this action, or remove it.',
     );
+  });
+
+  it('refuses an action missing what it cannot run without', () => {
+    // Each of these used to publish and fail on every run.
+    expect(messages([trigger(), node({ configuration: {} })])).toContain('Choose who to assign.');
+    expect(messages([trigger(), node({ configuration: { userId: '  ' } })])).toContain(
+      'Choose who to assign.',
+    );
+    expect(
+      messages([trigger(), node({ subtype: 'MOVE_TO_SECTION', configuration: {} })]),
+    ).toContain('Choose a section to move to.');
+    expect(
+      messages([trigger(), node({ subtype: 'MOVE_TO_PROJECT', configuration: {} })]),
+    ).toContain('Choose a project to move to.');
+    expect(
+      messages([trigger(), node({ subtype: 'UPDATE_STATUS', configuration: { status: '' } })]),
+    ).toContain('Choose a status.');
+    expect(
+      messages([trigger(), node({ subtype: 'SET_CUSTOM_FIELD', configuration: {} })]),
+    ).toContain('Choose a field to set.');
+    expect(messages([trigger(), node({ subtype: 'ADD_COMMENT', configuration: {} })])).toContain(
+      'Write the comment.',
+    );
+  });
+
+  it('accepts a setting under its older spelling, and an action that needs none', () => {
+    const errors = (nodes: Node[]) =>
+      validateGraphStructure(nodes, 'A rule').filter((issue) => issue.level === 'ERROR');
+
+    expect(errors([trigger(), node({ configuration: { assigneeId: 'user-1' } })])).toEqual([]);
+    expect(
+      errors([
+        trigger(),
+        node({ subtype: 'UPDATE_STATUS', configuration: { statusDefinitionId: 'IN_PROGRESS' } }),
+      ]),
+    ).toEqual([]);
+    // No offset means today; nobody named means the assignee. Rules, not gaps.
+    expect(errors([trigger(), node({ subtype: 'SET_DUE_DATE', configuration: {} })])).toEqual([]);
+    expect(
+      errors([trigger(), node({ subtype: 'SEND_IN_APP_NOTIFICATION', configuration: {} })]),
+    ).toEqual([]);
   });
 
   it('refuses a step with no parent, among steps that have one', () => {
@@ -405,5 +448,51 @@ describe('condition configuration', () => {
     );
 
     expect(issues.filter((issue) => issue.nodeId === 'c')).toEqual([]);
+  });
+});
+
+/*
+ * The runner's own comparisons — no filter to translate to, so they are fitted
+ * to a kind by name. A checkbox is checked, a number is between, a date is
+ * today; the same comparison on any other kind is refused the way "date
+ * contains high" is.
+ */
+describe('the direct comparisons', () => {
+  it('fit exactly the kind they are about', () => {
+    expect(operatorFitsValueKind('IS_CHECKED', ConditionValueKind.BOOLEAN)).toBe(true);
+    expect(operatorFitsValueKind('IS_NOT_CHECKED', ConditionValueKind.BOOLEAN)).toBe(true);
+    expect(operatorFitsValueKind('IS_CHECKED', ConditionValueKind.DATE)).toBe(false);
+    expect(operatorFitsValueKind('BETWEEN', ConditionValueKind.NUMBER)).toBe(true);
+    expect(operatorFitsValueKind('BETWEEN', ConditionValueKind.TEXT)).toBe(false);
+    expect(operatorFitsValueKind('IS_TODAY', ConditionValueKind.DATE)).toBe(true);
+    expect(operatorFitsValueKind('IS_OVERDUE', ConditionValueKind.DATE)).toBe(true);
+    expect(operatorFitsValueKind('IS_WITHIN_NEXT', ConditionValueKind.DATE)).toBe(true);
+    expect(operatorFitsValueKind('IS_OVERDUE', ConditionValueKind.BOOLEAN)).toBe(false);
+  });
+
+  it('accept the inclusive bounds on a number', () => {
+    // Offered by the builder and translated by the table, then refused here —
+    // so "estimate is at least 30" could be built and could not be published.
+    expect(operatorFitsValueKind('GREATER_THAN_OR_EQUAL', ConditionValueKind.NUMBER)).toBe(true);
+    expect(operatorFitsValueKind('LESS_THAN_OR_EQUAL', ConditionValueKind.NUMBER)).toBe(true);
+    expect(operatorFitsValueKind('GREATER_THAN_OR_EQUAL', ConditionValueKind.DATE)).toBe(false);
+  });
+
+  it('pass a checkbox condition written the way the builder writes it', () => {
+    // No value: "is checked" carries its whole question in the operator.
+    expect(
+      validateCondition(
+        { field: 'completed', operator: 'IS_CHECKED' },
+        ConditionValueKind.BOOLEAN,
+        'n-1',
+      ),
+    ).toEqual([]);
+    expect(
+      validateCondition(
+        { field: 'dueDate', operator: 'IS_WITHIN_NEXT', value: '3' },
+        ConditionValueKind.DATE,
+        'n-1',
+      ),
+    ).toEqual([]);
   });
 });

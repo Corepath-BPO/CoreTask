@@ -16,11 +16,18 @@ import { Prisma, type Ticket as PrismaTicket } from '@prisma/client';
 import { AppException } from '../../common/exceptions/app.exception';
 import { PaginatedResult } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
+import { normalizeRichText } from '../../common/utils/rich-text.util';
+import { toCalendarDate } from '../../common/utils/schedule.util';
 import { PrismaService } from '../../database/prisma.service';
+import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
+import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { diffItemStories, snapshotFromTicket } from '../activity-logs/item-stories';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
+import { FollowersService } from '../followers/followers.service';
+import { ticketLink, ticketRef } from '../followers/item-ref';
 
 import type { CreateTicketDto, TicketListQueryDto, UpdateTicketDto } from './dto/ticket.dto';
 import {
@@ -43,6 +50,9 @@ export class TicketsService {
     private readonly realtime: RealtimeGateway,
     private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
+    private readonly mentions: DescriptionMentionNotifier,
+    private readonly followers: FollowersService,
+    private readonly followerNotifier: FollowerNotifier,
   ) {}
 
   async list(
@@ -119,7 +129,7 @@ export class TicketsService {
           number,
           key: `${workspace.ticketPrefix}-${number}`,
           title: dto.title,
-          description: dto.description ?? null,
+          description: normalizeRichText(dto.description) ?? null,
           ...(dto.type ? { type: dto.type } : {}),
           status,
           ...(dto.priority ? { priority: dto.priority } : {}),
@@ -146,6 +156,11 @@ export class TicketsService {
     const ticket = toTicketDto(created);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_CREATED, ticket);
 
+    await this.followers.ensure(workspaceId, ticketLink(created.id), [
+      created.reporterId,
+      created.assigneeId,
+    ]);
+
     if (created.projectId) {
       await this.automation.publish({
         workspaceId,
@@ -159,6 +174,16 @@ export class TicketsService {
     }
 
     await this.notifyAssignment(workspaceId, userId, created, null);
+    await this.mentions.notify({
+      workspaceId,
+      actorId: userId,
+      entity: 'TICKET',
+      entityId: created.id,
+      label: created.key,
+      actionUrl: `/tickets?ticket=${created.key}`,
+      before: null,
+      after: created.description,
+    });
     this.logger.log({ ticketId: created.id, key: created.key }, 'Ticket created');
 
     return ticket;
@@ -177,7 +202,7 @@ export class TicketsService {
 
     const data: Prisma.TicketUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
-    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.description !== undefined) data.description = normalizeRichText(dto.description);
     if (dto.type !== undefined) data.type = dto.type;
     if (dto.priority !== undefined) data.priority = dto.priority;
     if (dto.severity !== undefined) data.severity = dto.severity;
@@ -208,20 +233,64 @@ export class TicketsService {
       include: ticketInclude,
     });
 
-    await this.activity.record({
+    const previousAssignee =
+      existing.assigneeId && existing.assigneeId !== updated.assigneeId
+        ? await this.prisma.user.findUnique({
+            where: { id: existing.assigneeId },
+            select: { id: true, name: true },
+          })
+        : updated.assignee;
+    const stories = diffItemStories(
+      snapshotFromTicket(existing, {
+        assignee:
+          existing.assigneeId && previousAssignee
+            ? { id: previousAssignee.id, label: previousAssignee.name }
+            : null,
+      }),
+      snapshotFromTicket(updated, {
+        assignee: updated.assignee
+          ? { id: updated.assignee.id, label: updated.assignee.name }
+          : null,
+      }),
+      'ticket',
+    );
+    const context = {
       workspaceId,
       actorId: userId,
-      action: statusChanged ? ActivityAction.STATUS_CHANGED : ActivityAction.UPDATED,
       entity: ActivityEntity.TICKET,
       entityId: existing.id,
-      summary: statusChanged
-        ? `Moved ${updated.key} to ${humanize(dto.status as TicketStatus)}`
-        : `Updated ${updated.key}`,
-      metadata: { fields: Object.keys(data) },
-    });
+    };
+    if (stories.length > 0) {
+      await this.activity.recordStories(context, stories);
+    } else {
+      await this.activity.record({
+        ...context,
+        action: ActivityAction.UPDATED,
+        summary: `Updated ${updated.key}`,
+        metadata: { fields: Object.keys(data) },
+      });
+    }
 
     const ticket = toTicketDto(updated);
     this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_UPDATED, ticket);
+
+    if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
+      await this.followers.ensure(workspaceId, ticketLink(updated.id), [updated.assigneeId]);
+    }
+    await this.followerNotifier.notifyStories(ticketRef(workspaceId, updated), userId, stories);
+
+    if (dto.description !== undefined) {
+      await this.mentions.notify({
+        workspaceId,
+        actorId: userId,
+        entity: 'TICKET',
+        entityId: updated.id,
+        label: updated.key,
+        actionUrl: `/tickets?ticket=${updated.key}`,
+        before: existing.description,
+        after: updated.description,
+      });
+    }
 
     if (statusChanged && updated.projectId) {
       await this.automation.publish({
@@ -431,11 +500,8 @@ export class TicketsService {
   }
 }
 
+/** A ticket's deadline is a calendar date; whatever clock arrives is dropped. */
 function toDate(value: string | null | undefined): Date | null | undefined {
   if (value === undefined) return undefined;
-  return value === null ? null : new Date(value);
-}
-
-function humanize(value: string): string {
-  return value.replace(/_/g, ' ').toLowerCase();
+  return value === null ? null : toCalendarDate(value);
 }

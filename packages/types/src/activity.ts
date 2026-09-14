@@ -10,9 +10,22 @@ export interface ActivityEntry {
   entity: ActivityEntity;
   entityId: string;
   summary: string;
+  /**
+   * What changed, in one of the story shapes from `@coretask/contracts`
+   * (`FieldStoryMetadata` and friends). Readers that do not know the shape
+   * fall back to `summary`.
+   */
+  metadata?: Record<string, unknown> | null;
   /** Null for system-generated activity: jobs, automations, scheduled work. */
   actor: UserRef | null;
   createdAt: string;
+}
+
+/** One page of a task's or ticket's own stories, newest first. */
+export interface ItemActivityPage {
+  items: ActivityEntry[];
+  /** Pass back as `before` for older stories; null when there are none. */
+  nextCursor: string | null;
 }
 
 export interface NotificationEntry {

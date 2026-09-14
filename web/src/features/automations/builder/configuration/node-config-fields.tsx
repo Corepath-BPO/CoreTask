@@ -1,5 +1,6 @@
 import {
   AUTOMATION_VALUE_TOKEN_LABEL,
+  CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
   isTokenValue,
   operatorNeedsValue,
@@ -9,11 +10,22 @@ import {
   type ConditionValueType,
 } from '@coretask/contracts';
 import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
+import { ChevronDown, X } from 'lucide-react';
+import { useState } from 'react';
 
 import { Field } from '@/components/forms/field';
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
@@ -35,6 +47,7 @@ import {
   readTriggerSections,
 } from './trigger-forms';
 import { RadioItem } from './radio-item';
+import { SubtaskListFields } from './subtask-list-fields';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
 /*
@@ -132,6 +145,18 @@ function TriggerFields({
   const forms = formsForTrigger(subtype, metadata);
   const form = readTriggerForm(configuration, forms);
 
+  // Which field to watch — or every field, which is what no fieldId stores and
+  // what every rule saved before the narrowing existed still means.
+  if (subtype === 'CUSTOM_FIELD_CHANGED') {
+    return (
+      <CustomFieldTriggerFields
+        configuration={configuration}
+        metadata={metadata}
+        onChange={onChange}
+      />
+    );
+  }
+
   // Most triggers fire on the whole project. A form of disabled controls would
   // make somebody read it before finding out there was nothing to answer.
   if (forms.length === 0 || !form) {
@@ -225,6 +250,49 @@ function TriggerFields({
   );
 }
 
+/*
+ * A Radix select cannot hold `value=""` on an item, and "watch every field" is
+ * an answer somebody must be able to give — so it gets a token of its own,
+ * translated to an absent `fieldId` at the write.
+ */
+const ANY_FIELD = 'ANY';
+
+/** Which custom field a CUSTOM_FIELD_CHANGED trigger watches, if not all. */
+function CustomFieldTriggerFields({
+  configuration,
+  metadata,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  metadata: AutomationMetadata | undefined;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const fieldId = typeof configuration['fieldId'] === 'string' ? configuration['fieldId'] : '';
+
+  return (
+    <Field label="Field" htmlFor="trigger-field">
+      <Select
+        value={fieldId === '' ? ANY_FIELD : fieldId}
+        onValueChange={(next) =>
+          onChange({ ...configuration, fieldId: next === ANY_FIELD ? undefined : next })
+        }
+      >
+        <SelectTrigger id="trigger-field" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <RadioItem value={ANY_FIELD}>Any custom field</RadioItem>
+          {(metadata?.customFields ?? []).map((field) => (
+            <RadioItem key={field.id} value={field.id}>
+              {field.name}
+            </RadioItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Check if                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -305,7 +373,7 @@ function ConditionFields({
           <SelectContent>
             {operators.map((entry) => (
               <RadioItem key={entry} value={entry}>
-                {operatorOptionLabel(definition?.label ?? '', entry)}
+                {operatorOptionLabel(definition, entry)}
               </RadioItem>
             ))}
           </SelectContent>
@@ -318,10 +386,14 @@ function ConditionFields({
         valueType &&
         operator !== '' &&
         operatorNeedsValue(operator as ConditionOperator) && (
-          <Field label={valueFieldLabel(definition, valueType, multiple)} htmlFor="condition-value">
+          <Field
+            label={valueFieldLabel(definition, valueType, multiple, operator)}
+            htmlFor="condition-value"
+          >
             <ConditionValue
               definition={definition}
               valueType={valueType}
+              operator={operator}
               multiple={multiple}
               values={values}
               metadata={metadata}
@@ -346,6 +418,7 @@ function ConditionFields({
 function ConditionValue({
   definition,
   valueType,
+  operator,
   multiple,
   values,
   metadata,
@@ -353,12 +426,32 @@ function ConditionValue({
 }: {
   definition: ConditionFieldDefinition;
   valueType: ConditionValueType;
+  operator: string;
   multiple: boolean;
   values: string[];
   metadata: AutomationMetadata | undefined;
   onChange: (values: string[]) => void;
 }) {
   const options = choiceOptions(definition, valueType, metadata);
+
+  /*
+   * "Within the next…" is a count of days, whatever the field holds: the date
+   * is the thing compared and today is the other side, so how far ahead to
+   * look is the only value to ask for — and a date box here would take a date
+   * the runner then read as a number.
+   */
+  if (operator === CONDITION_OPERATOR.IS_WITHIN_NEXT) {
+    return (
+      <Input
+        id="condition-value"
+        type="number"
+        min={0}
+        step={1}
+        value={values[0] ?? ''}
+        onChange={(event) => onChange(event.target.value === '' ? [] : [event.target.value])}
+      />
+    );
+  }
 
   if (options) {
     return multiple ? (
@@ -451,7 +544,13 @@ function choiceOptions(
   if (!definition.options) return null;
 
   if (valueType !== CONDITION_VALUE_TYPE.PEOPLE) {
-    return definition.options.map((option) => ({ value: option.value, label: option.label }));
+    // The colour comes along where the option has one, so the list offers the
+    // same tinted chip the board shows the value as.
+    return definition.options.map((option) => ({
+      value: option.value,
+      label: option.label,
+      ...(option.colorToken ? { colorToken: option.colorToken } : {}),
+    }));
   }
 
   const faces = new Map((metadata?.members ?? []).map((member) => [member.id, member.avatarUrl]));
@@ -492,10 +591,19 @@ function ActionFields({
 
   const set = (key: string, value: unknown) => onChange({ ...configuration, [key]: value });
 
+  // Numbers are stored as numbers — the runner does `Number(config.daysFromNow)`
+  // and the validator checks the kind — and typed as text.
+  const readNumber = (key: string): string => {
+    const value = configuration[key];
+    return typeof value === 'number' ? String(value) : typeof value === 'string' ? value : '';
+  };
+  const setNumber = (key: string, raw: string) =>
+    onChange({ ...configuration, [key]: raw === '' ? undefined : Number(raw) });
+
   const picker = (
     key: string,
     label: string,
-    options: { id: string; name: string }[] | undefined,
+    options: { id: string; name: string; colorToken?: string }[] | undefined,
     placeholder: string,
   ) => (
     <Field label={label} htmlFor={`step-${key}`}>
@@ -506,7 +614,13 @@ function ActionFields({
         <SelectContent>
           {(options ?? []).map((option) => (
             <RadioItem key={option.id} value={option.id}>
-              {option.name}
+              <OptionFace
+                option={{
+                  value: option.id,
+                  label: option.name,
+                  ...(option.colorToken ? { colorToken: option.colorToken } : {}),
+                }}
+              />
             </RadioItem>
           ))}
         </SelectContent>
@@ -525,6 +639,15 @@ function ActionFields({
 
     case 'MOVE_TO_SECTION':
       return picker('sectionId', 'Section', metadata?.sections, 'Choose a section');
+
+    case 'MOVE_TO_PROJECT':
+      return (
+        <MoveToProjectFields
+          configuration={configuration}
+          metadata={metadata}
+          onChange={onChange}
+        />
+      );
 
     /*
      * `status`, not `statusDefinitionId`.
@@ -552,6 +675,45 @@ function ActionFields({
         />
       );
 
+    /*
+     * A count of days, not a date: "due in three days" stays meaningful for as
+     * long as the rule exists, where a fixed date is stale the week after. The
+     * due-date step had no form at all, so the action could only ever set
+     * today.
+     */
+    case 'SET_DUE_DATE':
+    case 'SET_START_DATE':
+      return (
+        <Field
+          label="Days from now"
+          htmlFor="step-daysFromNow"
+          hint="0 sets it to the day the rule runs."
+        >
+          <Input
+            id="step-daysFromNow"
+            type="number"
+            min={0}
+            step={1}
+            value={readNumber('daysFromNow')}
+            onChange={(event) => setNumber('daysFromNow', event.target.value)}
+          />
+        </Field>
+      );
+
+    case 'SET_ESTIMATE':
+      return (
+        <Field label="Minutes" htmlFor="step-minutes">
+          <Input
+            id="step-minutes"
+            type="number"
+            min={0}
+            step={1}
+            value={readNumber('minutes')}
+            onChange={(event) => setNumber('minutes', event.target.value)}
+          />
+        </Field>
+      );
+
     case 'ADD_COMMENT':
       return (
         <Field label="Comment" htmlFor="step-body">
@@ -565,9 +727,188 @@ function ActionFields({
         </Field>
       );
 
+    case 'CREATE_SUBTASK':
+      return (
+        <SubtaskListFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;
   }
+}
+
+/** The one answer "Choose an option" has. */
+const MOVE_OPTION = 'MOVE';
+
+/**
+ * Moving a task to another project: which one, and which of its sections.
+ *
+ * Laid out as the same panel is in Asana — an option, a project, a section —
+ * because that is the shape somebody arriving from there expects to find. The
+ * option has one working answer. A task lives in one project here, so "add"
+ * (the same task in two projects at once) has nothing to write; it is shown
+ * disabled with that reason rather than left out, so nobody goes looking for it
+ * under another name.
+ *
+ * The section list follows the chosen project, and changing the project clears
+ * the section: a section id means nothing in another project, and keeping it
+ * would leave the form reading answered while storing something the runner
+ * refuses. No section chosen is a real answer — the project's first — and the
+ * hint says so rather than leaving the empty box to look unfinished.
+ */
+function MoveToProjectFields({
+  configuration,
+  metadata,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  metadata: AutomationMetadata | undefined;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const read = (key: string): string => {
+    const value = configuration[key];
+    return typeof value === 'string' ? value : '';
+  };
+
+  const projects = metadata?.projects ?? [];
+  const project = projects.find((entry) => entry.id === read('projectId'));
+
+  const chooseProject = (projectId: string | undefined) => {
+    onChange({ ...configuration, projectId, targetSectionId: undefined });
+    setOpen(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Field label="Choose an option" htmlFor="step-move-option">
+        <Select value={MOVE_OPTION}>
+          <SelectTrigger id="step-move-option" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <RadioItem value={MOVE_OPTION}>Move task to another project</RadioItem>
+            <RadioItem value="ADD" disabled>
+              <span className="flex flex-col">
+                <span>Add task to another project</span>
+                <span className="text-xs italic text-muted-foreground">
+                  A task lives in one project here, so it can only be moved.
+                </span>
+              </span>
+            </RadioItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label="Choose a project"
+        htmlFor="step-projectId"
+        hint={
+          projects.length === 0
+            ? 'There is no other project in this workspace to move to.'
+            : undefined
+        }
+      >
+        {/* The clear control sits beside the trigger rather than inside it —
+            a button inside a button is not a thing a browser will honour. */}
+        <div className="relative">
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                id="step-projectId"
+                role="combobox"
+                aria-expanded={open}
+                aria-controls="step-projectId-list"
+                className={cn(
+                  'flex h-10 w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm shadow-xs outline-none transition-[border-color,box-shadow]',
+                  'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/25',
+                  project ? 'pr-9' : 'text-muted-foreground',
+                )}
+              >
+                {project ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: project.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-left text-foreground">
+                      {project.name}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-left">Choose a project</span>
+                    <ChevronDown className="size-4 shrink-0 opacity-50" aria-hidden="true" />
+                  </>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+              <Command>
+                <CommandInput placeholder="Search projects…" />
+                <CommandList id="step-projectId-list">
+                  <CommandEmpty>No project matches.</CommandEmpty>
+                  {projects.map((entry) => (
+                    // The id rides along in the value so two projects with one
+                    // name stay two rows; the search still matches on the name.
+                    <CommandItem
+                      key={entry.id}
+                      value={`${entry.name} ${entry.id}`}
+                      onSelect={() => chooseProject(entry.id)}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: entry.color }}
+                      />
+                      <span className="truncate">{entry.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          {project && (
+            <button
+              type="button"
+              aria-label="Clear project"
+              onClick={() => chooseProject(undefined)}
+              className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </Field>
+
+      <Field
+        label="Choose a column/section"
+        htmlFor="step-targetSectionId"
+        hint="Left blank, the task lands in the project’s first section."
+      >
+        <Select
+          value={read('targetSectionId')}
+          onValueChange={(value) => onChange({ ...configuration, targetSectionId: value })}
+          disabled={!project}
+        >
+          <SelectTrigger id="step-targetSectionId" className="w-full">
+            <SelectValue placeholder="First section" />
+          </SelectTrigger>
+          <SelectContent>
+            {(project?.sections ?? []).map((section) => (
+              <RadioItem key={section.id} value={section.id}>
+                {section.name}
+              </RadioItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+    </div>
+  );
 }
 
 /**
@@ -605,6 +946,7 @@ function CustomFieldAction({
   const options: ChoiceOption[] = (field?.options ?? []).map((option) => ({
     value: option.id,
     label: option.label,
+    ...(option.colorToken ? { colorToken: option.colorToken } : {}),
   }));
 
   const raw = config['value'];
@@ -726,12 +1068,12 @@ function CustomFieldAction({
               id="step-custom-value"
               // The runner coerces by type, so the control has to produce what
               // that coercion expects — a date string, a number, or text.
-              type={field.type === 'NUMBER' ? 'number' : field.type === 'DATE' ? 'date' : 'text'}
+              type={isNumeric(field.type) ? 'number' : field.type === 'DATE' ? 'date' : 'text'}
               value={typeof raw === 'number' ? String(raw) : read('value')}
               onChange={(event) =>
                 set(
                   'value',
-                  field.type === 'NUMBER'
+                  isNumeric(field.type)
                     ? event.target.value === ''
                       ? undefined
                       : Number(event.target.value)
@@ -744,4 +1086,9 @@ function CustomFieldAction({
       )}
     </>
   );
+}
+
+/** A rating is a bounded whole number; the runner stores and compares it as one. */
+function isNumeric(type: string): boolean {
+  return type === 'NUMBER' || type === 'RATING';
 }

@@ -467,6 +467,106 @@ describe('Tasks (e2e)', () => {
     });
   });
 
+  describe('dates, times and descriptions', () => {
+    const patch = (scope: Scope, taskId: string, body: object) =>
+      request(server())
+        .patch(`${tasksUrl(scope)}/${taskId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send(body);
+
+    it('keeps a due date as a calendar date, whatever clock arrived with it', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope, { dueDate: '2026-09-05T17:30:00.000Z' });
+
+      expect(task.dueDate).toBe('2026-09-05T00:00:00.000Z');
+      expect(task.dueAt).toBeNull();
+    });
+
+    it('stores the exact instant beside the date once a time is chosen', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope);
+
+      const response = await patch(scope, task.id, {
+        dueDate: '2026-09-05T00:00:00.000Z',
+        dueAt: '2026-09-05T20:00:00.000Z',
+      }).expect(200);
+
+      expect(response.body.data).toMatchObject({
+        dueDate: '2026-09-05T00:00:00.000Z',
+        dueAt: '2026-09-05T20:00:00.000Z',
+      });
+    });
+
+    it('carries the time of day along when only the date moves', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope, {
+        dueDate: '2026-09-05T00:00:00.000Z',
+        dueAt: '2026-09-05T20:00:00.000Z',
+      });
+
+      const response = await patch(scope, task.id, {
+        dueDate: '2026-09-08T00:00:00.000Z',
+      }).expect(200);
+
+      expect(response.body.data).toMatchObject({
+        dueDate: '2026-09-08T00:00:00.000Z',
+        dueAt: '2026-09-08T20:00:00.000Z',
+      });
+    });
+
+    it('clears the time with the date, and refuses a time on no date', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope, {
+        dueDate: '2026-09-05T00:00:00.000Z',
+        dueAt: '2026-09-05T20:00:00.000Z',
+      });
+
+      const cleared = await patch(scope, task.id, { dueDate: null }).expect(200);
+      expect(cleared.body.data).toMatchObject({ dueDate: null, dueAt: null });
+
+      await patch(scope, task.id, { dueAt: '2026-09-05T20:00:00.000Z' }).expect(400);
+    });
+
+    it('counts a timed task as overdue only once its moment has passed', async () => {
+      const scope = await setupScope();
+      const today = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+      const hour = 60 * 60 * 1000;
+
+      await createTask(scope, {
+        title: 'Later today',
+        dueDate: today,
+        dueAt: new Date(Date.now() + hour).toISOString(),
+      });
+      await createTask(scope, {
+        title: 'Earlier today',
+        dueDate: today,
+        dueAt: new Date(Date.now() - hour).toISOString(),
+      });
+      await createTask(scope, { title: 'Today, all day', dueDate: today });
+
+      const response = await request(server())
+        .get(tasksUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.meta.summary.overdue).toBe(1);
+    });
+
+    it('stores a description as sanitised HTML', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope, {
+        description: '<p onclick="steal()">Read <strong>this</strong><script>alert(1)</script></p>',
+      });
+      expect(task.description).toBe('<p>Read <strong>this</strong></p>');
+
+      const plain = await patch(scope, task.id, { description: 'plain\ntext' }).expect(200);
+      expect(plain.body.data.description).toBe('<p>plain</p><p>text</p>');
+
+      const emptied = await patch(scope, task.id, { description: '<p></p>' }).expect(200);
+      expect(emptied.body.data.description).toBeNull();
+    });
+  });
+
   describe('moving', () => {
     const move = (scope: Scope, taskId: string, body: object) =>
       request(server())
@@ -730,6 +830,71 @@ describe('Tasks (e2e)', () => {
     });
   });
 
+  describe('description mentions', () => {
+    const chip = (userId: string, name: string) =>
+      `<p>Ask <span data-mention="${userId}">@${name}</span></p>`;
+
+    const addMember = async (scope: Scope, name: string) => {
+      const member = await registerUser(name);
+      await context.prisma.workspaceMember.create({
+        data: { workspaceId: scope.workspaceId, userId: member.userId, role: WorkspaceRole.MEMBER },
+      });
+      return member;
+    };
+
+    const patch = (scope: Scope, taskId: string, body: object) =>
+      request(server())
+        .patch(`${tasksUrl(scope)}/${taskId}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send(body);
+
+    const mentionsFor = (userId: string) =>
+      context.prisma.notification.findMany({ where: { userId, type: 'MENTIONED' } });
+
+    it('tells a member they were named — once, and not again while the mention stands', async () => {
+      const scope = await setupScope();
+      const ada = await addMember(scope, 'Ada');
+      const task = await createTask(scope, { title: 'Grid' });
+
+      const response = await patch(scope, task.id, {
+        description: chip(ada.userId.toUpperCase(), 'Ada'),
+      }).expect(200);
+      expect(response.body.data.description).toBe(chip(ada.userId, 'Ada'));
+
+      const first = await mentionsFor(ada.userId);
+      expect(first).toHaveLength(1);
+      expect(first[0]?.title).toBe('Test User mentioned you in “Grid”');
+
+      // A typo fixed elsewhere in the text must not ping Ada again.
+      await patch(scope, task.id, {
+        description: `${chip(ada.userId, 'Ada')}<p>More detail.</p>`,
+      }).expect(200);
+      expect(await mentionsFor(ada.userId)).toHaveLength(1);
+    });
+
+    it('notifies from a description written at creation', async () => {
+      const scope = await setupScope();
+      const ada = await addMember(scope, 'Ada');
+
+      await createTask(scope, { title: 'New', description: chip(ada.userId, 'Ada') });
+
+      expect(await mentionsFor(ada.userId)).toHaveLength(1);
+    });
+
+    it('tells nobody about a self-mention, or a chip naming someone outside the workspace', async () => {
+      const scope = await setupScope();
+      const stranger = await registerUser('Stranger');
+      const task = await createTask(scope, { title: 'Grid' });
+
+      await patch(scope, task.id, {
+        description: `${chip(scope.owner.userId, 'Me')}${chip(stranger.userId, 'Stranger')}`,
+      }).expect(200);
+
+      expect(await mentionsFor(scope.owner.userId)).toHaveLength(0);
+      expect(await mentionsFor(stranger.userId)).toHaveLength(0);
+    });
+  });
+
   describe('notifications', () => {
     it('notifies the assignee when someone else assigns them', async () => {
       const scope = await setupScope();
@@ -754,6 +919,55 @@ describe('Tasks (e2e)', () => {
         where: { userId: scope.owner.userId, type: 'TASK_ASSIGNED' },
       });
       expect(notifications).toHaveLength(0);
+    });
+  });
+  describe('counts on the row', () => {
+    it('counts live comments and confirmed files, and nothing else', async () => {
+      const scope = await setupScope();
+      const task = await createTask(scope);
+
+      const kept = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks/${task.id}/comments`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'kept' })
+        .expect(201);
+      const gone = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks/${task.id}/comments`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'gone' })
+        .expect(201);
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/comments/${gone.body.data.id}`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      for (const status of ['READY', 'PENDING'] as const) {
+        await context.prisma.attachment.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            uploaderId: scope.owner.userId,
+            taskId: task.id,
+            filename: `${status.toLowerCase()}.png`,
+            mimeType: 'image/png',
+            sizeBytes: 10,
+            objectKey: `workspaces/${scope.workspaceId}/${status}-${task.id}.png`,
+            status,
+          },
+        });
+      }
+
+      const detail = await request(server())
+        .get(`${tasksUrl(scope)}/${task.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(detail.body.data).toMatchObject({ commentCount: 1, attachmentCount: 1 });
+      expect(kept.body.data.id).toBeDefined();
+
+      const rows = await request(server())
+        .get(tasksUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(rows.body.data[0]).toMatchObject({ commentCount: 1, attachmentCount: 1 });
     });
   });
 });

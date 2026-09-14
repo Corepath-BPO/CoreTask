@@ -41,7 +41,7 @@ describe('the automation catalogue', () => {
     { id: 'field-effort', name: 'Effort', type: 'NUMBER' },
   ];
 
-  const triggers = triggerCatalogue();
+  const triggers = triggerCatalogue(fields);
   const conditions = conditionCatalogue(fields);
   const actions = actionCatalogue(fields);
 
@@ -130,7 +130,7 @@ describe('the automation catalogue', () => {
      * would pass just as happily when both copies are wrong. This calls the code
      * that decides the answer at run time.
      */
-    const runner = new AutomationRunnerService({} as never);
+    const runner = new AutomationRunnerService({} as never, {} as never);
     const readField = (field: string, task: Task, event: AutomationEvent): unknown =>
       (
         runner as unknown as {
@@ -153,6 +153,8 @@ describe('the automation catalogue', () => {
       completedAt: new Date('2026-01-02T03:04:05.000Z'),
       dueDate: new Date('2026-02-03T00:00:00.000Z'),
       startDate: new Date('2026-01-01T00:00:00.000Z'),
+      estimatedMinutes: 45,
+      createdAt: new Date('2025-12-31T10:00:00.000Z'),
     } as unknown as Task;
 
     const probed = [...READABLE_TASK_FIELDS, customFieldKey('field-risk')];
@@ -176,25 +178,132 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * The failure mode the catalogue is protecting against, demonstrated. A
-     * field the runner has no case for falls through to the event payload,
-     * which on almost every event carries nothing under that key — so the
-     * comparison reads `undefined`, fails, and the rule never fires and never
-     * complains.
+     * A custom field's key resolves against the value rows loaded with the
+     * task, never the event payload — the event is the thing that happened,
+     * not the state a condition asks about.
      */
-    it.each([customFieldKey('field-risk')])(
-      'falls through to the event payload for %s, which is why it is not offered',
-      (field) => {
-        expect(readField(field, task, event)).toBe(FROM_THE_EVENT);
-      },
-    );
+    it('reads a custom field from the task’s own value rows', () => {
+      const blank = {
+        textValue: null,
+        numberValue: null,
+        dateValue: null,
+        booleanValue: null,
+        optionIds: [] as string[],
+        userIds: [] as string[],
+      };
+
+      const holding = {
+        ...task,
+        customFieldValues: [
+          { ...blank, customFieldId: 'field-risk', optionIds: ['option-high'] },
+          { ...blank, customFieldId: 'field-effort', numberValue: 8 },
+          { ...blank, customFieldId: 'field-started', dateValue: new Date('2026-03-01T00:00:00Z') },
+          { ...blank, customFieldId: 'field-notes', textValue: 'call first' },
+        ],
+      } as unknown as Task;
+
+      expect(readField(customFieldKey('field-risk'), holding, event)).toBe('option-high');
+      expect(readField(customFieldKey('field-effort'), holding, event)).toBe(8);
+      expect(readField(customFieldKey('field-started'), holding, event)).toBe(
+        '2026-03-01T00:00:00.000Z',
+      );
+      expect(readField(customFieldKey('field-notes'), holding, event)).toBe('call first');
+    });
+
+    it('reads an unset custom field as empty, so "is empty" can hold', () => {
+      expect(readField(customFieldKey('field-risk'), task, event)).toBeNull();
+    });
+
+    /*
+     * A set compares by membership — the promise behind offering multi-select
+     * and people fields as conditions at all. "Tags is set to Urgent" against
+     * ['urgent', 'q3'] holds; read as equality it could never hold once a
+     * second value was ticked.
+     */
+    describe('a many-valued field compares by membership', () => {
+      const conditionHolds = (configuration: Record<string, unknown>, holding: Task): boolean =>
+        (
+          runner as unknown as {
+            conditionHolds(
+              node: { subtype: string; configuration: Record<string, unknown> },
+              task: Task,
+              event: AutomationEvent,
+            ): boolean;
+          }
+        ).conditionHolds({ subtype: customFieldKey('field-tags'), configuration }, holding, event);
+
+      const blank = {
+        textValue: null,
+        numberValue: null,
+        dateValue: null,
+        booleanValue: null,
+        optionIds: [] as string[],
+        userIds: [] as string[],
+      };
+
+      const tagged = (...optionIds: string[]): Task =>
+        ({
+          ...task,
+          customFieldValues: [{ ...blank, customFieldId: 'field-tags', optionIds }],
+        }) as unknown as Task;
+
+      const field = customFieldKey('field-tags');
+
+      it('holds when the chosen option is among those held', () => {
+        expect(
+          conditionHolds({ field, operator: 'IS', value: 'urgent' }, tagged('urgent', 'q3')),
+        ).toBe(true);
+        expect(
+          conditionHolds({ field, operator: 'IS', value: 'urgent' }, tagged('q3', 'later')),
+        ).toBe(false);
+      });
+
+      it('reads "is not" as the same membership, denied', () => {
+        expect(
+          conditionHolds({ field, operator: 'IS_NOT', value: 'urgent' }, tagged('urgent', 'q3')),
+        ).toBe(false);
+        expect(conditionHolds({ field, operator: 'IS_NOT', value: 'urgent' }, tagged('q3'))).toBe(
+          true,
+        );
+      });
+
+      it('reads "is one of" as any overlap between the two sets', () => {
+        expect(
+          conditionHolds(
+            { field, operator: 'IS_ONE_OF', value: ['urgent', 'blocked'] },
+            tagged('q3', 'blocked'),
+          ),
+        ).toBe(true);
+        expect(
+          conditionHolds(
+            { field, operator: 'IS_ONE_OF', value: ['urgent', 'blocked'] },
+            tagged('q3'),
+          ),
+        ).toBe(false);
+      });
+
+      it('still unwraps a one-entry set, so a single tick compares as itself', () => {
+        expect(conditionHolds({ field, operator: 'IS', value: 'urgent' }, tagged('urgent'))).toBe(
+          true,
+        );
+      });
+
+      it('reads an empty field as empty, not as holding nothing in particular', () => {
+        expect(conditionHolds({ field, operator: 'IS_EMPTY' }, tagged())).toBe(true);
+        expect(conditionHolds({ field, operator: 'IS_NOT_EMPTY' }, tagged('urgent', 'q3'))).toBe(
+          true,
+        );
+      });
+    });
 
     it('marks a condition available only where the runner reads its field', () => {
       const readable = new Set<string>(READABLE_TASK_FIELDS);
 
       for (const condition of conditions) {
         if (!condition.available) continue;
-        expect(readable.has(condition.subtype)).toBe(true);
+        expect(
+          readable.has(condition.subtype) || condition.subtype.startsWith('customField:'),
+        ).toBe(true);
       }
     });
 
@@ -219,18 +328,15 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * The one row that gate takes away, named so the loss is deliberate.
-     *
-     * A checkbox offers "is checked" and "is not checked", and neither has a
-     * comparison behind it — so this was an enabled row whose only product was
-     * a rule that did nothing. Greyed with a reason it reads as "not yet",
-     * which is the truth.
+     * The row that gate used to take away, now let through. "Is checked" is a
+     * comparison the runner makes itself, so the completion check — and every
+     * checkbox custom field with it — is a working row rather than a greyed
+     * one. `automation-runner-conditions.spec` holds the runner to that.
      */
-    it('greys the completion check, which has no comparison behind it', () => {
+    it('offers the completion check, now that "is checked" is a comparison', () => {
       const completed = conditions.find((entry) => entry.subtype === 'completed');
 
-      expect(completed).toMatchObject({ available: false });
-      expect(completed?.reason).toBeTruthy();
+      expect(completed).toMatchObject({ available: true, reason: null });
     });
 
     /*
@@ -293,18 +399,55 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * The asymmetry, pinned deliberately. `SET_CUSTOM_FIELD` upserts into
-     * `task_custom_field_values` and `readField` never reads that table, so the
-     * same field is a working action and a check the engine cannot make. It
-     * looks like a bug until something says which way round it is.
+     * The old asymmetry, closed: the runner now loads the value rows with the
+     * task, so a single-valued field is a working condition as well as a
+     * working action.
      */
-    it('can write a custom field but not ask about one', () => {
+    it('can ask about a single-valued custom field as well as write it', () => {
       const condition = conditions.find((entry) => entry.fieldId === 'field-risk');
       const action = actions.find((entry) => entry.fieldId === 'field-risk');
 
-      expect(condition?.available).toBe(false);
-      expect(condition?.reason).toBeTruthy();
+      expect(condition).toMatchObject({ available: true, reason: null });
       expect(action?.available).toBe(true);
+    });
+
+    /*
+     * The many-valued types used to stay greyed — "the engine compares one at
+     * a time" — until `conditionHolds` learned to read "is set to X" against a
+     * set as membership. Now their rows derive available like everything else.
+     */
+    it('offers the many-valued types too, now that membership is a comparison', () => {
+      const manyValued = conditionCatalogue([
+        { id: 'field-tags', name: 'Tags', type: 'MULTI_SELECT' },
+        { id: 'field-watchers', name: 'Watchers', type: 'PEOPLE' },
+      ]);
+
+      const generated = manyValued.filter((entry) => entry.fieldId !== undefined);
+      expect(generated).toHaveLength(2);
+      expect(generated.every((entry) => entry.available && entry.reason === null)).toBe(true);
+    });
+
+    it('treats a rating as a number, and leaves a formula out entirely', () => {
+      const mixed: CatalogueCustomField[] = [
+        { id: 'field-stars', name: 'Stars', type: 'RATING' },
+        { id: 'field-total', name: 'Total', type: 'FORMULA' },
+      ];
+
+      const generatedConditions = conditionCatalogue(mixed).filter(
+        (entry) => entry.category === CONDITION_CATEGORY.CUSTOM_FIELD,
+      );
+      expect(generatedConditions.map((entry) => entry.fieldId)).toEqual(['field-stars']);
+      expect(generatedConditions[0]?.valueType).toBe(CONDITION_VALUE_TYPE.NUMBER);
+
+      const generatedActions = actionCatalogue(mixed).filter(
+        (entry) => entry.category === ACTION_CATEGORY.CHANGE_CUSTOM_FIELD,
+      );
+      expect(generatedActions.map((entry) => entry.fieldId)).toEqual(['field-stars']);
+
+      const generatedTriggers = triggerCatalogue(mixed).filter(
+        (entry) => entry.fieldId !== undefined,
+      );
+      expect(generatedTriggers.map((entry) => entry.fieldId)).toEqual(['field-stars']);
     });
 
     it('generates nothing when the project uses no fields', () => {
@@ -373,9 +516,78 @@ describe('the automation catalogue', () => {
      * from the picker. This is the assertion that makes that impossible.
      */
     it('lists every declared trigger exactly once', () => {
-      expect(triggers.map((trigger) => trigger.subtype).sort()).toEqual(
-        [...AUTOMATION_TRIGGERS].sort(),
+      // The generated "[Field] is changed" rows share the real subtype by
+      // design — they are the same trigger with the field pre-filled — so the
+      // once-each guarantee is about the hand-written rows.
+      const declared = triggers
+        .filter((trigger) => trigger.fieldId === undefined)
+        .map((trigger) => trigger.subtype)
+        .filter((subtype) => (AUTOMATION_TRIGGERS as readonly string[]).includes(subtype));
+
+      expect(declared.sort()).toEqual([...AUTOMATION_TRIGGERS].sort());
+    });
+
+    /*
+     * The planned rows borrow the picker without joining the engine: their
+     * subtypes must stay outside the enum, or one could collide with a real
+     * trigger and validate as something the runner never fires.
+     */
+    it('keeps every planned trigger row outside the enum, disabled, and explained', () => {
+      const planned = triggers.filter(
+        (trigger) => !(AUTOMATION_TRIGGERS as readonly string[]).includes(trigger.subtype),
       );
+
+      expect(planned.length).toBeGreaterThan(0);
+      expect(planned.every((trigger) => !trigger.available)).toBe(true);
+      expect(planned.every((trigger) => typeof trigger.reason === 'string')).toBe(true);
+      expect(planned.every((trigger) => trigger.configForms.length === 0)).toBe(true);
+    });
+
+    /*
+     * The per-field rows exist so "can I watch this field?" is answered in
+     * place. Only a date can approach or pass, so only a DATE field gets the
+     * two time-based rows beside its "is changed".
+     */
+    it('generates three rows for a date field and one for any other', () => {
+      const dated = triggerCatalogue([{ id: 'field-started', name: 'Started', type: 'DATE' }]);
+      const datedLabels = dated
+        .filter((trigger) => trigger.fieldId === 'field-started')
+        .map((trigger) => trigger.label);
+
+      expect(datedLabels).toEqual([
+        'Started is changed',
+        'Started is approaching',
+        'Started is overdue',
+      ]);
+
+      const plain = triggers.filter((trigger) => trigger.fieldId !== undefined);
+      expect(plain.map((trigger) => trigger.label)).toEqual([
+        'Risk is changed',
+        'Effort is changed',
+      ]);
+      expect(plain.map((trigger) => trigger.fieldName)).toEqual(['Risk', 'Effort']);
+    });
+
+    /*
+     * "[Field] is changed" is the real trigger with the field pre-filled — the
+     * runner narrows on the `fieldId` the row carries — while the date rows
+     * still wait on something watching the clock.
+     */
+    it('offers the per-field change rows and greys only the date ones', () => {
+      const rows = triggerCatalogue([{ id: 'field-started', name: 'Started', type: 'DATE' }]);
+      const generated = rows.filter((trigger) => trigger.fieldId === 'field-started');
+
+      const changed = generated.find((trigger) => trigger.label === 'Started is changed');
+      expect(changed).toMatchObject({
+        subtype: AutomationTrigger.CUSTOM_FIELD_CHANGED,
+        available: true,
+        reason: null,
+        fieldId: 'field-started',
+      });
+
+      const dated = generated.filter((trigger) => trigger.label !== 'Started is changed');
+      expect(dated).toHaveLength(2);
+      expect(dated.every((trigger) => !trigger.available && trigger.reason)).toBe(true);
     });
 
     it('gathers each group rather than interleaving them', () => {
@@ -425,12 +637,52 @@ describe('the automation catalogue', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('trigger scoping', () => {
+    /*
+     * `triggerMatches` is private for the same reason `readField` is: restating
+     * its comparisons in the assertion would pass just as happily when both
+     * copies are wrong. This calls the code that decides at run time.
+     */
+    const runner = new AutomationRunnerService({} as never, {} as never);
+    const matches = (config: unknown, event: unknown): boolean =>
+      (
+        runner as unknown as { triggerMatches(config: unknown, event: unknown): boolean }
+      ).triggerMatches(config, event);
+
+    const fieldEvent = {
+      trigger: AutomationTrigger.CUSTOM_FIELD_CHANGED,
+      after: { fieldId: 'field-risk', fieldName: 'Risk' },
+    };
+
+    it('fires a narrowed rule only for its own field', () => {
+      expect(matches({ fieldId: 'field-risk' }, fieldEvent)).toBe(true);
+      expect(matches({ fieldId: 'field-effort' }, fieldEvent)).toBe(false);
+    });
+
+    /* What every rule saved before the narrowing existed stores. */
+    it('fires an unnarrowed rule for any field', () => {
+      expect(matches({}, fieldEvent)).toBe(true);
+      expect(matches(null, fieldEvent)).toBe(true);
+    });
+
+    it('leaves section narrowing exactly as it was', () => {
+      const moved = {
+        trigger: AutomationTrigger.TASK_MOVED_TO_SECTION,
+        after: { sectionId: 'section-1' },
+      };
+
+      expect(matches({ sectionId: 'section-1' }, moved)).toBe(true);
+      expect(matches({ sectionId: 'section-2' }, moved)).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe('capabilities and permissions', () => {
     it('claims nothing the action list does not support', () => {
       expect(capabilities()).toMatchObject({
         externalActions: false,
         ai: false,
-        conditionsOnCustomFields: false,
+        conditionsOnCustomFields: true,
         actionsOnCustomFields: true,
         delays: false,
       });

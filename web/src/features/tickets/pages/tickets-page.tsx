@@ -31,6 +31,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import {
   cn,
+  daysUntil,
   formatDate,
   formatDueDate,
   formatRelativeTime,
@@ -73,10 +74,12 @@ export function TicketsPage() {
    * `useSearch({ strict: false })` returns the raw parameters — junk would
    * otherwise open a dialog that can only report "not found".
    */
-  const routeSearch: Partial<{ ticket: string }> = useSearch({ strict: false });
+  const routeSearch: Partial<{ ticket: string; comment: string }> = useSearch({ strict: false });
   const linkedTicket =
-    routeSearch.ticket && TICKET_KEY_PATTERN.test(routeSearch.ticket)
-      ? routeSearch.ticket
+    routeSearch.ticket && TICKET_KEY_PATTERN.test(routeSearch.ticket) ? routeSearch.ticket : null;
+  const linkedComment =
+    linkedTicket && routeSearch.comment && /^[0-9a-f-]{36}$/i.test(routeSearch.comment)
+      ? routeSearch.comment
       : null;
 
   /*
@@ -294,6 +297,7 @@ export function TicketsPage() {
       <TicketDetailDialog
         workspaceId={workspaceId}
         idOrKey={openTicket}
+        linkedCommentId={openTicket === linkedTicket ? linkedComment : null}
         onClose={() => setOpenTicket(null)}
         role={role}
       />
@@ -303,7 +307,8 @@ export function TicketsPage() {
 
 function TicketRow({ ticket, onOpen }: { ticket: Ticket; onOpen: (id: string) => void }) {
   const finished = ticket.status === TicketStatus.RESOLVED || ticket.status === TicketStatus.CLOSED;
-  const overdue = ticket.dueDate !== null && !finished && new Date(ticket.dueDate) < new Date();
+  // Calendar days, not instants: a ticket due today is not late yet.
+  const overdue = ticket.dueDate !== null && !finished && daysUntil(ticket.dueDate) < 0;
 
   return (
     <li>

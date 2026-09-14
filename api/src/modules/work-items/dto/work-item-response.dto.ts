@@ -66,13 +66,22 @@ export class ProjectWorkItemDto {
 
   @ApiProperty({ type: [WorkItemUserDto] }) assignees!: WorkItemUserDto[];
 
-  @ApiProperty({ nullable: true }) startDate!: string | null;
-  @ApiProperty({ nullable: true }) dueDate!: string | null;
+  @ApiProperty({ nullable: true, description: 'The calendar date, at UTC midnight.' })
+  startDate!: string | null;
+  @ApiProperty({ nullable: true, description: 'The exact instant when a time was chosen.' })
+  startAt!: string | null;
+  @ApiProperty({ nullable: true, description: 'The calendar date, at UTC midnight.' })
+  dueDate!: string | null;
+  @ApiProperty({ nullable: true, description: 'The exact instant when a time was chosen.' })
+  dueAt!: string | null;
   @ApiProperty({ nullable: true }) completedAt!: string | null;
   @ApiProperty({ nullable: true }) archivedAt!: string | null;
 
   @ApiProperty() subtaskCount!: number;
   @ApiProperty() completedSubtaskCount!: number;
+  @ApiProperty({ description: 'Live comments; soft-deleted ones are not counted.' })
+  commentCount!: number;
+  @ApiProperty({ description: 'Confirmed uploads only.' }) attachmentCount!: number;
 
   @ApiProperty({
     type: [WorkItemCustomFieldValueDto],
@@ -99,4 +108,12 @@ export class ProjectWorkItemPageDto {
 
   @ApiPropertyOptional({ nullable: true, description: 'Null when there is nothing further.' })
   nextCursor!: string | null;
+}
+
+export class BulkWorkItemResultDto {
+  @ApiProperty({
+    type: [ProjectWorkItemDto],
+    description: 'Every row touched, in the order it was named, as it now stands.',
+  })
+  items!: ProjectWorkItemDto[];
 }

@@ -6,7 +6,7 @@ import {
   type WorkItemType,
 } from '@coretask/contracts';
 import { Loader2, Plus } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useImperativeHandle, useRef, useState, type Ref } from 'react';
 
 import {
   DropdownMenu,
@@ -31,6 +31,13 @@ interface Props {
   className?: string;
   /** Asana's list styling: "Add task…" alone, no leading plus. */
   plain?: boolean;
+  /** Lets a keyboard chord open the row — Tab+N lands here. */
+  ref?: Ref<QuickCreateWorkItemRowHandle>;
+}
+
+export interface QuickCreateWorkItemRowHandle {
+  /** Opens the row and puts the caret in it, as clicking it does. */
+  open(): void;
 }
 
 /**
@@ -52,6 +59,7 @@ export function QuickCreateWorkItemRow({
   pending = false,
   className,
   plain = false,
+  ref,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -59,6 +67,14 @@ export function QuickCreateWorkItemRow({
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    open: () => {
+      setOpen(true);
+      // The input mounts this tick; focusing it has to wait for the next.
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+  }));
 
   const permissions = useWorkItemPermissions();
   if (!permissions.canCreate) return null;
@@ -190,7 +206,16 @@ export function QuickCreateWorkItemRow({
             ? `New ${WORK_ITEM_TYPE_LABEL[type].toLowerCase()} in ${sectionName}`
             : `New ${WORK_ITEM_TYPE_LABEL[type].toLowerCase()}`
         }
-        className="h-8 flex-1"
+        className={cn(
+          'h-8 flex-1',
+          // In the list the open row reads as a row being typed into, not a
+          // form control dropped between rows: no border, no fill, no focus
+          // ring — the caret and placeholder carry the affordance, as they do
+          // in Asana. The board keeps the boxed input; a card column has no
+          // grid to blend into.
+          plain &&
+            'rounded-none border-0 bg-transparent px-1 shadow-none focus-visible:bg-transparent focus-visible:ring-0',
+        )}
       />
 
       {pending && (

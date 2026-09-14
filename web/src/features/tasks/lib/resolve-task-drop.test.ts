@@ -15,7 +15,9 @@ const task = (id: string, sectionId: string): Task => ({
   priority: 'NONE',
   position: 0,
   startDate: null,
+  startAt: null,
   dueDate: null,
+  dueAt: null,
   completedAt: null,
   archivedAt: null,
   estimatedMinutes: null,
@@ -24,6 +26,8 @@ const task = (id: string, sectionId: string): Task => ({
   createdById: 'u',
   subtaskCount: 0,
   completedSubtaskCount: 0,
+  commentCount: 0,
+  attachmentCount: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 });

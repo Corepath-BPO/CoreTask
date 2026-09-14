@@ -1,28 +1,21 @@
+import { ApiRoutes } from '@coretask/contracts';
 import type {
   CreateProjectViewPayload,
   CustomField,
   FieldCatalog,
   ProjectFieldMetadata,
   ProjectView,
+  RemoveFieldMode,
+  RemoveFieldResult,
   Task,
   UpdateCustomFieldPayload,
   UpdateProjectViewPayload,
-  ViewFilterCondition,
-  ViewSort,
 } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
 
 const base = (workspaceId: string, projectId: string) =>
   `/workspaces/${workspaceId}/projects/${projectId}`;
-
-export interface ViewTaskQuery {
-  page?: number;
-  limit?: number;
-  search?: string;
-  filters?: ViewFilterCondition[];
-  sorts?: ViewSort[];
-}
 
 export const projectViewsApi = {
   list: (workspaceId: string, projectId: string): Promise<ProjectView[]> =>
@@ -45,30 +38,6 @@ export const projectViewsApi = {
 
   remove: (workspaceId: string, projectId: string, viewId: string): Promise<{ deleted: boolean }> =>
     apiClient.delete<{ deleted: boolean }>(`${base(workspaceId, projectId)}/views/${viewId}`),
-
-  /**
-   * The tasks behind a view.
-   *
-   * A POST because filters are a nested structure — encoding one into a query
-   * string means inventing a serialisation both sides have to agree on. Paging
-   * and search stay in the query string, where they are readable.
-   */
-  queryTasks: (
-    workspaceId: string,
-    projectId: string,
-    query: ViewTaskQuery,
-  ): Promise<{ items: Task[]; meta: { total: number; page: number; totalPages: number } }> =>
-    apiClient.postPaginated<Task>(
-      `${base(workspaceId, projectId)}/tasks/query`,
-      { filters: query.filters ?? [], sorts: query.sorts ?? [] },
-      {
-        params: {
-          ...(query.page ? { page: query.page } : {}),
-          ...(query.limit ? { limit: query.limit } : {}),
-          ...(query.search ? { search: query.search } : {}),
-        },
-      },
-    ),
 
   subtasks: (workspaceId: string, projectId: string, taskId: string): Promise<Task[]> =>
     apiClient.get<Task[]>(`${base(workspaceId, projectId)}/tasks/${taskId}/subtasks`),
@@ -101,14 +70,11 @@ export const projectViewsApi = {
 
 export const customFieldsApi = {
   list: (workspaceId: string, projectId: string): Promise<CustomField[]> =>
-    apiClient.get<CustomField[]>(`${base(workspaceId, projectId)}/custom-fields`),
+    apiClient.get<CustomField[]>(ApiRoutes.customFields.forProject(workspaceId, projectId)),
 
   /** Reuses an existing workspace field here, rather than making a second one. */
   attach: (workspaceId: string, projectId: string, fieldId: string): Promise<CustomField> =>
-    apiClient.post<CustomField>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/attach`,
-      {},
-    ),
+    apiClient.post<CustomField>(ApiRoutes.customFields.attach(workspaceId, projectId, fieldId), {}),
 
   create: (
     workspaceId: string,
@@ -118,20 +84,30 @@ export const customFieldsApi = {
       type: string;
       description?: string;
       isRequired?: boolean;
+      notifyOnChange?: boolean;
       /** Type-specific configuration; validated against the type server-side. */
       settings?: Record<string, unknown>;
       options?: { label: string; colorToken?: string }[];
     },
   ): Promise<CustomField> =>
-    apiClient.post<CustomField>(`${base(workspaceId, projectId)}/custom-fields`, payload),
+    apiClient.post<CustomField>(ApiRoutes.customFields.forProject(workspaceId, projectId), payload),
 
+  /**
+   * Takes a field off this project.
+   *
+   * `mode` says what was meant: `detach` keeps the definition in the library,
+   * `delete` removes it from every project (archiving when tasks hold values).
+   * Without one the API chooses from state, as it always has.
+   */
   remove: (
     workspaceId: string,
     projectId: string,
     fieldId: string,
-  ): Promise<{ deleted: boolean; archived: boolean }> =>
-    apiClient.delete<{ deleted: boolean; archived: boolean }>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}`,
+    mode?: RemoveFieldMode,
+  ): Promise<RemoveFieldResult> =>
+    apiClient.delete<RemoveFieldResult>(
+      ApiRoutes.customFields.forProjectField(workspaceId, projectId, fieldId),
+      mode ? { params: { mode } } : undefined,
     ),
 
   /** The type cannot change — everything else about a field can. */
@@ -142,9 +118,18 @@ export const customFieldsApi = {
     payload: UpdateCustomFieldPayload,
   ): Promise<CustomField> =>
     apiClient.patch<CustomField>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}`,
+      ApiRoutes.customFields.forProjectField(workspaceId, projectId, fieldId),
       payload,
     ),
+
+  /**
+   * The definition alone, with no project in the URL — the one route that can
+   * reach a field no project holds any more, which is how "Restore" works.
+   */
+  restore: (workspaceId: string, fieldId: string): Promise<CustomField> =>
+    apiClient.patch<CustomField>(ApiRoutes.customFields.libraryField(workspaceId, fieldId), {
+      isArchived: false,
+    }),
 
   addOption: (
     workspaceId: string,
@@ -153,7 +138,7 @@ export const customFieldsApi = {
     payload: { label: string; colorToken?: string },
   ): Promise<CustomField> =>
     apiClient.post<CustomField>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options`,
+      ApiRoutes.customFields.options(workspaceId, projectId, fieldId),
       payload,
     ),
 
@@ -162,10 +147,10 @@ export const customFieldsApi = {
     projectId: string,
     fieldId: string,
     optionId: string,
-    payload: { label?: string; colorToken?: string; position?: number },
+    payload: { label?: string; colorToken?: string; position?: number; isArchived?: boolean },
   ): Promise<CustomField> =>
     apiClient.patch<CustomField>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options/${optionId}`,
+      ApiRoutes.customFields.option(workspaceId, projectId, fieldId, optionId),
       payload,
     ),
 
@@ -176,7 +161,7 @@ export const customFieldsApi = {
     optionId: string,
   ): Promise<{ deleted: boolean; archived: boolean }> =>
     apiClient.delete<{ deleted: boolean; archived: boolean }>(
-      `${base(workspaceId, projectId)}/custom-fields/${fieldId}/options/${optionId}`,
+      ApiRoutes.customFields.option(workspaceId, projectId, fieldId, optionId),
     ),
 
   setValue: (
@@ -185,5 +170,5 @@ export const customFieldsApi = {
     fieldId: string,
     payload: Record<string, unknown>,
   ): Promise<unknown> =>
-    apiClient.put(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`, payload),
+    apiClient.put(ApiRoutes.customFields.taskValue(workspaceId, taskId, fieldId), payload),
 };

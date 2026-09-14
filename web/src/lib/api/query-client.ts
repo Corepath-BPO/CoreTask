@@ -112,8 +112,17 @@ export const queryKeys = {
     thread: (workspaceId: string, parentKind: string, parentId: string) =>
       [...queryKeys.comments.all(workspaceId), parentKind, parentId] as const,
   },
+  followers: {
+    all: (workspaceId: string) => ['followers', workspaceId] as const,
+    /** `parentKind` keeps a task and a ticket with the same id from colliding. */
+    forParent: (workspaceId: string, parentKind: string, parentId: string) =>
+      [...queryKeys.followers.all(workspaceId), parentKind, parentId] as const,
+  },
   activity: {
     all: (workspaceId: string) => ['activity', workspaceId] as const,
+    /** One item's own stories; separate from the workspace feed so the panel does not refetch the dashboard. */
+    item: (workspaceId: string, parentKind: string, parentId: string) =>
+      [...queryKeys.activity.all(workspaceId), 'item', parentKind, parentId] as const,
   },
   notifications: {
     all: (workspaceId: string) => ['notifications', workspaceId] as const,

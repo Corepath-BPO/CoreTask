@@ -4,6 +4,8 @@ export * from './automation-rule.js';
 export * from './auth.js';
 export * from './comment.js';
 export * from './custom-field-settings.js';
+export * from './custom-field-value.js';
+export * from './followers.js';
 export * from './common.js';
 export * from './invitation.js';
 export * from './project-view.js';
