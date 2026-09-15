@@ -28,6 +28,7 @@ import { planPlacement } from '../../common/utils/position.util';
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { diffItemStories, snapshotFromWorkItem } from '../activity-logs/item-stories';
@@ -81,6 +82,7 @@ export class ProjectWorkItemService {
     private readonly activity: ActivityLogsService,
     private readonly automation: AutomationEventPublisher,
     private readonly realtime: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
     private readonly mentions: DescriptionMentionNotifier,
     private readonly followers: FollowersService,
     private readonly followerNotifier: FollowerNotifier,
@@ -275,6 +277,7 @@ export class ProjectWorkItemService {
       action: ActivityAction.CREATED,
       entity: created.type === WorkItemType.TICKET ? ActivityEntity.TICKET : ActivityEntity.TASK,
       entityId: created.id,
+      projectId,
       summary: this.describe(created, 'Created'),
       metadata: {
         projectId,
@@ -291,6 +294,7 @@ export class ProjectWorkItemService {
         action: ActivityAction.SUBTASK_ADDED,
         entity: ActivityEntity.TASK,
         entityId: created.parentId,
+        projectId,
         summary: `Added subtask “${created.title}”`,
         metadata: { subtaskId: created.id, title: created.title },
       });
@@ -332,8 +336,9 @@ export class ProjectWorkItemService {
      * future integration — keeps working while callers move across. Removing
      * them is a separate decision, made once nothing depends on them.
      */
-    this.realtime.emitToWorkspace(
+    void this.broadcast.emit(
       workspaceId,
+      projectId,
       created.type === WorkItemType.TICKET ? ServerEvent.TICKET_CREATED : ServerEvent.TASK_CREATED,
       created,
     );
@@ -369,6 +374,7 @@ export class ProjectWorkItemService {
       actorId: userId,
       entity: updated.type === WorkItemType.TICKET ? ActivityEntity.TICKET : ActivityEntity.TASK,
       entityId: updated.id,
+      projectId,
     };
     if (stories.length > 0) {
       await this.activity.recordStories(context, stories);
@@ -431,8 +437,9 @@ export class ProjectWorkItemService {
       });
     }
 
-    this.realtime.emitToWorkspace(
+    void this.broadcast.emit(
       workspaceId,
+      projectId,
       updated.type === WorkItemType.TICKET ? ServerEvent.TICKET_UPDATED : ServerEvent.TASK_UPDATED,
       updated,
     );
@@ -487,7 +494,7 @@ export class ProjectWorkItemService {
       };
 
       await this.activity.recordStories(
-        { workspaceId, actorId: userId, entity, entityId: moved.id },
+        { workspaceId, actorId: userId, entity, entityId: moved.id, projectId },
         diffItemStories(
           snapshotFromWorkItem(before, { section: ref(before.sectionId) }),
           snapshotFromWorkItem(moved, { section: ref(moved.sectionId) }),
@@ -501,6 +508,7 @@ export class ProjectWorkItemService {
         action: ActivityAction.UPDATED,
         entity,
         entityId: moved.id,
+        projectId,
         summary: this.describe(moved, 'Moved'),
         metadata: {
           projectId,
@@ -532,7 +540,7 @@ export class ProjectWorkItemService {
       ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
     });
 
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_MOVED, {
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.TASK_MOVED, {
       id: moved.id,
       sectionId: moved.sectionId,
       position: moved.position,
@@ -670,6 +678,7 @@ export class ProjectWorkItemService {
       action: ActivityAction.ARCHIVED,
       entity: ActivityEntity.TASK,
       entityId: archived.id,
+      projectId,
       summary: this.describe(archived, 'Archived'),
       metadata: { projectId, workItemType: archived.type, source: 'USER' },
     });
@@ -678,7 +687,7 @@ export class ProjectWorkItemService {
       changedFields: ['archivedAt'],
       ...correlation,
     });
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_ARCHIVED, archived);
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.TASK_ARCHIVED, archived);
 
     return archived;
   }
@@ -905,13 +914,22 @@ export class ProjectWorkItemService {
   /** The item as a notification names it. */
   private refOf(item: ProjectWorkItem): ItemRef {
     return item.details.kind === 'TICKET'
-      ? ticketRef(item.workspaceId, { id: item.id, key: item.details.key })
+      ? ticketRef(item.workspaceId, {
+          id: item.id,
+          key: item.details.key,
+          projectId: item.projectId,
+        })
       : taskRef(item.workspaceId, item);
   }
 
   /** Who a description names, and where its notification should lead. */
   private mentionTarget(item: ProjectWorkItem, actorId: string) {
-    const shared = { workspaceId: item.workspaceId, actorId, entityId: item.id };
+    const shared = {
+      workspaceId: item.workspaceId,
+      actorId,
+      entityId: item.id,
+      projectId: item.projectId,
+    };
 
     if (item.details.kind === 'TICKET') {
       return {

@@ -33,6 +33,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
 import { AppException } from '../../common/exceptions/app.exception';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import {
@@ -74,7 +75,7 @@ function invalid(
 @ApiTags('Work items')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId/work-items')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')

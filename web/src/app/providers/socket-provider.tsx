@@ -2,6 +2,7 @@ import { ServerEvent } from '@coretask/contracts';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 
+import { useProjectAccessRealtime } from '@/features/projects/hooks/use-project-access-realtime';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { getAccessToken } from '@/lib/api/client';
 import { queryClient } from '@/lib/api/query-client';
@@ -98,14 +99,36 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       ServerEvent.TASK_ARCHIVED,
     ];
 
+    /*
+     * A project made, renamed, archived or made private by somebody else
+     * should show up on the browse page and in every picker without a reload.
+     * Only active queries refetch, so a tab on a task list pays nothing.
+     */
+    const onProjectChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    };
+
+    const PROJECT_EVENTS = [
+      ServerEvent.PROJECT_CREATED,
+      ServerEvent.PROJECT_UPDATED,
+      ServerEvent.PROJECT_ARCHIVED,
+      ServerEvent.PROJECT_RESTORED,
+    ];
+
     socket.on(ServerEvent.NOTIFICATION_CREATED, onNotification);
     for (const event of TASK_EVENTS) socket.on(event, onTaskChanged);
+    for (const event of PROJECT_EVENTS) socket.on(event, onProjectChanged);
 
     return () => {
       socket.off(ServerEvent.NOTIFICATION_CREATED, onNotification);
       for (const event of TASK_EVENTS) socket.off(event, onTaskChanged);
+      for (const event of PROJECT_EVENTS) socket.off(event, onProjectChanged);
     };
   }, [isAuthenticated]);
+
+  // Being added to or removed from a private project, or a privacy flip: the
+  // caches and, when a tab is on the project, the page itself.
+  useProjectAccessRealtime(isAuthenticated ? workspaceId : undefined);
 
   /*
    * Room membership follows the workspace switcher — and every reconnect.

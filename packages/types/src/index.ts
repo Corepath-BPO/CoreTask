@@ -8,6 +8,7 @@ export type * from './auth.js';
 export type * from './followers.js';
 export type * from './health.js';
 export type * from './integrations.js';
+export type * from './project-members.js';
 export type * from './project-view.js';
 export type * from './project-work-item.js';
 export type * from './team.js';

@@ -63,6 +63,25 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/projects/${projectId}/restore`,
   },
   /**
+   * A project's members — the list a private project is private to. Removing
+   * one names the user, so "leave" and "remove someone" share a route; `join`
+   * and `leave` exist for the common self-service case on a public project.
+   */
+  projectMembers: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/members`,
+    add: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/members`,
+    updateRole: (workspaceId: string, projectId: string, userId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/members/${userId}`,
+    remove: (workspaceId: string, projectId: string, userId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/members/${userId}`,
+    join: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/join`,
+    leave: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/leave`,
+  },
+  /**
    * Workspace-scoped rather than nested under a project: a task may have no
    * project at all, and "my tasks" spans every project in the workspace.
    * Project and section are filters on the list instead of path segments.
@@ -71,6 +90,8 @@ export const ApiRoutes = {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/tasks`,
     create: (workspaceId: string) => `/workspaces/${workspaceId}/tasks`,
     detail: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
+    subtasks: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/subtasks`,
     update: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
     move: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/move`,

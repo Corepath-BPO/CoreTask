@@ -4,8 +4,11 @@ import {
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
+import { useParams } from '@tanstack/react-router';
 import { useMemo } from 'react';
 
+import { useProject } from '@/features/projects/hooks/use-projects';
+import { resolveProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 export interface WorkItemPermissions {
@@ -31,14 +34,22 @@ export interface WorkItemPermissions {
  *     "never considered" look identical, and offering them would create a task
  *     wearing a milestone's label.
  *
+ * "This person" means their standing *in the project on screen*: the project
+ * is read off the route, and the workspace role is capped by their role in it,
+ * so a viewer gets no add controls whatever they may do elsewhere.
+ *
  * This decides presentation only. The API checks the same things again, because
  * a hidden menu item is not a permission check — see the work-items controller.
  */
 export function useWorkItemPermissions(archived = false): WorkItemPermissions {
   const { workspace } = useActiveWorkspace();
-  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  const workspaceRole = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  const { projectId } = useParams({ strict: false }) as { projectId?: string };
+  // Cached by the project shell, so this is free.
+  const { data: project } = useProject(workspace?.id, projectId ?? '');
 
   return useMemo(() => {
+    const role = resolveProjectAccess(project, workspaceRole).effectiveRole;
     const canEdit = !archived && hasAtLeastRole(role, WorkspaceRole.MEMBER);
 
     return {
@@ -51,5 +62,5 @@ export function useWorkItemPermissions(archived = false): WorkItemPermissions {
         ? Object.values(WorkItemType).filter((type) => !CREATABLE_WORK_ITEM_TYPES.includes(type))
         : [],
     };
-  }, [role, archived]);
+  }, [project, workspaceRole, archived]);
 }

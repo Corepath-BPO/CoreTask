@@ -7,7 +7,9 @@ import {
   PROJECT_NAME_MAX_LENGTH,
   PROJECT_NAME_MIN_LENGTH,
   PROJECT_STATUSES,
+  PROJECT_VISIBILITIES,
   ProjectStatus,
+  ProjectVisibility,
 } from '@coretask/contracts';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -95,6 +97,17 @@ export class CreateProjectDto {
   defaultWorkItemType?: 'TASK' | 'TICKET';
 
   @ApiPropertyOptional({
+    enum: PROJECT_VISIBILITIES,
+    default: ProjectVisibility.PUBLIC,
+    description:
+      'PUBLIC is every workspace member; PRIVATE is the project’s members and the workspace’s admins. ' +
+      'On an update, only a project admin may change it.',
+  })
+  @IsOptional()
+  @IsEnum(ProjectVisibility)
+  visibility?: ProjectVisibility;
+
+  @ApiPropertyOptional({
     format: 'uuid',
     nullable: true,
     description: 'Must be a member of this workspace.',
@@ -171,6 +184,17 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsIn(['TASK', 'TICKET'])
   defaultWorkItemType?: 'TASK' | 'TICKET';
+
+  @ApiPropertyOptional({
+    enum: PROJECT_VISIBILITIES,
+    default: ProjectVisibility.PUBLIC,
+    description:
+      'PUBLIC is every workspace member; PRIVATE is the project’s members and the workspace’s admins. ' +
+      'On an update, only a project admin may change it.',
+  })
+  @IsOptional()
+  @IsEnum(ProjectVisibility)
+  visibility?: ProjectVisibility;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   @IsOptional()

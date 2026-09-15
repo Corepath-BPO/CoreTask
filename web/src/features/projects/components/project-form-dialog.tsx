@@ -3,6 +3,7 @@ import {
   PROJECT_COLORS,
   PROJECT_STATUSES,
   ProjectStatus,
+  ProjectVisibility,
   WORK_ITEM_TYPE_LABEL,
 } from '@coretask/contracts';
 import type { ProjectSummary } from '@coretask/types';
@@ -38,6 +39,8 @@ import { cn, humanizeEnum } from '@/lib/utils';
 
 import { useCreateProject, useUpdateProject } from '../hooks/use-projects';
 
+import { ProjectVisibilitySelect } from './sharing/project-visibility-select';
+
 /** Radix `Select` treats `''` as "no value", so absence needs a real token. */
 const NO_TEAM = 'none';
 
@@ -56,6 +59,7 @@ const EMPTY: ProjectFormInput = {
   status: ProjectStatus.PLANNING,
   color: PROJECT_COLORS[0] as string,
   defaultWorkItemType: 'TASK',
+  visibility: ProjectVisibility.PUBLIC,
   teamId: '',
   startDate: '',
   dueDate: '',
@@ -100,6 +104,7 @@ export function ProjectFormDialog({
             status: project.status,
             color: project.color,
             defaultWorkItemType: project.defaultWorkItemType,
+            visibility: project.visibility,
             teamId: project.teamId ?? '',
             startDate: toDateInput(project.startDate),
             dueDate: toDateInput(project.dueDate),
@@ -116,7 +121,13 @@ export function ProjectFormDialog({
   const name = watch('name') ?? '';
   const keyPreview = isEdit ? project.key : watch('key') || deriveProjectKey(name);
 
+  // Who can see the project is a project admin's call. The form still shows
+  // the choice to everyone else, read-only, so it is never a surprise.
+  const canChangeVisibility = !isEdit || (project.access?.canManage ?? true);
+
   const onSubmit = handleSubmit(async (values) => {
+    const visibility = values.visibility as ProjectVisibility;
+
     if (isEdit) {
       await updateProject.mutateAsync({
         projectId: project.id,
@@ -126,6 +137,9 @@ export function ProjectFormDialog({
           status: values.status as ProjectSummary['status'],
           color: values.color,
           defaultWorkItemType: values.defaultWorkItemType,
+          // Sent only when it changed: the API refuses the field from anyone
+          // but a project admin, even when the value is what it already was.
+          ...(canChangeVisibility && visibility !== project.visibility ? { visibility } : {}),
           teamId: values.teamId || null,
           startDate: values.startDate || null,
           dueDate: values.dueDate || null,
@@ -139,6 +153,7 @@ export function ProjectFormDialog({
         status: values.status as ProjectSummary['status'],
         color: values.color,
         defaultWorkItemType: values.defaultWorkItemType,
+        visibility,
         ...(values.teamId ? { teamId: values.teamId } : {}),
         ...(values.startDate ? { startDate: values.startDate } : {}),
         ...(values.dueDate ? { dueDate: values.dueDate } : {}),
@@ -165,7 +180,7 @@ export function ProjectFormDialog({
           <DialogDescription>
             {isEdit
               ? 'The project key cannot change because it is part of every ticket reference.'
-              : 'Four default sections are created so the board is usable straight away.'}
+              : 'Four default sections are created so the board is usable straight away, and you become the project’s admin.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -333,6 +348,30 @@ export function ProjectFormDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              )}
+            />
+          </Field>
+
+          <Field
+            label="Privacy"
+            htmlFor="project-visibility"
+            error={errors.visibility?.message}
+            hint={
+              canChangeVisibility
+                ? 'Private projects are visible only to their members and workspace admins.'
+                : 'Only a project admin can change who sees this project.'
+            }
+          >
+            <Controller
+              control={control}
+              name="visibility"
+              render={({ field }) => (
+                <ProjectVisibilitySelect
+                  id="project-visibility"
+                  value={(field.value ?? ProjectVisibility.PUBLIC) as ProjectVisibility}
+                  onValueChange={field.onChange}
+                  disabled={busy || !canChangeVisibility}
+                />
               )}
             />
           </Field>

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 
 import { FollowersService } from './followers.service';
 
@@ -12,7 +13,7 @@ import { FollowersService } from './followers.service';
  * live in `FollowersApiModule`, which may depend on whatever it likes.
  */
 @Module({
-  imports: [ActivityLogsModule],
+  imports: [ActivityLogsModule, ProjectAccessModule],
   providers: [FollowersService],
   exports: [FollowersService],
 })

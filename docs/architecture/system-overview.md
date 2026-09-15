@@ -99,6 +99,14 @@ workspace id supplied by the client.
 Unknown and unauthorised workspace ids both answer `403 WORKSPACE_ACCESS_DENIED`.
 Distinguishing them would let an attacker enumerate which ids exist.
 
+Inside a workspace, a `PRIVATE` project is a second boundary: visible to its
+members and the workspace's admins only. `ProjectAccessGuard` resolves the
+caller's standing on any route under a project and lowers the request's role to
+what they may do there; lists that span projects filter with the same rule. For
+the same enumeration reason, a private project the caller cannot see is a plain
+`404` — indistinguishable from one that does not exist. See
+[ADR 0016](../decisions/0016-project-privacy-is-a-membership-list.md).
+
 ## Observability
 
 Every request carries a correlation id (`X-Request-Id`), generated if the caller

@@ -25,6 +25,10 @@ const baseProject: ProjectSummary = {
   taskCount: 10,
   completedTaskCount: 4,
   sectionCount: 4,
+  visibility: 'PUBLIC',
+  memberCount: 1,
+  members: [],
+  access: { effectiveRole: 'OWNER', projectRole: 'ADMIN', isMember: true, canManage: true },
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };

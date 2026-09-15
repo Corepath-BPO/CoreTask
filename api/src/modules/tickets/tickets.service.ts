@@ -8,26 +8,29 @@ import {
   TICKET_KEY_PATTERN,
   TicketPriority,
   TicketStatus,
+  WorkspaceRole,
 } from '@coretask/contracts';
 import type { Ticket, TicketDetail, TicketListMeta, TicketListSummary } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Ticket as PrismaTicket } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
-import { PaginatedResult } from '../../common/types/api.types';
+import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
 import { normalizeRichText } from '../../common/utils/rich-text.util';
 import { toCalendarDate } from '../../common/utils/schedule.util';
+import { UUID_PATTERN } from '../../common/utils/uuid.util';
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { diffItemStories, snapshotFromTicket } from '../activity-logs/item-stories';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { FollowersService } from '../followers/followers.service';
 import { ticketLink, ticketRef } from '../followers/item-ref';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTicketDto, TicketListQueryDto, UpdateTicketDto } from './dto/ticket.dto';
 import {
@@ -37,9 +40,6 @@ import {
   toTicketDto,
 } from './ticket.mapper';
 
-/** Matches a bare UUID, so a path segment can be told apart from a ticket key. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 @Injectable()
 export class TicketsService {
   private readonly logger = new Logger(TicketsService.name);
@@ -47,7 +47,8 @@ export class TicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
     private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
     private readonly mentions: DescriptionMentionNotifier,
@@ -57,10 +58,10 @@ export class TicketsService {
 
   async list(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     query: TicketListQueryDto,
   ): Promise<PaginatedResult<Ticket, TicketListMeta>> {
-    const where = this.buildWhere(workspaceId, userId, query);
+    const where = this.buildWhere(workspaceId, actor, query);
 
     const [total, tickets] = await Promise.all([
       this.prisma.ticket.count({ where }),
@@ -74,7 +75,7 @@ export class TicketsService {
       }),
     ]);
 
-    const summary = await this.summarize(workspaceId, query, userId);
+    const summary = await this.summarize(workspaceId, query, actor);
 
     return new PaginatedResult(tickets.map(toTicketDto), {
       ...buildPaginationMeta(query, total),
@@ -88,9 +89,13 @@ export class TicketsService {
    * Keys are what people paste into chat and commit messages, so a link built
    * from one has to resolve without the reader first looking up an id.
    */
-  async getDetail(workspaceId: string, idOrKey: string): Promise<TicketDetail> {
+  async getDetail(
+    workspaceId: string,
+    idOrKey: string,
+    actor: ActorContext,
+  ): Promise<TicketDetail> {
     const ticket = await this.prisma.ticket.findFirst({
-      where: { workspaceId, ...this.identify(idOrKey) },
+      where: { workspaceId, ...this.identify(idOrKey), AND: [this.access.scopedWhere(actor)] },
       include: ticketDetailInclude,
     });
 
@@ -101,9 +106,15 @@ export class TicketsService {
     return toTicketDetailDto(ticket);
   }
 
-  async create(workspaceId: string, userId: string, dto: CreateTicketDto): Promise<Ticket> {
+  async create(workspaceId: string, actor: ActorContext, dto: CreateTicketDto): Promise<Ticket> {
+    const { userId } = actor;
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
-    if (dto.projectId) await this.assertProjectInWorkspace(workspaceId, dto.projectId);
+    // The project arrives in the body, out of `ProjectAccessGuard`'s sight:
+    // invisible is a 404, visible but read-only is a 403.
+    if (dto.projectId) {
+      await this.access.requireAccess(workspaceId, dto.projectId, actor, WorkspaceRole.MEMBER);
+    }
+    await this.assertAssigneeCanSee(workspaceId, dto.projectId ?? null, dto.assigneeId);
 
     const status = dto.status ?? TicketStatus.OPEN;
 
@@ -149,12 +160,13 @@ export class TicketsService {
       action: ActivityAction.CREATED,
       entity: ActivityEntity.TICKET,
       entityId: created.id,
+      projectId: created.projectId,
       summary: `Reported ${created.key}: ${created.title}`,
       metadata: { key: created.key, type: created.type, priority: created.priority },
     });
 
     const ticket = toTicketDto(created);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_CREATED, ticket);
+    void this.broadcast.emit(workspaceId, created.projectId, ServerEvent.TICKET_CREATED, ticket);
 
     await this.followers.ensure(workspaceId, ticketLink(created.id), [
       created.reporterId,
@@ -179,6 +191,7 @@ export class TicketsService {
       actorId: userId,
       entity: 'TICKET',
       entityId: created.id,
+      projectId: created.projectId,
       label: created.key,
       actionUrl: `/tickets?ticket=${created.key}`,
       before: null,
@@ -191,14 +204,24 @@ export class TicketsService {
 
   async update(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     idOrKey: string,
     dto: UpdateTicketDto,
   ): Promise<Ticket> {
-    const existing = await this.requireTicket(workspaceId, idOrKey);
+    const { userId } = actor;
+    const existing = await this.requireTicket(workspaceId, idOrKey, actor, WorkspaceRole.MEMBER);
 
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
-    if (dto.projectId) await this.assertProjectInWorkspace(workspaceId, dto.projectId);
+    // Moving a ticket into a project is a write into that project.
+    if (dto.projectId) {
+      await this.access.requireAccess(workspaceId, dto.projectId, actor, WorkspaceRole.MEMBER);
+    }
+    const targetProjectId = dto.projectId === undefined ? existing.projectId : dto.projectId;
+    await this.assertAssigneeCanSee(
+      workspaceId,
+      targetProjectId,
+      dto.assigneeId === undefined ? existing.assigneeId : dto.assigneeId,
+    );
 
     const data: Prisma.TicketUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
@@ -259,6 +282,7 @@ export class TicketsService {
       actorId: userId,
       entity: ActivityEntity.TICKET,
       entityId: existing.id,
+      projectId: updated.projectId,
     };
     if (stories.length > 0) {
       await this.activity.recordStories(context, stories);
@@ -272,7 +296,7 @@ export class TicketsService {
     }
 
     const ticket = toTicketDto(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TICKET_UPDATED, ticket);
+    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TICKET_UPDATED, ticket);
 
     if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
       await this.followers.ensure(workspaceId, ticketLink(updated.id), [updated.assigneeId]);
@@ -285,6 +309,7 @@ export class TicketsService {
         actorId: userId,
         entity: 'TICKET',
         entityId: updated.id,
+        projectId: updated.projectId,
         label: updated.key,
         actionUrl: `/tickets?ticket=${updated.key}`,
         before: existing.description,
@@ -342,13 +367,13 @@ export class TicketsService {
 
   private buildWhere(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     query: TicketListQueryDto,
   ): Prisma.TicketWhereInput {
     // `me` saves a round trip to learn your own id, and makes a shared queue
     // link resolve per viewer.
-    const assigneeId = query.assigneeId === 'me' ? userId : query.assigneeId;
-    const reporterId = query.reporterId === 'me' ? userId : query.reporterId;
+    const assigneeId = query.assigneeId === 'me' ? actor.userId : query.assigneeId;
+    const reporterId = query.reporterId === 'me' ? actor.userId : query.reporterId;
 
     // An explicit status filter speaks for itself; otherwise the queue hides
     // finished work unless the caller asks for it.
@@ -360,6 +385,8 @@ export class TicketsService {
 
     return {
       workspaceId,
+      // Tickets in projects the caller cannot see are not in their queue.
+      AND: [this.access.scopedWhere(actor)],
       ...(status ? { status } : {}),
       ...(query.projectId ? { projectId: query.projectId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
@@ -399,13 +426,16 @@ export class TicketsService {
   private async summarize(
     workspaceId: string,
     query: TicketListQueryDto,
-    userId: string,
+    actor: ActorContext,
   ): Promise<TicketListSummary> {
     const scope: Prisma.TicketWhereInput = {
       workspaceId,
+      // Its own scope, so it gets its own privacy filter — the tiles must not
+      // count work the list beneath them hides.
+      AND: [this.access.scopedWhere(actor)],
       ...(query.projectId ? { projectId: query.projectId } : {}),
       ...(query.assigneeId
-        ? { assigneeId: query.assigneeId === 'me' ? userId : query.assigneeId }
+        ? { assigneeId: query.assigneeId === 'me' ? actor.userId : query.assigneeId }
         : {}),
     };
 
@@ -437,13 +467,22 @@ export class TicketsService {
    * id-or-key resolution with it, so `/tickets/CORE-1001/comments` works without
    * that rule being duplicated.
    */
-  async requireTicket(workspaceId: string, idOrKey: string): Promise<PrismaTicket> {
+  async requireTicket(
+    workspaceId: string,
+    idOrKey: string,
+    actor: ActorContext,
+    minimumRole?: WorkspaceRole,
+  ): Promise<PrismaTicket> {
     const ticket = await this.prisma.ticket.findFirst({
-      where: { workspaceId, ...this.identify(idOrKey) },
+      where: { workspaceId, ...this.identify(idOrKey), AND: [this.access.scopedWhere(actor)] },
     });
 
     if (!ticket) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Ticket not found.');
+    }
+
+    if (minimumRole) {
+      await this.access.assertEffectiveRole(ticket.projectId, actor, minimumRole);
     }
 
     return ticket;
@@ -465,15 +504,20 @@ export class TicketsService {
     }
   }
 
-  private async assertProjectInWorkspace(workspaceId: string, projectId: string): Promise<void> {
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, workspaceId },
-      select: { id: true },
-    });
+  /** Assigning work someone cannot open helps nobody: they would get a notification to a 404. */
+  private async assertAssigneeCanSee(
+    workspaceId: string,
+    projectId: string | null,
+    assigneeId: string | null | undefined,
+  ): Promise<void> {
+    if (!assigneeId) return;
 
-    if (!project) {
-      throw AppException.badRequest('BAD_REQUEST', 'That project is not in this workspace.');
-    }
+    await this.access.assertUsersCanSee(
+      workspaceId,
+      projectId,
+      [assigneeId],
+      'The assignee must be able to see this project.',
+    );
   }
 
   private async notifyAssignment(

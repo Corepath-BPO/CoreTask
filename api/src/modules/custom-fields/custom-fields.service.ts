@@ -23,11 +23,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
 import { FieldChangeNotifier } from '../../integrations/notifications/field-change.notifier';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { ProjectsService } from '../projects/projects.service';
 import { taskInclude, toTaskDto } from '../tasks/task.mapper';
 
@@ -96,6 +98,12 @@ export type ValueSource = 'USER' | 'BULK' | 'AUTOMATION';
 export interface SetValueOptions {
   source?: ValueSource;
   correlationId?: string | undefined;
+  /**
+   * Who is asking, when a person is. Given, the task is resolved through
+   * their view of its project and they must act as at least a MEMBER in it;
+   * absent (a rule, a bulk edit already checked upstream) the row is trusted.
+   */
+  actor?: ActorContext;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -107,6 +115,7 @@ export class CustomFieldsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
+    private readonly access: ProjectAccessService,
     private readonly activity: ActivityLogsService,
     private readonly realtime: RealtimeGateway,
     private readonly automation: AutomationEventPublisher,
@@ -628,6 +637,36 @@ export class CustomFieldsService {
   // -------------------------------------------------------------------------
 
   /**
+   * The task a value hangs off. With an actor, resolved through their view of
+   * the project (a private one they are not in is a 404) and checked for a
+   * MEMBER's standing in it; without one, tenancy alone.
+   */
+  private async requireTaskFor(
+    workspaceId: string,
+    taskId: string,
+    actor: ActorContext | undefined,
+  ): Promise<{ id: string; projectId: string | null; title: string }> {
+    const task = await this.prisma.task.findFirst({
+      where: {
+        id: taskId,
+        workspaceId,
+        ...(actor ? { AND: [this.access.scopedWhere(actor)] } : {}),
+      },
+      select: { id: true, projectId: true, title: true },
+    });
+
+    if (!task) {
+      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
+    }
+
+    if (actor) {
+      await this.access.assertEffectiveRole(task.projectId, actor, WorkspaceRole.MEMBER);
+    }
+
+    return task;
+  }
+
+  /**
    * Writes one task's value for one field, after validating it against the
    * field's own definition.
    *
@@ -644,14 +683,7 @@ export class CustomFieldsService {
     dto: SetCustomFieldValueDto,
     options: SetValueOptions = {},
   ): Promise<TaskCustomFieldValue> {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, workspaceId },
-      select: { id: true, projectId: true, title: true },
-    });
-
-    if (!task) {
-      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
-    }
+    const task = await this.requireTaskFor(workspaceId, taskId, options.actor);
 
     if (!task.projectId) {
       throw AppException.badRequest(
@@ -695,15 +727,9 @@ export class CustomFieldsService {
     taskId: string,
     fieldId: string,
     userId?: string,
+    actor?: ActorContext,
   ): Promise<void> {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, workspaceId },
-      select: { id: true, projectId: true, title: true },
-    });
-
-    if (!task) {
-      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
-    }
+    const task = await this.requireTaskFor(workspaceId, taskId, actor);
 
     const previous = await this.prisma.taskCustomFieldValue.findUnique({
       where: { taskId_customFieldId: { taskId, customFieldId: fieldId } },

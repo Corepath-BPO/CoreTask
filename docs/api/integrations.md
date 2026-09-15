@@ -21,6 +21,21 @@ Everything a key does is attributed to that account under the key's name, and
 the app badges it **Integration** wherever an author or actor is shown. User
 objects in responses carry `isServiceAccount: true` for it.
 
+A key sees what its account sees. It is capped at MANAGER, so it never has the
+workspace admins' override on private projects: **a private project is a `404`
+to a key until the key's account is added to that project's members** (from the
+project's Share dialog, like anyone else). Public projects need nothing. See
+[project-members.md](project-members.md).
+
+### Try it in the browser first
+
+**Integrations → Playground** runs the calls below from the app, as you or as a
+pasted API key, with projects and sections picked from dropdowns rather than
+ids typed by hand. It shows the exact request, the real response, and the same
+call as a curl line or an n8n HTTP Request node to copy. Everything it does is
+real: a task created there is a task. The complete endpoint reference stays at
+`/api/docs` (Swagger), which is for developers.
+
 ### The n8n recipe
 
 1. Create a key under **Integrations → API keys**. Copy it; it is shown once.
@@ -70,6 +85,23 @@ Comment on it:
 POST /api/v1/workspaces/{workspaceId}/tasks/{taskId}/comments
 { "body": "Synced from the CRM." }
 ```
+
+Break it into subtasks. A subtask is an ordinary task with a `parentTaskId`
+(one level deep), so it is completed and commented on exactly like its parent,
+by its own id:
+
+```http
+POST /api/v1/workspaces/{workspaceId}/tasks
+{ "title": "Check the deploy", "parentTaskId": "{taskId}" }
+
+GET  /api/v1/workspaces/{workspaceId}/tasks/{taskId}/subtasks
+PATCH /api/v1/workspaces/{workspaceId}/tasks/{subtaskId}
+{ "status": "DONE" }
+```
+
+The list comes back in board order with each subtask's `status`, and the
+parent's own `subtaskCount` / `completedSubtaskCount` keep the tally. (The
+task detail carries `subtasks` too, if you are fetching the parent anyway.)
 
 Set custom fields inline by creating through the project's work-items route
 instead (`POST …/projects/{projectId}/work-items` with `customFieldValues`), or

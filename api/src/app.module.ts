@@ -29,6 +29,8 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProjectViewsModule } from './modules/project-views/project-views.module';
 import { WorkItemsModule } from './modules/work-items/work-items.module';
+import { ProjectAccessModule } from './modules/project-access/project-access.module';
+import { ProjectMembersModule } from './modules/project-members/project-members.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { SectionsModule } from './modules/sections/sections.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -84,7 +86,9 @@ import { WebsocketModule } from './websocket/websocket.module';
     MembersModule,
     InvitationsModule,
     TeamsModule,
+    ProjectAccessModule,
     ProjectsModule,
+    ProjectMembersModule,
     ProjectViewsModule,
     WorkItemsModule,
     CustomFieldsModule,

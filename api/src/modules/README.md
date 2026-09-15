@@ -5,18 +5,20 @@ service (business logic), DTOs (validated request/response shapes).
 
 ## Implemented
 
-| Module              | Responsibility                                                     |
-| ------------------- | ------------------------------------------------------------------ |
-| `auth`              | Registration, login, refresh-token rotation, logout, `/auth/me`    |
-| `users`             | User lookup and creation; the only place that reads `passwordHash` |
-| `workspaces`        | Tenant containers, creation with OWNER assignment, settings        |
-| `workspace-members` | Membership resolution, role checks, `WorkspaceMemberGuard`         |
-| `projects`          | Project CRUD, key derivation, archive/restore, default sections    |
-| `sections`          | Board columns: CRUD plus fractional reordering                     |
-| `tasks`             | Task CRUD, filtering, cross-section moves, subtasks, archive       |
-| `activity-logs`     | Append-only audit trail                                            |
-| `notifications`     | In-app notification persistence                                    |
-| `health`            | Liveness plus PostgreSQL/Redis dependency checks                   |
+| Module              | Responsibility                                                                    |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `auth`              | Registration, login, refresh-token rotation, logout, `/auth/me`                   |
+| `users`             | User lookup and creation; the only place that reads `passwordHash`                |
+| `workspaces`        | Tenant containers, creation with OWNER assignment, settings                       |
+| `workspace-members` | Membership resolution, role checks, `WorkspaceMemberGuard`                        |
+| `projects`          | Project CRUD, key derivation, archive/restore, default sections                   |
+| `project-access`    | Who may see a project and as what: the visibility predicate, `ProjectAccessGuard` |
+| `project-members`   | A project's roster (add, role, remove, join, leave) and the last-admin rule       |
+| `sections`          | Board columns: CRUD plus fractional reordering                                    |
+| `tasks`             | Task CRUD, filtering, cross-section moves, subtasks, archive                      |
+| `activity-logs`     | Append-only audit trail                                                           |
+| `notifications`     | In-app notification persistence                                                   |
+| `health`            | Liveness plus PostgreSQL/Redis dependency checks                                  |
 
 ### Role requirements
 
@@ -28,6 +30,13 @@ Reads are open to any member, including GUEST. Mutations escalate:
 | Create/edit a project; add, rename or reorder a section | `MEMBER`     |
 | Create, edit or move a task                             | `MEMBER`     |
 | Archive/restore a project or task; delete a section     | `MANAGER`    |
+
+Inside a project these are checked against the caller's _effective_ role: the
+workspace role, lowered by their project role (`EDITOR` → at most `MEMBER`,
+`VIEWER` → at most `GUEST`). A `PRIVATE` project is a `404` to anyone who is
+neither on its roster nor a workspace `OWNER`/`ADMIN`. Changing the roster or
+the privacy needs a project `ADMIN` (or a workspace admin), whatever their
+workspace role. See `docs/api/project-members.md`.
 
 ### Routing shape
 

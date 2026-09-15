@@ -60,6 +60,7 @@ import {
   useSubtasks,
 } from '@/features/projects/hooks/use-project-views';
 import { useProject } from '@/features/projects/hooks/use-projects';
+import { useProjectAccess } from '@/features/projects/lib/project-access';
 import {
   useMoveProjectWorkItem,
   useProjectWorkItem,
@@ -475,7 +476,7 @@ interface TaskDetailBodyProps {
 function TaskDetailBody({
   task,
   workspaceId,
-  role,
+  role: workspaceRole,
   onClose,
   onOpenTask,
   metadata,
@@ -488,6 +489,13 @@ function TaskDetailBody({
   const me = useCurrentUser();
   // Already cached by the board in the common case, so this is usually free.
   const { data: project } = useProject(workspaceId, task.projectId ?? '');
+  /*
+   * A task in a project is edited with the reader's standing *in that
+   * project*, which caps the workspace role the caller passed. Reached from
+   * My Tasks or the inbox, this is what keeps a viewer's panel read-only.
+   */
+  const projectAccess = useProjectAccess(project);
+  const role = task.projectId && project ? projectAccess.effectiveRole : workspaceRole;
   const updateTask = useUpdateTask(workspaceId);
   const archiveTask = useArchiveTask(workspaceId);
   const createTask = useCreateTask(workspaceId);

@@ -12,7 +12,7 @@ import { TaskStatus, type Prisma } from '@prisma/client';
 
 import { AppException } from '../../../common/exceptions/app.exception';
 import { PrismaService } from '../../../database/prisma.service';
-import { ProjectsService } from '../../projects/projects.service';
+import { ProjectAccessService } from '../../project-access/project-access.service';
 import { AutomationsService } from '../automations.service';
 import { customFieldConditionId, customFieldKey } from '../builder/automation-catalogue';
 import type {
@@ -114,7 +114,7 @@ const readIds = (value: unknown): string[] =>
 export class AutomationTemplatesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly projects: ProjectsService,
+    private readonly access: ProjectAccessService,
     private readonly automations: AutomationsService,
   ) {}
 
@@ -269,7 +269,14 @@ export class AutomationTemplatesService {
   ): Promise<AppliedAutomationTemplate> {
     this.assertMayManage(role);
     const template = await this.requireTemplate(workspaceId, templateId);
-    await this.projects.requireProject(workspaceId, dto.projectId);
+    // The target arrives in the body, out of `ProjectAccessGuard`'s sight:
+    // invisible is a 404, and the caller must still be a manager *inside* it.
+    await this.access.requireAccess(
+      workspaceId,
+      dto.projectId,
+      { userId, role },
+      WorkspaceRole.MANAGER,
+    );
 
     const target = await this.loadTarget(workspaceId, dto.projectId);
     const references = asReferences(template.references);

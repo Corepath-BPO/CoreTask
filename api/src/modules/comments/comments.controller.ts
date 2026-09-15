@@ -21,13 +21,9 @@ import {
   ApiErrorResponseDoc,
   ApiPaginatedEnvelopeResponse,
 } from '../../common/decorators/api-envelope.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
-import {
-  CurrentWorkspace,
-  RequireWorkspaceRole,
-} from '../../common/decorators/workspace.decorator';
-import type { PaginatedResult } from '../../common/types/api.types';
+import { Actor, RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import type { ActorContext, PaginatedResult } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { CommentsService } from './comments.service';
@@ -61,10 +57,10 @@ export class TaskCommentsController {
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Query() query: CommentListQueryDto,
   ): Promise<PaginatedResult<Comment, CommentListMeta>> {
-    return this.comments.listForTask(workspaceId, userId, taskId, query);
+    return this.comments.listForTask(workspaceId, actor, taskId, query);
   }
 
   @Post()
@@ -77,10 +73,10 @@ export class TaskCommentsController {
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: CreateCommentDto,
   ): Promise<Comment> {
-    return this.comments.createForTask(workspaceId, userId, taskId, dto);
+    return this.comments.createForTask(workspaceId, actor, taskId, dto);
   }
 }
 
@@ -105,10 +101,10 @@ export class TicketCommentsController {
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Query() query: CommentListQueryDto,
   ): Promise<PaginatedResult<Comment, CommentListMeta>> {
-    return this.comments.listForTicket(workspaceId, userId, idOrKey, query);
+    return this.comments.listForTicket(workspaceId, actor, idOrKey, query);
   }
 
   @Post()
@@ -121,10 +117,10 @@ export class TicketCommentsController {
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: CreateCommentDto,
   ): Promise<Comment> {
-    return this.comments.createForTicket(workspaceId, userId, idOrKey, dto);
+    return this.comments.createForTicket(workspaceId, actor, idOrKey, dto);
   }
 }
 
@@ -156,10 +152,10 @@ export class CommentsController {
   update(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: UpdateCommentDto,
   ): Promise<Comment> {
-    return this.comments.update(workspaceId, userId, commentId, dto);
+    return this.comments.update(workspaceId, actor, commentId, dto);
   }
 
   @Delete(':commentId')
@@ -176,10 +172,9 @@ export class CommentsController {
   remove(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
-    @CurrentWorkspace('role') role: string,
+    @Actor() actor: ActorContext,
   ): Promise<{ deleted: true }> {
-    return this.comments.remove(workspaceId, userId, role as WorkspaceRole, commentId);
+    return this.comments.remove(workspaceId, actor, commentId);
   }
 
   @Post(':commentId/like')
@@ -190,9 +185,9 @@ export class CommentsController {
   like(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Comment> {
-    return this.comments.like(workspaceId, userId, commentId);
+    return this.comments.like(workspaceId, actor, commentId);
   }
 
   @Delete(':commentId/like')
@@ -204,9 +199,9 @@ export class CommentsController {
   unlike(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Comment> {
-    return this.comments.unlike(workspaceId, userId, commentId);
+    return this.comments.unlike(workspaceId, actor, commentId);
   }
 
   @Post(':commentId/pin')
@@ -221,10 +216,9 @@ export class CommentsController {
   pin(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
-    @CurrentWorkspace('role') role: string,
+    @Actor() actor: ActorContext,
   ): Promise<Comment> {
-    return this.comments.pin(workspaceId, userId, role as WorkspaceRole, commentId);
+    return this.comments.pin(workspaceId, actor, commentId);
   }
 
   @Delete(':commentId/pin')
@@ -237,9 +231,8 @@ export class CommentsController {
   unpin(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
-    @CurrentUser('id') userId: string,
-    @CurrentWorkspace('role') role: string,
+    @Actor() actor: ActorContext,
   ): Promise<Comment> {
-    return this.comments.unpin(workspaceId, userId, role as WorkspaceRole, commentId);
+    return this.comments.unpin(workspaceId, actor, commentId);
   }
 }
