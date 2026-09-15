@@ -115,15 +115,34 @@ Pop-Location
 if ($code -ne 0) { exit 1 }
 
 Write-Host '4/5 API and worker' -ForegroundColor Cyan
-Start-ServiceWindow 'CoreTask API' "$root\api" 'pnpm dev' 'api'
+# One compiler, two Node processes, each restarted by Node's own watch mode.
+#
+# Not `nest start --watch`: that manages the server process itself and, on
+# Windows, dies whenever its `taskkill` of the previous child fails ("no running
+# instance of the task") — which happened three times in one evening and left
+# nothing listening on :3000 until someone noticed. `nest build --watch` only
+# writes files; `node --watch` restarts the server when they change, the same
+# way the worker has always run. Absolute paths so the processes are
+# recognisable (and stoppable) by their command lines.
+#
+# The first build is a blocking one, so `dist` is complete before anything runs
+# from it, and the watcher is plain `tsc`, which rewrites files but never deletes
+# them: `nest build --watch` empties `dist` on start (deleteOutDir), and a Node
+# watcher whose entry file vanishes gives up ("Waiting for file changes") and
+# does not come back when the file reappears.
+Write-Host '    building the API once' -ForegroundColor Cyan
+Push-Location "$root\api"
+pnpm exec nest build
+$code = $LASTEXITCODE
+Pop-Location
+if ($code -ne 0) { exit 1 }
+Start-ServiceWindow 'CoreTask API compiler' "$root\api" 'pnpm exec tsc -p tsconfig.build.json --watch --preserveWatchOutput' 'api-compiler'
+Start-ServiceWindow 'CoreTask API' "$root\api" "node --watch --enable-source-maps `"$root\api\dist\main.js`"" 'api'
 Wait-Until 'API' { Test-Http 'http://localhost:3000/api/v1/health' } 240
-# The worker runs from the API's compiled output instead of its own
-# `nest start --watch`: a second compiler would wipe and rewrite the shared
-# api/dist while the API is restarting (it crashed with "Cannot find module
-# dist/main" that way), and it costs another ~450 MB. Node's own watch mode
-# restarts the worker whenever the API compiler rewrites a file it loaded.
-Wait-Until 'API build output' { Test-Path "$root\api\dist\worker.js" } 30
-# Absolute path so the process is recognisable (and stoppable) by its command line.
+# The worker runs from the same compiled output rather than a compiler of its
+# own: a second compiler would wipe and rewrite the shared api/dist while the
+# API is restarting, and it costs another ~450 MB.
+Wait-Until 'Worker build output' { Test-Path "$root\api\dist\worker.js" } 30
 Start-ServiceWindow 'CoreTask worker' "$root\api" "node --watch --enable-source-maps `"$root\api\dist\worker.js`"" 'worker'
 
 Write-Host '5/5 Web' -ForegroundColor Cyan
