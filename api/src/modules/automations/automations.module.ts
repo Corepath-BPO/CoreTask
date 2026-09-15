@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
@@ -12,7 +13,7 @@ import { AutomationTemplatesService } from './library/automation-templates.servi
 import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 @Module({
-  imports: [WorkspaceMembersModule, ProjectsModule],
+  imports: [WorkspaceMembersModule, ProjectAccessModule, ProjectsModule],
   controllers: [AutomationsController, AutomationTemplatesController],
   providers: [
     AutomationsService,

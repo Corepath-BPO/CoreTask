@@ -261,6 +261,41 @@ describe('Tasks (e2e)', () => {
       ]);
     });
 
+    it('lists the subtasks of one task by its id alone, in order', async () => {
+      const scope = await setupScope();
+      const parent = await createTask(scope, { title: 'Parent' });
+      await createTask(scope, { title: 'First child', parentTaskId: parent.id });
+      await createTask(scope, {
+        title: 'Second child',
+        parentTaskId: parent.id,
+        status: TaskStatus.DONE,
+      });
+      // Another parent's children must not leak in.
+      const other = await createTask(scope, { title: 'Other parent' });
+      await createTask(scope, { title: 'Other child', parentTaskId: other.id });
+
+      const response = await request(server())
+        .get(`${tasksUrl(scope)}/${parent.id}/subtasks`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.data.map((task: { title: string }) => task.title)).toEqual([
+        'First child',
+        'Second child',
+      ]);
+      expect(response.body.data[1].status).toBe(TaskStatus.DONE);
+      expect(response.body.data[1].parentTaskId).toBe(parent.id);
+    });
+
+    it('answers 404 when the parent is not in the workspace', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .get(`${tasksUrl(scope)}/019fc880-0000-7000-8000-000000000000/subtasks`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(404);
+    });
+
     it('refuses to nest more than one level deep', async () => {
       const scope = await setupScope();
       const parent = await createTask(scope, { title: 'Parent' });

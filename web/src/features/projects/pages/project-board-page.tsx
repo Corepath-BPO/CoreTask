@@ -1,10 +1,4 @@
-import {
-  ProjectViewType,
-  SystemField,
-  WorkspaceRole,
-  hasAtLeastRole,
-  type CreatableWorkItemType,
-} from '@coretask/contracts';
+import { ProjectViewType, SystemField, type CreatableWorkItemType } from '@coretask/contracts';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { FolderKanban } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -40,6 +34,7 @@ import {
   useViewSettingsEditor,
 } from '../hooks/use-project-views';
 import { useCreateSection, useProject } from '../hooks/use-projects';
+import { useProjectAccess } from '../lib/project-access';
 import { isManualOrder } from '../lib/group-value';
 
 /** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
@@ -56,9 +51,11 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
   const me = useCurrentUser();
-  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
 
   const { data: project, isLoading } = useProject(workspaceId, projectId);
+  // The reader's standing in this project, not their workspace role.
+  const access = useProjectAccess(project);
+  const role = access.effectiveRole;
   const { data: views } = useProjectViews(workspaceId, projectId);
 
   /*
@@ -157,8 +154,8 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
   const [addingSection, setAddingSection] = useState(false);
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
 
-  const canEdit = hasAtLeastRole(role, WorkspaceRole.MEMBER);
-  const canManage = hasAtLeastRole(role, WorkspaceRole.MANAGER);
+  const canEdit = access.canEdit;
+  const canManage = access.canManage;
   const archived = Boolean(project?.archivedAt);
   const manualOrder = isManualOrder(settings);
 

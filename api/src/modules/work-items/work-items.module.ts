@@ -7,6 +7,7 @@ import { AutomationEventsModule } from '../automations/automation-events.module'
 import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
 import { FollowersModule } from '../followers/followers.module';
 import { ProjectViewsModule } from '../project-views/project-views.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
@@ -31,6 +32,7 @@ import { WorkItemsController } from './work-items.controller';
 @Module({
   imports: [
     WorkspaceMembersModule,
+    ProjectAccessModule,
     ProjectsModule,
     ActivityLogsModule,
     AutomationEventsModule,

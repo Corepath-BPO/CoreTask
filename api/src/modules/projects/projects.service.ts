@@ -3,32 +3,46 @@ import {
   ActivityEntity,
   DEFAULT_SECTION_NAMES,
   PROJECT_KEY_MAX_LENGTH,
+  PROJECT_MEMBER_PREVIEW_LIMIT,
+  ProjectMemberRole,
   ProjectStatus,
+  ProjectVisibility,
   ServerEvent,
   TaskStatus,
+  canManageProject,
+  effectiveWorkspaceRole,
 } from '@coretask/contracts';
-import type { ProjectDetail, ProjectSummary } from '@coretask/types';
+import type { ProjectAccess, ProjectDetail, ProjectSummary } from '@coretask/types';
 import { deriveProjectKey } from '@coretask/validation';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Project } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
-import { PaginatedResult } from '../../common/types/api.types';
+import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
 import { initialPositions } from '../../common/utils/position.util';
 import { PrismaService } from '../../database/prisma.service';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { toSectionDto, type SectionWithCount } from '../sections/section.mapper';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
 
 import type { CreateProjectDto, ProjectListQueryDto, UpdateProjectDto } from './dto/project.dto';
 
 const LEAD_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const MEMBER_USER_SELECT = { ...LEAD_SELECT, isServiceAccount: true } as const;
 
 const PROJECT_INCLUDE = {
   lead: { select: LEAD_SELECT },
   team: { select: { id: true, name: true, color: true } },
-  _count: { select: { sections: true, tasks: true } },
+  // Admins first, then by seniority — the order an avatar stack shows them.
+  // Enum ordering follows the declaration (ADMIN, EDITOR, VIEWER).
+  members: {
+    take: PROJECT_MEMBER_PREVIEW_LIMIT,
+    orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+    include: { user: { select: MEMBER_USER_SELECT } },
+  },
+  _count: { select: { sections: true, tasks: true, members: true } },
 } satisfies Prisma.ProjectInclude;
 
 type ProjectWithCounts = Prisma.ProjectGetPayload<{ include: typeof PROJECT_INCLUDE }>;
@@ -40,15 +54,19 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   async list(
     workspaceId: string,
+    actor: ActorContext,
     query: ProjectListQueryDto,
   ): Promise<PaginatedResult<ProjectSummary>> {
     const where: Prisma.ProjectWhereInput = {
       workspaceId,
+      // Under AND because the search filter below owns the top-level OR.
+      AND: [this.access.projectWhere(actor)],
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.status ? { status: query.status } : {}),
       ...(query.teamId ? { teamId: query.teamId } : {}),
@@ -73,18 +91,32 @@ export class ProjectsService {
       }),
     ]);
 
-    const completed = await this.completedTaskCounts(projects.map((project) => project.id));
+    const ids = projects.map((project) => project.id);
+    const [completed, memberships] = await Promise.all([
+      this.completedTaskCounts(ids),
+      this.membershipsFor(actor.userId, ids),
+    ]);
 
     return new PaginatedResult(
-      projects.map((project) => this.toSummary(project, completed.get(project.id) ?? 0)),
+      projects.map((project) =>
+        this.toSummary(
+          project,
+          completed.get(project.id) ?? 0,
+          this.accessFor(actor, memberships.get(project.id) ?? null),
+        ),
+      ),
       buildPaginationMeta(query, total),
     );
   }
 
   /** The board payload: a project plus its ordered columns. */
-  async getDetail(workspaceId: string, projectId: string): Promise<ProjectDetail> {
+  async getDetail(
+    workspaceId: string,
+    projectId: string,
+    actor: ActorContext,
+  ): Promise<ProjectDetail> {
     const project = await this.prisma.project.findFirst({
-      where: { id: projectId, workspaceId },
+      where: { id: projectId, workspaceId, AND: [this.access.projectWhere(actor)] },
       include: {
         ...PROJECT_INCLUDE,
         sections: {
@@ -98,15 +130,26 @@ export class ProjectsService {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Project not found.');
     }
 
-    const completed = await this.completedTaskCounts([projectId]);
+    const [completed, memberships] = await Promise.all([
+      this.completedTaskCounts([projectId]),
+      this.membershipsFor(actor.userId, [projectId]),
+    ]);
 
     return {
-      ...this.toSummary(project, completed.get(projectId) ?? 0),
+      ...this.toSummary(
+        project,
+        completed.get(projectId) ?? 0,
+        this.accessFor(actor, memberships.get(projectId) ?? null),
+      ),
       sections: project.sections.map((section) => toSectionDto(section as SectionWithCount)),
     };
   }
 
-  async create(workspaceId: string, userId: string, dto: CreateProjectDto): Promise<ProjectDetail> {
+  async create(
+    workspaceId: string,
+    actor: ActorContext,
+    dto: CreateProjectDto,
+  ): Promise<ProjectDetail> {
     await this.assertLeadIsMember(workspaceId, dto.leadId);
     await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
@@ -122,11 +165,26 @@ export class ProjectsService {
           status: dto.status ?? ProjectStatus.PLANNING,
           ...(dto.color ? { color: dto.color } : {}),
           ...(dto.defaultWorkItemType ? { defaultWorkItemType: dto.defaultWorkItemType } : {}),
+          visibility: dto.visibility ?? ProjectVisibility.PUBLIC,
           leadId: dto.leadId ?? null,
           teamId: dto.teamId ?? null,
           startDate: toDate(dto.startDate),
           dueDate: toDate(dto.dueDate),
         },
+      });
+
+      // Whoever creates a project runs it, and so does the lead they named.
+      // Both are admins from the first moment, so a private project is never
+      // born without one.
+      await tx.projectMember.createMany({
+        data: uniqueIds([actor.userId, dto.leadId]).map((userId) => ({
+          projectId: created.id,
+          workspaceId,
+          userId,
+          role: ProjectMemberRole.ADMIN,
+          addedById: userId === actor.userId ? null : actor.userId,
+        })),
+        skipDuplicates: true,
       });
 
       // A project with no columns cannot show a board, so the defaults are part
@@ -146,16 +204,22 @@ export class ProjectsService {
 
     await this.activity.record({
       workspaceId,
-      actorId: userId,
+      actorId: actor.userId,
       action: ActivityAction.CREATED,
       entity: ActivityEntity.PROJECT,
       entityId: project.id,
+      projectId: project.id,
       summary: `Created project "${project.name}"`,
-      metadata: { key: project.key },
+      metadata: { key: project.key, visibility: project.visibility },
     });
 
-    const detail = await this.getDetail(workspaceId, project.id);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.PROJECT_CREATED, detail);
+    const detail = await this.getDetail(workspaceId, project.id, actor);
+    void this.broadcast.emit(
+      workspaceId,
+      project.id,
+      ServerEvent.PROJECT_CREATED,
+      withoutAccess(detail),
+    );
     this.logger.log({ projectId: project.id, workspaceId }, 'Project created');
 
     return detail;
@@ -163,11 +227,12 @@ export class ProjectsService {
 
   async update(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     projectId: string,
     dto: UpdateProjectDto,
   ): Promise<ProjectSummary> {
-    const existing = await this.requireProject(workspaceId, projectId);
+    const access = await this.access.resolveAccess(workspaceId, projectId, actor);
+    const existing = access.project;
     await this.assertLeadIsMember(workspaceId, dto.leadId);
     await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
@@ -198,24 +263,79 @@ export class ProjectsService {
       }
     }
 
+    // Who can see the project is a decision for the people who run it, not
+    // for anyone who may edit its name.
+    const visibilityChange =
+      dto.visibility !== undefined && dto.visibility !== existing.visibility
+        ? dto.visibility
+        : null;
+    if (visibilityChange !== null) {
+      if (!access.canManage) {
+        throw AppException.forbidden(
+          'INSUFFICIENT_PROJECT_ROLE',
+          'Only a project admin can change who can see this project.',
+        );
+      }
+      data.visibility = visibilityChange;
+    }
+
     if (Object.keys(data).length === 0) {
       throw AppException.badRequest('BAD_REQUEST', 'Provide at least one field to update.');
     }
 
-    await this.prisma.project.update({ where: { id: projectId }, data });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.project.update({ where: { id: projectId }, data });
+
+      // A named lead runs the project. An existing member keeps whatever role
+      // they had — being made lead never demotes anyone.
+      if (dto.leadId) {
+        await this.ensureMember(tx, workspaceId, projectId, dto.leadId, actor.userId);
+      }
+
+      // Going private must never lock out the person doing it, and a private
+      // project must always have an admin — so the actor becomes one now if
+      // nobody else is.
+      if (visibilityChange === ProjectVisibility.PRIVATE) {
+        await this.ensureMember(tx, workspaceId, projectId, actor.userId, null);
+        const admins = await tx.projectMember.count({
+          where: { projectId, role: ProjectMemberRole.ADMIN },
+        });
+        if (admins === 0) {
+          await tx.projectMember.update({
+            where: { projectId_userId: { projectId, userId: actor.userId } },
+            data: { role: ProjectMemberRole.ADMIN },
+          });
+        }
+      }
+    });
 
     await this.activity.record({
       workspaceId,
-      actorId: userId,
+      actorId: actor.userId,
       action: ActivityAction.UPDATED,
       entity: ActivityEntity.PROJECT,
       entityId: projectId,
+      projectId,
       summary: `Updated project "${dto.name ?? existing.name}"`,
-      metadata: { fields: Object.keys(data) },
+      metadata: {
+        fields: Object.keys(data),
+        ...(visibilityChange ? { visibility: visibilityChange } : {}),
+      },
     });
 
-    const summary = await this.getSummary(workspaceId, projectId);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.PROJECT_UPDATED, summary);
+    const summary = await this.getSummary(workspaceId, projectId, actor);
+    void this.broadcast.emit(
+      workspaceId,
+      projectId,
+      ServerEvent.PROJECT_UPDATED,
+      withoutAccess(summary),
+    );
+
+    // Everyone the project just disappeared for needs to hear it: their open
+    // tabs are still in its room and their lists still show it.
+    if (visibilityChange === ProjectVisibility.PRIVATE) {
+      await this.revokeFromOutsiders(workspaceId, projectId);
+    }
 
     return summary;
   }
@@ -224,8 +344,12 @@ export class ProjectsService {
    * Archive rather than delete: tasks, tickets and activity keep referring to
    * the project, and archiving is a reversible product action.
    */
-  async archive(workspaceId: string, userId: string, projectId: string): Promise<ProjectSummary> {
-    const existing = await this.requireProject(workspaceId, projectId);
+  async archive(
+    workspaceId: string,
+    actor: ActorContext,
+    projectId: string,
+  ): Promise<ProjectSummary> {
+    const { project: existing } = await this.access.resolveAccess(workspaceId, projectId, actor);
 
     if (existing.archivedAt !== null) {
       throw AppException.conflict('RESOURCE_CONFLICT', 'This project is already archived.');
@@ -238,21 +362,31 @@ export class ProjectsService {
 
     await this.activity.record({
       workspaceId,
-      actorId: userId,
+      actorId: actor.userId,
       action: ActivityAction.ARCHIVED,
       entity: ActivityEntity.PROJECT,
       entityId: projectId,
+      projectId,
       summary: `Archived project "${existing.name}"`,
     });
 
-    const summary = await this.getSummary(workspaceId, projectId);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.PROJECT_ARCHIVED, summary);
+    const summary = await this.getSummary(workspaceId, projectId, actor);
+    void this.broadcast.emit(
+      workspaceId,
+      projectId,
+      ServerEvent.PROJECT_ARCHIVED,
+      withoutAccess(summary),
+    );
 
     return summary;
   }
 
-  async restore(workspaceId: string, userId: string, projectId: string): Promise<ProjectSummary> {
-    const existing = await this.requireProject(workspaceId, projectId);
+  async restore(
+    workspaceId: string,
+    actor: ActorContext,
+    projectId: string,
+  ): Promise<ProjectSummary> {
+    const { project: existing } = await this.access.resolveAccess(workspaceId, projectId, actor);
 
     if (existing.archivedAt === null) {
       throw AppException.conflict('RESOURCE_CONFLICT', 'This project is not archived.');
@@ -265,25 +399,33 @@ export class ProjectsService {
 
     await this.activity.record({
       workspaceId,
-      actorId: userId,
+      actorId: actor.userId,
       action: ActivityAction.RESTORED,
       entity: ActivityEntity.PROJECT,
       entityId: projectId,
+      projectId,
       summary: `Restored project "${existing.name}"`,
     });
 
-    const summary = await this.getSummary(workspaceId, projectId);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.PROJECT_RESTORED, summary);
+    const summary = await this.getSummary(workspaceId, projectId, actor);
+    void this.broadcast.emit(
+      workspaceId,
+      projectId,
+      ServerEvent.PROJECT_RESTORED,
+      withoutAccess(summary),
+    );
 
     return summary;
   }
 
   /**
-   * Loads a project *within a workspace*.
+   * Loads a project *within a workspace*, tenancy only.
    *
    * The `workspaceId` in the filter is what stops an id from another tenant
    * resolving; the membership check has already happened in the guard, so a
-   * foreign id must look like it does not exist.
+   * foreign id must look like it does not exist. Visibility is *not* checked
+   * here — routes under a project have `ProjectAccessGuard` for that, and a
+   * `projectId` arriving in a body goes through `ProjectAccessService`.
    */
   async requireProject(workspaceId: string, projectId: string): Promise<Project> {
     const project = await this.prisma.project.findFirst({
@@ -297,14 +439,54 @@ export class ProjectsService {
     return project;
   }
 
-  private async getSummary(workspaceId: string, projectId: string): Promise<ProjectSummary> {
+  /** A summary as `actor` sees it, for the members module after a roster change. */
+  async getSummary(
+    workspaceId: string,
+    projectId: string,
+    actor: ActorContext,
+  ): Promise<ProjectSummary> {
     const project = await this.prisma.project.findFirstOrThrow({
       where: { id: projectId, workspaceId },
       include: PROJECT_INCLUDE,
     });
 
-    const completed = await this.completedTaskCounts([projectId]);
-    return this.toSummary(project, completed.get(projectId) ?? 0);
+    const [completed, memberships] = await Promise.all([
+      this.completedTaskCounts([projectId]),
+      this.membershipsFor(actor.userId, [projectId]),
+    ]);
+
+    return this.toSummary(
+      project,
+      completed.get(projectId) ?? 0,
+      this.accessFor(actor, memberships.get(projectId) ?? null),
+    );
+  }
+
+  /** Adds someone as an admin unless they are already on the roster, whatever their role. */
+  private async ensureMember(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    addedById: string | null,
+  ): Promise<void> {
+    await tx.projectMember.upsert({
+      where: { projectId_userId: { projectId, userId } },
+      create: { projectId, workspaceId, userId, role: ProjectMemberRole.ADMIN, addedById },
+      update: {},
+    });
+  }
+
+  /** Every workspace member who is not in the project's audience loses it. */
+  private async revokeFromOutsiders(workspaceId: string, projectId: string): Promise<void> {
+    const [audience, members] = await Promise.all([
+      this.access.audienceUserIds(workspaceId, projectId),
+      this.prisma.workspaceMember.findMany({ where: { workspaceId }, select: { userId: true } }),
+    ]);
+    const allowed = new Set(audience);
+    const outsiders = members.map((row) => row.userId).filter((userId) => !allowed.has(userId));
+
+    await this.broadcast.revoke(workspaceId, projectId, outsiders);
   }
 
   /**
@@ -325,6 +507,34 @@ export class ProjectsService {
         .filter((row): row is typeof row & { projectId: string } => row.projectId !== null)
         .map((row) => [row.projectId, row._count._all]),
     );
+  }
+
+  /**
+   * The reader's own role in each project on the page, in one query. The
+   * preview on the include is capped and admins-first, so it cannot be relied
+   * on to contain the reader.
+   */
+  private async membershipsFor(
+    userId: string,
+    projectIds: string[],
+  ): Promise<Map<string, ProjectMemberRole>> {
+    if (projectIds.length === 0) return new Map();
+
+    const rows = await this.prisma.projectMember.findMany({
+      where: { userId, projectId: { in: projectIds } },
+      select: { projectId: true, role: true },
+    });
+
+    return new Map(rows.map((row) => [row.projectId, row.role]));
+  }
+
+  private accessFor(actor: ActorContext, projectRole: ProjectMemberRole | null): ProjectAccess {
+    return {
+      effectiveRole: effectiveWorkspaceRole(actor.role, projectRole),
+      projectRole,
+      isMember: projectRole !== null,
+      canManage: canManageProject(actor.role, projectRole),
+    };
   }
 
   /** A lead must already belong to the workspace, or membership means nothing. */
@@ -386,7 +596,11 @@ export class ProjectsService {
     throw AppException.conflict('PROJECT_KEY_TAKEN');
   }
 
-  private toSummary(project: ProjectWithCounts, completedTaskCount: number): ProjectSummary {
+  private toSummary(
+    project: ProjectWithCounts,
+    completedTaskCount: number,
+    access: ProjectAccess,
+  ): ProjectSummary {
     return {
       id: project.id,
       workspaceId: project.workspaceId,
@@ -396,6 +610,7 @@ export class ProjectsService {
       status: project.status,
       color: project.color,
       defaultWorkItemType: project.defaultWorkItemType,
+      visibility: project.visibility,
       leadId: project.leadId,
       lead: project.lead,
       teamId: project.teamId,
@@ -407,6 +622,9 @@ export class ProjectsService {
       taskCount: project._count.tasks,
       completedTaskCount,
       sectionCount: project._count.sections,
+      memberCount: project._count.members,
+      members: project.members.map((member) => ({ user: member.user, role: member.role })),
+      access,
       createdAt: project.createdAt.toISOString(),
       updatedAt: project.updatedAt.toISOString(),
     };
@@ -416,4 +634,14 @@ export class ProjectsService {
 function toDate(value: string | null | undefined): Date | null | undefined {
   if (value === undefined) return undefined;
   return value === null ? null : new Date(value);
+}
+
+function uniqueIds(ids: Array<string | null | undefined>): string[] {
+  return [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+}
+
+/** `access` is one reader's view; a broadcast reaches many, so it goes without. */
+function withoutAccess<T extends { access: ProjectAccess }>(summary: T): Omit<T, 'access'> {
+  const { access: _access, ...rest } = summary;
+  return rest;
 }

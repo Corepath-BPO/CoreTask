@@ -1,4 +1,3 @@
-import type { WorkspaceRole } from '@coretask/contracts';
 import type { Attachment, AttachmentDownload, PresignedUpload } from '@coretask/types';
 import {
   Body,
@@ -18,8 +17,8 @@ import {
   ApiEnvelopeResponse,
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import { Actor } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AttachmentsService } from './attachments.service';
@@ -61,10 +60,10 @@ export class AttachmentsController {
   @ApiErrorResponseDoc(404, 'No such task or ticket in this workspace')
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: CreateAttachmentDto,
   ): Promise<PresignedUpload> {
-    return this.attachments.create(workspaceId, userId, dto);
+    return this.attachments.create(workspaceId, actor, dto);
   }
 
   @Post('attachments/:attachmentId/confirm')
@@ -81,9 +80,9 @@ export class AttachmentsController {
   confirm(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Attachment> {
-    return this.attachments.confirm(workspaceId, userId, attachmentId);
+    return this.attachments.confirm(workspaceId, actor, attachmentId);
   }
 
   @Get('tasks/:taskId/attachments')
@@ -93,8 +92,9 @@ export class AttachmentsController {
   listForTask(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Attachment[]> {
-    return this.attachments.listForTask(workspaceId, taskId);
+    return this.attachments.listForTask(workspaceId, taskId, actor);
   }
 
   @Get('tickets/:idOrKey/attachments')
@@ -104,8 +104,9 @@ export class AttachmentsController {
   listForTicket(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
+    @Actor() actor: ActorContext,
   ): Promise<Attachment[]> {
-    return this.attachments.listForTicket(workspaceId, idOrKey);
+    return this.attachments.listForTicket(workspaceId, idOrKey, actor);
   }
 
   @Get('attachments/:attachmentId/download')
@@ -120,8 +121,9 @@ export class AttachmentsController {
   download(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Actor() actor: ActorContext,
   ): Promise<AttachmentDownload> {
-    return this.attachments.download(workspaceId, attachmentId);
+    return this.attachments.download(workspaceId, attachmentId, actor);
   }
 
   @Get('attachments/:attachmentId/view')
@@ -139,8 +141,9 @@ export class AttachmentsController {
   view(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Actor() actor: ActorContext,
   ): Promise<AttachmentDownload> {
-    return this.attachments.view(workspaceId, attachmentId);
+    return this.attachments.view(workspaceId, attachmentId, actor);
   }
 
   @Delete('attachments/:attachmentId')
@@ -156,9 +159,8 @@ export class AttachmentsController {
   remove(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
-    @CurrentUser('id') userId: string,
-    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Actor() actor: ActorContext,
   ): Promise<{ deleted: true }> {
-    return this.attachments.remove(workspaceId, userId, role, attachmentId);
+    return this.attachments.remove(workspaceId, actor, attachmentId);
   }
 }

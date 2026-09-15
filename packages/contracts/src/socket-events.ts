@@ -28,6 +28,17 @@ export const ServerEvent = {
   PROJECT_UPDATED: 'project:updated',
   PROJECT_ARCHIVED: 'project:archived',
   PROJECT_RESTORED: 'project:restored',
+  /** Roster changes, sent to the project room. */
+  PROJECT_MEMBER_ADDED: 'project:member-added',
+  PROJECT_MEMBER_REMOVED: 'project:member-removed',
+  PROJECT_MEMBER_ROLE_CHANGED: 'project:member-role-changed',
+  /**
+   * Sent to one person's own room when a project appears for or disappears
+   * from them — added to or removed from a private project, or its privacy
+   * flipped. The client drops what it cached and leaves the page if it is on it.
+   */
+  PROJECT_ACCESS_GRANTED: 'project:access-granted',
+  PROJECT_ACCESS_REVOKED: 'project:access-revoked',
 
   SECTION_CREATED: 'section:created',
   SECTION_UPDATED: 'section:updated',

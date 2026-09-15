@@ -17,16 +17,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Comment as PrismaComment } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
-import { PaginatedResult } from '../../common/types/api.types';
+import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
 import { buildPaginationMeta } from '../../common/utils/pagination.util';
 import { htmlToText, normalizeCommentBody } from '../../common/utils/rich-text.util';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { FollowersService } from '../followers/followers.service';
 import { linkOf, type ItemLink } from '../followers/item-ref';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
 
@@ -49,6 +50,9 @@ interface CommentParent {
   projectId: string | null;
 }
 
+/** A comment row plus the project its item sits in, for the checks that need it. */
+type CommentRow = PrismaComment & { projectId: string | null };
+
 @Injectable()
 export class CommentsService {
   private readonly logger = new Logger(CommentsService.name);
@@ -58,7 +62,8 @@ export class CommentsService {
     private readonly tasks: TasksService,
     private readonly tickets: TicketsService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
     private readonly notifications: NotificationDispatcher,
     private readonly followers: FollowersService,
     private readonly automation: AutomationEventPublisher,
@@ -66,52 +71,53 @@ export class CommentsService {
 
   async listForTask(
     workspaceId: string,
-    viewerId: string,
+    actor: ActorContext,
     taskId: string,
     query: CommentListQueryDto,
   ): Promise<PaginatedResult<Comment, CommentListMeta>> {
-    const parent = await this.resolveTask(workspaceId, taskId);
-    return this.list(workspaceId, parent, viewerId, query);
+    const parent = await this.resolveTask(workspaceId, taskId, actor);
+    return this.list(workspaceId, parent, actor.userId, query);
   }
 
   async listForTicket(
     workspaceId: string,
-    viewerId: string,
+    actor: ActorContext,
     idOrKey: string,
     query: CommentListQueryDto,
   ): Promise<PaginatedResult<Comment, CommentListMeta>> {
-    const parent = await this.resolveTicket(workspaceId, idOrKey);
-    return this.list(workspaceId, parent, viewerId, query);
+    const parent = await this.resolveTicket(workspaceId, idOrKey, actor);
+    return this.list(workspaceId, parent, actor.userId, query);
   }
 
   async createForTask(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     taskId: string,
     dto: CreateCommentDto,
   ): Promise<Comment> {
-    const parent = await this.resolveTask(workspaceId, taskId);
-    return this.create(workspaceId, userId, parent, dto);
+    const parent = await this.resolveTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
+    return this.create(workspaceId, actor.userId, parent, dto);
   }
 
   async createForTicket(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     idOrKey: string,
     dto: CreateCommentDto,
   ): Promise<Comment> {
-    const parent = await this.resolveTicket(workspaceId, idOrKey);
-    return this.create(workspaceId, userId, parent, dto);
+    const parent = await this.resolveTicket(workspaceId, idOrKey, actor, WorkspaceRole.MEMBER);
+    return this.create(workspaceId, actor.userId, parent, dto);
   }
 
   /** Only the author edits their own words — not even an owner rewrites them. */
   async update(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     commentId: string,
     dto: UpdateCommentDto,
   ): Promise<Comment> {
-    const existing = await this.requireComment(workspaceId, commentId);
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
 
     if (existing.authorId !== userId) {
       throw AppException.forbidden('FORBIDDEN', 'Only the author can edit a comment.');
@@ -143,8 +149,9 @@ export class CommentsService {
     });
 
     const comment = toCommentDto(updated, userId);
-    this.realtime.emitToWorkspace(
+    void this.broadcast.emit(
       workspaceId,
+      existing.projectId,
       ServerEvent.COMMENT_UPDATED,
       toCommentDto(updated, null),
     );
@@ -156,7 +163,7 @@ export class CommentsService {
       // Being named makes you a collaborator, on an edit as on a fresh post.
       await this.followers.ensure(workspaceId, linkOf(existing), newlyMentioned);
 
-      const parent = await this.resolveParentOf(workspaceId, existing);
+      const parent = await this.resolveParentOf(workspaceId, existing, actor);
       if (parent) {
         await this.notifyMentioned(workspaceId, userId, parent, updated, newlyMentioned);
       }
@@ -172,14 +179,17 @@ export class CommentsService {
    */
   async remove(
     workspaceId: string,
-    userId: string,
-    role: WorkspaceRole,
+    actor: ActorContext,
     commentId: string,
   ): Promise<{ deleted: true }> {
-    const existing = await this.requireComment(workspaceId, commentId);
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
 
+    // "Manager" as judged inside the item's project, so a viewer there cannot
+    // delete what they may only read.
     const isAuthor = existing.authorId === userId;
-    if (!isAuthor && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
+    const effective = await this.access.effectiveRoleFor(existing.projectId, actor);
+    if (!isAuthor && !hasAtLeastRole(effective, WorkspaceRole.MANAGER)) {
       throw AppException.forbidden(
         'FORBIDDEN',
         'Only the author or a workspace manager can delete a comment.',
@@ -199,12 +209,13 @@ export class CommentsService {
         action: ActivityAction.DELETED,
         entity: ActivityEntity.COMMENT,
         entityId: commentId,
+        projectId: existing.projectId,
         summary: 'Removed a comment posted by someone else',
         metadata: { authorId: existing.authorId },
       });
     }
 
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.COMMENT_DELETED, {
+    void this.broadcast.emit(workspaceId, existing.projectId, ServerEvent.COMMENT_DELETED, {
       id: commentId,
       taskId: existing.taskId,
       ticketId: existing.ticketId,
@@ -274,8 +285,10 @@ export class CommentsService {
   }
 
   /** A thumbs-up. Liking twice is one like; the row's key says so. */
-  async like(workspaceId: string, userId: string, commentId: string): Promise<Comment> {
-    await this.requireComment(workspaceId, commentId);
+  async like(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
+    await this.access.assertEffectiveRole(existing.projectId, actor, WorkspaceRole.MEMBER);
 
     try {
       await this.prisma.commentLike.create({ data: { commentId, userId } });
@@ -285,13 +298,15 @@ export class CommentsService {
       }
     }
 
-    return this.reread(workspaceId, commentId, userId);
+    return this.reread(workspaceId, existing, userId);
   }
 
-  async unlike(workspaceId: string, userId: string, commentId: string): Promise<Comment> {
-    await this.requireComment(workspaceId, commentId);
+  async unlike(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
+    await this.access.assertEffectiveRole(existing.projectId, actor, WorkspaceRole.MEMBER);
     await this.prisma.commentLike.deleteMany({ where: { commentId, userId } });
-    return this.reread(workspaceId, commentId, userId);
+    return this.reread(workspaceId, existing, userId);
   }
 
   /**
@@ -299,14 +314,10 @@ export class CommentsService {
    * replaces whatever was pinned before. Authors and managers only; a pin is
    * a statement about the thread, not a reaction to it.
    */
-  async pin(
-    workspaceId: string,
-    userId: string,
-    role: WorkspaceRole,
-    commentId: string,
-  ): Promise<Comment> {
-    const existing = await this.requireComment(workspaceId, commentId);
-    this.assertMayPin(existing, userId, role);
+  async pin(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
+    await this.assertMayPin(existing, actor);
 
     await this.prisma.$transaction([
       this.prisma.comment.updateMany({
@@ -320,17 +331,13 @@ export class CommentsService {
     ]);
 
     await this.recordPin(workspaceId, userId, existing, ActivityAction.PINNED);
-    return this.reread(workspaceId, commentId, userId);
+    return this.reread(workspaceId, existing, userId);
   }
 
-  async unpin(
-    workspaceId: string,
-    userId: string,
-    role: WorkspaceRole,
-    commentId: string,
-  ): Promise<Comment> {
-    const existing = await this.requireComment(workspaceId, commentId);
-    this.assertMayPin(existing, userId, role);
+  async unpin(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
+    const { userId } = actor;
+    const existing = await this.requireComment(workspaceId, commentId, actor);
+    await this.assertMayPin(existing, actor);
 
     if (existing.pinnedAt !== null) {
       await this.prisma.comment.update({
@@ -340,11 +347,14 @@ export class CommentsService {
       await this.recordPin(workspaceId, userId, existing, ActivityAction.UNPINNED);
     }
 
-    return this.reread(workspaceId, commentId, userId);
+    return this.reread(workspaceId, existing, userId);
   }
 
-  private assertMayPin(comment: PrismaComment, userId: string, role: WorkspaceRole): void {
-    if (comment.authorId !== userId && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
+  private async assertMayPin(comment: CommentRow, actor: ActorContext): Promise<void> {
+    if (comment.authorId === actor.userId) return;
+
+    const effective = await this.access.effectiveRoleFor(comment.projectId, actor);
+    if (!hasAtLeastRole(effective, WorkspaceRole.MANAGER)) {
       throw AppException.forbidden(
         'FORBIDDEN',
         'Only the author or a workspace manager can pin a comment.',
@@ -355,7 +365,7 @@ export class CommentsService {
   private async recordPin(
     workspaceId: string,
     userId: string,
-    comment: PrismaComment,
+    comment: CommentRow,
     action: typeof ActivityAction.PINNED | typeof ActivityAction.UNPINNED,
   ): Promise<void> {
     await this.activity.record({
@@ -364,21 +374,27 @@ export class CommentsService {
       action,
       entity: comment.taskId ? ActivityEntity.TASK : ActivityEntity.TICKET,
       entityId: (comment.taskId ?? comment.ticketId) as string,
+      projectId: comment.projectId,
       summary: action === ActivityAction.PINNED ? 'Pinned a comment' : 'Unpinned a comment',
       metadata: { commentId: comment.id },
     });
   }
 
   /** The comment as it now stands, announced to the room and returned to the caller. */
-  private async reread(workspaceId: string, commentId: string, viewerId: string): Promise<Comment> {
+  private async reread(
+    workspaceId: string,
+    comment: CommentRow,
+    viewerId: string,
+  ): Promise<Comment> {
     const row = await this.prisma.comment.findUniqueOrThrow({
-      where: { id: commentId },
+      where: { id: comment.id },
       include: commentInclude,
     });
 
     // Emitted without a viewer: `likedByMe` is somebody else's to compute.
-    this.realtime.emitToWorkspace(
+    void this.broadcast.emit(
       workspaceId,
+      comment.projectId,
       ServerEvent.COMMENT_UPDATED,
       toCommentDto(row, null),
     );
@@ -446,6 +462,7 @@ export class CommentsService {
       action: ActivityAction.COMMENTED,
       entity: ActivityEntity.COMMENT,
       entityId: created.id,
+      projectId: parent.projectId,
       summary: `Commented on ${parent.label}`,
       metadata: { entity: parent.entity },
     });
@@ -472,8 +489,9 @@ export class CommentsService {
     }
 
     const comment = toCommentDto(created, userId);
-    this.realtime.emitToWorkspace(
+    void this.broadcast.emit(
       workspaceId,
+      parent.projectId,
       ServerEvent.COMMENT_CREATED,
       toCommentDto(created, null),
     );
@@ -538,9 +556,10 @@ export class CommentsService {
   private async resolveParentOf(
     workspaceId: string,
     comment: PrismaComment,
+    actor: ActorContext,
   ): Promise<CommentParent | null> {
-    if (comment.taskId) return this.resolveTask(workspaceId, comment.taskId);
-    if (comment.ticketId) return this.resolveTicket(workspaceId, comment.ticketId);
+    if (comment.taskId) return this.resolveTask(workspaceId, comment.taskId, actor);
+    if (comment.ticketId) return this.resolveTicket(workspaceId, comment.ticketId, actor);
     return null;
   }
 
@@ -556,7 +575,12 @@ export class CommentsService {
     comment: PrismaComment,
     mentioned: string[],
   ): Promise<void> {
-    const recipients = mentioned.filter((id) => id !== actorId);
+    // Naming someone who cannot see the project must not hand them a link to it.
+    const recipients = await this.access.filterVisibleTo(
+      workspaceId,
+      parent.projectId,
+      mentioned.filter((id) => id !== actorId),
+    );
     if (recipients.length === 0) return;
 
     const actor = await this.prisma.user.findUnique({
@@ -623,8 +647,13 @@ export class CommentsService {
     );
   }
 
-  private async resolveTask(workspaceId: string, taskId: string): Promise<CommentParent> {
-    const task = await this.tasks.requireTask(workspaceId, taskId);
+  private async resolveTask(
+    workspaceId: string,
+    taskId: string,
+    actor: ActorContext,
+    minimumRole?: WorkspaceRole,
+  ): Promise<CommentParent> {
+    const task = await this.tasks.requireTask(workspaceId, taskId, actor, minimumRole);
 
     return {
       entity: CommentEntity.TASK,
@@ -635,8 +664,13 @@ export class CommentsService {
     };
   }
 
-  private async resolveTicket(workspaceId: string, idOrKey: string): Promise<CommentParent> {
-    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey);
+  private async resolveTicket(
+    workspaceId: string,
+    idOrKey: string,
+    actor: ActorContext,
+    minimumRole?: WorkspaceRole,
+  ): Promise<CommentParent> {
+    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey, actor, minimumRole);
 
     return {
       entity: CommentEntity.TICKET,
@@ -647,16 +681,30 @@ export class CommentsService {
     };
   }
 
-  /** Soft-deleted comments are gone as far as every endpoint is concerned. */
-  private async requireComment(workspaceId: string, commentId: string): Promise<PrismaComment> {
+  /**
+   * Soft-deleted comments are gone as far as every endpoint is concerned, and
+   * so are comments on items in a private project the caller is not in.
+   */
+  private async requireComment(
+    workspaceId: string,
+    commentId: string,
+    actor: ActorContext,
+  ): Promise<CommentRow> {
     const comment = await this.prisma.comment.findFirst({
-      where: { id: commentId, workspaceId, deletedAt: null },
+      where: {
+        id: commentId,
+        workspaceId,
+        deletedAt: null,
+        AND: [this.access.itemParentWhere(actor)],
+      },
+      include: { task: { select: { projectId: true } }, ticket: { select: { projectId: true } } },
     });
 
     if (!comment) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Comment not found.');
     }
 
-    return comment;
+    const { task, ticket, ...row } = comment;
+    return { ...row, projectId: task?.projectId ?? ticket?.projectId ?? null };
   }
 }

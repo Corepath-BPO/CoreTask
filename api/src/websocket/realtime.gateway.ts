@@ -22,6 +22,7 @@ import type { Server, Socket } from 'socket.io';
 
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../database/prisma.service';
+import { ProjectAccessService } from '../modules/project-access/project-access.service';
 
 interface SocketData {
   userId: string;
@@ -53,6 +54,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly jwt: JwtService,
     private readonly config: AppConfigService,
     private readonly prisma: PrismaService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   async handleConnection(client: AuthedSocket): Promise<void> {
@@ -129,10 +131,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * A project room, so a tab watching one project is not woken by every other.
    *
-   * Authorised through the project's workspace rather than the project id
-   * alone: a project id is guessable and a room name is not a permission. The
-   * lookup does both jobs at once — it fails if the project does not exist, and
-   * it fails if the caller is not a member of the workspace holding it.
+   * Authorised through the project's workspace and its visibility rather than
+   * the project id alone: a project id is guessable and a room name is not a
+   * permission. One lookup does every job — it fails if the project does not
+   * exist, if the caller is not in the workspace holding it, or if it is
+   * private and the caller is neither a member nor a workspace admin.
    */
   @SubscribeMessage(ClientEvent.PROJECT_JOIN)
   async onProjectJoin(
@@ -144,12 +147,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     if (!userId || !projectId) return { joined: false };
 
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, workspace: { members: { some: { userId } } } },
-      select: { id: true },
-    });
-
-    if (!project) {
+    if (!(await this.access.canJoinProject(projectId, userId))) {
       client.emit(ServerEvent.ERROR, { code: 'PROJECT_ACCESS_DENIED', projectId });
       return { joined: false };
     }
@@ -183,6 +181,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitToUser(userId: string, event: string, payload: unknown): void {
     this.server?.to(userRoom(userId)).emit(event, payload);
+  }
+
+  /** One emit to several people's own rooms — a private project's audience. */
+  emitToUsers(userIds: readonly string[], event: string, payload: unknown): void {
+    if (userIds.length === 0) return;
+    this.server?.to(userIds.map(userRoom)).emit(event, payload);
+  }
+
+  /** The project-room counterpart of `evictFromWorkspace`, for the same reason. */
+  async evictFromProject(projectId: string, userId: string): Promise<void> {
+    await this.server?.in(userRoom(userId)).socketsLeave(projectRoom(projectId));
+
+    this.logger.log({ projectId, userId }, 'Evicted a user from a project room');
   }
 
   /**

@@ -95,6 +95,23 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
       refresh();
     };
 
+    /*
+     * The project itself — its name, privacy, roster — changed. Narrower than
+     * `refresh`: only the detail and the roster are stale, not every row.
+     * Project mutations carry no correlation id, so the echo of one's own
+     * change costs one extra refetch of the detail; acceptable.
+     */
+    const onProject = (payload: { projectId?: string; id?: string }) => {
+      if ((payload?.projectId ?? payload?.id) !== projectId) return;
+
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.detail(workspaceId, projectId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.members(workspaceId, projectId),
+      });
+    };
+
     const workItemEvents = [
       ServerEvent.WORK_ITEM_CREATED,
       ServerEvent.WORK_ITEM_UPDATED,
@@ -109,13 +126,24 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
       ServerEvent.SECTION_MOVED,
     ];
 
+    const projectEvents = [
+      ServerEvent.PROJECT_UPDATED,
+      ServerEvent.PROJECT_ARCHIVED,
+      ServerEvent.PROJECT_RESTORED,
+      ServerEvent.PROJECT_MEMBER_ADDED,
+      ServerEvent.PROJECT_MEMBER_REMOVED,
+      ServerEvent.PROJECT_MEMBER_ROLE_CHANGED,
+    ];
+
     for (const event of workItemEvents) socket.on(event, onWorkItem);
     for (const event of sectionEvents) socket.on(event, onSection);
+    for (const event of projectEvents) socket.on(event, onProject);
 
     return () => {
       socket.off('connect', rejoin);
       for (const event of workItemEvents) socket.off(event, onWorkItem);
       for (const event of sectionEvents) socket.off(event, onSection);
+      for (const event of projectEvents) socket.off(event, onProject);
 
       // Left on unmount so a tab that navigates away stops being woken by a
       // project it is no longer showing.

@@ -7,6 +7,8 @@ import {
   PROJECT_NAME_MAX_LENGTH,
   PROJECT_NAME_MIN_LENGTH,
   PROJECT_STATUSES,
+  PROJECT_VISIBILITIES,
+  ProjectVisibility,
 } from '@coretask/contracts';
 import { z } from 'zod';
 
@@ -27,6 +29,11 @@ export const projectKeySchema = z
 export const projectStatusSchema = z.enum(
   PROJECT_STATUSES as unknown as [string, ...string[]],
   'Choose a valid status.',
+);
+
+export const projectVisibilitySchema = z.enum(
+  PROJECT_VISIBILITIES as unknown as [string, ...string[]],
+  'Choose who can see this project.',
 );
 
 export const projectColorSchema = z
@@ -58,6 +65,7 @@ export const createProjectSchema = z.object({
   status: projectStatusSchema.optional(),
   color: projectColorSchema.optional(),
   defaultWorkItemType: defaultWorkItemTypeSchema.optional(),
+  visibility: projectVisibilitySchema.optional(),
   leadId: z.uuid().nullable().optional(),
   startDate: optionalDate.optional(),
   dueDate: optionalDate.optional(),
@@ -76,6 +84,7 @@ export const updateProjectSchema = z
     status: projectStatusSchema.optional(),
     color: projectColorSchema.optional(),
     defaultWorkItemType: defaultWorkItemTypeSchema.optional(),
+    visibility: projectVisibilitySchema.optional(),
     leadId: z.uuid().nullable().optional(),
     startDate: optionalDate.optional(),
     dueDate: optionalDate.optional(),
@@ -99,6 +108,8 @@ export const projectFormSchema = z
     status: projectStatusSchema,
     color: projectColorSchema,
     defaultWorkItemType: defaultWorkItemTypeSchema,
+    /** Defaulted so a form built before privacy existed still validates. */
+    visibility: projectVisibilitySchema.default(ProjectVisibility.PUBLIC),
     /** `''` means "no team" — a native select cannot hold null. */
     teamId: z.string(),
     startDate: z.string().trim(),

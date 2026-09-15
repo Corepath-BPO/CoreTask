@@ -19,7 +19,13 @@ import { NotificationDispatcher } from '../../integrations/notifications/notific
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
 
-const MEMBER_USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
+const MEMBER_USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  isServiceAccount: true,
+} as const;
 
 /**
  * Changing and ending memberships.
@@ -162,6 +168,16 @@ export class MembersService {
 
       // A lead who is no longer in the workspace is not leading anything.
       await tx.team.updateMany({
+        where: { workspaceId, leadId: target.userId },
+        data: { leadId: null },
+      });
+
+      // Project membership has the same shape again: rows are dropped here
+      // rather than left to keep a private project open to someone who is
+      // gone. A private project whose last admin leaves this way is still
+      // reachable by the workspace's admins, so nothing is stranded.
+      await tx.projectMember.deleteMany({ where: { workspaceId, userId: target.userId } });
+      await tx.project.updateMany({
         where: { workspaceId, leadId: target.userId },
         data: { leadId: null },
       });

@@ -17,6 +17,7 @@ import { Progress } from '@/components/ui/progress';
 import { cn, daysUntil, formatDueDate, initials, percentage } from '@/lib/utils';
 
 import { ProjectStatusBadge } from './project-status-badge';
+import { ProjectPrivacyBadge } from './sharing/project-privacy-badge';
 
 interface ProjectCardProps {
   project: ProjectSummary;
@@ -55,15 +56,18 @@ export function ProjectCard({
           <div className="min-w-0 flex-1">
             {/* The whole card is clickable via this stretched link, so the
                 action menu below needs its own stacking context to stay usable. */}
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              className="after:absolute after:inset-0 focus-visible:outline-none"
-            >
-              <h3 className="truncate text-sm font-semibold leading-tight group-hover:underline">
-                {project.name}
-              </h3>
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link
+                to="/projects/$projectId"
+                params={{ projectId: project.id }}
+                className="min-w-0 after:absolute after:inset-0 focus-visible:outline-none"
+              >
+                <h3 className="truncate text-sm font-semibold leading-tight group-hover:underline">
+                  {project.name}
+                </h3>
+              </Link>
+              {project.visibility === 'PRIVATE' && <ProjectPrivacyBadge size="sm" />}
+            </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {project.description || 'No description'}
             </p>

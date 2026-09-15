@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { StorageModule } from '../../integrations/storage/storage.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
@@ -18,6 +19,7 @@ import { AttachmentsService } from './attachments.service';
     ActivityLogsModule,
     TasksModule,
     TicketsModule,
+    ProjectAccessModule,
   ],
   controllers: [AttachmentsController],
   providers: [AttachmentsService],

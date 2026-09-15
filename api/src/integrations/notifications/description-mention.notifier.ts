@@ -10,6 +10,7 @@ import { htmlToText } from '../../common/utils/rich-text.util';
 import { PrismaService } from '../../database/prisma.service';
 import { FollowersService } from '../../modules/followers/followers.service';
 import { taskLink, ticketLink } from '../../modules/followers/item-ref';
+import { ProjectAccessService } from '../../modules/project-access/project-access.service';
 
 import { NotificationDispatcher } from './notification.dispatcher';
 
@@ -18,6 +19,8 @@ export interface DescriptionMentionChange {
   actorId: string;
   entity: 'TASK' | 'TICKET';
   entityId: string;
+  /** The item's project; a mention cannot reach someone who cannot see it. */
+  projectId: string | null;
   /** What the notification names — `“Ship the grid”`, `CORE-1042`. */
   label: string;
   actionUrl: string;
@@ -37,8 +40,10 @@ export interface DescriptionMentionChange {
  * already in hand wherever it is rewritten. Re-adding a mention that was
  * removed notifies again, which is what the words mean.
  *
- * Only current workspace members are told, whatever the markup names: a chip
- * can no more notify at will than a comment token can.
+ * Only current workspace members who can see the item's project are told,
+ * whatever the markup names: a chip can no more notify at will than a comment
+ * token can, and naming an outsider in a private project's task must not
+ * hand them a link to it.
  */
 @Injectable()
 export class DescriptionMentionNotifier {
@@ -46,6 +51,7 @@ export class DescriptionMentionNotifier {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationDispatcher,
     private readonly followers: FollowersService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   async notify(change: DescriptionMentionChange): Promise<void> {
@@ -57,11 +63,17 @@ export class DescriptionMentionNotifier {
     );
     if (added.length === 0) return;
 
-    const members = await this.prisma.workspaceMember.findMany({
+    const rows = await this.prisma.workspaceMember.findMany({
       where: { workspaceId: change.workspaceId, userId: { in: added } },
       select: { userId: true },
     });
-    if (members.length === 0) return;
+    const memberIds = await this.access.filterVisibleTo(
+      change.workspaceId,
+      change.projectId,
+      rows.map((row) => row.userId),
+    );
+    if (memberIds.length === 0) return;
+    const members = memberIds.map((userId) => ({ userId }));
 
     // Named in the description means a collaborator from here on, as a
     // comment mention does. This is the one place all three description
@@ -69,7 +81,7 @@ export class DescriptionMentionNotifier {
     await this.followers.ensure(
       change.workspaceId,
       change.entity === 'TASK' ? taskLink(change.entityId) : ticketLink(change.entityId),
-      members.map((member) => member.userId),
+      memberIds,
     );
 
     const actor = await this.prisma.user.findUnique({

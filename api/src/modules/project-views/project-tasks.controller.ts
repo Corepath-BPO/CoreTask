@@ -1,7 +1,18 @@
 import { LIST_VIEW_PAGE_SIZE, PAGINATION_DEFAULT_PAGE } from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
 import { filterConditionSchema, sortEntrySchema } from '@coretask/validation';
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
@@ -15,6 +26,7 @@ import type { PaginatedResult } from '../../common/types/api.types';
 import { AppException } from '../../common/exceptions/app.exception';
 import { TaskDto } from '../tasks/dto/task-response.dto';
 import { TasksService } from '../tasks/tasks.service';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { FieldCatalogDto, FieldCatalogQueryDto } from './dto/field-catalog.dto';
@@ -59,7 +71,7 @@ export class ProjectTaskQueryDto {
 @ApiTags('Project views')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
@@ -85,7 +97,11 @@ export class ProjectTasksController {
   ): Promise<FieldCatalog> {
     return this.catalog.build(workspaceId, projectId, {
       search: query.search,
-      visible: query.visible?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? [],
+      visible:
+        query.visible
+          ?.split(',')
+          .map((entry) => entry.trim())
+          .filter(Boolean) ?? [],
       includeLibrary: query.includeLibrary !== 'false',
       includeArchived: query.includeArchived === 'true',
     });

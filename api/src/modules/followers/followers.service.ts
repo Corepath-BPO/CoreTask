@@ -3,13 +3,21 @@ import type { Follower } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { ItemLink, ItemRef } from './item-ref';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
+const USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  isServiceAccount: true,
+} as const;
 
 /**
  * Collaborators on a task or ticket.
@@ -20,9 +28,10 @@ const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServ
  * are the deliberate ones behind the panel's "+" and "Leave task", and those
  * do read as stories.
  *
- * Only current members ever follow. A row for someone who has left would make
- * notifications go to a person who cannot open the item, so membership is
- * checked on the way in and filtered again on the way out.
+ * Only current members ever follow, and only people who can see the item's
+ * project. A row for anyone else would make notifications go to a person who
+ * cannot open the item, so both are checked on the way in and filtered again
+ * on the way out.
  */
 @Injectable()
 export class FollowersService {
@@ -31,7 +40,8 @@ export class FollowersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   /**
@@ -52,7 +62,12 @@ export class FollowersService {
       where: { workspaceId, userId: { in: wanted } },
       select: { userId: true },
     });
-    const memberIds = members.map((member) => member.userId);
+    const projectId = await this.projectIdOf(link);
+    const memberIds = await this.access.filterVisibleTo(
+      workspaceId,
+      projectId,
+      members.map((member) => member.userId),
+    );
     if (memberIds.length === 0) return [];
 
     const existing = await this.prisma.follower.findMany({
@@ -70,7 +85,7 @@ export class FollowersService {
       skipDuplicates: true,
     });
 
-    this.announce(workspaceId, link);
+    this.announce(workspaceId, link, projectId);
     return added;
   }
 
@@ -88,6 +103,12 @@ export class FollowersService {
         'Everyone added as a collaborator must be a member of this workspace.',
       );
     }
+    await this.access.assertUsersCanSee(
+      ref.workspaceId,
+      ref.projectId,
+      wanted,
+      'Everyone added as a collaborator must be able to see this project.',
+    );
 
     const added = await this.ensure(ref.workspaceId, ref.link, wanted);
     if (added.length > 0) {
@@ -102,6 +123,7 @@ export class FollowersService {
         action: ActivityAction.FOLLOWED,
         entity: ref.entity,
         entityId: ref.entityId,
+        projectId: ref.projectId,
         summary: self
           ? `Joined ${ref.label}`
           : `Added ${users.map((user) => user.label).join(', ')} to ${ref.label}`,
@@ -114,20 +136,19 @@ export class FollowersService {
 
   /**
    * "Leave task", or a manager removing someone. Idempotent: leaving something
-   * you do not follow is not an error, it is already true.
+   * you do not follow is not an error, it is already true. "Manager" is judged
+   * inside the item's project, so a viewer there cannot eject anyone.
    */
-  async remove(
-    ref: ItemRef,
-    actorId: string,
-    role: WorkspaceRole,
-    userId: string,
-  ): Promise<Follower[]> {
-    const self = userId === actorId;
-    if (!self && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
-      throw AppException.forbidden(
-        'FORBIDDEN',
-        'Only a workspace manager can remove another collaborator.',
-      );
+  async remove(ref: ItemRef, actor: ActorContext, userId: string): Promise<Follower[]> {
+    const self = userId === actor.userId;
+    if (!self) {
+      const effective = await this.access.effectiveRoleFor(ref.projectId, actor);
+      if (!hasAtLeastRole(effective, WorkspaceRole.MANAGER)) {
+        throw AppException.forbidden(
+          'FORBIDDEN',
+          'Only a workspace manager can remove another collaborator.',
+        );
+      }
     }
 
     const result = await this.prisma.follower.deleteMany({ where: { ...ref.link, userId } });
@@ -141,15 +162,16 @@ export class FollowersService {
 
       await this.activity.record({
         workspaceId: ref.workspaceId,
-        actorId,
+        actorId: actor.userId,
         action: ActivityAction.UNFOLLOWED,
         entity: ref.entity,
         entityId: ref.entityId,
+        projectId: ref.projectId,
         summary: self ? `Left ${ref.label}` : `Removed ${label} from ${ref.label}`,
         metadata: { users: [{ id: userId, label }], self },
       });
 
-      this.announce(ref.workspaceId, ref.link);
+      this.announce(ref.workspaceId, ref.link, ref.projectId);
     }
 
     return this.list(ref.workspaceId, ref.link);
@@ -166,24 +188,48 @@ export class FollowersService {
     return rows.map((row) => ({ user: row.user, followedAt: row.createdAt.toISOString() }));
   }
 
-  /** Who to notify. Current members only, for the same reason `list` filters. */
+  /**
+   * Who to notify. Current members who can still see the project, for the
+   * same reason `list` filters: a follower row outlives a removal from a
+   * private project, and a notification they cannot open is worse than none.
+   */
   async followerIds(workspaceId: string, link: ItemLink): Promise<string[]> {
     const rows = await this.prisma.follower.findMany({
       where: { ...link, workspaceId, user: { memberships: { some: { workspaceId } } } },
       select: { userId: true },
     });
 
-    return rows.map((row) => row.userId);
+    return this.access.filterVisibleTo(
+      workspaceId,
+      await this.projectIdOf(link),
+      rows.map((row) => row.userId),
+    );
   }
 
-  private announce(workspaceId: string, link: ItemLink): void {
-    try {
-      this.realtime.emitToWorkspace(workspaceId, ServerEvent.FOLLOWERS_CHANGED, {
-        workspaceId,
-        ...link,
+  /** The project behind a link, from whichever side of it is set. */
+  private async projectIdOf(link: ItemLink): Promise<string | null> {
+    if (link.taskId) {
+      const task = await this.prisma.task.findUnique({
+        where: { id: link.taskId },
+        select: { projectId: true },
       });
-    } catch (error) {
-      this.logger.warn({ err: error, ...link }, 'Could not announce a follower change');
+      return task?.projectId ?? null;
     }
+    if (link.ticketId) {
+      const ticket = await this.prisma.ticket.findUnique({
+        where: { id: link.ticketId },
+        select: { projectId: true },
+      });
+      return ticket?.projectId ?? null;
+    }
+    return null;
+  }
+
+  private announce(workspaceId: string, link: ItemLink, projectId: string | null): void {
+    void this.broadcast
+      .emit(workspaceId, projectId, ServerEvent.FOLLOWERS_CHANGED, { workspaceId, ...link })
+      .catch((error: unknown) => {
+        this.logger.warn({ err: error, ...link }, 'Could not announce a follower change');
+      });
   }
 }

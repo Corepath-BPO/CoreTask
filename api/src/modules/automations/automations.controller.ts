@@ -23,6 +23,7 @@ import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
 import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
 import { AutomationMetadataService } from './builder/automation-metadata.service';
 import { toGraph } from './builder/automation-graph.mapper';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AutomationsService } from './automations.service';
@@ -40,7 +41,7 @@ import { AutomationDefinitionService } from './structured/automation-definition.
 @ApiTags('Automations')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId/automations')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')

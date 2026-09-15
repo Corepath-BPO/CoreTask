@@ -20,6 +20,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { DefinitionsService } from './definitions.service';
@@ -42,7 +43,7 @@ import {
 @ApiTags('Statuses')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId/statuses')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
@@ -140,9 +141,7 @@ export class PrioritiesController {
   @Get()
   @ApiOperation({ summary: 'List the workspace priorities' })
   @ApiEnvelopeResponse(PriorityDefinitionDto, { isArray: true })
-  list(
-    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-  ): Promise<PriorityDefinition[]> {
+  list(@Param('workspaceId', ParseUUIDPipe) workspaceId: string): Promise<PriorityDefinition[]> {
     return this.definitions.listPriorities(workspaceId);
   }
 

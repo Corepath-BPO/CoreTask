@@ -4,6 +4,7 @@ import { NotificationsIntegrationModule } from '../../integrations/notifications
 import { WebsocketModule } from '../../websocket/websocket.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
@@ -23,6 +24,7 @@ import { FormulaValuesService } from './formula-values.service';
    */
   imports: [
     WorkspaceMembersModule,
+    ProjectAccessModule,
     ProjectsModule,
     ActivityLogsModule,
     AutomationEventsModule,

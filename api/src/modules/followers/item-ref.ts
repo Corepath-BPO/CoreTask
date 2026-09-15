@@ -18,6 +18,8 @@ export interface ItemRef {
   entity: typeof ActivityEntity.TASK | typeof ActivityEntity.TICKET;
   entityId: string;
   link: ItemLink;
+  /** The project the item sits in — what decides who may be told about it. */
+  projectId: string | null;
   /** `“Ship the grid”` for a task, `CORE-1042` for a ticket. */
   label: string;
   /** In-app path a notification opens. */
@@ -27,23 +29,31 @@ export interface ItemRef {
 export const taskLink = (taskId: string): ItemLink => ({ taskId, ticketId: null });
 export const ticketLink = (ticketId: string): ItemLink => ({ taskId: null, ticketId });
 
-export function taskRef(workspaceId: string, task: { id: string; title: string }): ItemRef {
+export function taskRef(
+  workspaceId: string,
+  task: { id: string; title: string; projectId: string | null },
+): ItemRef {
   return {
     workspaceId,
     entity: ActivityEntity.TASK,
     entityId: task.id,
     link: taskLink(task.id),
+    projectId: task.projectId,
     label: `“${task.title}”`,
     actionUrl: `/my-tasks?task=${task.id}`,
   };
 }
 
-export function ticketRef(workspaceId: string, ticket: { id: string; key: string }): ItemRef {
+export function ticketRef(
+  workspaceId: string,
+  ticket: { id: string; key: string; projectId: string | null },
+): ItemRef {
   return {
     workspaceId,
     entity: ActivityEntity.TICKET,
     entityId: ticket.id,
     link: ticketLink(ticket.id),
+    projectId: ticket.projectId,
     label: ticket.key,
     actionUrl: `/tickets?ticket=${ticket.key}`,
   };

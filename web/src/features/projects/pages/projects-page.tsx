@@ -1,6 +1,7 @@
 import {
   PROJECT_STATUSES,
   ProjectStatus,
+  ProjectVisibility,
   WorkItemType,
   WorkspaceRole,
   hasAtLeastRole,
@@ -23,12 +24,12 @@ import {
   Star,
   Ticket,
   Upload,
+  Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
 import { EmptyState } from '@/components/feedback/empty-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -43,11 +44,19 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ImportProjectDialog } from '@/features/import/components/import-project-dialog';
 import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { cn, formatDate, humanizeEnum, initials } from '@/lib/utils';
+import { cn, formatDate, humanizeEnum } from '@/lib/utils';
 import { usePortfolios, type Portfolio } from '@/stores/portfolio.store';
 
 import { ProjectFormDialog } from '../components/project-form-dialog';
+import { ProjectMembersStack } from '../components/sharing/project-members-stack';
+import { ProjectPrivacyBadge } from '../components/sharing/project-privacy-badge';
+import { ShareProjectDialog } from '../components/sharing/share-project-dialog';
+import { useJoinProject } from '../hooks/use-project-members';
 import { useArchiveProject, useProjects } from '../hooks/use-projects';
+import { resolveProjectAccess } from '../lib/project-access';
+
+/** The Members chip: everything, only what the reader is on, or only what is private. */
+type MembershipFilter = 'me' | 'private';
 
 /**
  * One page of everything: the API caps a page at 100, which comfortably holds
@@ -74,9 +83,11 @@ export function ProjectsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [membership, setMembership] = useState<MembershipFilter | null>(null);
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [sortDescending, setSortDescending] = useState(true);
   const [editing, setEditing] = useState<ProjectSummary | null>(null);
+  const [sharing, setSharing] = useState<ProjectSummary | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
@@ -100,10 +111,12 @@ export function ProjectsPage() {
 
   const { data, isLoading, isError, error } = useProjects(workspaceId, params);
   const archiveProject = useArchiveProject(workspaceId);
+  const joinProject = useJoinProject(workspaceId);
 
+  // Creating is a workspace-level act; everything on a row is judged per
+  // project, from the `access` each summary carries.
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const canCreate = hasAtLeastRole(role, WorkspaceRole.MEMBER);
-  const canArchive = hasAtLeastRole(role, WorkspaceRole.MANAGER);
 
   const items = useMemo(() => data?.items ?? [], [data]);
   const meta = data?.meta;
@@ -127,6 +140,10 @@ export function ProjectsPage() {
   const visible = useMemo(() => {
     let list = items;
     if (ownerId) list = list.filter((project) => project.lead?.id === ownerId);
+    if (membership === 'me') list = list.filter((project) => project.access?.isMember);
+    if (membership === 'private') {
+      list = list.filter((project) => project.visibility === ProjectVisibility.PRIVATE);
+    }
     if (portfolioId) {
       const chosen = new Set(
         portfolios.find((portfolio) => portfolio.id === portfolioId)?.projectIds ?? [],
@@ -137,12 +154,13 @@ export function ProjectsPage() {
     return [...list].sort(
       (a, b) => direction * (Date.parse(a.updatedAt) - Date.parse(b.updatedAt)),
     );
-  }, [items, ownerId, portfolioId, portfolios, sortDescending]);
+  }, [items, ownerId, membership, portfolioId, portfolios, sortDescending]);
 
   const filtered =
     debouncedSearch !== '' ||
     status !== null ||
     ownerId !== null ||
+    membership !== null ||
     portfolioId !== null ||
     Boolean(teamId);
 
@@ -150,6 +168,7 @@ export function ProjectsPage() {
     setSearch('');
     setStatus(null);
     setOwnerId(null);
+    setMembership(null);
     setPortfolioId(null);
     void navigate({ to: '/projects', search: {}, replace: true });
   };
@@ -221,18 +240,16 @@ export function ProjectsPage() {
           options={owners.map((owner) => ({ value: owner.id, label: owner.name }))}
           onSelect={setOwnerId}
         />
-        {/* Real member lists need project membership, which the API doesn't
-            model yet — the chip is here so the row reads like Asana's. */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          title="Filtering by members needs project membership — not built yet"
-          className="rounded-full font-normal"
-        >
-          Members
-          <ChevronDown className="text-muted-foreground" />
-        </Button>
+        <FilterChip
+          label="Members"
+          allLabel="Anyone"
+          value={membership}
+          options={[
+            { value: 'me', label: 'I’m a member' },
+            { value: 'private', label: 'Private to members' },
+          ]}
+          onSelect={(value) => setMembership(value as MembershipFilter | null)}
+        />
         <FilterChip
           label="Teams"
           allLabel="All teams"
@@ -322,22 +339,34 @@ export function ProjectsPage() {
               </button>
             </div>
 
-            {visible.map((project) => (
-              <ProjectRow
-                key={project.id}
-                project={project}
-                portfolios={portfoliosByProject.get(project.id) ?? []}
-                canEdit={canCreate}
-                canArchive={canArchive}
-                onEdit={openEdit}
-                onToggleArchive={(target) =>
-                  archiveProject.mutate({
-                    projectId: target.id,
-                    archived: target.archivedAt !== null,
-                  })
-                }
-              />
-            ))}
+            {visible.map((project) => {
+              const access = resolveProjectAccess(project, role);
+
+              return (
+                <ProjectRow
+                  key={project.id}
+                  project={project}
+                  portfolios={portfoliosByProject.get(project.id) ?? []}
+                  canEdit={access.canEdit}
+                  canArchive={access.canManage}
+                  canJoin={access.canJoin}
+                  joinPending={
+                    joinProject.isPending && joinProject.variables?.projectId === project.id
+                  }
+                  onEdit={openEdit}
+                  onShare={setSharing}
+                  onJoin={(target) =>
+                    joinProject.mutate({ projectId: target.id, name: target.name })
+                  }
+                  onToggleArchive={(target) =>
+                    archiveProject.mutate({
+                      projectId: target.id,
+                      archived: target.archivedAt !== null,
+                    })
+                  }
+                />
+              );
+            })}
           </div>
         </div>
       )}
@@ -359,6 +388,21 @@ export function ProjectsPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         workspaceId={workspaceId}
+      />
+
+      <ShareProjectDialog
+        open={sharing !== null}
+        onOpenChange={(open) => {
+          if (!open) setSharing(null);
+        }}
+        workspaceId={workspaceId}
+        // The list refetches after every change, so the open dialog reads the
+        // row as it now is rather than as it was when the menu was clicked.
+        project={sharing ? (items.find((item) => item.id === sharing.id) ?? sharing) : null}
+        access={resolveProjectAccess(
+          sharing ? (items.find((item) => item.id === sharing.id) ?? sharing) : null,
+          role,
+        )}
       />
     </div>
   );
@@ -412,14 +456,22 @@ function ProjectRow({
   portfolios,
   canEdit,
   canArchive,
+  canJoin,
+  joinPending,
   onEdit,
+  onShare,
+  onJoin,
   onToggleArchive,
 }: {
   project: ProjectSummary;
   portfolios: Portfolio[];
   canEdit: boolean;
   canArchive: boolean;
+  canJoin: boolean;
+  joinPending: boolean;
   onEdit: (project: ProjectSummary) => void;
+  onShare: (project: ProjectSummary) => void;
+  onJoin: (project: ProjectSummary) => void;
   onToggleArchive: (project: ProjectSummary) => void;
 }) {
   const archived = project.archivedAt !== null;
@@ -445,30 +497,31 @@ function ProjectRow({
         <div className="min-w-0">
           {/* The whole row is clickable via this stretched link; interactive
               cells below sit above it with their own z-index. */}
-          <Link
-            to="/projects/$projectId"
-            params={{ projectId: project.id }}
-            className="after:absolute after:inset-0 focus-visible:outline-none"
-          >
-            <span className="block truncate text-sm font-medium group-hover:underline">
-              {project.name}
-            </span>
-          </Link>
+          <div className="flex items-center gap-1.5">
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId: project.id }}
+              className="min-w-0 after:absolute after:inset-0 focus-visible:outline-none"
+            >
+              <span className="block truncate text-sm font-medium group-hover:underline">
+                {project.name}
+              </span>
+            </Link>
+            {project.visibility === ProjectVisibility.PRIVATE && <ProjectPrivacyBadge size="sm" />}
+          </div>
           {archived && <span className="text-xs text-muted-foreground">Archived</span>}
         </div>
       </div>
 
-      {/* Only the lead is known per project — a full avatar stack needs the
-          membership the backend doesn't have yet. */}
+      {/* From the summary's preview — the row's stretched link owns the click,
+          so the stack here is not a button. */}
       <div className="flex items-center">
-        {project.lead ? (
-          <Avatar className="size-6" title={`${project.lead.name} — lead`}>
-            {project.lead.avatarUrl && <AvatarImage src={project.lead.avatarUrl} alt="" />}
-            <AvatarFallback className="text-[9px]">{initials(project.lead.name)}</AvatarFallback>
-          </Avatar>
-        ) : (
-          <span className="text-sm text-muted-foreground">—</span>
-        )}
+        <ProjectMembersStack
+          members={project.members}
+          memberCount={project.memberCount}
+          leadId={project.leadId}
+          size="sm"
+        />
       </div>
 
       <div className="flex min-w-0 items-center gap-1.5">
@@ -507,41 +560,46 @@ function ProjectRow({
           >
             <Star />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled
-            title="Joining needs project membership — not built yet"
-          >
-            Join
-          </Button>
-          {(canEdit || canArchive) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${project.name}`}>
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {canEdit && (
-                  <DropdownMenuItem onSelect={() => onEdit(project)}>
-                    <Pencil />
-                    Edit project
-                  </DropdownMenuItem>
-                )}
-                {canEdit && canArchive && <DropdownMenuSeparator />}
-                {canArchive && (
-                  <DropdownMenuItem
-                    variant={archived ? 'default' : 'destructive'}
-                    onSelect={() => onToggleArchive(project)}
-                  >
-                    {archived ? <ArchiveRestore /> : <Archive />}
-                    {archived ? 'Restore project' : 'Archive project'}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {canJoin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={joinPending}
+              onClick={() => onJoin(project)}
+              aria-label={`Join ${project.name}`}
+            >
+              Join
+            </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${project.name}`}>
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => onShare(project)}>
+                <Users />
+                Share
+              </DropdownMenuItem>
+              {canEdit && (
+                <DropdownMenuItem onSelect={() => onEdit(project)}>
+                  <Pencil />
+                  Edit project
+                </DropdownMenuItem>
+              )}
+              {canArchive && <DropdownMenuSeparator />}
+              {canArchive && (
+                <DropdownMenuItem
+                  variant={archived ? 'default' : 'destructive'}
+                  onSelect={() => onToggleArchive(project)}
+                >
+                  {archived ? <ArchiveRestore /> : <Archive />}
+                  {archived ? 'Restore project' : 'Archive project'}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <span className="text-xs tabular-nums text-muted-foreground">
           {formatDate(project.updatedAt)}

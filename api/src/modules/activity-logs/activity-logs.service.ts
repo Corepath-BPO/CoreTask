@@ -1,16 +1,18 @@
 import {
   ACTIVITY_FEED_LIMIT,
   ActivityAction,
+  ActivityEntity,
   ITEM_ACTIVITY_PAGE_LIMIT,
   ServerEvent,
-  type ActivityEntity,
 } from '@coretask/contracts';
 import type { ActivityEntry, ItemActivityPage } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
+import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { StoryDraft } from './item-stories';
 
@@ -23,6 +25,13 @@ export interface RecordActivityInput {
   entityId: string;
   summary: string;
   metadata?: Prisma.InputJsonValue;
+  /**
+   * The project the entity belongs to. Pass it when you have it in hand;
+   * leave it undefined and it is looked up from the entity, so no writer can
+   * leak a private project's line into the workspace feed by forgetting.
+   * Null means "none" and skips the lookup.
+   */
+  projectId?: string | null;
 }
 
 /** Who did what to which item — shared by every story a single write produces. */
@@ -31,7 +40,10 @@ export interface StoryContext {
   actorId: string | null;
   entity: ActivityEntity;
   entityId: string;
+  projectId?: string | null;
 }
+
+type ActivityClient = Prisma.TransactionClient | PrismaService;
 
 const ACTOR_SELECT = {
   id: true,
@@ -54,13 +66,19 @@ export class ActivityLogsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   async record(input: RecordActivityInput, tx?: Prisma.TransactionClient): Promise<void> {
     const client = tx ?? this.prisma;
 
     try {
+      const projectId =
+        input.projectId === undefined
+          ? await this.resolveProjectId(input.entity, input.entityId, client)
+          : input.projectId;
+
       const entry = await client.activityLog.create({
         data: {
           workspaceId: input.workspaceId,
@@ -69,6 +87,7 @@ export class ActivityLogsService {
           entity: input.entity,
           entityId: input.entityId,
           summary: input.summary.slice(0, 500),
+          projectId,
           ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
         },
       });
@@ -77,9 +96,10 @@ export class ActivityLogsService {
        * The panel's feed learns of a new story here rather than from each
        * writer: there is one place a line is written, so there is one place it
        * is announced. The payload names the item, not the story — a client
-       * refetches the feed, which is what it would do anyway.
+       * refetches the feed, which is what it would do anyway. Addressed by the
+       * project's audience, so a private project's item ids stay private too.
        */
-      this.realtime.emitToWorkspace(input.workspaceId, ServerEvent.ACTIVITY_RECORDED, {
+      void this.broadcast.emit(input.workspaceId, projectId, ServerEvent.ACTIVITY_RECORDED, {
         id: entry.id,
         workspaceId: input.workspaceId,
         entity: input.entity,
@@ -89,6 +109,70 @@ export class ActivityLogsService {
       });
     } catch (error) {
       this.logger.error({ err: error, input }, 'Failed to write activity log');
+    }
+  }
+
+  /**
+   * Which project a line is about, from the entity it names. Done here rather
+   * than at every call site so the feed's privacy filter cannot be bypassed by
+   * a writer that did not know to pass it.
+   */
+  private async resolveProjectId(
+    entity: ActivityEntity,
+    entityId: string,
+    client: ActivityClient,
+  ): Promise<string | null> {
+    switch (entity) {
+      case ActivityEntity.PROJECT: {
+        const row = await client.project.findUnique({
+          where: { id: entityId },
+          select: { id: true },
+        });
+        return row?.id ?? null;
+      }
+      case ActivityEntity.TASK: {
+        const row = await client.task.findUnique({
+          where: { id: entityId },
+          select: { projectId: true },
+        });
+        return row?.projectId ?? null;
+      }
+      case ActivityEntity.TICKET: {
+        const row = await client.ticket.findUnique({
+          where: { id: entityId },
+          select: { projectId: true },
+        });
+        return row?.projectId ?? null;
+      }
+      case ActivityEntity.SECTION: {
+        const row = await client.section.findUnique({
+          where: { id: entityId },
+          select: { projectId: true },
+        });
+        return row?.projectId ?? null;
+      }
+      case ActivityEntity.COMMENT: {
+        const row = await client.comment.findUnique({
+          where: { id: entityId },
+          select: {
+            task: { select: { projectId: true } },
+            ticket: { select: { projectId: true } },
+          },
+        });
+        return row?.task?.projectId ?? row?.ticket?.projectId ?? null;
+      }
+      case ActivityEntity.ATTACHMENT: {
+        const row = await client.attachment.findUnique({
+          where: { id: entityId },
+          select: {
+            task: { select: { projectId: true } },
+            ticket: { select: { projectId: true } },
+          },
+        });
+        return row?.task?.projectId ?? row?.ticket?.projectId ?? null;
+      }
+      default:
+        return null;
     }
   }
 
@@ -111,10 +195,17 @@ export class ActivityLogsService {
     }
   }
 
-  /** Most recent activity in a workspace, newest first. */
-  async listFeed(workspaceId: string, limit = ACTIVITY_FEED_LIMIT): Promise<ActivityEntry[]> {
+  /**
+   * Most recent activity in a workspace, newest first — leaving out lines from
+   * projects the reader cannot see.
+   */
+  async listFeed(
+    workspaceId: string,
+    actor: ActorContext,
+    limit = ACTIVITY_FEED_LIMIT,
+  ): Promise<ActivityEntry[]> {
     const entries = await this.prisma.activityLog.findMany({
-      where: { workspaceId },
+      where: { workspaceId, AND: [this.access.scopedWhere(actor)] },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { actor: { select: ACTOR_SELECT } },
@@ -137,6 +228,7 @@ export class ActivityLogsService {
    */
   async listForEntity(
     workspaceId: string,
+    actor: ActorContext,
     entity: ActivityEntity,
     entityId: string,
     query: { before?: string | undefined; limit?: number | undefined } = {},
@@ -149,6 +241,7 @@ export class ActivityLogsService {
         entity,
         entityId,
         action: { not: ActivityAction.COMMENTED },
+        AND: [this.access.scopedWhere(actor)],
         ...(query.before ? { id: { lt: query.before } } : {}),
       },
       orderBy: { id: 'desc' },

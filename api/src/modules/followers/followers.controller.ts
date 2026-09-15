@@ -18,11 +18,8 @@ import {
   ApiEnvelopeResponse,
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import {
-  CurrentWorkspace,
-  RequireWorkspaceRole,
-} from '../../common/decorators/workspace.decorator';
+import { Actor, RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
@@ -34,8 +31,9 @@ import { taskLink, taskRef, ticketLink, ticketRef } from './item-ref';
 
 /**
  * Collaborators hang off the item, like its thread does. The parent is
- * resolved inside the workspace first, so nobody can read or change who
- * follows a task in another tenant.
+ * resolved inside the workspace first — and through the caller's view of its
+ * project — so nobody can read or change who follows a task in another
+ * tenant, or in a private project they are not part of.
  */
 @ApiTags('Followers')
 @ApiBearerAuth()
@@ -45,7 +43,10 @@ import { taskLink, taskRef, ticketLink, ticketRef } from './item-ref';
 @ApiParam({ name: 'taskId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 @ApiErrorResponseDoc(403, 'The caller is not a member of this workspace')
-@ApiErrorResponseDoc(404, 'No such task in this workspace')
+@ApiErrorResponseDoc(
+  404,
+  'No such task in this workspace, or it is in a private project the caller is not in',
+)
 export class TaskFollowersController {
   constructor(
     private readonly followers: FollowersService,
@@ -58,8 +59,9 @@ export class TaskFollowersController {
   async list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Follower[]> {
-    const task = await this.tasks.requireTask(workspaceId, taskId);
+    const task = await this.tasks.requireTask(workspaceId, taskId, actor);
     return this.followers.list(workspaceId, taskLink(task.id));
   }
 
@@ -67,19 +69,20 @@ export class TaskFollowersController {
   @RequireWorkspaceRole(WorkspaceRole.MEMBER)
   @ApiOperation({
     summary: 'Add collaborators to a task',
-    description: 'Workspace members only. Adding someone already following is a no-op.',
+    description:
+      'Workspace members who can see the task’s project only. Adding someone already following is a no-op.',
   })
   @ApiEnvelopeResponse(FollowerDto, { isArray: true, status: 201 })
-  @ApiErrorResponseDoc(400, 'Somebody named is not a member of this workspace')
+  @ApiErrorResponseDoc(400, 'Somebody named is not a member here, or cannot see this project')
   @ApiErrorResponseDoc(422, 'Validation failed')
   async add(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: AddFollowersDto,
   ): Promise<Follower[]> {
-    const task = await this.tasks.requireTask(workspaceId, taskId);
-    return this.followers.add(taskRef(workspaceId, task), userId, dto.userIds);
+    const task = await this.tasks.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
+    return this.followers.add(taskRef(workspaceId, task), actor.userId, dto.userIds);
   }
 
   @Delete(':userId')
@@ -87,7 +90,8 @@ export class TaskFollowersController {
   @ApiParam({ name: 'userId', format: 'uuid' })
   @ApiOperation({
     summary: 'Leave a task, or remove a collaborator',
-    description: 'Anyone may remove themselves; MANAGER and above may remove anyone.',
+    description:
+      'Anyone may remove themselves; MANAGER and above (in the project) may remove anyone.',
   })
   @ApiEnvelopeResponse(FollowerDto, { isArray: true })
   @ApiErrorResponseDoc(403, 'Removing someone else needs MANAGER')
@@ -95,16 +99,10 @@ export class TaskFollowersController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
     @Param('userId', ParseUUIDPipe) userId: string,
-    @CurrentUser('id') actorId: string,
-    @CurrentWorkspace('role') role: string,
+    @Actor() actor: ActorContext,
   ): Promise<Follower[]> {
-    const task = await this.tasks.requireTask(workspaceId, taskId);
-    return this.followers.remove(
-      taskRef(workspaceId, task),
-      actorId,
-      role as WorkspaceRole,
-      userId,
-    );
+    const task = await this.tasks.requireTask(workspaceId, taskId, actor);
+    return this.followers.remove(taskRef(workspaceId, task), actor, userId);
   }
 }
 
@@ -116,7 +114,10 @@ export class TaskFollowersController {
 @ApiParam({ name: 'idOrKey', example: 'CORE-1001' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 @ApiErrorResponseDoc(403, 'The caller is not a member of this workspace')
-@ApiErrorResponseDoc(404, 'No such ticket in this workspace')
+@ApiErrorResponseDoc(
+  404,
+  'No such ticket in this workspace, or it is in a private project the caller is not in',
+)
 export class TicketFollowersController {
   constructor(
     private readonly followers: FollowersService,
@@ -132,8 +133,9 @@ export class TicketFollowersController {
   async list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
+    @Actor() actor: ActorContext,
   ): Promise<Follower[]> {
-    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey);
+    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey, actor);
     return this.followers.list(workspaceId, ticketLink(ticket.id));
   }
 
@@ -141,16 +143,21 @@ export class TicketFollowersController {
   @RequireWorkspaceRole(WorkspaceRole.MEMBER)
   @ApiOperation({ summary: 'Add collaborators to a ticket' })
   @ApiEnvelopeResponse(FollowerDto, { isArray: true, status: 201 })
-  @ApiErrorResponseDoc(400, 'Somebody named is not a member of this workspace')
+  @ApiErrorResponseDoc(400, 'Somebody named is not a member here, or cannot see this project')
   @ApiErrorResponseDoc(422, 'Validation failed')
   async add(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: AddFollowersDto,
   ): Promise<Follower[]> {
-    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey);
-    return this.followers.add(ticketRef(workspaceId, ticket), userId, dto.userIds);
+    const ticket = await this.tickets.requireTicket(
+      workspaceId,
+      idOrKey,
+      actor,
+      WorkspaceRole.MEMBER,
+    );
+    return this.followers.add(ticketRef(workspaceId, ticket), actor.userId, dto.userIds);
   }
 
   @Delete(':userId')
@@ -163,15 +170,9 @@ export class TicketFollowersController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
     @Param('userId', ParseUUIDPipe) userId: string,
-    @CurrentUser('id') actorId: string,
-    @CurrentWorkspace('role') role: string,
+    @Actor() actor: ActorContext,
   ): Promise<Follower[]> {
-    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey);
-    return this.followers.remove(
-      ticketRef(workspaceId, ticket),
-      actorId,
-      role as WorkspaceRole,
-      userId,
-    );
+    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey, actor);
+    return this.followers.remove(ticketRef(workspaceId, ticket), actor, userId);
   }
 }
