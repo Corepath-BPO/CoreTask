@@ -47,7 +47,7 @@ export function IntegrationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Integrations"
-        description={`API keys and webhooks for the tools that work with ${workspace.name}.`}
+        description={`API keys, webhooks and a playground for the tools that work with ${workspace.name}.`}
       />
 
       {canManage ? (

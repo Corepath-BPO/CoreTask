@@ -13,6 +13,7 @@ interface IntegrationsTab {
 const TABS: IntegrationsTab[] = [
   { label: 'API keys', segment: 'api-keys' },
   { label: 'Webhooks', segment: 'webhooks' },
+  { label: 'Playground', segment: 'playground' },
 ];
 
 /** Links rather than local state, so the tab lives in the URL and survives a refresh. */

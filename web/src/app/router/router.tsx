@@ -12,6 +12,7 @@ import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
 import { IntegrationsPage } from '@/features/integrations/pages/integrations-page';
+import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
 import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
@@ -311,6 +312,12 @@ const integrationsWebhooksRoute = createRoute({
   component: WebhooksPage,
 });
 
+const integrationsPlaygroundRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/playground',
+  component: PlaygroundPage,
+});
+
 /**
  * Hangs off the root rather than either gate: `guestRoute` would bounce a
  * signed-in user away from the invitation they were sent, and `protectedRoute`
@@ -578,6 +585,7 @@ const routeTree = rootRoute.addChildren([
       integrationsIndexRoute,
       integrationsApiKeysRoute,
       integrationsWebhooksRoute,
+      integrationsPlaygroundRoute,
     ]),
     calendarRoute,
     reportsRoute,
