@@ -34,10 +34,11 @@ import { Separator } from '@/components/ui/separator';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import {
   cn,
-  daysUntil,
+  formatDue,
   formatDueDate,
   formatRelativeTime,
   initials,
+  isOverdue,
   percentage,
 } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
@@ -177,7 +178,7 @@ export function DashboardPage() {
             ) : (
               <ul className="divide-y divide-border/70">
                 {assignedTasks.map((task) => {
-                  const overdue = task.dueDate !== null && daysUntil(task.dueDate) < 0;
+                  const overdue = isOverdue(task);
 
                   return (
                     <li
@@ -203,7 +204,7 @@ export function DashboardPage() {
                               overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
                             )}
                           >
-                            {formatDueDate(task.dueDate)}
+                            {formatDue(task)}
                           </span>
                         )}
                       </div>
@@ -227,7 +228,7 @@ export function DashboardPage() {
               </p>
             ) : (
               upcomingTasks.map((task) => {
-                const overdue = task.dueDate !== null && daysUntil(task.dueDate) < 0;
+                const overdue = isOverdue(task);
 
                 return (
                   <div key={task.id} className="flex items-start gap-3">
@@ -246,7 +247,7 @@ export function DashboardPage() {
                           overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
                         )}
                       >
-                        {task.dueDate ? formatDueDate(task.dueDate) : 'No due date'}
+                        {task.dueDate ? formatDue(task) : 'No due date'}
                         {task.assignee ? ` · ${task.assignee.name}` : ' · unassigned'}
                       </p>
                     </div>

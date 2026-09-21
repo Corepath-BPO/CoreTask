@@ -196,6 +196,53 @@ app exchanges the refresh cookie for a new one. Two details matter:
   only ever 401. Absent means _unknown_, and unknown still tries — treating it as
   signed out would strand every session that predates the marker.
 
+## API keys (integrations)
+
+A workspace admin creates keys under **Integrations → API keys**. A key is the
+credential for a tool such as n8n, and it is the only way for one: the refresh
+cookie is bound to a browser session and never issued to a machine.
+
+| Property   | Value                                                               |
+| ---------- | ------------------------------------------------------------------- |
+| Format     | `ctk_` + 43 URL-safe characters (32 random bytes)                   |
+| Sent as    | `X-API-Key: ctk_…` or `Authorization: Bearer ctk_…`                 |
+| Storage    | SHA-256 hash only; the raw key is returned once, at creation        |
+| Identity   | A hidden service-account user named after the key, in one workspace |
+| Role       | `GUEST`, `MEMBER` or `MANAGER` — never `ADMIN` or `OWNER`           |
+| Lifetime   | Optional expiry in days; revocation is final and keeps the history  |
+| Rate limit | `RATE_LIMIT_MAX` per key, not per IP                                |
+
+The service account is a real `User` row (`isServiceAccount`), so tasks and
+comments it creates carry it as author and the activity feed reads "n8n created
+this task". It is left out of member lists and counts, cannot sign in, and its
+address is under the reserved `.invalid` TLD so no mail can ever reach it.
+
+A key may move work but never widen its own access. Routes marked
+`@SessionOnly()` refuse it with `403 API_KEY_NOT_ALLOWED`: everything under
+`/auth`, managing members, invitations and API keys, and creating workspaces.
+Any workspace other than its own answers `403 WORKSPACE_ACCESS_DENIED`.
+
+Start with `GET /integration/whoami`, which confirms the key and returns the
+workspace id every other call needs:
+
+```json
+{
+  "principal": "api_key",
+  "user": { "id": "…", "name": "n8n", "email": "api-key-…@integrations.coretask.invalid" },
+  "workspace": { "id": "…", "name": "CoreTask Demo", "slug": "coretask-demo" },
+  "apiKey": { "id": "…", "name": "n8n", "role": "MEMBER" }
+}
+```
+
+| Code                       | Status | Meaning                                       |
+| -------------------------- | ------ | --------------------------------------------- |
+| `API_KEY_INVALID`          | 401    | Not recognised                                |
+| `API_KEY_REVOKED`          | 401    | Revoked by an admin                           |
+| `API_KEY_EXPIRED`          | 401    | Past its expiry                               |
+| `API_KEY_NOT_ALLOWED`      | 403    | Session-only route                            |
+| `API_KEY_ROLE_NOT_ALLOWED` | 422    | Asked for a role a key may not hold           |
+| `API_KEY_LIMIT_REACHED`    | 409    | Workspace already has the maximum active keys |
+
 ## Not yet implemented
 
 E-mail verification, password reset, "sign out everywhere", and MFA. The

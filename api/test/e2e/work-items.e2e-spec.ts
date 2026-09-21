@@ -387,6 +387,35 @@ describe('Project work items (e2e)', () => {
         .expect(400);
     });
 
+    it('stamps the completion time when a task is marked done, and clears it when reopened', async () => {
+      /*
+       * The task module derived `completedAt` from the status on every edit;
+       * this path did not. A task ticked off in the List carried `DONE` with no
+       * completion time — and since "task completed" is raised off that column,
+       * no rule ever heard about it, while the same tick on a subtask, which
+       * takes the other path, fired every time.
+       */
+      const scope = await setupScope();
+      const task = await create(scope, { type: 'TASK', title: 'A task' }).expect(201);
+      const itemUrl = `${itemsUrl(scope)}/${task.body.data.id}`;
+
+      const done = await request(server())
+        .patch(itemUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ statusId: 'DONE' })
+        .expect(200);
+
+      expect(done.body.data.completedAt).toEqual(expect.any(String));
+
+      const reopened = await request(server())
+        .patch(itemUrl)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ statusId: 'IN_PROGRESS' })
+        .expect(200);
+
+      expect(reopened.body.data.completedAt).toBeNull();
+    });
+
     it('refuses an assignee who is not a member of the workspace', async () => {
       const scope = await setupScope();
       const task = await create(scope, { type: 'TASK', title: 'A task' }).expect(201);
@@ -472,6 +501,259 @@ describe('Project work items (e2e)', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('bulk', () => {
+    const bulk = (scope: Scope, body: Record<string, unknown>, actor: Actor = scope.owner) =>
+      request(server())
+        .post(`${itemsUrl(scope)}/bulk`)
+        .set('Authorization', `Bearer ${actor.token}`)
+        .send(body);
+
+    const list = (scope: Scope, query = '') =>
+      request(server())
+        .get(`${itemsUrl(scope)}${query}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+    const createMany = async (scope: Scope, titles: string[], type = 'TASK') => {
+      const ids: string[] = [];
+      for (const title of titles) {
+        const response = await create(scope, { type, title, sectionId: scope.sectionId }).expect(
+          201,
+        );
+        ids.push(response.body.data.id as string);
+      }
+      return ids;
+    };
+
+    it('applies one field change to every row, with an activity entry each', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['One', 'Two', 'Three']);
+
+      const response = await bulk(scope, {
+        workItemIds: ids,
+        update: { statusId: 'IN_PROGRESS' },
+      }).expect(201);
+
+      expect(response.body.data.items.map((item: { id: string }) => item.id)).toEqual(ids);
+      for (const item of response.body.data.items) {
+        expect(item.status.id).toBe('IN_PROGRESS');
+      }
+
+      // Twenty ordinary edits, not one unfamiliar event: each row has its own
+      // story, exactly as it would after a single PATCH — and a status change
+      // reads as one.
+      const activity = await context.prisma.activityLog.findMany({
+        where: { workspaceId: scope.workspaceId, action: 'STATUS_CHANGED', entityId: { in: ids } },
+      });
+      expect(activity).toHaveLength(3);
+    });
+
+    const createSelectField = async (scope: Scope, projectId = scope.projectId) => {
+      const response = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${projectId}/custom-fields`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Severity',
+          type: 'SINGLE_SELECT',
+          options: [{ label: 'Low' }, { label: 'High' }],
+        })
+        .expect(201);
+      const options = response.body.data.options as { id: string; label: string }[];
+      return { id: response.body.data.id as string, high: options[1]!.id };
+    };
+
+    const valueRows = (scope: Scope, fieldId: string) =>
+      context.prisma.taskCustomFieldValue.findMany({
+        where: { customFieldId: fieldId, task: { workspaceId: scope.workspaceId } },
+      });
+
+    it('sets a field value on every task, skipping tickets, with a story each', async () => {
+      const scope = await setupScope();
+      const field = await createSelectField(scope);
+      const tasks = await createMany(scope, ['One', 'Two']);
+      const [ticket] = await createMany(scope, ['A ticket'], 'TICKET');
+
+      const response = await bulk(scope, {
+        workItemIds: [...tasks, ticket],
+        update: { customFieldValues: { [field.id]: { optionIds: [field.high] } } },
+      }).expect(201);
+
+      const items = response.body.data.items as {
+        id: string;
+        customFieldValues: { fieldId: string; optionIds: string[] }[];
+      }[];
+      for (const id of tasks) {
+        expect(items.find((item) => item.id === id)?.customFieldValues).toEqual([
+          expect.objectContaining({ fieldId: field.id, optionIds: [field.high] }),
+        ]);
+      }
+      expect(items.find((item) => item.id === ticket)?.customFieldValues).toEqual([]);
+
+      const stories = await context.prisma.activityLog.findMany({
+        where: { workspaceId: scope.workspaceId, action: 'FIELD_CHANGED' },
+      });
+      expect(stories.map((story) => story.entityId).sort()).toEqual([...tasks].sort());
+      expect(stories[0]?.metadata).toMatchObject({ source: 'BULK', after: { label: 'High' } });
+    });
+
+    it('combines a field value with a row change in one request', async () => {
+      const scope = await setupScope();
+      const field = await createSelectField(scope);
+      const tasks = await createMany(scope, ['One']);
+
+      const response = await bulk(scope, {
+        workItemIds: tasks,
+        update: {
+          statusId: 'IN_PROGRESS',
+          customFieldValues: { [field.id]: { optionIds: [field.high] } },
+        },
+      }).expect(201);
+
+      expect(response.body.data.items[0]).toMatchObject({
+        status: { id: 'IN_PROGRESS' },
+        customFieldValues: [expect.objectContaining({ fieldId: field.id })],
+      });
+    });
+
+    it('refuses a field the project does not have before writing anything', async () => {
+      const scope = await setupScope();
+      const elsewhere = await createSelectField(scope, scope.otherProjectId);
+      const tasks = await createMany(scope, ['One', 'Two']);
+
+      await bulk(scope, {
+        workItemIds: tasks,
+        update: { customFieldValues: { [elsewhere.id]: { optionIds: [elsewhere.high] } } },
+      }).expect(404);
+
+      expect(await valueRows(scope, elsewhere.id)).toHaveLength(0);
+    });
+
+    it('refuses a value that does not fit the field before writing anything', async () => {
+      const scope = await setupScope();
+      const field = await createSelectField(scope);
+      const tasks = await createMany(scope, ['One', 'Two']);
+
+      await bulk(scope, {
+        workItemIds: tasks,
+        update: { customFieldValues: { [field.id]: { optionIds: [crypto.randomUUID()] } } },
+      }).expect(400);
+
+      expect(await valueRows(scope, field.id)).toHaveLength(0);
+    });
+
+    it('refuses a formula, which nobody sets', async () => {
+      const scope = await setupScope();
+      const formula = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/custom-fields`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Fixed', type: 'FORMULA', settings: { expression: '1' } })
+        .expect(201);
+      const tasks = await createMany(scope, ['One']);
+
+      await bulk(scope, {
+        workItemIds: tasks,
+        update: { customFieldValues: { [formula.body.data.id]: { number: 2 } } },
+      }).expect(422);
+    });
+
+    it('moves a task and a ticket together, keeping the order they were named in', async () => {
+      const scope = await setupScope();
+      const [task] = await createMany(scope, ['A task']);
+      const [ticket] = await createMany(scope, ['A ticket'], 'TICKET');
+
+      await bulk(scope, {
+        workItemIds: [task, ticket],
+        sectionId: scope.secondSectionId,
+      }).expect(201);
+
+      const moved = await list(scope, `?sectionId=${scope.secondSectionId}`);
+      expect(moved.body.data.items.map((item: { id: string }) => item.id)).toEqual([task, ticket]);
+    });
+
+    it('changes nothing when one id belongs to another project', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['Mine']);
+      const stranger = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.otherProjectId}/work-items`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ type: 'TASK', title: 'Not mine' })
+        .expect(201);
+
+      await bulk(scope, {
+        workItemIds: [...ids, stranger.body.data.id],
+        update: { statusId: 'DONE' },
+      }).expect(404);
+
+      const untouched = await list(scope);
+      expect(untouched.body.data.items[0].status.id).not.toBe('DONE');
+    });
+
+    it('refuses a task status on a selection that holds a ticket, before writing anything', async () => {
+      const scope = await setupScope();
+      const [task] = await createMany(scope, ['A task']);
+      const [ticket] = await createMany(scope, ['A ticket'], 'TICKET');
+
+      await bulk(scope, {
+        workItemIds: [task, ticket],
+        update: { statusId: 'BACKLOG' },
+      }).expect(400);
+
+      const untouched = await list(scope);
+      const statuses = untouched.body.data.items.map(
+        (item: { status: { id: string } }) => item.status.id,
+      );
+      expect(statuses).not.toContain('BACKLOG');
+    });
+
+    it('archives for a manager, and the rows leave the list', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['Old', 'Older']);
+
+      await bulk(scope, { workItemIds: ids, archived: true }).expect(201);
+
+      const remaining = await list(scope);
+      expect(remaining.body.data.items).toHaveLength(0);
+    });
+
+    it('refuses archiving from an ordinary member', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['Keep']);
+
+      await bulk(scope, { workItemIds: ids, archived: true }, scope.member).expect(403);
+    });
+
+    it('refuses to archive a ticket from here', async () => {
+      const scope = await setupScope();
+      const [ticket] = await createMany(scope, ['A ticket'], 'TICKET');
+
+      await bulk(scope, { workItemIds: [ticket], archived: true }).expect(400);
+    });
+
+    it('caps a request at a hundred rows', async () => {
+      const scope = await setupScope();
+      const ids = Array.from({ length: 101 }, () => crypto.randomUUID());
+
+      await bulk(scope, { workItemIds: ids, update: { statusId: 'DONE' } }).expect(422);
+    });
+
+    it('refuses a request that asks for nothing', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['Idle']);
+
+      await bulk(scope, { workItemIds: ids }).expect(422);
+    });
+
+    it('refuses somebody who is not in the workspace', async () => {
+      const scope = await setupScope();
+      const ids = await createMany(scope, ['Private']);
+
+      await bulk(scope, { workItemIds: ids, update: { statusId: 'DONE' } }, scope.outsider).expect(
+        403,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('authorization', () => {
     it('refuses somebody who is not in the workspace', async () => {
       const scope = await setupScope();
@@ -506,6 +788,47 @@ describe('Project work items (e2e)', () => {
         )
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(404);
+    });
+  });
+  // -------------------------------------------------------------------------
+  describe('counts on the row', () => {
+    it('carries comment and attachment counts for a task and a ticket alike', async () => {
+      const scope = await setupScope();
+      const task = await create(scope, { type: 'TASK', title: 'Talked about' }).expect(201);
+      const ticket = await create(scope, { type: 'TICKET', title: 'Filed' }).expect(201);
+
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks/${task.body.data.id}/comments`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'one' })
+        .expect(201);
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tickets/${ticket.body.data.id}/comments`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'two' })
+        .expect(201);
+      await context.prisma.attachment.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          uploaderId: scope.owner.userId,
+          ticketId: ticket.body.data.id,
+          filename: 'log.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 10,
+          objectKey: `workspaces/${scope.workspaceId}/${ticket.body.data.id}.txt`,
+          status: 'READY',
+        },
+      });
+
+      const response = await request(server())
+        .get(itemsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      const byId = Object.fromEntries(
+        response.body.data.items.map((item: { id: string }) => [item.id, item]),
+      );
+      expect(byId[task.body.data.id]).toMatchObject({ commentCount: 1, attachmentCount: 0 });
+      expect(byId[ticket.body.data.id]).toMatchObject({ commentCount: 1, attachmentCount: 1 });
     });
   });
 });

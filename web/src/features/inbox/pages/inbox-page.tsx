@@ -4,10 +4,12 @@ import { useNavigate } from '@tanstack/react-router';
 import {
   AtSign,
   Bell,
+  CalendarClock,
   CheckCheck,
   Inbox as InboxIcon,
   MessageSquare,
   RotateCcw,
+  SlidersHorizontal,
   UserPlus,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -120,9 +122,7 @@ export function InboxPage() {
                 <article
                   className={cn(
                     'flex items-start gap-3 rounded-lg border p-4 transition-colors',
-                    entry.readAt
-                      ? 'border-border bg-card'
-                      : 'border-primary/30 bg-primary/[0.03]',
+                    entry.readAt ? 'border-border bg-card' : 'border-primary/30 bg-primary/[0.03]',
                   )}
                 >
                   <NotificationIcon type={entry.type} />
@@ -136,12 +136,7 @@ export function InboxPage() {
                     aria-label={`Open "${entry.title}"`}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <p
-                      className={cn(
-                        'text-sm text-foreground',
-                        !entry.readAt && 'font-medium',
-                      )}
-                    >
+                    <p className={cn('text-sm text-foreground', !entry.readAt && 'font-medium')}>
                       {entry.title}
                     </p>
                     {entry.body && (
@@ -203,7 +198,14 @@ function NotificationIcon({ type }: { type: NotificationType }) {
         ? MessageSquare
         : type === NotificationType.WORKSPACE_INVITE
           ? UserPlus
-          : Bell;
+          : type === NotificationType.TASK_STATUS_CHANGED ||
+              type === NotificationType.TICKET_STATUS_CHANGED
+            ? CheckCheck
+            : type === NotificationType.TASK_UPDATED || type === NotificationType.TICKET_UPDATED
+              ? CalendarClock
+              : type === NotificationType.FIELD_CHANGED
+                ? SlidersHorizontal
+                : Bell;
 
   return (
     <span className="mt-0.5 rounded-md bg-muted p-1.5">

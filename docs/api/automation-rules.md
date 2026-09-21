@@ -41,13 +41,23 @@ that exists.
 
 ## `GET /`
 
-Optional `?sectionId=` returns only rules whose trigger watches that section.
+Optional `?sectionId=` returns only the rules that belong under that section —
+what the section's lightning icon lists, the way Asana's does.
 
-The filter reads the trigger configuration —
-`triggerConfig: { path: ['sectionId'], equals: sectionId }` — rather than a
-column. The section a rule watches is part of how it triggers, not a second
-relationship, and a denormalised column would eventually disagree with the
-trigger it was copied from.
+A rule belongs to a section when the section is what it watches, read from the
+rule itself by `rulesForSection` in `@coretask/contracts` rather than from a
+column:
+
+- its trigger is scoped to the section (`triggerConfig.sectionId`, or one of
+  `sectionIds` for the any-of form), or
+- one of its conditions checks `sectionId` is (or is one of) the section — the
+  check a rule started from a section's lightning menu carries, and keeps when
+  its trigger is later changed to something like "task completed".
+
+Neither a negated form ("section is not…") nor an action that moves tasks to
+the section counts: the first is about everywhere else, and the second is where
+the rule sends things, not where it lives. The same helper drives the web
+lightning, so the icon and the endpoint cannot disagree.
 
 `ARCHIVED` rules are excluded. They exist to explain history, not to be
 managed.
@@ -220,6 +230,8 @@ that:
 - names a trigger the engine does not understand
 - has no action at all
 - names an action the engine cannot run
+- has an action missing the setting it cannot run without — a move with no
+  section, an assignment with nobody named, a comment with no text
 - watches a section that no longer exists
 
 Each of those otherwise fails **silently at run time**. A rule with no action
@@ -301,6 +313,81 @@ each is accounted for separately.
 
 The limit is fixed at 25 in the service and is not exposed as a query
 parameter.
+
+## The rule library
+
+Base: `/api/v1/workspaces/:workspaceId/automation-templates`
+
+Rules saved to be started from again, in any project of the workspace. A
+template is a **snapshot** of a rule's graph, not a link to the rule: editing,
+archiving or deleting the rule afterwards leaves the template as it was saved.
+Workspace-scoped rather than under a project, because reuse across projects is
+the whole point — that is the difference between this and `duplicate`, which
+copies a rule beside itself.
+
+| Method   | Path                 | Role    | Purpose                                   |
+| -------- | -------------------- | ------- | ----------------------------------------- |
+| `GET`    | `/`                  | member  | every template, with its graph, by name   |
+| `POST`   | `/`                  | manager | save a rule's current graph as a template |
+| `PATCH`  | `/:templateId`       | manager | rename or describe                        |
+| `DELETE` | `/:templateId`       | manager | remove; drafts started from it are kept   |
+| `POST`   | `/:templateId/apply` | manager | start a `DRAFT` in a project from it      |
+
+### `POST /`
+
+```json
+{ "projectId": "…", "ruleId": "…", "name": "Standard triage", "description": "…" }
+```
+
+Addressed by rule rather than by graph, so the library only ever holds things
+that were built in the builder. `name` and `description` default to the rule's
+own. The rule must have at least one node.
+
+`clearReferences: true` saves the rule with its sections, statuses, fields and
+options left blank, so the template asks for them wherever it is used instead of
+carrying this project's and matching by name. It is the same translation an
+apply performs when nothing matches, run against an empty project. People and
+priorities are workspace-wide and stay either way.
+
+Alongside the graph, the service records the **names** behind every
+project-scoped id the rule carries — sections, statuses, custom fields and their
+options — in a `references` column the response does not expose. Members and
+priorities are workspace-wide and need no such record.
+
+### `POST /:templateId/apply`
+
+```json
+{ "projectId": "…", "sectionId": "…" }
+```
+
+Creates a `DRAFT` in `projectId`, never a live rule, and answers with
+`{ rule, unresolved }` — the rule exactly as `GET /automations/:ruleId` returns
+it. Every project-scoped id in the graph is translated, each kind the same way:
+
+1. **kept** if the target project has that very row (a template applied back
+   where it came from, or a field the workspace library shares);
+2. otherwise **matched by name**, case-insensitively, against the target
+   project's sections, its statuses (its own set, or the workspace defaults when
+   it has none) and the fields linked to it — a select option is then matched
+   by label on the matched field;
+3. otherwise **cleared** and reported in `unresolved` as
+   `{ nodeType, subtype, kind, name }`, where `kind` is `SECTION`, `STATUS`,
+   `CUSTOM_FIELD` or `OPTION` and `name` is what the source project called it.
+
+A condition about a field the project lacks is emptied entirely, so the builder
+shows it as an unanswered row rather than a comparison against nothing. Nothing
+is refused for failing to match: the draft cannot publish until the blanks are
+filled, because `publish` refuses an action missing its setting — that is the
+check.
+
+`sectionId`, when given, must belong to `projectId` and replaces the section a
+`TASK_MOVED_TO_SECTION` trigger remembered; it is how a template started from a
+section's lightning menu watches that section. `useCount` and `lastUsedAt` on
+the template are updated.
+
+`404` for a template, project or section outside the workspace — the same rule
+as everywhere else: an id from elsewhere is indistinguishable from one that does
+not exist.
 
 ## Errors
 

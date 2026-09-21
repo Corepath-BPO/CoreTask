@@ -1,5 +1,5 @@
 import type { CatalogCustomField, ViewColumn } from '@coretask/types';
-import { Check, Library, Loader2, Plus, RotateCw, Search } from 'lucide-react';
+import { ArchiveRestore, Check, Library, Loader2, Plus, RotateCw, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +15,11 @@ import { Input } from '@/components/ui/input';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 
-import { useAttachField, useFieldCatalog } from '../../hooks/use-project-views';
+import {
+  useAttachField,
+  useFieldCatalog,
+  useRestoreCustomField,
+} from '../../hooks/use-project-views';
 
 import { FIELD_TYPE_META } from './field-type-registry';
 import { FieldTypeIcon } from './field-type-icon';
@@ -59,15 +63,18 @@ export function FieldLibraryDialog({
 }) {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
 
   useDebouncedValue(search, setDebounced);
 
   const visible = useMemo(() => new Set(columns.map((column) => column.field)), [columns]);
 
-  // Archived fields included: this is the one place they should be visible, so
-  // somebody can see why a name is "taken" by something no longer in use.
-  const catalog = useFieldCatalog(workspaceId, projectId, debounced, [], true, true);
+  // Archived fields on request: this is the one place they should be visible,
+  // so somebody can see why a name is "taken" by something no longer in use —
+  // and bring it back.
+  const catalog = useFieldCatalog(workspaceId, projectId, debounced, [], true, showArchived);
   const attachField = useAttachField(workspaceId, projectId);
+  const restoreField = useRestoreCustomField(workspaceId, projectId);
 
   const fields = useMemo(() => {
     const all = [...(catalog.data?.projectFields ?? []), ...(catalog.data?.libraryFields ?? [])];
@@ -92,8 +99,8 @@ export function FieldLibraryDialog({
     },
     {
       title: 'Archived',
-      hint: 'Kept so the values recorded against them stay readable',
-      fields: fields.filter((field) => field.isArchived),
+      hint: 'Kept so the values recorded against them stay readable; restore one to use it again',
+      fields: showArchived ? fields.filter((field) => field.isArchived) : [],
     },
   ].filter((group) => group.fields.length > 0);
 
@@ -111,8 +118,8 @@ export function FieldLibraryDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="border-b border-border p-3">
-          <div className="relative">
+        <div className="flex items-center gap-3 border-b border-border p-3">
+          <div className="relative flex-1">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -125,6 +132,15 @@ export function FieldLibraryDialog({
               className="pl-9"
             />
           </div>
+          <label className="flex shrink-0 items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(event) => setShowArchived(event.target.checked)}
+              className="size-4 cursor-pointer rounded border-input accent-primary"
+            />
+            Show archived
+          </label>
         </div>
 
         <div className="max-h-[52vh] overflow-y-auto p-3">
@@ -171,7 +187,7 @@ export function FieldLibraryDialog({
                       key={field.id}
                       field={field}
                       state={stateOf(field, visible)}
-                      pending={attachField.isPending}
+                      pending={attachField.isPending || restoreField.isPending}
                       onAddColumn={() => onAddColumn(`custom:${field.id}`)}
                       onAttach={() =>
                         attachField.mutate(field.id, {
@@ -180,6 +196,7 @@ export function FieldLibraryDialog({
                           onSuccess: () => onAddColumn(`custom:${field.id}`),
                         })
                       }
+                      onRestore={() => restoreField.mutate(field.id)}
                     />
                   ))}
                 </ul>
@@ -208,12 +225,14 @@ function LibraryRow({
   pending,
   onAddColumn,
   onAttach,
+  onRestore,
 }: {
   field: CatalogCustomField;
   state: FieldState;
   pending: boolean;
   onAddColumn: () => void;
   onAttach: () => void;
+  onRestore: () => void;
 }) {
   return (
     <li className="flex items-center gap-3 rounded-md border border-border p-2.5">
@@ -272,9 +291,13 @@ function LibraryRow({
         )}
 
         {state === 'ARCHIVED' && (
-          // No action: restoring is a field-management decision, not something
-          // to do by accident while choosing a column.
-          <span className="text-xs text-muted-foreground">Archived</span>
+          // Restored to the library, not straight onto this project: the
+          // values it held come back readable, and adding it somewhere is a
+          // second, deliberate step.
+          <Button variant="outline" size="sm" loading={pending} onClick={onRestore}>
+            <ArchiveRestore className="size-3.5" aria-hidden="true" />
+            Restore
+          </Button>
         )}
       </div>
     </li>

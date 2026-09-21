@@ -57,8 +57,14 @@ export async function createApp(): Promise<INestApplication> {
     origin: config.corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-    exposedHeaders: ['X-Request-Id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-API-Key',
+      'X-Request-Id',
+      'Idempotency-Key',
+    ],
+    exposedHeaders: ['X-Request-Id', 'Idempotency-Replayed'],
     maxAge: 86_400,
   });
 

@@ -21,6 +21,7 @@ import {
   TICKET_SEVERITIES,
   TICKET_STATUSES,
   TICKET_TYPES,
+  WEBHOOK_DELIVERY_STATUSES,
   WORKSPACE_ROLES,
 } from '@coretask/contracts';
 import { $Enums } from '@prisma/client';
@@ -56,6 +57,7 @@ describe('shared enums match the Prisma schema', () => {
     ['AutomationRuleNameMode', AUTOMATION_RULE_NAME_MODE_VALUES],
     ['AutomationBranchType', AUTOMATION_BRANCH_TYPE_VALUES],
     ['ConditionGroupOperator', CONDITION_GROUP_OPERATOR_VALUES],
+    ['WebhookDeliveryStatus', WEBHOOK_DELIVERY_STATUSES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

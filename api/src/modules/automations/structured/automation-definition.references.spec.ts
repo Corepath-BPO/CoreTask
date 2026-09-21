@@ -219,10 +219,44 @@ describe('what a step may be', () => {
     ).toEqual([]);
   });
 
+  it('reads a subtask list as set up, and an empty one as not yet', () => {
+    // The list is what the builder writes; the single title is what older
+    // rules stored, and both have to read as the step being configured.
+    const configured = (configuration: Record<string, unknown>) =>
+      checkShapes(definition([branch({ actions: [action('CREATE_SUBTASK', configuration)] })]));
+
+    expect(configured({ subtasks: ['Review'] })).toEqual([]);
+    expect(configured({ title: 'Review' })).toEqual([]);
+
+    const issues = configured({ subtasks: [''] });
+    expect(draftBlockers(issues)).toEqual([]);
+    expect(issues).toHaveLength(1);
+  });
+
+  it('lets a subtask still waiting for its date save, and blocks publishing it', () => {
+    const issues = checkShapes(
+      definition([
+        branch({
+          actions: [action('CREATE_SUBTASK', { subtasks: [{ title: 'Review', dueDate: '' }] })],
+        }),
+      ]),
+    );
+
+    expect(draftBlockers(issues)).toEqual([]);
+    expect(issues).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Choose a due date') }),
+    ]);
+  });
+
   /* No form produces either, so storing one would only move the failure on to
    * whoever reads it next. */
   it.each([
     ['a body that is not text', 'ADD_COMMENT', { body: { text: 'hello' } }],
+    [
+      'a subtask due date that is not a date',
+      'CREATE_SUBTASK',
+      { subtasks: [{ title: 'Review', dueDate: 'next Tuesday' }] },
+    ],
     ['a section that is not an id', 'MOVE_TO_SECTION', { sectionId: 'the-first-one' }],
     ['a day count that is not a number', 'SET_DUE_DATE', { daysFromNow: 'tomorrow' }],
   ])('refuses %s on the draft', (_name, actionType, configuration) => {
@@ -326,6 +360,28 @@ describe('what a rule points at', () => {
     expect(found).toEqual([expect.objectContaining({ kind: 'MEMBER', id: UUID.member })]);
   });
 
+  it('finds the person each subtask goes to, against its own row', () => {
+    const found = collectReferences(
+      definition([
+        branch({
+          actions: [
+            action('CREATE_SUBTASK', {
+              subtasks: ['Bare', { title: 'Review', assigneeId: UUID.member }],
+            }),
+          ],
+        }),
+      ]),
+    );
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        kind: 'MEMBER',
+        id: UUID.member,
+        path: expect.stringMatching(/subtasks\.1\.assigneeId$/),
+      }),
+    ]);
+  });
+
   /* The field is checked; its value is not. What a valid value looks like
    * depends on the field's type, and a deleted field never matches whatever it
    * was compared against. */
@@ -364,5 +420,53 @@ describe('what a rule points at', () => {
     );
 
     expect(found).toEqual([]);
+  });
+});
+
+describe('a move to another project', () => {
+  const PROJECT = '019fc8d5-0000-7000-8000-000000000201';
+  const TARGET_SECTION = '019fc8d5-0000-7000-8000-000000000202';
+
+  it('collects the project, and the section scoped to that project', () => {
+    const found = collectReferences(
+      definition([
+        branch({
+          actions: [
+            action('MOVE_TO_PROJECT', { projectId: PROJECT, targetSectionId: TARGET_SECTION }),
+          ],
+        }),
+      ]),
+    );
+
+    expect(found).toEqual([
+      expect.objectContaining({ kind: 'PROJECT', id: PROJECT }),
+      // Looked up in the chosen project, not the rule's own: the scope is what
+      // says which.
+      expect.objectContaining({ kind: 'PROJECT_SECTION', id: TARGET_SECTION, scope: PROJECT }),
+    ]);
+  });
+
+  it('needs only the project — the section is optional', () => {
+    expect(
+      checkShapes(
+        definition([branch({ actions: [action('MOVE_TO_PROJECT', { projectId: PROJECT })] })]),
+      ),
+    ).toEqual([]);
+
+    const issues = checkShapes(definition([branch({ actions: [action('MOVE_TO_PROJECT')] })]));
+    expect(draftBlockers(issues)).toEqual([]);
+    expect(issues).toHaveLength(1);
+  });
+
+  it('refuses a project or section that is not an id on the draft', () => {
+    const issues = checkShapes(
+      definition([
+        branch({
+          actions: [action('MOVE_TO_PROJECT', { projectId: 'renewals', targetSectionId: 'first' })],
+        }),
+      ]),
+    );
+
+    expect(draftBlockers(issues)).toHaveLength(2);
   });
 });

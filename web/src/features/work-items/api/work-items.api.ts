@@ -1,4 +1,6 @@
 import type {
+  BulkWorkItemPayload,
+  BulkWorkItemResult,
   CreateWorkItemPayload,
   MoveWorkItemPayload,
   ProjectWorkItem,
@@ -30,6 +32,14 @@ function toSearchParams(query: ProjectWorkItemQuery): Record<string, string> {
   if (query.includeArchived) params['includeArchived'] = 'true';
   if (query.limit !== undefined) params['limit'] = String(query.limit);
   if (query.cursor) params['cursor'] = query.cursor;
+
+  // The view's settings, as JSON: both sides already agree on the shape, and
+  // a bespoke encoding would be a second thing to keep in step. Sent only
+  // when they say something, so a plain read keeps its plain key.
+  if (query.filters?.length) params['filters'] = JSON.stringify(query.filters);
+  if (query.sorts?.length) params['sorts'] = JSON.stringify(query.sorts);
+  if (query.groupBy) params['groupBy'] = query.groupBy;
+  if (query.showCompleted === false) params['showCompleted'] = 'false';
 
   return params;
 }
@@ -76,4 +86,12 @@ export const workItemsApi = {
     payload: MoveWorkItemPayload,
   ): Promise<ProjectWorkItem> =>
     apiClient.patch<ProjectWorkItem>(`${base(workspaceId, projectId)}/${workItemId}/move`, payload),
+
+  /** One change for a whole selection — what the List's bulk bar sends. */
+  bulk: (
+    workspaceId: string,
+    projectId: string,
+    payload: BulkWorkItemPayload,
+  ): Promise<BulkWorkItemResult> =>
+    apiClient.post<BulkWorkItemResult>(`${base(workspaceId, projectId)}/bulk`, payload),
 };

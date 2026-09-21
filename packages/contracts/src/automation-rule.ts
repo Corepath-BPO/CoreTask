@@ -1,4 +1,5 @@
 import { AutomationTrigger } from './automation.js';
+import { ConditionValueKind } from './automation-graph.js';
 import { FILTER_OPERATORS, FilterOperator } from './query.js';
 
 /**
@@ -203,11 +204,22 @@ export const OPERATORS_BY_VALUE_TYPE: Record<ConditionValueType, readonly Condit
     CONDITION_OPERATOR.IS_EMPTY,
     CONDITION_OPERATOR.IS_NOT_EMPTY,
   ],
+  /*
+   * The same vocabulary as a single select, on purpose.
+   *
+   * This used to offer `CONTAINS_ANY_OF` and `CONTAINS_ALL_OF`, which no layer
+   * below could serve: the runner has no comparison for them and the validator
+   * refuses them for the kind these fields map to — an offered operator whose
+   * only product was a rule that could not publish. Against a set, `IS` reads
+   * as membership — "Tags is set to Urgent" holds when Urgent is among the
+   * tags, which is what the sentence means to the person who wrote it — and
+   * membership is a comparison every layer performs.
+   */
   MULTI_SELECT: [
-    CONDITION_OPERATOR.CONTAINS,
-    CONDITION_OPERATOR.DOES_NOT_CONTAIN,
-    CONDITION_OPERATOR.CONTAINS_ANY_OF,
-    CONDITION_OPERATOR.CONTAINS_ALL_OF,
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_NOT_ONE_OF,
     CONDITION_OPERATOR.IS_EMPTY,
     CONDITION_OPERATOR.IS_NOT_EMPTY,
   ],
@@ -382,13 +394,70 @@ export const FILTER_OPERATOR_BY_CONDITION_OPERATOR: Partial<
 };
 
 /**
+ * Comparisons the runner makes on its own, with no `FilterOperator` behind them.
+ *
+ * "Is checked" asks about a boolean with nothing beside it, "between" holds two
+ * numbers, the three date checks compare against the clock rather than a
+ * configured value, and "starts with" and "ends with" are text comparisons the
+ * filter bar never needed. None of those is a saved-view filter, and the view
+ * vocabulary in `query.ts` is shared with the filter bar — so rather than teach
+ * it comparisons the bar cannot make, the runner evaluates these directly, and
+ * this list is how the catalogue, the validator and the builder know it does.
+ *
+ * Every entry here has a case in the runner's `directComparison`; the runner's
+ * unit spec walks this list and asserts each one holds for a value it should.
+ */
+export const DIRECT_CONDITION_OPERATORS: readonly ConditionOperator[] = [
+  CONDITION_OPERATOR.IS_CHECKED,
+  CONDITION_OPERATOR.IS_NOT_CHECKED,
+  CONDITION_OPERATOR.STARTS_WITH,
+  CONDITION_OPERATOR.ENDS_WITH,
+  CONDITION_OPERATOR.BETWEEN,
+  CONDITION_OPERATOR.IS_TODAY,
+  CONDITION_OPERATOR.IS_OVERDUE,
+  CONDITION_OPERATOR.IS_WITHIN_NEXT,
+];
+
+/**
+ * The kind of value each direct comparison is about — the validator's half.
+ *
+ * `OPERATORS_BY_VALUE_KIND` answers the same question for the filter-backed
+ * operators; these have no filter to look up, so the kind is stated beside
+ * them. "Is checked" on a date and "is today" on a checkbox are refused here
+ * exactly as "date contains high" is refused there.
+ */
+export const DIRECT_OPERATOR_VALUE_KIND: Partial<Record<ConditionOperator, ConditionValueKind>> = {
+  [CONDITION_OPERATOR.IS_CHECKED]: ConditionValueKind.BOOLEAN,
+  [CONDITION_OPERATOR.IS_NOT_CHECKED]: ConditionValueKind.BOOLEAN,
+  [CONDITION_OPERATOR.STARTS_WITH]: ConditionValueKind.TEXT,
+  [CONDITION_OPERATOR.ENDS_WITH]: ConditionValueKind.TEXT,
+  [CONDITION_OPERATOR.BETWEEN]: ConditionValueKind.NUMBER,
+  [CONDITION_OPERATOR.IS_TODAY]: ConditionValueKind.DATE,
+  [CONDITION_OPERATOR.IS_OVERDUE]: ConditionValueKind.DATE,
+  [CONDITION_OPERATOR.IS_WITHIN_NEXT]: ConditionValueKind.DATE,
+};
+
+/** Whether the runner evaluates this operator itself rather than through a filter. */
+export function isDirectOperator(
+  operator: string | null | undefined,
+): operator is ConditionOperator {
+  return (
+    typeof operator === 'string' &&
+    (DIRECT_CONDITION_OPERATORS as readonly string[]).includes(operator)
+  );
+}
+
+/**
  * What a stored operator compares with, or null when nothing can compare it.
  *
- * Null rather than a default comparison, because the operators with no entry —
- * `IS_TODAY`, `IS_OVERDUE`, `IS_WITHIN_NEXT`, `CONTAINS_ANY_OF`, `BETWEEN`,
- * `IS_CHECKED` — are ones the engine genuinely cannot evaluate yet. Guessing
- * `EQUALS` for them would turn "cannot run this" into "ran it and it was
- * false", which is the failure this whole translation exists to end.
+ * Null rather than a default comparison, because an operator with no entry —
+ * `CONTAINS_ANY_OF`, `CONTAINS_ALL_OF` — is one the engine genuinely cannot
+ * evaluate. Guessing `EQUALS` for it would turn "cannot run this" into "ran it
+ * and it was false", which is the failure this whole translation exists to end.
+ *
+ * Null, too, for the direct comparisons above: they are evaluated without a
+ * filter, which is not the same as not being evaluated at all. Ask
+ * `isEvaluableOperator` for that question rather than this one.
  */
 export function toFilterOperator(operator: string | null | undefined): FilterOperator | null {
   if (!operator) return null;
@@ -404,7 +473,7 @@ export function toFilterOperator(operator: string | null | undefined): FilterOpe
 
 /** Whether the engine can evaluate this operator at all. */
 export function isEvaluableOperator(operator: string | null | undefined): boolean {
-  return toFilterOperator(operator) !== null;
+  return isDirectOperator(operator) || toFilterOperator(operator) !== null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -448,8 +517,7 @@ export function isTokenValue(value: unknown): value is AutomationTokenValue {
   const token = (value as { token?: unknown }).token;
 
   return (
-    typeof token === 'string' &&
-    (Object.values(AUTOMATION_VALUE_TOKEN) as string[]).includes(token)
+    typeof token === 'string' && (Object.values(AUTOMATION_VALUE_TOKEN) as string[]).includes(token)
   );
 }
 

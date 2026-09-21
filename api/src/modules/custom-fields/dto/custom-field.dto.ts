@@ -51,6 +51,49 @@ export class UpdateFieldOptionDto {
   @IsOptional()
   @IsNumber()
   position?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Asana’s "hide option": true removes it from pickers while cells holding it keep their label.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
+}
+
+/** `?mode=` on removing a field from a project. Absent keeps the older state-chosen behaviour. */
+export class RemoveFieldQueryDto {
+  @ApiPropertyOptional({
+    enum: ['detach', 'delete'],
+    description:
+      '`detach` leaves the definition in the library; `delete` removes it from every project, archiving instead when tasks hold values.',
+  })
+  @IsOptional()
+  @IsIn(['detach', 'delete'])
+  mode?: 'detach' | 'delete';
+}
+
+/** The definition alone, reachable without a project — how the library restores a field. */
+export class UpdateWorkspaceCustomFieldDto {
+  @ApiPropertyOptional({ maxLength: 80 })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name?: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
+
+  @ApiPropertyOptional({ description: 'False restores an archived field to the library.' })
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
 }
 
 export class CreateCustomFieldDto {
@@ -76,6 +119,14 @@ export class CreateCustomFieldDto {
   @IsOptional()
   @IsBoolean()
   isRequired?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Notify a task’s collaborators whenever this field’s value changes.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyOnChange?: boolean;
 
   /*
    * Type-specific configuration, kept as an object here and validated against
@@ -135,6 +186,13 @@ export class UpdateCustomFieldDto {
   @IsBoolean()
   isRequired?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Notify a task’s collaborators whenever this field’s value changes.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyOnChange?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
@@ -164,7 +222,9 @@ export class SetCustomFieldValueDto {
   @MaxLength(2000)
   text?: string | null;
 
-  @ApiPropertyOptional({ description: 'NUMBER fields.' })
+  @ApiPropertyOptional({
+    description: 'NUMBER and RATING fields. A rating is a whole number from 1 to its `maxRating`.',
+  })
   @IsOptional()
   @IsNumber()
   number?: number | null;

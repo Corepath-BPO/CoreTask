@@ -19,7 +19,7 @@ import {
   MAX_SECTIONS_PER_PROJECT,
   type CreatableWorkItemType,
 } from '@coretask/contracts';
-import type { Section, Task } from '@coretask/types';
+import type { ProjectFieldMetadata, Section, Task } from '@coretask/types';
 import { Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -57,9 +57,17 @@ interface SectionBoardProps {
   totalTaskCount: number;
   canEdit: boolean;
   canDelete: boolean;
+  /** False while a sort owns the order: dragging within a column does nothing. */
+  manualOrder?: boolean;
+  /** The view's card fields, drawn under each card's meta row. */
+  cardFields?: string[];
+  metadata?: ProjectFieldMetadata | undefined;
   onOpenTask: (taskId: string) => void;
   /** Opens the shared section dialog. Omitted hides the trailing column. */
   onAddSection?: (() => void) | undefined;
+  /** The section named in the URL, if any; clicking a column header selects it. */
+  selectedSectionId?: string | null;
+  onSelectSection?: ((sectionId: string) => void) | undefined;
 }
 
 export function SectionBoard({
@@ -70,8 +78,13 @@ export function SectionBoard({
   totalTaskCount,
   canEdit,
   canDelete,
+  manualOrder = true,
+  cardFields = [],
+  metadata,
   onOpenTask,
   onAddSection,
+  selectedSectionId = null,
+  onSelectSection,
 }: SectionBoardProps) {
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveSection = useMoveSection(workspaceId, projectId);
@@ -138,6 +151,11 @@ export function SectionBoard({
     const plan = resolveTaskDrop(groups, String(active.id), target);
     if (!plan) return;
 
+    // While a sort holds, a drop within the same column is not a reorder —
+    // the sort decides the order. Across columns it is still a move.
+    const stayed = groups[plan.sectionId]?.some((task) => task.id === active.id);
+    if (!manualOrder && stayed) return;
+
     /*
      * The shared move, so a card dragged here lands exactly where a row dragged
      * in the List would. The plan itself still comes from `resolveTaskDrop` —
@@ -176,9 +194,14 @@ export function SectionBoard({
                 tasks={groups[section.id] ?? []}
                 canEdit={canEdit}
                 canDelete={canDelete}
+                manualOrder={manualOrder}
+                cardFields={cardFields}
+                metadata={metadata}
                 onRename={(sectionId, name) => renameSection.mutate({ sectionId, name })}
                 onRequestDelete={setPendingDelete}
                 onOpenTask={onOpenTask}
+                selected={selectedSectionId === section.id}
+                onSelect={onSelectSection ? () => onSelectSection(section.id) : undefined}
                 defaultType={defaultType}
                 creating={createWorkItem.isPending}
                 onCreateWorkItem={(sectionId, type, title) =>

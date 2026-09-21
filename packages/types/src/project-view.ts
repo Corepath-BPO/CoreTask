@@ -93,6 +93,8 @@ export interface CustomField {
   description: string | null;
   type: CustomFieldType;
   isRequired: boolean;
+  /** Asana's "notify task collaborators when this field changes". Per project. */
+  notifyOnChange: boolean;
   isArchived: boolean;
   position: number;
   /**
@@ -102,10 +104,32 @@ export interface CustomField {
    * has to know what a missing key used to mean.
    */
   settings: Record<string, unknown>;
-  /** Present only for select types. */
+  /**
+   * Present only for select types. Archived options are included with
+   * `isArchived: true`, so a cell still holding one can render its label;
+   * pickers leave them out.
+   */
   options: CustomFieldOption[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Removing a field from a project: leave it in the library, or delete it everywhere. */
+export type RemoveFieldMode = 'detach' | 'delete';
+
+export interface RemoveFieldResult {
+  deleted: boolean;
+  archived: boolean;
+  /** How many projects it was removed from. */
+  detachedProjects: number;
+}
+
+export interface UpdateFieldOptionPayload {
+  label?: string;
+  colorToken?: string;
+  position?: number;
+  /** Asana's "hide option": kept for the cells that hold it, gone from the picker. */
+  isArchived?: boolean;
 }
 
 /**
@@ -135,6 +159,7 @@ export interface CreateCustomFieldPayload {
   type: CustomFieldType;
   description?: string;
   isRequired?: boolean;
+  notifyOnChange?: boolean;
   settings?: Record<string, unknown>;
   options?: { label: string; colorToken?: string }[];
 }
@@ -144,6 +169,7 @@ export interface UpdateCustomFieldPayload {
   settings?: Record<string, unknown>;
   description?: string | null;
   isRequired?: boolean;
+  notifyOnChange?: boolean;
   isArchived?: boolean;
   position?: number;
 }
@@ -168,6 +194,8 @@ export interface FieldTypeOption {
   label: string;
   description: string;
   hasOptions: boolean;
+  /** Worked out rather than typed: no editor, no bulk edit, no rule, no import. */
+  isComputed: boolean;
 }
 
 /** A built-in task property, and what the application can do with it. */

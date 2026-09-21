@@ -19,6 +19,34 @@ export function useActivityFeed(workspaceId: string | undefined, limit = ACTIVIT
   });
 }
 
+/** Which task or ticket a panel is showing. The id must be a UUID, never a ticket key. */
+export interface ActivityParent {
+  kind: 'task' | 'ticket';
+  id: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One item's stories for the panel's feed, newest page first and older pages
+ * behind "Show earlier activity". Keyed apart from the workspace feed so the
+ * dashboard is not refetched every time somebody opens a task.
+ */
+export function useItemActivity(workspaceId: string | undefined, parent: ActivityParent | null) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.activity.item(workspaceId ?? '', parent?.kind ?? '', parent?.id ?? ''),
+    queryFn: ({ pageParam }) =>
+      activityApi.forItem(workspaceId as string, {
+        entity: parent?.kind === 'ticket' ? 'TICKET' : 'TASK',
+        entityId: (parent as ActivityParent).id,
+        ...(pageParam ? { before: pageParam } : {}),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: Boolean(workspaceId) && Boolean(parent) && UUID.test(parent?.id ?? ''),
+  });
+}
+
 export function useNotifications(workspaceId: string | undefined, limit = NOTIFICATION_FEED_LIMIT) {
   return useQuery({
     queryKey: [...queryKeys.notifications.all(workspaceId ?? ''), limit],

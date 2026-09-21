@@ -185,6 +185,7 @@ export function CustomizePanel({
 
         {activeSection === 'rules' && (
           <CustomizeRulesSection
+            workspaceId={workspaceId}
             projectId={projectId}
             rules={rulesQuery.data}
             isLoading={rulesQuery.isLoading}

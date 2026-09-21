@@ -1,7 +1,7 @@
 import type { Ticket, TicketDetail } from '@coretask/types';
 import type { Prisma } from '@prisma/client';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true } as const;
+const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
 
 export const ticketInclude = {
   reporter: { select: USER_SELECT },

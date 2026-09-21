@@ -1,8 +1,8 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type {
   Comment,
+  CommentListMeta,
   CreateCommentPayload,
-  PaginationMeta,
   UpdateCommentPayload,
 } from '@coretask/types';
 
@@ -19,13 +19,22 @@ const threadUrl = (workspaceId: string, parent: CommentParent) =>
     ? ApiRoutes.comments.forTask(workspaceId, parent.id)
     : ApiRoutes.comments.forTicket(workspaceId, parent.id);
 
+export interface CommentPage {
+  items: Comment[];
+  meta: CommentListMeta;
+}
+
 export const commentsApi = {
+  /**
+   * The latest window of a thread, or the one before `before`. Ids are
+   * time-ordered, so the cursor is the earliest id already on screen.
+   */
   list: (
     workspaceId: string,
     parent: CommentParent,
-    params: { page?: number; limit?: number } = {},
-  ): Promise<{ items: Comment[]; meta: PaginationMeta }> =>
-    apiClient.getPaginated<Comment>(threadUrl(workspaceId, parent), { params }),
+    params: { before?: string; limit?: number } = {},
+  ): Promise<CommentPage> =>
+    apiClient.getPaginated<Comment, CommentListMeta>(threadUrl(workspaceId, parent), { params }),
 
   create: (
     workspaceId: string,
@@ -42,4 +51,16 @@ export const commentsApi = {
 
   remove: (workspaceId: string, commentId: string): Promise<{ deleted: boolean }> =>
     apiClient.delete<{ deleted: boolean }>(ApiRoutes.comments.remove(workspaceId, commentId)),
+
+  like: (workspaceId: string, commentId: string): Promise<Comment> =>
+    apiClient.post<Comment>(ApiRoutes.comments.like(workspaceId, commentId), {}),
+
+  unlike: (workspaceId: string, commentId: string): Promise<Comment> =>
+    apiClient.delete<Comment>(ApiRoutes.comments.like(workspaceId, commentId)),
+
+  pin: (workspaceId: string, commentId: string): Promise<Comment> =>
+    apiClient.post<Comment>(ApiRoutes.comments.pin(workspaceId, commentId), {}),
+
+  unpin: (workspaceId: string, commentId: string): Promise<Comment> =>
+    apiClient.delete<Comment>(ApiRoutes.comments.pin(workspaceId, commentId)),
 };

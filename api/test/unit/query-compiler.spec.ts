@@ -4,6 +4,7 @@ import { AppException } from '../../src/common/exceptions/app.exception';
 import {
   compileFilters,
   compileSorts,
+  compileTicketFilters,
   type CustomFieldMap,
 } from '../../src/modules/project-views/lib/query-compiler';
 
@@ -15,18 +16,27 @@ import {
  */
 describe('query compiler', () => {
   const fields: CustomFieldMap = new Map([
-    ['11111111-1111-4111-8111-111111111111', {
-      id: '11111111-1111-4111-8111-111111111111',
-      type: CustomFieldType.TEXT,
-    }],
-    ['22222222-2222-4222-8222-222222222222', {
-      id: '22222222-2222-4222-8222-222222222222',
-      type: CustomFieldType.SINGLE_SELECT,
-    }],
-    ['33333333-3333-4333-8333-333333333333', {
-      id: '33333333-3333-4333-8333-333333333333',
-      type: CustomFieldType.NUMBER,
-    }],
+    [
+      '11111111-1111-4111-8111-111111111111',
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        type: CustomFieldType.TEXT,
+      },
+    ],
+    [
+      '22222222-2222-4222-8222-222222222222',
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        type: CustomFieldType.SINGLE_SELECT,
+      },
+    ],
+    [
+      '33333333-3333-4333-8333-333333333333',
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        type: CustomFieldType.NUMBER,
+      },
+    ],
   ]);
 
   const compile = (field: string, operator: FilterOperator, value?: unknown) =>
@@ -191,5 +201,103 @@ describe('query compiler', () => {
     );
 
     expect(result).toHaveLength(2);
+  });
+  describe('relative dates', () => {
+    it('resolves a token to a date at query time', () => {
+      const result = compile('dueDate', FilterOperator.LESS_THAN_OR_EQUAL, '@today') as {
+        dueDate: { lte: Date };
+      };
+
+      expect(result.dueDate.lte).toBeInstanceOf(Date);
+      expect(result.dueDate.lte.toISOString()).toMatch(/T00:00:00.000Z$/);
+    });
+  });
+
+  describe('computed fields', () => {
+    const FORMULA = '44444444-4444-4444-8444-444444444444';
+    const withFormula: CustomFieldMap = new Map([
+      ...fields,
+      [FORMULA, { id: FORMULA, type: CustomFieldType.FORMULA }],
+    ]);
+
+    it('refuses a filter on a formula by name, rather than matching nothing', () => {
+      expect(() =>
+        compileFilters(
+          [{ field: `custom:${FORMULA}`, operator: FilterOperator.IS_EMPTY }],
+          withFormula,
+        ),
+      ).toThrow(/calculated/i);
+    });
+
+    it('refuses a custom-field sort on the legacy task path', () => {
+      expect(() => compileSorts([{ field: 'custom:' + FORMULA, direction: 'ASC' }])).toThrow(
+        AppException,
+      );
+    });
+  });
+
+  describe('tickets', () => {
+    const TEXT = 'custom:11111111-1111-4111-8111-111111111111';
+
+    it('answers what a ticket can, on its own columns', () => {
+      expect(
+        compileTicketFilters(
+          [
+            { field: 'assigneeId', operator: FilterOperator.IN, value: ['u-1'] },
+            { field: 'completedAt', operator: FilterOperator.IS_NOT_EMPTY },
+            { field: 'createdById', operator: FilterOperator.IN, value: ['u-2'] },
+          ],
+          fields,
+        ),
+      ).toEqual([
+        { assigneeId: { in: ['u-1'] } },
+        { resolvedAt: { not: null } },
+        { reporterId: { in: ['u-2'] } },
+      ]);
+    });
+
+    it('rules every ticket out of a task vocabulary or a field it cannot hold', () => {
+      expect(
+        compileTicketFilters(
+          [{ field: 'status', operator: FilterOperator.EQUALS, value: 'TODO' }],
+          fields,
+        ),
+      ).toBe('NONE');
+      expect(
+        compileTicketFilters(
+          [{ field: TEXT, operator: FilterOperator.EQUALS, value: 'x' }],
+          fields,
+        ),
+      ).toBe('NONE');
+      expect(
+        compileTicketFilters(
+          [{ field: 'estimatedMinutes', operator: FilterOperator.GREATER_THAN, value: 1 }],
+          fields,
+        ),
+      ).toBe('NONE');
+    });
+
+    it('keeps every ticket for IS_EMPTY on something it does not have', () => {
+      expect(
+        compileTicketFilters([{ field: TEXT, operator: FilterOperator.IS_EMPTY }], fields),
+      ).toEqual([]);
+      expect(
+        compileTicketFilters([{ field: 'startDate', operator: FilterOperator.IS_EMPTY }], fields),
+      ).toEqual([]);
+    });
+
+    it('still refuses a field the project does not have', () => {
+      expect(() =>
+        compileTicketFilters(
+          [
+            {
+              field: 'custom:99999999-9999-4999-8999-999999999999',
+              operator: FilterOperator.IS_EMPTY,
+            },
+          ],
+          fields,
+        ),
+      ).toThrow(AppException);
+    });
   });
 });

@@ -12,7 +12,7 @@ import { useProjects } from '@/features/projects/hooks/use-projects';
 import { useTasks } from '@/features/tasks/hooks/use-tasks';
 import { useTickets } from '@/features/tickets/hooks/use-tickets';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
-import { cn } from '@/lib/utils';
+import { asLocalDate, cn } from '@/lib/utils';
 
 type ItemKind = 'task' | 'ticket' | 'project';
 type CalendarItem = {
@@ -56,7 +56,9 @@ export function CalendarPage() {
               id: task.id,
               kind: 'task',
               title: task.title,
-              date: dayKey(new Date(task.dueDate)),
+              // The calendar date as stored, not its UTC midnight read in
+              // local time — which put every due date a day early in Texas.
+              date: dayKey(asLocalDate(task.dueDate)),
               detail: task.status.replaceAll('_', ' '),
               to: '/my-tasks',
               search: { task: task.id },
@@ -71,7 +73,7 @@ export function CalendarPage() {
               id: ticketItem.id,
               kind: 'ticket',
               title: ticketItem.title,
-              date: dayKey(new Date(ticketItem.dueDate)),
+              date: dayKey(asLocalDate(ticketItem.dueDate)),
               detail: `${ticketItem.key} · ${ticketItem.status.replaceAll('_', ' ')}`,
               to: '/tickets',
               search: { ticket: ticketItem.key },
@@ -81,7 +83,7 @@ export function CalendarPage() {
     );
     const projectItems: CalendarItem[] = (projects.data?.items ?? []).flatMap((project) => {
       if (!project.dueDate) return [];
-      const due = new Date(project.dueDate);
+      const due = asLocalDate(project.dueDate);
       if (due < range.start || due > range.end) return [];
       return [
         {

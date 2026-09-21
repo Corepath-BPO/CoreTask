@@ -1,6 +1,6 @@
 import { ProjectViewType } from '@coretask/contracts';
 import type { CustomField, ProjectFieldMetadata } from '@coretask/types';
-import { Library, Pencil, Plus } from 'lucide-react';
+import { Library, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 import {
   useAttachField,
+  useFieldCatalog,
   useProjectViews,
+  useRemoveCustomField,
   useSaveViewSettings,
 } from '../../hooks/use-project-views';
 import { CreateCustomFieldDialog } from '../field-picker/create-custom-field-dialog';
@@ -16,6 +18,7 @@ import { EditCustomFieldDialog } from '../field-picker/edit-custom-field-dialog'
 import { FieldLibraryDialog } from '../field-picker/field-library-dialog';
 import { FieldTypeIcon } from '../field-picker/field-type-icon';
 import { FIELD_TYPE_META } from '../field-picker/field-type-registry';
+import { RemoveFieldDialog } from '../field-picker/remove-field-dialog';
 
 /**
  * The project's custom fields, managed from the Customize panel.
@@ -39,6 +42,7 @@ export function CustomizeFieldsSection({
   canEdit: boolean;
 }) {
   const [editingField, setEditingField] = useState<CustomField | null>(null);
+  const [removingField, setRemovingField] = useState<CustomField | null>(null);
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
@@ -57,6 +61,24 @@ export function CustomizeFieldsSection({
     if (!listView || columns.some((column) => column.field === field)) return;
     saveSettings(listView.id, { ...listView.settings, columns: [...columns, { field }] });
   };
+  // The mirror of `addColumn`, for the mirror of adding: a removed field must
+  // not leave a dead column behind in the List.
+  const dropColumn = (field: string) => {
+    if (!listView || !columns.some((column) => column.field === field)) return;
+    saveSettings(listView.id, {
+      ...listView.settings,
+      columns: columns.filter((column) => column.field !== field),
+    });
+  };
+
+  const removeField = useRemoveCustomField(workspaceId, projectId);
+
+  // How many projects share the field being removed, so the dialog can say
+  // what "delete from the workspace" would take with it. Fetched only while
+  // the dialog is up.
+  const catalog = useFieldCatalog(workspaceId, projectId, '', [], removingField !== null);
+  const usageCount =
+    catalog.data?.projectFields.find((entry) => entry.id === removingField?.id)?.usageCount ?? null;
 
   const fields = (metadata?.customFields ?? []).filter((field) => !field.isArchived);
 
@@ -77,28 +99,45 @@ export function CustomizeFieldsSection({
       )}
 
       {fields.map((field) => (
-        <button
-          key={field.id}
-          type="button"
-          disabled={!canEdit}
-          title={canEdit ? undefined : 'Editing fields needs project membership'}
-          onClick={() => setEditingField(field)}
-          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md border p-3 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
-        >
-          <FieldTypeIcon type={field.type} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{field.name}</span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {FIELD_TYPE_META[field.type].label}
+        /*
+         * A wrapper, because the row is a button and the delete control is
+         * another one — nesting them would be invalid markup and the inner
+         * click would never be the one that fired.
+         */
+        <div key={field.id} className="group relative">
+          <button
+            type="button"
+            disabled={!canEdit}
+            title={canEdit ? undefined : 'Editing fields needs project membership'}
+            onClick={() => setEditingField(field)}
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-md border p-3 pr-12 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            <FieldTypeIcon type={field.type} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{field.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {FIELD_TYPE_META[field.type].label}
+              </span>
             </span>
-          </span>
+            {canEdit && (
+              <Pencil
+                className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                aria-hidden="true"
+              />
+            )}
+          </button>
+
           {canEdit && (
-            <Pencil
-              className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-              aria-hidden="true"
-            />
+            <button
+              type="button"
+              aria-label={`Remove field: ${field.name}`}
+              onClick={() => setRemovingField(field)}
+              className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-focus-within:opacity-100 group-hover:opacity-100"
+            >
+              <Trash2 className="size-4" aria-hidden="true" />
+            </button>
           )}
-        </button>
+        </div>
       ))}
 
       {canEdit && (
@@ -107,16 +146,34 @@ export function CustomizeFieldsSection({
             <Plus />
             Create a field
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => setLibraryOpen(true)}
-          >
+          <Button variant="ghost" size="sm" className="w-full" onClick={() => setLibraryOpen(true)}>
             <Library />
             Choose from field library
           </Button>
         </div>
+      )}
+
+      {/* Asana's two-way choice: off this project, or out of the workspace.
+          Keyed by mounting so the choice resets for the next field. */}
+      {removingField && (
+        <RemoveFieldDialog
+          field={removingField}
+          usageCount={usageCount}
+          pending={removeField.isPending}
+          onOpenChange={(open) => !open && setRemovingField(null)}
+          onConfirm={(mode) => {
+            const field = removingField;
+            removeField.mutate(
+              { fieldId: field.id, mode },
+              {
+                onSuccess: () => {
+                  setRemovingField(null);
+                  dropColumn(`custom:${field.id}`);
+                },
+              },
+            );
+          }}
+        />
       )}
 
       {/* Keyed by mounting, as everywhere else: form state initialises from

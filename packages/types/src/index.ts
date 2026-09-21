@@ -1,12 +1,16 @@
 export type * from './activity.js';
 export type * from './automation-graph.js';
 export type * from './automation-rule.js';
+export type * from './automation-template.js';
 export type * from './api.js';
 export type * from './attachment.js';
 export type * from './auth.js';
+export type * from './followers.js';
 export type * from './health.js';
+export type * from './integrations.js';
 export type * from './project-view.js';
 export type * from './project-work-item.js';
 export type * from './team.js';
+export type * from './webhooks.js';
 export type * from './work-items.js';
 export type * from './workspace.js';

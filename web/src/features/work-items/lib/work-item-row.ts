@@ -68,7 +68,9 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
 
     position: item.position,
     startDate: item.startDate,
+    startAt: item.startAt,
     dueDate: item.dueDate,
+    dueAt: item.dueAt,
     completedAt: item.completedAt,
     archivedAt: item.archivedAt,
     estimatedMinutes: item.details.kind === 'TASK' ? item.details.estimatedMinutes : null,
@@ -81,6 +83,8 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
 
     subtaskCount: item.subtaskCount,
     completedSubtaskCount: item.completedSubtaskCount,
+    commentCount: item.commentCount,
+    attachmentCount: item.attachmentCount,
 
     /*
      * Renamed, not merely copied. The wire shape says `textValue`; the List's

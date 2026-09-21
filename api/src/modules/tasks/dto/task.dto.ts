@@ -1,6 +1,6 @@
 import {
   BOARD_TASK_LIMIT,
-  DESCRIPTION_MAX_LENGTH,
+  RICH_TEXT_MAX_LENGTH,
   PAGINATION_DEFAULT_LIMIT,
   PAGINATION_DEFAULT_PAGE,
   TASK_MAX_ESTIMATED_MINUTES,
@@ -57,11 +57,11 @@ export class CreateTaskDto {
   @Length(TASK_TITLE_MIN_LENGTH, TASK_TITLE_MAX_LENGTH)
   title!: string;
 
-  @ApiPropertyOptional({ maxLength: DESCRIPTION_MAX_LENGTH })
+  @ApiPropertyOptional({ maxLength: RICH_TEXT_MAX_LENGTH })
   @IsOptional()
   @trim()
   @IsString()
-  @Length(0, DESCRIPTION_MAX_LENGTH)
+  @Length(0, RICH_TEXT_MAX_LENGTH)
   description?: string;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
@@ -102,19 +102,49 @@ export class CreateTaskDto {
   @IsUUID()
   assigneeId?: string | null;
 
-  @ApiPropertyOptional({ format: 'date-time', nullable: true })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date; only the date part is kept.',
+  })
   @IsOptional()
   @emptyToNull()
   @ValidateIf((_, value) => value !== null)
   @IsISO8601()
   startDate?: string | null;
 
-  @ApiPropertyOptional({ format: 'date-time', nullable: true })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact start instant when a time was chosen. Needs a startDate.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsISO8601()
+  startAt?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date; only the date part is kept.',
+  })
   @IsOptional()
   @emptyToNull()
   @ValidateIf((_, value) => value !== null)
   @IsISO8601()
   dueDate?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact due instant when a time was chosen. Needs a dueDate.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsISO8601()
+  dueAt?: string | null;
 
   @ApiPropertyOptional({ minimum: 0, maximum: TASK_MAX_ESTIMATED_MINUTES, nullable: true })
   @IsOptional()
@@ -153,7 +183,7 @@ export class UpdateTaskDto {
   @trim()
   @ValidateIf((_, value) => value !== null)
   @IsString()
-  @Length(0, DESCRIPTION_MAX_LENGTH)
+  @Length(0, RICH_TEXT_MAX_LENGTH)
   description?: string | null;
 
   @ApiPropertyOptional({ enum: TASK_STATUSES })
@@ -172,19 +202,49 @@ export class UpdateTaskDto {
   @IsUUID()
   assigneeId?: string | null;
 
-  @ApiPropertyOptional({ format: 'date-time', nullable: true })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date; only the date part is kept.',
+  })
   @IsOptional()
   @emptyToNull()
   @ValidateIf((_, value) => value !== null)
   @IsISO8601()
   startDate?: string | null;
 
-  @ApiPropertyOptional({ format: 'date-time', nullable: true })
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact start instant when a time was chosen. Needs a startDate.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsISO8601()
+  startAt?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The calendar date; only the date part is kept.',
+  })
   @IsOptional()
   @emptyToNull()
   @ValidateIf((_, value) => value !== null)
   @IsISO8601()
   dueDate?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    nullable: true,
+    description: 'The exact due instant when a time was chosen. Needs a dueDate.',
+  })
+  @IsOptional()
+  @emptyToNull()
+  @ValidateIf((_, value) => value !== null)
+  @IsISO8601()
+  dueAt?: string | null;
 
   @ApiPropertyOptional({ minimum: 0, maximum: TASK_MAX_ESTIMATED_MINUTES, nullable: true })
   @IsOptional()

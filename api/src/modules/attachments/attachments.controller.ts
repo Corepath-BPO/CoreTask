@@ -124,6 +124,25 @@ export class AttachmentsController {
     return this.attachments.download(workspaceId, attachmentId);
   }
 
+  @Get('attachments/:attachmentId/view')
+  @ApiOperation({
+    summary: 'Get a short-lived URL that renders inline',
+    description:
+      'For images shown inside a description, which stores the attachment id rather than a URL. ' +
+      'Raster images only: an SVG is refused, because rendered from the storage origin it can carry ' +
+      'script. Expires as quickly as the download URL.',
+  })
+  @ApiParam({ name: 'attachmentId', format: 'uuid' })
+  @ApiEnvelopeResponse(AttachmentDownloadDto)
+  @ApiErrorResponseDoc(400, 'Not an image that can be shown inline')
+  @ApiErrorResponseDoc(404, 'No such attachment in this workspace')
+  view(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+  ): Promise<AttachmentDownload> {
+    return this.attachments.view(workspaceId, attachmentId);
+  }
+
   @Delete('attachments/:attachmentId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

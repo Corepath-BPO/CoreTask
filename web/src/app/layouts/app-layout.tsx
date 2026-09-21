@@ -2,13 +2,20 @@ import { Outlet } from '@tanstack/react-router';
 
 import { SocketProvider } from '@/app/providers/socket-provider';
 import { ErrorBoundary } from '@/components/feedback/error-boundary';
+import { ShortcutsHelpDialog } from '@/components/navigation/shortcuts-help-dialog';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Topbar } from '@/components/navigation/topbar';
+import { useGlobalShortcuts } from '@/lib/shortcuts/use-global-shortcuts';
 
 /** Authenticated shell: sidebar, top bar, and the routed content area. */
 export function AppLayout() {
+  // One keyboard listener for the whole signed-in app; screens register what
+  // they can do with each chord — see `useShortcutActions`.
+  useGlobalShortcuts();
+
   return (
     <SocketProvider>
+      <ShortcutsHelpDialog />
       <div className="flex h-dvh overflow-hidden bg-background">
         <Sidebar />
 

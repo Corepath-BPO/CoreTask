@@ -7,6 +7,8 @@ import {
   Link as LinkIcon,
   List,
   ListChecks,
+  Sigma,
+  Star,
   Type,
   Users,
 } from 'lucide-react';
@@ -25,6 +27,8 @@ import { cn } from '@/lib/utils';
 const ICONS: Record<string, typeof Type> = {
   [CustomFieldType.TEXT]: Type,
   [CustomFieldType.NUMBER]: Hash,
+  [CustomFieldType.RATING]: Star,
+  [CustomFieldType.FORMULA]: Sigma,
   [CustomFieldType.DATE]: CalendarDays,
   [CustomFieldType.CHECKBOX]: CheckSquare,
   [CustomFieldType.SINGLE_SELECT]: List,
@@ -39,5 +43,7 @@ export function FieldTypeIcon({ type, className }: { type: string; className?: s
 
   // Decorative: the field's name is right beside it, and announcing "list icon"
   // before every entry would make the list slower to listen to, not clearer.
-  return <Icon className={cn('size-4 shrink-0 text-muted-foreground', className)} aria-hidden="true" />;
+  return (
+    <Icon className={cn('size-4 shrink-0 text-muted-foreground', className)} aria-hidden="true" />
+  );
 }

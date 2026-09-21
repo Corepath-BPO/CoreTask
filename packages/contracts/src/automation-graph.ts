@@ -1,4 +1,4 @@
-import { AutomationNodeType } from './automation.js';
+import type { AutomationNodeType } from './automation.js';
 import { FilterOperator } from './query.js';
 
 /**
@@ -107,6 +107,27 @@ export type AutomationSelectorCategory =
   (typeof AUTOMATION_SELECTOR_CATEGORY)[keyof typeof AUTOMATION_SELECTOR_CATEGORY];
 
 /**
+ * The trigger picker's groups, worded as Asana words them.
+ *
+ * A separate list from `AUTOMATION_SELECTOR_CATEGORY` rather than a rewording of
+ * it: that one still names the older engineering groupings other selectors use,
+ * and these are the phrases somebody reads down the trigger picker. Rows that
+ * sit above every group — run manually, on a schedule — carry the empty string,
+ * which the picker renders as no heading at all.
+ */
+export const TRIGGER_GROUP = {
+  UNGROUPED: '',
+  MOVED: 'Task moved',
+  FIELD_CHANGED: 'Task field is changed',
+  DUE_DATE: 'Due date is…',
+  START_DATE: 'Start date is…',
+  STATUS_CHANGED: 'Status is changed',
+  CUSTOM_FIELD_CHANGED: 'Custom field is changed',
+  ADDED_TO_TASK: 'Added to task',
+} as const;
+export type TriggerGroup = (typeof TRIGGER_GROUP)[keyof typeof TRIGGER_GROUP];
+
+/**
  * What a condition can be about, and what type its value is.
  *
  * The type is what makes operators type-aware: "date contains high" and
@@ -142,18 +163,30 @@ export const OPERATORS_BY_VALUE_KIND: Record<ConditionValueKind, readonly Filter
     FilterOperator.EQUALS,
     FilterOperator.NOT_EQUALS,
     FilterOperator.GREATER_THAN,
+    /*
+     * The two inclusive bounds were offered by the builder — every number
+     * field lists "greater than or equal" — and translated to these names by
+     * `toFilterOperator`, and then refused here as not fitting a number. So
+     * "estimate is at least 30" could be built and could not be published.
+     */
+    FilterOperator.GREATER_THAN_OR_EQUAL,
     FilterOperator.LESS_THAN,
+    FilterOperator.LESS_THAN_OR_EQUAL,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],
   DATE: [
     FilterOperator.EQUALS,
+    FilterOperator.NOT_EQUALS,
     FilterOperator.BEFORE,
     FilterOperator.AFTER,
     FilterOperator.IS_EMPTY,
     FilterOperator.IS_NOT_EMPTY,
   ],
-  BOOLEAN: [FilterOperator.EQUALS],
+  // "Is checked" and "is not checked" are the runner's own comparisons — see
+  // `DIRECT_OPERATOR_VALUE_KIND` — so a checkbox lists here only the shapes a
+  // rule written over the API might still hold.
+  BOOLEAN: [FilterOperator.EQUALS, FilterOperator.NOT_EQUALS],
   /*
    * `IN` and `NOT_IN` belong to both list kinds because the panel offers them
    * and the runner evaluates them.

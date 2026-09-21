@@ -14,11 +14,13 @@ const catalogState: { data: FieldCatalog | undefined; isLoading: boolean; isErro
 };
 
 const attachMutate = vi.fn();
+const restoreMutate = vi.fn();
 const refetch = vi.fn();
 
 vi.mock('../../hooks/use-project-views', () => ({
   useFieldCatalog: () => ({ ...catalogState, refetch }),
   useAttachField: () => ({ mutate: attachMutate, isPending: false }),
+  useRestoreCustomField: () => ({ mutate: restoreMutate, isPending: false }),
   useCreateCustomField: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
@@ -64,6 +66,7 @@ beforeEach(() => {
   catalogState.isLoading = false;
   catalogState.isError = false;
   attachMutate.mockReset();
+  restoreMutate.mockReset();
   refetch.mockReset();
 });
 
@@ -131,16 +134,24 @@ describe('FieldLibraryDialog', () => {
     expect(onAddColumn).toHaveBeenCalledWith('custom:f-2');
   });
 
-  it('lists archived fields without offering to use them', () => {
-    // Visible so somebody can see why a name is "taken"; not actionable,
-    // because restoring is a field-management decision.
+  it('keeps archived fields out of the way until asked, then offers to restore them', () => {
+    // Hidden by default so the library reads as what is in use; shown on
+    // request so somebody can see why a name is "taken" — and bring the
+    // field back, values and all, rather than inventing a second one.
     catalogState.data = catalog([], [field({ id: 'f-3', name: 'Old', isArchived: true })]);
 
     open();
 
+    expect(screen.queryByRole('region', { name: 'Archived' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Show archived'));
+
     const archived = screen.getByRole('region', { name: 'Archived' });
     expect(within(archived).getByText('Old')).toBeInTheDocument();
-    expect(within(archived).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(archived).queryByRole('button', { name: /add to/i })).not.toBeInTheDocument();
+
+    fireEvent.click(within(archived).getByRole('button', { name: 'Restore' }));
+    expect(restoreMutate).toHaveBeenCalledWith('f-3');
   });
 
   it('previews the options, because a name alone does not identify a field', () => {

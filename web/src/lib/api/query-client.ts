@@ -37,6 +37,18 @@ export const queryKeys = {
       [...queryKeys.workspaces.all, 'invitations', workspaceId] as const,
   },
   invitationPreview: (token: string) => ['invitation-preview', token] as const,
+  apiKeys: {
+    all: (workspaceId: string) => ['api-keys', workspaceId] as const,
+    list: (workspaceId: string) => [...queryKeys.apiKeys.all(workspaceId), 'list'] as const,
+  },
+  webhooks: {
+    all: (workspaceId: string) => ['webhooks', workspaceId] as const,
+    list: (workspaceId: string) => [...queryKeys.webhooks.all(workspaceId), 'list'] as const,
+    deliveries: (workspaceId: string, endpointId: string) =>
+      [...queryKeys.webhooks.all(workspaceId), 'deliveries', endpointId] as const,
+    delivery: (workspaceId: string, deliveryId: string) =>
+      [...queryKeys.webhooks.all(workspaceId), 'delivery', deliveryId] as const,
+  },
   teams: {
     all: (workspaceId: string) => ['teams', workspaceId] as const,
     list: (workspaceId: string) => [...queryKeys.teams.all(workspaceId), 'list'] as const,
@@ -112,8 +124,17 @@ export const queryKeys = {
     thread: (workspaceId: string, parentKind: string, parentId: string) =>
       [...queryKeys.comments.all(workspaceId), parentKind, parentId] as const,
   },
+  followers: {
+    all: (workspaceId: string) => ['followers', workspaceId] as const,
+    /** `parentKind` keeps a task and a ticket with the same id from colliding. */
+    forParent: (workspaceId: string, parentKind: string, parentId: string) =>
+      [...queryKeys.followers.all(workspaceId), parentKind, parentId] as const,
+  },
   activity: {
     all: (workspaceId: string) => ['activity', workspaceId] as const,
+    /** One item's own stories; separate from the workspace feed so the panel does not refetch the dashboard. */
+    item: (workspaceId: string, parentKind: string, parentId: string) =>
+      [...queryKeys.activity.all(workspaceId), 'item', parentKind, parentId] as const,
   },
   notifications: {
     all: (workspaceId: string) => ['notifications', workspaceId] as const,

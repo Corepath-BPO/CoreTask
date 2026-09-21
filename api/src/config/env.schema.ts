@@ -101,6 +101,30 @@ export const envSchema = z
     MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
     MAIL_FROM_ADDRESS: optionalString,
     MAIL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
+
+    /*
+     * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
+     * from the base delay: 30 s, 1 m, 2 m, 4 m, 8 m by default.
+     */
+    WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
+    WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+    WEBHOOK_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
+    /** Consecutive final failures before an endpoint switches itself off. */
+    WEBHOOK_AUTO_DISABLE_AFTER: z.coerce.number().int().min(1).max(1_000).default(20),
+    WEBHOOK_DELIVERY_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+    /**
+     * Allow endpoints on localhost and private networks. Off by default so a
+     * workspace admin cannot point CoreTask at internal services; on for a
+     * developer whose n8n runs on the same laptop.
+     */
+    WEBHOOK_ALLOW_PRIVATE_URLS: booleanFlag(false),
+    /**
+     * Key material for encrypting signing secrets at rest. Outside production
+     * it is derived from JWT_ACCESS_SECRET so development needs no extra
+     * setting; production must set it, and losing it means rotating every
+     * endpoint's secret.
+     */
+    WEBHOOK_SECRET_ENCRYPTION_KEY: optionalString,
   })
   .superRefine((env, ctx) => {
     /*
@@ -152,6 +176,15 @@ export const envSchema = z
         code: 'custom',
         path: ['COOKIE_SAME_SITE'],
         message: 'SameSite=None requires the client to be served over HTTPS.',
+      });
+    }
+
+    if (!env.WEBHOOK_SECRET_ENCRYPTION_KEY || env.WEBHOOK_SECRET_ENCRYPTION_KEY.length < 32) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WEBHOOK_SECRET_ENCRYPTION_KEY'],
+        message:
+          'Required in production, at least 32 characters. Webhook signing secrets are encrypted with it.',
       });
     }
   });

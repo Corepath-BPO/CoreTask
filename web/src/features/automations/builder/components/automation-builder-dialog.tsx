@@ -35,10 +35,13 @@ export function AutomationBuilderDialog({
   projectId,
   ruleId,
   sectionId,
+  starter,
 }: {
   projectId: string;
   ruleId: string | null;
   sectionId?: string;
+  /** A starter's key from the library, for a canvas that opens already shaped. */
+  starter?: string;
 }) {
   const navigate = useNavigate();
 
@@ -98,6 +101,7 @@ export function AutomationBuilderDialog({
           projectId={projectId}
           ruleId={ruleId}
           {...(sectionId ? { sectionId } : {})}
+          {...(starter ? { starter } : {})}
           onDirtyChange={setDirty}
           onClose={leave}
         />

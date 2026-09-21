@@ -34,7 +34,7 @@ export class FieldMetadataService {
         select: { id: true, name: true },
       }),
       this.prisma.workspaceMember.findMany({
-        where: { workspaceId },
+        where: { workspaceId, user: { isServiceAccount: false } },
         select: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
         orderBy: { user: { name: 'asc' } },
       }),

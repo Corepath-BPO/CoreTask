@@ -2,7 +2,7 @@ import { type CreatableWorkItemType, type WorkItemType } from '@coretask/contrac
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { Section, Task } from '@coretask/types';
+import type { ProjectFieldMetadata, Section, Task } from '@coretask/types';
 import { GripVertical, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,8 @@ import { TaskCard } from '@/features/tasks/components/task-card';
 import { QuickCreateWorkItemRow } from '@/features/work-items/components/quick-create-work-item-row';
 import { SectionAutomationPopover } from '@/features/automations/components/section-automation-popover';
 import { cn } from '@/lib/utils';
+
+import { SectionLinkItems } from './section-link-items';
 
 /**
  * Droppable id for a column body, so an empty column is still a drop target.
@@ -31,12 +34,18 @@ interface SectionColumnProps {
   tasks: Task[];
   canEdit: boolean;
   canDelete: boolean;
+  manualOrder?: boolean;
+  cardFields?: string[];
+  metadata?: ProjectFieldMetadata | undefined;
   onRename: (sectionId: string, name: string) => void;
   onRequestDelete: (section: Section) => void;
   defaultType: CreatableWorkItemType;
   onCreateWorkItem: (sectionId: string, type: WorkItemType, title: string) => Promise<unknown>;
   onOpenTask: (taskId: string) => void;
   creating?: boolean;
+  /** Named in the URL, so its id can be read off the address bar. */
+  selected?: boolean;
+  onSelect?: (() => void) | undefined;
 }
 
 export function SectionColumn({
@@ -44,12 +53,17 @@ export function SectionColumn({
   tasks,
   canEdit,
   canDelete,
+  manualOrder = true,
+  cardFields = [],
+  metadata,
   onRename,
   onRequestDelete,
   defaultType,
   onCreateWorkItem,
   onOpenTask,
   creating = false,
+  selected = false,
+  onSelect,
 }: SectionColumnProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -103,9 +117,12 @@ export function SectionColumn({
         'flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30',
         isDragging && 'z-10 opacity-80 shadow-lg',
         isOver && 'ring-2 ring-primary/40',
+        selected && 'border-primary/60',
       )}
     >
-      <header className="flex items-center gap-1 border-b px-3 py-2.5">
+      {/* `group` lets the lightning of a section with no rules wait for a
+          hover, the way Asana's does — see SectionAutomationPopover. */}
+      <header className="group flex items-center gap-1 border-b px-3 py-2.5">
         {/* What runs when a task lands here. Placed in the header because that
             is where someone asks the question. */}
         <SectionAutomationPopover
@@ -145,12 +162,16 @@ export function SectionColumn({
         ) : (
           <button
             type="button"
-            disabled={!canEdit}
-            onClick={() => canEdit && startEditing()}
+            // Clicking the name selects the section for everyone — its id goes
+            // to the address bar — and opens the rename for those who may.
+            onClick={() => {
+              onSelect?.();
+              if (canEdit) startEditing();
+            }}
             className={cn(
               'min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-sm font-medium',
-              canEdit &&
-                'hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
+              'hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none',
+              selected && 'text-primary',
             )}
             title={canEdit ? 'Click to rename' : section.name}
           >
@@ -162,25 +183,32 @@ export function SectionColumn({
           {tasks.length}
         </Badge>
 
-        {canDelete && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${section.name}`}>
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+        {/* Everyone gets the menu for its copy items; editing and deleting stay gated. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${section.name}`}>
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {canEdit && (
               <DropdownMenuItem onSelect={startEditing}>
                 <Pencil />
                 Rename
               </DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onSelect={() => onRequestDelete(section)}>
-                <Trash2 />
-                Delete section
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+            )}
+            <SectionLinkItems projectId={section.projectId} sectionId={section.id} view="board" />
+            {canDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => onRequestDelete(section)}>
+                  <Trash2 />
+                  Delete section
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div ref={setBodyRef} className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto p-2">
@@ -189,7 +217,15 @@ export function SectionColumn({
           strategy={verticalListSortingStrategy}
         >
           {tasks.map((task) => (
-            <TaskCard key={task.id} task={task} onOpen={onOpenTask} draggable={canEdit} />
+            <TaskCard
+              key={task.id}
+              task={task}
+              onOpen={onOpenTask}
+              draggable={canEdit}
+              manualOrder={manualOrder}
+              cardFields={cardFields}
+              metadata={metadata}
+            />
           ))}
         </SortableContext>
 

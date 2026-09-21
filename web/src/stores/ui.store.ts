@@ -13,6 +13,17 @@ interface UiState {
 
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
+
+  /** The keyboard shortcut sheet. Opened by `?` and the account menu. */
+  shortcutsHelpOpen: boolean;
+  setShortcutsHelpOpen: (open: boolean) => void;
+
+  /**
+   * The task panel's feed: stories interleaved with comments, or comments
+   * alone. Persisted — Asana remembers the choice, and so should we.
+   */
+  activityFeedMode: 'all' | 'comments';
+  setActivityFeedMode: (mode: 'all' | 'comments') => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -27,10 +38,19 @@ export const useUiStore = create<UiState>()(
 
       commandPaletteOpen: false,
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+
+      shortcutsHelpOpen: false,
+      setShortcutsHelpOpen: (shortcutsHelpOpen) => set({ shortcutsHelpOpen }),
+
+      activityFeedMode: 'all',
+      setActivityFeedMode: (activityFeedMode) => set({ activityFeedMode }),
     }),
     {
       name: 'coretask.ui',
-      partialize: (state) => ({ sidebarCollapsed: state.sidebarCollapsed }),
+      partialize: (state) => ({
+        sidebarCollapsed: state.sidebarCollapsed,
+        activityFeedMode: state.activityFeedMode,
+      }),
     },
   ),
 );

@@ -21,7 +21,9 @@ export function toWorkItemUpdate(payload: Record<string, unknown>): UpdateWorkIt
   if ('status' in payload) update.statusId = payload['status'] as string;
   if ('priority' in payload) update.priorityId = payload['priority'] as string;
   if ('startDate' in payload) update.startDate = payload['startDate'] as string | null;
+  if ('startAt' in payload) update.startAt = payload['startAt'] as string | null;
   if ('dueDate' in payload) update.dueDate = payload['dueDate'] as string | null;
+  if ('dueAt' in payload) update.dueAt = payload['dueAt'] as string | null;
 
   if ('assigneeId' in payload) {
     // An empty list clears it. `[null]` would be a list containing nothing,

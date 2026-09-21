@@ -1,4 +1,9 @@
-import { TRIGGER_LABEL, type AutomationTrigger } from '@coretask/contracts';
+import {
+  EXTERNAL_ACTION_CATEGORY,
+  TRIGGER_LABEL,
+  isFallbackBranch,
+  type AutomationTrigger,
+} from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationMetadata,
@@ -69,6 +74,16 @@ interface Props {
    * had already said.
    */
   onChoose: (entry: AutomationCatalogEntry) => void;
+  /*
+   * Back from a step's form to the list it was chosen from.
+   *
+   * The breadcrumb above a form reads "When… /" — a place — and a place people
+   * try to go. Without this the only way from a configured trigger back to the
+   * trigger list was a hover menu on the card, which reads as no way at all.
+   * The page decides which catalogue that is; the rail only says the step
+   * whose panel is open.
+   */
+  onReopenCatalogue: (nodeId: string) => void;
   rule: AutomationRuleGraph;
   settings: RuleSettings;
   onSettingsChange: (next: Partial<RuleSettings>) => void;
@@ -100,6 +115,7 @@ export function NodeConfigRail({
   onChange,
   onDelete,
   onChoose,
+  onReopenCatalogue,
   rule,
   settings,
   onSettingsChange,
@@ -215,6 +231,7 @@ export function NodeConfigRail({
           onClose={onClose}
           onChange={onChange}
           onDelete={onDelete}
+          onReopenCatalogue={onReopenCatalogue}
         />
       )}
     </aside>
@@ -223,6 +240,7 @@ export function NodeConfigRail({
 
 function RailHeader({
   eyebrow,
+  onEyebrowClick,
   title,
   hint,
   onClose,
@@ -230,6 +248,8 @@ function RailHeader({
 }: {
   /** Where this sits — the kind of step. Above the title, like a breadcrumb. */
   eyebrow?: string;
+  /** Back to the catalogue this step was chosen from, where that exists. */
+  onEyebrowClick?: () => void;
   title: string;
   /** What this panel is for. Below the title, because it explains it. */
   hint?: string;
@@ -241,7 +261,26 @@ function RailHeader({
     // flex child squashed by a long body is a heading that scrolls away.
     <header className="flex shrink-0 items-start gap-2 border-b border-border px-4 py-3">
       <div className="min-w-0 flex-1">
-        {eyebrow && <p className="truncate text-xs text-muted-foreground">{eyebrow}</p>}
+        {/*
+          A breadcrumb that goes somewhere, where somewhere exists.
+
+          "When… /" reads as a place, and a place people try to press —
+          especially holding a rule whose trigger was chosen for them. The
+          underline on hover is the whole announcement; a chevron or a "back"
+          word would make the header about navigation instead of the step.
+        */}
+        {eyebrow &&
+          (onEyebrowClick ? (
+            <button
+              type="button"
+              onClick={onEyebrowClick}
+              className="block max-w-full cursor-pointer truncate rounded text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            >
+              {eyebrow}
+            </button>
+          ) : (
+            <p className="truncate text-xs text-muted-foreground">{eyebrow}</p>
+          ))}
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
       </div>
@@ -278,6 +317,7 @@ function ConfigurePanel({
   onClose,
   onChange,
   onDelete,
+  onReopenCatalogue,
 }: {
   node: CanvasNode | null;
   /** True for a branch after the first, which reads as "Otherwise if". */
@@ -286,6 +326,7 @@ function ConfigurePanel({
   onClose: () => void;
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
+  onReopenCatalogue: (nodeId: string) => void;
 }) {
   const body = useRef<HTMLDivElement>(null);
 
@@ -305,12 +346,25 @@ function ConfigurePanel({
 
   const category = nodeCategory(node, { alternative });
 
+  /*
+   * Which steps have a list to go back to.
+   *
+   * The trigger always does — choosing again retypes it in place. A branch row
+   * does too, except the fallback, which asks no question and so was never
+   * chosen from one. An action has no in-place swap: replacing one is delete
+   * and choose again, and a breadcrumb that quietly did that would throw away
+   * a configuration on a click that looked like navigation.
+   */
+  const reChoosable =
+    node.type === 'TRIGGER' || (node.type === 'CONDITION' && !isFallbackBranch(node.configuration));
+
   return (
     <>
       <RailHeader
         /* A breadcrumb, not a heading: "When… /" says where in the rule this
            step sits, and the title below says which step it is. */
         eyebrow={`${category}… /`}
+        {...(reChoosable ? { onEyebrowClick: () => onReopenCatalogue(node.id) } : {})}
         title={inspectorTitle(node, metadata)}
         onClose={onClose}
         /*
@@ -358,10 +412,15 @@ function inspectorTitle(node: CanvasNode, metadata: AutomationMetadata | undefin
     return summariseCondition(node.configuration, metadata, false);
   }
 
+  // The list is the panel: a heading that also counts it — "Create subtasks
+  // 3 subtasks" — stutters above three visible rows.
+  if (node.type === 'ACTION' && node.subtype === 'CREATE_SUBTASK') return 'Create subtasks';
+
   return summarise(node, metadata);
 }
 
-/** Which half of the action catalogue is showing. */
+/** Which half of a tabbed catalogue is showing. 'actions' is the internal
+    half whatever the catalogue — the value never reaches a reader's eyes. */
 type CatalogueTab = 'actions' | 'external';
 
 /**
@@ -383,6 +442,18 @@ const CATALOGUE_NOUN: Record<CatalogueKind, string> = {
   triggers: 'triggers',
   conditions: 'conditions',
   actions: 'actions',
+};
+
+/**
+ * The tab pair a catalogue splits into, where it splits at all.
+ *
+ * Absence is the flag: a catalogue without an entry here renders untabbed. The
+ * external surface exists on both so "can this talk to anything else?" has an
+ * answer other than silence, and it answers honestly — see the tab's content.
+ */
+const TAB_LABEL: Partial<Record<CatalogueKind, { internal: string; external: string }>> = {
+  triggers: { internal: 'Triggers', external: 'External triggers' },
+  actions: { internal: 'Actions', external: 'External actions' },
 };
 
 /**
@@ -417,12 +488,13 @@ function ChoosePanel({
   const [tab, setTab] = useState<CatalogueTab>('actions');
 
   /*
-   * Only the action catalogue has a second surface.
+   * Triggers and actions carry a second surface; conditions do not.
    *
    * "External conditions" is not a thing anybody has asked for, and an empty
    * tab beside a list of conditions would be answering a question nobody put.
    */
-  const tabbed = catalogue === 'actions';
+  const tabs = TAB_LABEL[catalogue];
+  const tabbed = tabs !== undefined;
   const noun = CATALOGUE_NOUN[catalogue];
 
   const groups = useMemo(() => {
@@ -458,6 +530,15 @@ function ChoosePanel({
   }, [entries, query]);
 
   /*
+   * The external group has its own tab, so it is taken out of the main list
+   * when there is one. With no tabs — conditions — everything stays together.
+   */
+  const externalGroups = groups.filter(([group]) => group === EXTERNAL_ACTION_CATEGORY);
+  const internalGroups = tabbed
+    ? groups.filter(([group]) => group !== EXTERNAL_ACTION_CATEGORY)
+    : groups;
+
+  /*
    * The list says it is one.
    *
    * Every row already carried `role="option"`, but an option outside a listbox
@@ -466,27 +547,42 @@ function ChoosePanel({
    * which is the only thing telling somebody how much catalogue is left below
    * the fold.
    */
-  const list = (
-    <div role="listbox" aria-label={title} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-      {groups.length === 0 && (
+  const renderList = (shown: [string, AutomationCatalogEntry[]][], label: string) => (
+    <div role="listbox" aria-label={label} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {shown.length === 0 && (
         <p className="px-2 py-6 text-center text-sm text-muted-foreground">
           Nothing matches “{query}”.
         </p>
       )}
 
-      {groups.map(([group, groupEntries]) => (
+      {shown.map(([group, groupEntries]) => (
         <div key={group} role="group" aria-label={group} className="mb-2">
-          <p aria-hidden="true" className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-            {group}
-          </p>
+          {/* The rows that sit above every group carry an empty category, and
+              an empty heading would still take a line. */}
+          {group !== '' && (
+            <p aria-hidden="true" className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+              {group}
+            </p>
+          )}
 
           {groupEntries.map((entry) => (
-            <CatalogueRow key={entry.subtype} entry={entry} onChoose={onChoose} />
+            <CatalogueRow
+              /*
+               * The subtype alone is not an identity: every generated per-field
+               * row — "Change Effort to…", "Effort is changed" — shares its
+               * subtype with its siblings and differs only by the field.
+               */
+              key={entry.fieldId ? `${entry.subtype}:${entry.fieldId}` : entry.subtype}
+              entry={entry}
+              onChoose={onChoose}
+            />
           ))}
         </div>
       ))}
     </div>
   );
+
+  const list = renderList(internalGroups, title);
 
   return (
     <>
@@ -507,10 +603,6 @@ function ChoosePanel({
             placeholder={`Search ${noun}`}
             aria-label={`Search ${noun}`}
             className="pl-8"
-            /* Off on the tab with nothing to search. Hidden instead would move
-               the tabs up and down as somebody switched between them, and a box
-               that quietly ignores typing is the worse of the two. */
-            disabled={tab === 'external'}
             autoFocus
           />
         </div>
@@ -525,8 +617,8 @@ function ChoosePanel({
           className="flex min-h-0 flex-1 flex-col"
         >
           <TabsPrimitive.List className="flex shrink-0 gap-4 border-b border-border px-4">
-            <CatalogueTabTrigger value="actions">Actions</CatalogueTabTrigger>
-            <CatalogueTabTrigger value="external">External actions</CatalogueTabTrigger>
+            <CatalogueTabTrigger value="actions">{tabs?.internal}</CatalogueTabTrigger>
+            <CatalogueTabTrigger value="external">{tabs?.external}</CatalogueTabTrigger>
           </TabsPrimitive.List>
 
           <TabsPrimitive.Content
@@ -537,17 +629,21 @@ function ChoosePanel({
           </TabsPrimitive.Content>
 
           {/*
-            A sentence, and nothing else.
-
-            No external action is implemented, so anything else here would be a
-            row that looks like an integration and is not one. The tab exists so
-            that "can this talk to anything else?" has an answer other than
-            silence.
+            The rows the API files under the external category — today, "Send a
+            webhook". When the server sends none, a sentence rather than an
+            empty list, so "can this talk to anything else?" has an answer.
           */}
-          <TabsPrimitive.Content value="external" className="px-4 py-6 outline-none">
-            <p className="text-sm text-muted-foreground">
-              External actions will be available later.
-            </p>
+          <TabsPrimitive.Content
+            value="external"
+            className="flex min-h-0 flex-1 flex-col outline-none"
+          >
+            {externalGroups.length > 0 || query.trim() !== '' ? (
+              renderList(externalGroups, `External ${noun}`)
+            ) : (
+              <p className="px-4 py-6 text-sm text-muted-foreground">
+                External {noun} will be available later.
+              </p>
+            )}
           </TabsPrimitive.Content>
         </TabsPrimitive.Root>
       )}
@@ -609,7 +705,7 @@ function CatalogueRow({
           !entry.available && 'opacity-60',
         )}
       >
-        {catalogueIcon(entry.subtype)}
+        {catalogueIcon(entry.subtype, entry.valueType)}
       </span>
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">

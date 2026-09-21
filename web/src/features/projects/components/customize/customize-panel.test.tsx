@@ -35,6 +35,7 @@ const field = (index: number, isArchived = false) =>
     description: null,
     type: CustomFieldType.TEXT,
     isRequired: false,
+    notifyOnChange: false,
     isArchived,
     position: index,
     settings: {},

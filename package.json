@@ -41,5 +41,10 @@
   "devDependencies": {
     "prettier": "^3.6.2",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "prosemirror-transform": "1.12.0"
+    }
   }
 }

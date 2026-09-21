@@ -149,6 +149,22 @@ function resolve(link: FieldLink): ProjectField {
 clients saw no change on the day the migration ran. The library endpoints came
 afterwards, additively.
 
+## Later additions to the enum
+
+`20260910140000_custom_field_rating_formula_notify` adds `RATING` and `FORMULA`
+to `CustomFieldType` and `notifyOnChange BOOLEAN NOT NULL DEFAULT false` to
+`project_custom_fields`. Additive, so no data moves; a `DO` block still verifies
+it, raising an exception if the enum does not end with eleven members and a
+notice on success:
+
+```
+NOTICE:  CustomFieldType: 11 member(s); 0 association(s) notify (expected 0)
+```
+
+`ALTER TYPE … ADD VALUE` cannot be used in the same transaction that adds it,
+which is why no row is written with the new values here; the first `RATING`
+field is created through the API.
+
 ## Related
 
 - [The custom field system](../architecture/custom-field-system.md)

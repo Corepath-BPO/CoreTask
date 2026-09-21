@@ -1,119 +1,57 @@
 import { formatMention } from '@coretask/contracts';
-import type { UserRef } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-
-import { segmentCommentBody } from '../lib/segment-comment-body';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CommentBody } from './comment-body';
+
+vi.mock('@/features/attachments/hooks/use-attachment-view-url', () => ({
+  useAttachmentViewUrl: () => ({ data: undefined, isError: false, refetch: vi.fn() }),
+}));
 
 const ADA = '019fc880-0000-7000-8000-00000000aaaa';
 const GRACE = '019fc880-0000-7000-8000-00000000bbbb';
 
-const ada: UserRef = { id: ADA, name: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: null };
-const grace: UserRef = {
-  id: GRACE,
-  name: 'Grace Hopper',
-  email: 'grace@example.com',
-  avatarUrl: null,
-};
-
-describe('segmentCommentBody', () => {
-  it('returns one text segment for a body without mentions', () => {
-    expect(segmentCommentBody('Nothing special here', [])).toEqual([
-      { kind: 'text', value: 'Nothing special here' },
-    ]);
-  });
-
-  it('splits text around a mention', () => {
-    const body = `Hey ${formatMention(ADA, 'Ada Lovelace')} look`;
-
-    expect(segmentCommentBody(body, [ada])).toEqual([
-      { kind: 'text', value: 'Hey ' },
-      { kind: 'mention', userId: ADA, label: 'Ada Lovelace', resolved: true },
-      { kind: 'text', value: ' look' },
-    ]);
-  });
-
-  /** A renamed member should read as their current name, not the stored label. */
-  it('prefers the resolved name over the stored label', () => {
-    const body = `@[Ada L.](${ADA})`;
-    const segments = segmentCommentBody(body, [ada]);
-
-    expect(segments[0]).toMatchObject({ label: 'Ada Lovelace', resolved: true });
-  });
-
-  it('falls back to the label when the user no longer resolves', () => {
-    const body = `@[Departed Person](${GRACE})`;
-    const segments = segmentCommentBody(body, []);
-
-    expect(segments[0]).toMatchObject({ label: 'Departed Person', resolved: false });
-  });
-
-  it('handles several mentions and adjacent tokens', () => {
-    const body = `${formatMention(ADA, 'Ada')}${formatMention(GRACE, 'Grace')}`;
-    const segments = segmentCommentBody(body, [ada, grace]);
-
-    expect(segments).toHaveLength(2);
-    expect(segments.every((segment) => segment.kind === 'mention')).toBe(true);
-  });
-
-  it('keeps a trailing mention without inventing an empty text segment', () => {
-    const body = `Thanks ${formatMention(ADA, 'Ada')}`;
-    const segments = segmentCommentBody(body, [ada]);
-
-    expect(segments).toHaveLength(2);
-    expect(segments[1]?.kind).toBe('mention');
-  });
-
-  /**
-   * The shared pattern carries the global flag and is therefore stateful. A
-   * fresh `RegExp` per call is what stops a re-render from skipping matches.
-   */
-  it('gives the same answer when called repeatedly', () => {
-    const body = `${formatMention(ADA, 'Ada')} and ${formatMention(GRACE, 'Grace')}`;
-
-    const first = segmentCommentBody(body, [ada, grace]);
-    const second = segmentCommentBody(body, [ada, grace]);
-    const third = segmentCommentBody(body, [ada, grace]);
-
-    expect(second).toEqual(first);
-    expect(third).toEqual(first);
-    expect(first.filter((segment) => segment.kind === 'mention')).toHaveLength(2);
-  });
-});
-
 describe('CommentBody', () => {
-  it('renders mentions as chips with an @ prefix', () => {
-    render(<CommentBody body={`Hi ${formatMention(ADA, 'Ada Lovelace')}`} mentions={[ada]} />);
+  it('renders stored markup as the structure it describes', () => {
+    render(<CommentBody body="<p>Read <strong>this</strong></p><ul><li>one</li></ul>" />);
 
-    expect(screen.getByText('@Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('this').tagName).toBe('STRONG');
+    expect(screen.getByText('one').closest('li')).not.toBeNull();
   });
 
-  it('marks a mention of the reader differently from anyone else', () => {
-    const body = `${formatMention(ADA, 'Ada')} ${formatMention(GRACE, 'Grace')}`;
+  it('draws a chip for a mention', () => {
     const { container } = render(
-      <CommentBody body={body} mentions={[ada, grace]} currentUserId={ADA} />,
+      <CommentBody body={`<p>Hey <span data-mention="${ADA}">@Ada Lovelace</span></p>`} />,
     );
 
-    const mine = container.querySelector(`[data-mention="${ADA}"]`);
-    const theirs = container.querySelector(`[data-mention="${GRACE}"]`);
-
-    expect(mine?.className).not.toBe(theirs?.className);
-    expect(mine?.className).toContain('text-primary');
+    const chip = container.querySelector('span[data-mention]');
+    expect(chip?.getAttribute('data-mention')).toBe(ADA);
+    expect(chip?.textContent).toBe('@Ada Lovelace');
   });
 
-  it('renders plain text untouched', () => {
-    render(<CommentBody body="No mentions, just words" mentions={[]} />);
-    expect(screen.getByText('No mentions, just words')).toBeInTheDocument();
+  it('tints a mention of the reader, and nobody else', () => {
+    const { container } = render(
+      <CommentBody
+        body={`<p><span data-mention="${ADA}">@Ada</span> and <span data-mention="${GRACE}">@Grace</span></p>`}
+        currentUserId={ADA}
+      />,
+    );
+
+    const chips = [...container.querySelectorAll('span[data-mention]')];
+    expect(chips[0]?.hasAttribute('data-me')).toBe(true);
+    expect(chips[1]?.hasAttribute('data-me')).toBe(false);
   });
 
-  /** Tokens are markup, not content — none of it should leak into the output. */
-  it('never shows raw token syntax', () => {
-    const body = `Hi ${formatMention(ADA, 'Ada Lovelace')}`;
-    const { container } = render(<CommentBody body={body} mentions={[ada]} />);
+  /** A row from before comments were rich text still reads as a chip. */
+  it('converts a legacy token body on the way in', () => {
+    const { container } = render(
+      <CommentBody body={`Ping ${formatMention(ADA, 'Ada Lovelace')} please\nsecond line`} />,
+    );
 
-    expect(container.textContent).not.toContain(ADA);
+    const chip = container.querySelector('span[data-mention]');
+    expect(chip?.getAttribute('data-mention')).toBe(ADA);
+    expect(chip?.textContent).toBe('@Ada Lovelace');
     expect(container.textContent).not.toContain('](');
+    expect(container.querySelectorAll('p')).toHaveLength(2);
   });
 });

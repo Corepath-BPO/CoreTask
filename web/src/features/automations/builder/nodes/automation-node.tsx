@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
+import { OptionChip } from '../configuration/option-chip';
 import type { SummarySegment } from '../lib/node-summary';
 
 /** What the canvas hands each node. */
@@ -135,7 +136,9 @@ export function AutomationNode({ data, selected }: NodeProps) {
    * with nothing in front of it.
    */
   const heading = node.heading;
-  const name = heading ? `${heading} - ${node.label}` : node.label;
+  // An em dash, matching the pause the label itself prints — and the name the
+  // e2e suite addresses these cards by.
+  const name = heading ? `${heading} — ${node.label}` : node.label;
 
   return (
     /*
@@ -188,7 +191,23 @@ export function AutomationNode({ data, selected }: NodeProps) {
             )}
           >
             {node.summary.map((part, index) =>
-              part.chip ? (
+              part.placeholder ? (
+                /* The gap where an answer will go: dashed, because a solid chip
+                   would claim the rule already holds this value. */
+                <span
+                  key={index}
+                  className="max-w-[210px] truncate rounded border border-dashed border-muted-foreground/60 px-1.5 py-px text-[13px] text-muted-foreground"
+                >
+                  {part.text}
+                </span>
+              ) : part.chip && part.colorToken ? (
+                <OptionChip
+                  key={index}
+                  label={part.text}
+                  colorToken={part.colorToken}
+                  className="max-w-[210px] text-[13px]"
+                />
+              ) : part.chip ? (
                 <span
                   key={index}
                   className="max-w-[210px] truncate rounded bg-muted px-1.5 py-0.5 text-[13px] text-foreground"

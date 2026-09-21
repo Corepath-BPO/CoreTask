@@ -94,20 +94,77 @@ compiled to Prisma in `query-compiler.ts`. See
 [custom-fields.md](./custom-fields.md) for how custom fields join it.
 
 Operators are declared per field **kind**, not per field. That is what makes a
-newly created custom field filterable immediately, with no frontend change.
+newly created custom field filterable immediately, with no frontend change. The
+system fields' capabilities — sortable, filterable, groupable, and whether the
+field is a column at all — live in `SYSTEM_FIELD_CATALOG` in the same package,
+so the toolbar offers exactly what the compiler accepts.
 
-`POST`, not `GET`, for the task query: a filter set is a nested structure, and
-encoding one into a query string means inventing a serialisation both sides must
-agree on — which is how injection surfaces get built. Paging and search stay in
-the query string where they are readable.
+## The toolbar
+
+Asana's four buttons — Filter, Sort, Group, Options — are wired to the open
+view's settings, on the List and the Board alike.
+
+**The request carries the effective settings.** `GET …/work-items` takes
+`filters` and `sorts` as JSON, `groupBy` as a field reference and
+`showCompleted=false`, rather than a view id. The UI must apply a change
+instantly and independently of whether the caller may persist it, and the cache
+keys and realtime invalidation are already built on the GET. See
+[project-work-items.md](../api/project-work-items.md#query-settings).
+
+**Debounced write, optimistic draft.** `useViewSettingsEditor` owns a draft
+that drives the query at once, writes it 400 ms after the last change, and
+reverts with a toast on failure. It never re-syncs from the server while a save
+is pending, so a refetch cannot overwrite what is being typed. The List's
+`pendingColumns` folded into it.
+
+**Who may write.** `canPersistView` mirrors the API: a personal view is its
+owner's, a shared view is any member's. Anyone else keeps a draft and is offered
+"Save as my view", which creates a personal view with the draft and opens it at
+`?view=<id>`. The active view is `?view=<id>`, else the type's default, else
+the first.
+
+**One ordering in SQL for both kinds.** Sorting by a custom field — or by
+anything, when tasks and tickets must interleave — goes through
+`order-compiler.ts` and `work-item-order.repository.ts`: Prisma computes two id
+allowlists with the same `where` it always used, one raw query orders them
+(`NULLS LAST` both ways, `position, id` as the tail), and the service hydrates
+in that order. The default read is untouched. The group key leads the ordering
+so a group never splits across a page.
+
+**Tickets answer what they can.** A filter on a title, assignee, section, due
+date, created, updated or completion (`resolvedAt`) applies to tickets; one on a
+custom field, a task status or priority, a start date or an estimate excludes
+them — except `IS_EMPTY`, which every ticket satisfies for a field it does not
+hold. On a custom-field sort every ticket's key is `NULL`, so they land after
+the valued tasks.
+
+**Relative dates.** `@today`, `@startOfWeek`, `@endOfWeek`, `@startOfNextWeek`
+and `@endOfNextWeek` are resolved on the server at query time (Monday-start,
+UTC midnight), so "Due this week" saved on Wednesday is still this week next
+Monday. Date filters gained `GREATER_THAN_OR_EQUAL` and `LESS_THAN_OR_EQUAL`
+so a week is two inclusive bounds rather than two guesses.
+
+**Manual order** holds only with no sort and the section grouping. Otherwise
+the drag handles go, and dragging _between_ groups means "give it this value"
+— a status, an assignee, a select option — through the same mutation a cell
+edit uses. Grouping is client-side over the page (`group-rows.ts`), which the
+API already ordered by the group key: every value the vocabulary offers is
+drawn, empty or not, and a value the vocabulary does not know (a ticket's
+status under a task-status grouping) gets a heading of its own.
+
+**Options** holds what used to be the Fields button — the List's columns and
+their order — plus row density and "Show completed tasks"; on the Board it
+holds the card fields, drawn as label/value lines under a card's meta row.
 
 ## Known limitations
 
-- **Grouping is section-only in the List.** The contract allows status, priority
-  and assignee; the table implements section.
-- **No inline cell editing.** Clicking a title opens the existing task dialog.
-  Column resizing, pinning and bulk selection are likewise not built.
-- **Custom fields are not sortable.** Prisma cannot express the ordering without
-  a raw query, and a silently-ignored sort is worse than one never offered.
+- **Grouping by a date is not built.** The menu lists "Due date" disabled with
+  the reason on hover.
+- **Formulas are not filterable or sortable** — they are worked out on read.
+  See [ADR 0015](../decisions/0015-formula-fields-computed-on-read.md).
+- **Weeks start on Monday at UTC midnight**, not on the reader's locale; a
+  documented placeholder.
+- **A multi-select sorts by its first stored option**, not the lowest-positioned
+  one held.
 - **Calendar, Timeline and Dashboard** exist in `ProjectViewType` and nowhere
   else. They are deliberately not half-built.

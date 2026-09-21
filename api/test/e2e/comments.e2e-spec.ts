@@ -5,6 +5,8 @@ import {
   WorkspaceRole,
   formatMention,
 } from '@coretask/contracts';
+import { randomUUID } from 'node:crypto';
+
 import request from 'supertest';
 
 import {
@@ -124,8 +126,9 @@ describe('Comments (e2e)', () => {
       const scope = await setupScope();
       const comment = await postComment(taskThread(scope), scope.owner, 'Blocked on storage');
 
+      // Stored as the editor's markup: one paragraph, sanitised.
       expect(comment).toMatchObject({
-        body: 'Blocked on storage',
+        body: '<p>Blocked on storage</p>',
         taskId: scope.taskId,
         ticketId: null,
         authorId: scope.owner.userId,
@@ -171,7 +174,7 @@ describe('Comments (e2e)', () => {
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(200);
 
-      expect(task.body.data.map((c: { body: string }) => c.body)).toEqual(['On the task']);
+      expect(task.body.data.map((c: { body: string }) => c.body)).toEqual(['<p>On the task</p>']);
     });
 
     it('orders a thread oldest first, so it reads top to bottom', async () => {
@@ -184,20 +187,92 @@ describe('Comments (e2e)', () => {
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(200);
 
-      expect(response.body.data.map((c: { body: string }) => c.body)).toEqual(['First', 'Second']);
+      expect(response.body.data.map((c: { body: string }) => c.body)).toEqual([
+        '<p>First</p>',
+        '<p>Second</p>',
+      ]);
     });
 
     it('trims the body and rejects one that is only whitespace', async () => {
       const scope = await setupScope();
 
       const comment = await postComment(taskThread(scope), scope.owner, '  padded  ');
-      expect(comment.body).toBe('padded');
+      expect(comment.body).toBe('<p>padded</p>');
 
       await request(server())
         .post(taskThread(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .send({ body: '   ' })
         .expect(422);
+    });
+
+    it('refuses markup with nothing in it, and strips what the editor never emits', async () => {
+      const scope = await setupScope();
+
+      await request(server())
+        .post(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: '<p>   </p>' })
+        .expect(422);
+
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        '<script>alert(1)</script><p onclick="x">hi <b>there</b></p>',
+      );
+      expect(comment.body).toBe('<p>hi <b>there</b></p>');
+    });
+
+    it('keeps a picture-only comment, and says so in the notification', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/followers`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ userIds: [member.userId] })
+        .expect(201);
+
+      const shot = '019fc880-0000-7000-8000-00000000f00d';
+      const comment = await postComment(
+        taskThread(scope),
+        scope.owner,
+        `<img data-attachment="${shot}" alt="shot.png">`,
+      );
+      expect(comment.body).toContain(`data-attachment="${shot}"`);
+
+      const inbox = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/notifications`))
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      const line = inbox.body.data.items.find(
+        (item: { type: string }) => item.type === 'COMMENT_CREATED',
+      );
+      expect(line.body).toBe('(image)');
+    });
+
+    it('converts a row from before comments were rich text on the way out', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Ada Lovelace');
+      await addMember(scope, member, WorkspaceRole.MEMBER);
+
+      await context.prisma.comment.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          authorId: scope.owner.userId,
+          taskId: scope.taskId,
+          body: `Legacy ${formatMention(member.userId, 'Ada Lovelace')} row`,
+        },
+      });
+
+      const thread = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(thread.body.data[0].body).toBe(
+        `<p>Legacy <span data-mention="${member.userId}">@Ada Lovelace</span> row</p>`,
+      );
     });
 
     it('rejects a body past the maximum length', async () => {
@@ -231,7 +306,7 @@ describe('Comments (e2e)', () => {
         .send({ body: 'Revised' })
         .expect(200);
 
-      expect(response.body.data.body).toBe('Revised');
+      expect(response.body.data.body).toBe('<p>Revised</p>');
       expect(response.body.data.editedAt).not.toBeNull();
     });
 
@@ -596,7 +671,7 @@ describe('Comments (e2e)', () => {
       expect(comment.mentions).toHaveLength(MAX_MENTIONS_PER_COMMENT);
     });
 
-    it('strips tokens from the notification body, which is plain text', async () => {
+    it('keeps the notification body plain text, whatever the comment holds', async () => {
       const scope = await setupScope();
       const member = await registerUser('Ada');
       await addMember(scope, member, WorkspaceRole.MEMBER);
@@ -636,6 +711,7 @@ describe('Comments (e2e)', () => {
         .expect(200);
 
       expect(thread.body.data[0].body).toContain('Ada');
+      expect(thread.body.data[0].body).toContain(`data-mention="${member.userId}"`);
     });
 
     /**
@@ -780,6 +856,288 @@ describe('Comments (e2e)', () => {
 
       const summaries = response.body.data.map((entry: { summary: string }) => entry.summary);
       expect(summaries).toContain(`Commented on ${scope.ticketKey}`);
+    });
+  });
+  // -------------------------------------------------------------------------
+  describe('likes', () => {
+    const like = (scope: Scope, actor: Actor, commentId: string) =>
+      request(server())
+        .post(`${commentUrl(scope, commentId)}/like`)
+        .set('Authorization', `Bearer ${actor.token}`);
+    const unlike = (scope: Scope, actor: Actor, commentId: string) =>
+      request(server())
+        .delete(`${commentUrl(scope, commentId)}/like`)
+        .set('Authorization', `Bearer ${actor.token}`);
+
+    it('counts one like per person, however many times they press it', async () => {
+      const scope = await setupScope();
+      const ada = await registerUser('Ada Lovelace');
+      await addMember(scope, ada, WorkspaceRole.MEMBER);
+      const comment = await postComment(taskThread(scope), scope.owner);
+
+      const first = await like(scope, ada, comment.id).expect(201);
+      expect(first.body.data).toMatchObject({ likeCount: 1, likedByMe: true });
+      expect(first.body.data.likedBy.map((user: { id: string }) => user.id)).toEqual([ada.userId]);
+
+      const again = await like(scope, ada, comment.id).expect(201);
+      expect(again.body.data.likeCount).toBe(1);
+
+      // The author reads it as somebody else's like.
+      const thread = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(thread.body.data[0]).toMatchObject({ likeCount: 1, likedByMe: false });
+
+      const taken = await unlike(scope, ada, comment.id).expect(200);
+      expect(taken.body.data).toMatchObject({ likeCount: 0, likedByMe: false, likedBy: [] });
+      await unlike(scope, ada, comment.id).expect(200);
+    });
+
+    it('is read-only for a guest, and gone with the comment', async () => {
+      const scope = await setupScope();
+      const guest = await registerUser('Guest');
+      await addMember(scope, guest, WorkspaceRole.GUEST);
+      const comment = await postComment(taskThread(scope), scope.owner);
+
+      await like(scope, guest, comment.id).expect(403);
+
+      await request(server())
+        .delete(commentUrl(scope, comment.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      await like(scope, scope.owner, comment.id).expect(404);
+    });
+
+    it('cannot be reached from another workspace', async () => {
+      const first = await setupScope();
+      const second = await setupScope();
+      const comment = await postComment(taskThread(first), first.owner);
+
+      await request(server())
+        .post(url(`/workspaces/${second.workspaceId}/comments/${comment.id}/like`))
+        .set('Authorization', `Bearer ${second.owner.token}`)
+        .expect(404);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('pins', () => {
+    const pin = (scope: Scope, actor: Actor, commentId: string) =>
+      request(server())
+        .post(`${commentUrl(scope, commentId)}/pin`)
+        .set('Authorization', `Bearer ${actor.token}`);
+
+    it('lets the author pin, and one pin replaces another', async () => {
+      const scope = await setupScope();
+      const first = await postComment(taskThread(scope), scope.owner, 'First');
+      const second = await postComment(taskThread(scope), scope.owner, 'Second');
+
+      const pinned = await pin(scope, scope.owner, first.id).expect(201);
+      expect(pinned.body.data.pinnedAt).not.toBeNull();
+      expect(pinned.body.data.pinnedBy.id).toBe(scope.owner.userId);
+
+      await pin(scope, scope.owner, second.id).expect(201);
+
+      const thread = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      const byId = Object.fromEntries(
+        thread.body.data.map((c: { id: string; pinnedAt: string | null }) => [c.id, c.pinnedAt]),
+      );
+      expect(byId[first.id]).toBeNull();
+      expect(byId[second.id]).not.toBeNull();
+      expect(thread.body.meta.pinnedCommentId).toBe(second.id);
+
+      const story = await context.prisma.activityLog.findFirst({
+        where: { entity: 'TASK', entityId: scope.taskId, action: 'PINNED' },
+      });
+      expect(story?.metadata).toMatchObject({ commentId: first.id });
+
+      await request(server())
+        .delete(`${commentUrl(scope, second.id)}/pin`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      const after = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(after.body.meta.pinnedCommentId).toBeNull();
+    });
+
+    it('refuses a member pinning somebody else’s words, and lets a manager', async () => {
+      const scope = await setupScope();
+      const ada = await registerUser('Ada');
+      const manager = await registerUser('Manager');
+      await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await addMember(scope, manager, WorkspaceRole.MANAGER);
+      const comment = await postComment(taskThread(scope), scope.owner);
+
+      await pin(scope, ada, comment.id).expect(403);
+      await pin(scope, manager, comment.id).expect(201);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('paging', () => {
+    it('serves the latest window first and walks back without repeating a line', async () => {
+      const scope = await setupScope();
+      // Straight into the table: sixty round trips would spend the suite's
+      // budget on setup. Ids are v7, so a later row sorts later.
+      for (let index = 1; index <= 60; index += 1) {
+        await context.prisma.comment.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            authorId: scope.owner.userId,
+            taskId: scope.taskId,
+            body: `<p>Comment ${index}</p>`,
+          },
+        });
+      }
+
+      const first = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(first.body.data).toHaveLength(50);
+      expect(first.body.data[0].body).toBe('<p>Comment 11</p>');
+      expect(first.body.data[49].body).toBe('<p>Comment 60</p>');
+      expect(first.body.meta).toMatchObject({ total: 60, hasEarlier: true });
+      expect(first.body.meta.earliestId).toBe(first.body.data[0].id);
+
+      const earlier = await request(server())
+        .get(taskThread(scope))
+        .query({ before: first.body.meta.earliestId })
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(earlier.body.data.map((c: { body: string }) => c.body)).toEqual(
+        Array.from({ length: 10 }, (_, index) => `<p>Comment ${index + 1}</p>`),
+      );
+      expect(earlier.body.meta).toMatchObject({ hasEarlier: false, earliestId: null });
+
+      const ids = new Set(
+        [...first.body.data, ...earlier.body.data].map((c: { id: string }) => c.id),
+      );
+      expect(ids.size).toBe(60);
+    });
+
+    it('carries the pinned comment in the first window whatever its age', async () => {
+      const scope = await setupScope();
+      const old = await postComment(taskThread(scope), scope.owner, 'Pinned and old');
+      for (let index = 1; index <= 55; index += 1) {
+        await context.prisma.comment.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            authorId: scope.owner.userId,
+            taskId: scope.taskId,
+            body: `<p>Filler ${index}</p>`,
+          },
+        });
+      }
+      await request(server())
+        .post(`${commentUrl(scope, old.id)}/pin`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(201);
+
+      const first = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(first.body.data[0].id).toBe(old.id);
+      expect(first.body.data).toHaveLength(51);
+      expect(first.body.meta.pinnedCommentId).toBe(old.id);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('attachments', () => {
+    const readyFile = async (scope: Scope, uploaderId: string, overrides: object = {}) =>
+      context.prisma.attachment.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          uploaderId,
+          taskId: scope.taskId,
+          filename: 'spec.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1200,
+          objectKey: `workspaces/${scope.workspaceId}/${randomUUID()}.pdf`,
+          status: 'READY',
+          ...overrides,
+        },
+      });
+
+    it('links the author’s confirmed files to the comment, and keeps them on the task', async () => {
+      const scope = await setupScope();
+      const file = await readyFile(scope, scope.owner.userId);
+
+      const response = await request(server())
+        .post(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'See attached', attachmentIds: [file.id] })
+        .expect(201);
+      expect(response.body.data.attachments.map((a: { id: string }) => a.id)).toEqual([file.id]);
+      expect(response.body.data.attachments[0].commentId).toBe(response.body.data.id);
+
+      const strip = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/attachments`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(strip.body.data.map((a: { id: string }) => a.id)).toEqual([file.id]);
+
+      // The file is the task's; deleting the words leaves it.
+      await request(server())
+        .delete(commentUrl(scope, response.body.data.id))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(await context.prisma.attachment.findUnique({ where: { id: file.id } })).not.toBeNull();
+    });
+
+    it('refuses a file that is pending, somebody else’s, elsewhere, or already posted', async () => {
+      const scope = await setupScope();
+      const ada = await registerUser('Ada');
+      await addMember(scope, ada, WorkspaceRole.MEMBER);
+
+      const pending = await readyFile(scope, scope.owner.userId, { status: 'PENDING' });
+      const theirs = await readyFile(scope, ada.userId);
+      const onTicket = await readyFile(scope, scope.owner.userId, {
+        taskId: null,
+        ticketId: scope.ticketId,
+      });
+      const posted = await readyFile(scope, scope.owner.userId);
+      await request(server())
+        .post(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ body: 'first', attachmentIds: [posted.id] })
+        .expect(201);
+
+      for (const id of [pending.id, theirs.id, onTicket.id, posted.id]) {
+        await request(server())
+          .post(taskThread(scope))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({ body: 'nope', attachmentIds: [id] })
+          .expect(400);
+      }
+
+      // A refused claim leaves no comment behind.
+      const thread = await request(server())
+        .get(taskThread(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(thread.body.meta.total).toBe(1);
+    });
+
+    it('never links a file from another workspace', async () => {
+      const first = await setupScope();
+      const second = await setupScope();
+      const foreign = await readyFile(second, second.owner.userId, { taskId: second.taskId });
+
+      await request(server())
+        .post(taskThread(first))
+        .set('Authorization', `Bearer ${first.owner.token}`)
+        .send({ body: 'nope', attachmentIds: [foreign.id] })
+        .expect(400);
     });
   });
 });

@@ -38,9 +38,11 @@ describe('parseFieldSettings', () => {
   it('drops a setting this version does not know', () => {
     // A client one release ahead should not have its field creation refused
     // over a key this server has never heard of.
-    expect(parseFieldSettings(CustomFieldType.TEXT, { textMode: 'LONG', futureThing: 42 })).toEqual({
-      textMode: 'LONG',
-    });
+    expect(parseFieldSettings(CustomFieldType.TEXT, { textMode: 'LONG', futureThing: 42 })).toEqual(
+      {
+        textMode: 'LONG',
+      },
+    );
   });
 
   it('rejects a mode that is not one of the allowed ones', () => {
@@ -78,5 +80,106 @@ describe('defaultFieldSettings', () => {
 
   it('gives a multi-select no selection limit until one is chosen', () => {
     expect(defaultFieldSettings(CustomFieldType.MULTI_SELECT)).toEqual({});
+  });
+
+  it('gives a checkbox no default value, because Asana’s fields have none', () => {
+    expect(defaultFieldSettings(CustomFieldType.CHECKBOX)).toEqual({});
+    // A document that still carries the old key reads back without it.
+    expect(parseFieldSettings(CustomFieldType.CHECKBOX, { defaultValue: true })).toEqual({});
+  });
+
+  it('starts a rating at five stars and a formula at a placeholder expression', () => {
+    expect(defaultFieldSettings(CustomFieldType.RATING)).toEqual({ maxRating: 5 });
+    expect(defaultFieldSettings(CustomFieldType.FORMULA)).toMatchObject({
+      expression: '0',
+      numberFormat: 'PLAIN',
+      decimalPlaces: 0,
+    });
+  });
+});
+
+describe('number display formats', () => {
+  it('stores a currency with its code, and refuses one without', () => {
+    expect(
+      parseFieldSettings(CustomFieldType.NUMBER, {
+        numberFormat: 'CURRENCY',
+        currencyCode: 'EUR',
+        decimalPlaces: 2,
+      }),
+    ).toEqual({ numberFormat: 'CURRENCY', currencyCode: 'EUR', decimalPlaces: 2 });
+
+    const missing = safeParseFieldSettings(CustomFieldType.NUMBER, { numberFormat: 'CURRENCY' });
+    expect(missing.success).toBe(false);
+    if (!missing.success) expect(missing.error.issues[0]?.path).toEqual(['currencyCode']);
+
+    expect(
+      safeParseFieldSettings(CustomFieldType.NUMBER, {
+        numberFormat: 'CURRENCY',
+        currencyCode: 'euro',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('stores a custom unit with its label, and refuses one without', () => {
+    expect(
+      parseFieldSettings(CustomFieldType.NUMBER, {
+        numberFormat: 'CUSTOM_UNIT',
+        unitLabel: 'pts',
+        unitPosition: 'SUFFIX',
+      }),
+    ).toMatchObject({ unitLabel: 'pts', unitPosition: 'SUFFIX' });
+
+    const missing = safeParseFieldSettings(CustomFieldType.NUMBER, {
+      numberFormat: 'CUSTOM_UNIT',
+    });
+    expect(missing.success).toBe(false);
+    if (!missing.success) expect(missing.error.issues[0]?.path).toEqual(['unitLabel']);
+  });
+
+  it('adds no display keys to a plain number, so old documents read back unchanged', () => {
+    expect(parseFieldSettings(CustomFieldType.NUMBER, {})).toEqual({
+      numberFormat: 'PLAIN',
+      decimalPlaces: 0,
+    });
+  });
+});
+
+describe('rating settings', () => {
+  it('keeps the stars between three and ten', () => {
+    expect(parseFieldSettings(CustomFieldType.RATING, { maxRating: 7 })).toEqual({ maxRating: 7 });
+    expect(safeParseFieldSettings(CustomFieldType.RATING, { maxRating: 2 }).success).toBe(false);
+    expect(safeParseFieldSettings(CustomFieldType.RATING, { maxRating: 11 }).success).toBe(false);
+    expect(safeParseFieldSettings(CustomFieldType.RATING, { maxRating: 4.5 }).success).toBe(false);
+  });
+});
+
+describe('formula settings', () => {
+  const ref = '{field:11111111-1111-4111-8111-111111111111}';
+
+  it('accepts an expression that parses, with the number display keys', () => {
+    expect(
+      parseFieldSettings(CustomFieldType.FORMULA, {
+        expression: `${ref} * 2`,
+        numberFormat: 'CURRENCY',
+        currencyCode: 'USD',
+        decimalPlaces: 2,
+      }),
+    ).toEqual({
+      expression: `${ref} * 2`,
+      numberFormat: 'CURRENCY',
+      currencyCode: 'USD',
+      decimalPlaces: 2,
+    });
+  });
+
+  it('checks the syntax here, and leaves the references to the service', () => {
+    // Only the service holds the project, so only it can say whether the
+    // field a formula names exists. Syntax needs nothing but the text.
+    const broken = safeParseFieldSettings(CustomFieldType.FORMULA, { expression: '1 +' });
+    expect(broken.success).toBe(false);
+    if (!broken.success) expect(broken.error.issues[0]?.path).toEqual(['expression']);
+
+    expect(safeParseFieldSettings(CustomFieldType.FORMULA, { expression: '' }).success).toBe(false);
+    expect(safeParseFieldSettings(CustomFieldType.FORMULA, {}).success).toBe(false);
   });
 });

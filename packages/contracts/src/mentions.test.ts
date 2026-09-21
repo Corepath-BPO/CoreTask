@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   formatMention,
   MENTION_PATTERN,
+  mentionTokensToHtml,
+  parseAnyMentionIds,
   parseMentionIds,
+  parseDescriptionMentionIds,
   parseMentions,
   stripMentionTokens,
 } from './mentions.js';
@@ -100,5 +103,45 @@ describe('stripMentionTokens', () => {
 
   it('handles several tokens in one body', () => {
     expect(stripMentionTokens(`@[Ada](${ADA}) and @[Grace](${GRACE})`)).toBe('@Ada and @Grace');
+  });
+});
+
+describe('parseDescriptionMentionIds', () => {
+  it('reads the chips out of sanitised markup, once each, lower-cased', () => {
+    expect(
+      parseDescriptionMentionIds(
+        `<p><span data-mention="${ADA.toUpperCase()}">@Ada</span> and <span data-mention="${ADA}">@Ada</span></p>`,
+      ),
+    ).toEqual([ADA]);
+    expect(parseDescriptionMentionIds('<p>@nobody, and @[Ada](not-a-chip)</p>')).toEqual([]);
+  });
+});
+
+describe('mentionTokensToHtml', () => {
+  it('turns a token body into paragraphs with chips, escaping the text around them', () => {
+    expect(mentionTokensToHtml(`Hey @[Ada Lovelace](${ADA}), a < b\nsecond line`)).toBe(
+      `<p>Hey <span data-mention="${ADA}">@Ada Lovelace</span>, a &lt; b</p><p>second line</p>`,
+    );
+  });
+
+  it('lower-cases the id and escapes a label that tries to smuggle markup', () => {
+    expect(mentionTokensToHtml(`@[<b>x</b>](${ADA.toUpperCase()})`)).toBe(
+      `<p><span data-mention="${ADA}">@&lt;b&gt;x&lt;/b&gt;</span></p>`,
+    );
+  });
+
+  it('keeps an empty line as an empty paragraph', () => {
+    expect(mentionTokensToHtml('one\n\ntwo')).toBe('<p>one</p><p></p><p>two</p>');
+  });
+});
+
+describe('parseAnyMentionIds', () => {
+  it('reads tokens and chips alike, in order, without repeats', () => {
+    const body = `<p><span data-mention="${GRACE}">@Grace</span></p> and @[Ada](${ADA}) then @[Grace](${GRACE})`;
+    expect(parseAnyMentionIds(body)).toEqual([ADA, GRACE]);
+  });
+
+  it('finds nothing in plain words', () => {
+    expect(parseAnyMentionIds('<p>nobody here</p>')).toEqual([]);
   });
 });

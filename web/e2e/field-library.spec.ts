@@ -127,6 +127,44 @@ test.describe('the field library', () => {
     await expect(page.getByText(/Create custom field/)).toBeHidden();
   });
 
+  test('rates a task with stars and the value survives a refresh', async ({ page }) => {
+    await openList(page);
+
+    // Named with the same prefix as the select above, so `afterAll` removes it.
+    const RATING = `${FIELD} stars`;
+
+    await picker(page).click();
+    await page.getByLabel('Search or create a field').fill(RATING);
+    await page.getByText(/Create custom field/).click();
+
+    const dialog = page.getByRole('dialog').filter({ hasText: 'Create a field' });
+    await dialog.getByRole('combobox', { name: 'Type' }).click();
+    await page.getByRole('option', { name: /^rating$/i }).click();
+
+    // The type's own settings: how many stars, with a preview beside it.
+    await expect(dialog.getByRole('spinbutton', { name: 'Number of stars' })).toHaveValue('5');
+    await dialog.getByRole('button', { name: 'Create field' }).click();
+    await expect(dialog).toBeHidden();
+
+    await expect(page.getByRole('columnheader', { name: RATING })).toBeVisible();
+
+    // One click on a star sets it; the cell is a radio group, not a number box.
+    const stars = page.getByRole('radiogroup', { name: new RegExp(`^${RATING} for `) }).first();
+    await stars.getByRole('radio', { name: '4 of 5' }).click();
+    await expect(stars.getByRole('radio', { name: '4 of 5' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    await page.reload();
+    await expect(
+      page
+        .getByRole('radiogroup', { name: new RegExp(`^${RATING} for `) })
+        .first()
+        .getByRole('radio', { name: '4 of 5' }),
+    ).toHaveAttribute('aria-checked', 'true');
+  });
+
   test.afterAll(async () => {
     /*
      * Removed through the API rather than the UI: cleanup has to run even when

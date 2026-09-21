@@ -62,6 +62,11 @@ export const ServerEvent = {
   COMMENT_UPDATED: 'comment:updated',
   COMMENT_DELETED: 'comment:deleted',
 
+  /** Somebody joined or left a task's or ticket's collaborators. */
+  FOLLOWERS_CHANGED: 'followers:changed',
+  /** A story landed on an item's activity feed. Payload names the item, not the story. */
+  ACTIVITY_RECORDED: 'activity:recorded',
+
   NOTIFICATION_CREATED: 'notification:created',
 
   PRESENCE_UPDATED: 'presence:updated',

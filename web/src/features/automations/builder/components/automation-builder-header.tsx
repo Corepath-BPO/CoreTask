@@ -1,5 +1,5 @@
 import type { AutomationGraphIssue } from '@coretask/types';
-import { Save, Settings, X } from 'lucide-react';
+import { ArrowLeft, BookmarkPlus, LibraryBig, Save, Settings, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -55,6 +55,11 @@ export function AutomationBuilderHeader({
   publishing,
   canPublish,
   onPublish,
+  onDelete,
+  onSaveToLibrary,
+  canSaveToLibrary,
+  onBrowseLibrary,
+  canBrowseLibrary,
   onClose,
 }: {
   /** Above the name, like a breadcrumb. Undefined until the project arrives. */
@@ -74,12 +79,36 @@ export function AutomationBuilderHeader({
   publishing: boolean;
   canPublish: boolean;
   onPublish: () => void;
+  /** Take the whole rule away. Absent on a rule that has never been saved —
+      there is nothing to delete yet, and closing the builder is the same act. */
+  onDelete?: () => void;
+  /** Put this rule in the workspace's library for other projects to start from. */
+  onSaveToLibrary: () => void;
+  /** Off until the rule has a name and a trigger — the library keeps rules, not blanks. */
+  canSaveToLibrary: boolean;
+  /** Open the library to start a different rule from. */
+  onBrowseLibrary: () => void;
+  /** Off while there are unsaved changes: choosing a template leaves this canvas. */
+  canBrowseLibrary: boolean;
   onClose: () => void;
 }) {
   return (
     // `shrink-0`, because the canvas below it is the flex child that grows: a
     // header allowed to give up height would be squeezed by its own contents.
     <header className="flex shrink-0 items-center gap-4 border-b border-border px-4 py-2.5">
+      {/* The same exit as the X, offered where a back control is looked for.
+          One route out, two doors to it — the dialog's unsaved-work guard
+          covers both. */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 cursor-pointer"
+        aria-label="Back to automations"
+        onClick={onClose}
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" />
+      </Button>
+
       <div className="min-w-0 flex-1">
         {/*
           A fixed line, filled or not.
@@ -131,6 +160,54 @@ export function AutomationBuilderHeader({
               sliders read as "adjust what is on screen". */}
           <Settings className="size-4" aria-hidden="true" />
         </Button>
+
+        {/* Reuse lives beside the rule's own controls: "I want this on the
+            other project too" is thought while looking at the rule, not at a
+            list of them. Saves the canvas first, so the library gets what is
+            on screen rather than what was last written. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 cursor-pointer"
+          aria-label="Save to library"
+          title="Save to library"
+          disabled={!canSaveToLibrary}
+          onClick={onSaveToLibrary}
+        >
+          <BookmarkPlus className="size-4" aria-hidden="true" />
+        </Button>
+
+        {/* The other direction: what is already in the library, from here.
+            Starting from a template opens its own draft, so this is only
+            offered while nothing on this canvas would be lost by leaving. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 cursor-pointer"
+          aria-label="Browse the rule library"
+          title={
+            canBrowseLibrary ? 'Browse the rule library' : 'Save or discard your changes first'
+          }
+          disabled={!canBrowseLibrary}
+          onClick={onBrowseLibrary}
+        >
+          <LibraryBig className="size-4" aria-hidden="true" />
+        </Button>
+
+        {/* Beside the settings it belongs with, not buried in them: taking a
+            rule away is a thing owners come here to do, and a control nobody
+            can find is a privilege nobody has. */}
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 cursor-pointer text-muted-foreground hover:text-destructive"
+            aria-label="Delete this rule"
+            onClick={onDelete}
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+          </Button>
+        )}
 
         {/* Beside Publish, not above the canvas: this is the explanation for the
             button next to it being off. */}

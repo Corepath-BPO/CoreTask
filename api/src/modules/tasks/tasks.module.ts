@@ -4,6 +4,8 @@ import { AutomationEventsModule } from '../automations/automation-events.module'
 
 import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
+import { FollowersModule } from '../followers/followers.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
 import { TasksController } from './tasks.controller';
@@ -15,6 +17,10 @@ import { TasksService } from './tasks.service';
     WorkspaceMembersModule,
     ActivityLogsModule,
     NotificationsIntegrationModule,
+    FollowersModule,
+    // For the formula values the List reads off each row. Nothing in the
+    // custom-fields module imports this one back.
+    CustomFieldsModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],

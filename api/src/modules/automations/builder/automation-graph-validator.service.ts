@@ -4,17 +4,29 @@ import {
   tokensForFieldType,
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
+  AutomationAction,
   AutomationNodeType,
   GraphIssueLevel,
   isFallbackBranch,
+  subtaskEntries,
+  subtaskProblems,
+  subtaskTitles,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
 import { Injectable } from '@nestjs/common';
 
+import { AppException } from '../../../common/exceptions/app.exception';
+import { AppConfigService } from '../../../config/app-config.service';
 import { PrismaService } from '../../../database/prisma.service';
+import { assertDeliverableUrl } from '../../webhooks/lib/url-policy';
 
-import { conditionFieldKind, triggerUnavailableReason } from './automation-catalogue';
+import {
+  conditionFieldKind,
+  customFieldConditionId,
+  kindForCustomFieldType,
+  triggerUnavailableReason,
+} from './automation-catalogue';
 
 /**
  * One node as the table holds it.
@@ -66,7 +78,10 @@ type StructuralNode = Parameters<typeof validateGraphStructure>[0][number];
  */
 @Injectable()
 export class AutomationGraphValidatorService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: AppConfigService,
+  ) {}
 
   async validate(
     projectId: string,
@@ -126,6 +141,28 @@ export class AutomationGraphValidatorService {
             path: 'subtype',
             message: `“${node.subtype}” is not an action the engine can run.`,
           });
+        } else if (node.subtype === AutomationAction.CREATE_SUBTASK) {
+          // A subtask step with nothing to create would publish cleanly and
+          // fail on every run; the emptiness is checkable here, so it is an
+          // error here rather than a message in the execution log. So is a
+          // due date the runner could not turn into a day.
+          if (subtaskTitles(node.configuration).length === 0) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'configuration',
+              message: 'Give this step at least one subtask title.',
+            });
+          }
+
+          for (const problem of subtaskProblems(node.configuration)) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'subtasks',
+              message: problem.message,
+            });
+          }
         }
       }
 
@@ -170,6 +207,9 @@ export class AutomationGraphValidatorService {
     const statusIds = new Set<string>();
     const priorityIds = new Set<string>();
     const fieldIds = new Set<string>();
+    const targetProjectIds = new Set<string>();
+    const targetSectionIds = new Set<string>();
+    const webhookEndpointIds = new Set<string>();
 
     const read = (value: unknown): string | null =>
       typeof value === 'string' && value !== '' ? value : null;
@@ -180,8 +220,34 @@ export class AutomationGraphValidatorService {
       const sectionId = read(config['sectionId']);
       if (sectionId) sectionIds.add(sectionId);
 
+      // A move out of this project names another project and, optionally, a
+      // section of *that* one — under its own key, so the `sectionId` check
+      // above never mistakes it for a section that should be here.
+      if (node.subtype === AutomationAction.MOVE_TO_PROJECT) {
+        const targetProjectId = read(config['projectId']);
+        if (targetProjectId) targetProjectIds.add(targetProjectId);
+
+        const targetSectionId = read(config['targetSectionId']);
+        if (targetSectionId) targetSectionIds.add(targetSectionId);
+      }
+
       const userId = read(config['userId']) ?? read(config['assigneeId']);
       if (userId) userIds.add(userId);
+
+      // The person each subtask goes to is a reference like the assign
+      // action's, and is looked up in the same query.
+      if (node.subtype === AutomationAction.CREATE_SUBTASK) {
+        for (const entry of subtaskEntries(config)) {
+          if (entry.assigneeId) userIds.add(entry.assigneeId);
+        }
+      }
+
+      // A webhook step names a workspace endpoint; a rule may not send to
+      // another workspace's, so the lookup is scoped like every other.
+      if (node.subtype === AutomationAction.SEND_WEBHOOK) {
+        const endpointId = read(config['endpointId']);
+        if (endpointId) webhookEndpointIds.add(endpointId);
+      }
 
       /*
        * Canonical name first, then the one it used to be written under.
@@ -202,9 +268,23 @@ export class AutomationGraphValidatorService {
 
       const fieldId = read(config['fieldId'] ?? config['customFieldId']);
       if (fieldId) fieldIds.add(fieldId);
+
+      // A condition about a custom field carries the id inside its field key
+      // rather than under `fieldId`; its type decides which comparisons fit.
+      const conditionFieldId = customFieldConditionId(config['field']);
+      if (conditionFieldId) fieldIds.add(conditionFieldId);
     }
 
-    const [sections, members, statuses, priorities, fields] = await Promise.all([
+    const [
+      sections,
+      members,
+      statuses,
+      priorities,
+      fields,
+      targetProjects,
+      targetSections,
+      webhookEndpoints,
+    ] = await Promise.all([
       sectionIds.size
         ? this.prisma.section.findMany({
             where: { id: { in: [...sectionIds] }, projectId },
@@ -243,7 +323,39 @@ export class AutomationGraphValidatorService {
             select: { id: true, type: true },
           })
         : [],
+      targetProjectIds.size
+        ? // Another live project of this workspace. The rule's own is not a
+          // destination, and an archived one would land the task somewhere
+          // nobody looks.
+          this.prisma.project.findMany({
+            where: {
+              id: { in: [...targetProjectIds] },
+              workspaceId,
+              archivedAt: null,
+              NOT: { id: projectId },
+            },
+            select: { id: true },
+          })
+        : [],
+      targetSectionIds.size
+        ? // With the project each belongs to: the check below is that it is
+          // the project the same node chose, not merely that it exists.
+          this.prisma.section.findMany({
+            where: { id: { in: [...targetSectionIds] }, workspaceId },
+            select: { id: true, projectId: true },
+          })
+        : [],
+      webhookEndpointIds.size
+        ? this.prisma.webhookEndpoint.findMany({
+            where: { id: { in: [...webhookEndpointIds] }, workspaceId },
+            select: { id: true, enabled: true },
+          })
+        : [],
     ]);
+
+    const liveEndpoints = new Map(webhookEndpoints.map((row) => [row.id, row.enabled]));
+    const liveTargetProjects = new Set(targetProjects.map((row) => row.id));
+    const targetSectionProject = new Map(targetSections.map((row) => [row.id, row.projectId]));
 
     const liveSections = new Set(sections.map((row) => row.id));
     const liveMembers = new Set(members.map((row) => row.userId));
@@ -265,6 +377,36 @@ export class AutomationGraphValidatorService {
         });
       }
 
+      if (node.subtype === AutomationAction.MOVE_TO_PROJECT) {
+        const targetProjectId = read(config['projectId']);
+        if (targetProjectId && !liveTargetProjects.has(targetProjectId)) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'projectId',
+            message:
+              targetProjectId === projectId
+                ? 'The task is already in this project — choose another one.'
+                : 'That project is no longer in this workspace.',
+          });
+        }
+
+        const targetSectionId = read(config['targetSectionId']);
+        if (
+          targetSectionId &&
+          (!targetSectionProject.has(targetSectionId) ||
+            (targetProjectId !== null &&
+              targetSectionProject.get(targetSectionId) !== targetProjectId))
+        ) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'targetSectionId',
+            message: 'That section is no longer in the chosen project.',
+          });
+        }
+      }
+
       const userId = read(config['userId']) ?? read(config['assigneeId']);
       if (userId && !liveMembers.has(userId)) {
         issues.push({
@@ -272,6 +414,19 @@ export class AutomationGraphValidatorService {
           nodeId: node.id,
           path: 'userId',
           message: 'That person is no longer a member of this workspace.',
+        });
+      }
+
+      if (node.subtype === AutomationAction.CREATE_SUBTASK) {
+        subtaskEntries(config).forEach((entry, index) => {
+          if (entry.assigneeId && !liveMembers.has(entry.assigneeId)) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: `subtasks.${index}.assigneeId`,
+              message: 'That person is no longer a member of this workspace.',
+            });
+          }
         });
       }
 
@@ -306,6 +461,50 @@ export class AutomationGraphValidatorService {
       }
 
       /*
+       * Where a webhook step sends. An endpoint that is gone is an error; one
+       * that is switched off is a warning, since switching it back on needs
+       * no change to the rule. An ad-hoc URL is held to the same address
+       * policy the settings page applies, in the deployment's own words.
+       */
+      if (node.subtype === AutomationAction.SEND_WEBHOOK) {
+        const endpointId = read(config['endpointId']);
+        if (endpointId) {
+          const enabled = liveEndpoints.get(endpointId);
+          if (enabled === undefined) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'endpointId',
+              message: 'That webhook endpoint is no longer in this workspace.',
+            });
+          } else if (!enabled) {
+            issues.push({
+              level: GraphIssueLevel.WARNING,
+              nodeId: node.id,
+              path: 'endpointId',
+              message:
+                'That webhook endpoint is disabled, so this step sends nothing until it is enabled.',
+            });
+          }
+        }
+
+        const url = read(config['url']);
+        if (url && !endpointId) {
+          try {
+            assertDeliverableUrl(url, { allowPrivate: this.config.webhooks.allowPrivateUrls });
+          } catch (error) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'url',
+              message:
+                error instanceof AppException ? error.message : 'That URL cannot be sent to.',
+            });
+          }
+        }
+      }
+
+      /*
        * A computed value, on a field that can hold one.
        *
        * The panel only offers "the date this rule is triggered" for a date, so
@@ -337,7 +536,20 @@ export class AutomationGraphValidatorService {
        * exactly what somebody built.
        */
       if (node.type === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
-        issues.push(...validateCondition(config, conditionFieldKind(config['field']), node.id));
+        /*
+         * A generated key's kind comes from the field's own type — and from
+         * the *live* field, so a condition about a deleted one falls to
+         * `undefined` and the shared check refuses it as no longer available,
+         * which is exactly what happened to it.
+         */
+        const conditionFieldId = customFieldConditionId(config['field']);
+        const kind = conditionFieldId
+          ? kindForCustomFieldType(
+              liveFields.has(conditionFieldId) ? fieldType.get(conditionFieldId) : undefined,
+            )
+          : conditionFieldKind(config['field']);
+
+        issues.push(...validateCondition(config, kind, node.id));
       }
     }
 
@@ -361,7 +573,20 @@ export class AutomationGraphValidatorService {
       TASK_PRIORITY_CHANGED: ['UPDATE_PRIORITY'],
       TASK_ASSIGNED: ['ASSIGN_USER'],
       TASK_MOVED_TO_SECTION: ['MOVE_TO_SECTION'],
-      TASK_UPDATED: ['UPDATE_STATUS', 'UPDATE_PRIORITY', 'ASSIGN_USER', 'SET_DUE_DATE'],
+      TASK_UPDATED: [
+        'UPDATE_STATUS',
+        'UPDATE_PRIORITY',
+        'ASSIGN_USER',
+        'UNASSIGN_USER',
+        'SET_DUE_DATE',
+        'CLEAR_DUE_DATE',
+        'SET_START_DATE',
+        'CLEAR_START_DATE',
+        'SET_ESTIMATE',
+      ],
+      TASK_DUE_DATE_CHANGED: ['SET_DUE_DATE', 'CLEAR_DUE_DATE'],
+      TASK_START_DATE_CHANGED: ['SET_START_DATE', 'CLEAR_START_DATE'],
+      TASK_ESTIMATE_CHANGED: ['SET_ESTIMATE'],
     };
 
     const risky = willRetrigger[trigger.subtype] ?? [];

@@ -22,6 +22,7 @@ import {
   ApiPaginatedEnvelopeResponse,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
 import type { PaginatedResult } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
@@ -63,6 +64,7 @@ export class TasksController {
   }
 
   @Post()
+  @Idempotent()
   @RequireWorkspaceRole(WorkspaceRole.MEMBER)
   @ApiOperation({
     summary: 'Create a task',

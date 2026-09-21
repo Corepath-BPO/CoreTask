@@ -1,10 +1,13 @@
 import {
+  CUSTOM_FIELD_KIND,
   CustomFieldType,
   FilterOperator,
   SYSTEM_FIELD_KIND,
   SystemField,
+  isRelativeDate,
   isSystemField,
   parseCustomFieldRef,
+  resolveRelativeDate,
   type FieldKind,
   type SortDirection,
 } from '@coretask/contracts';
@@ -69,10 +72,7 @@ function compileCondition(
   return compileSystemField(condition.field, condition);
 }
 
-function compileSystemField(
-  field: SystemField,
-  condition: FilterCondition,
-): Prisma.TaskWhereInput {
+function compileSystemField(field: SystemField, condition: FilterCondition): Prisma.TaskWhereInput {
   const kind = SYSTEM_FIELD_KIND[field];
   const clause = buildClause(kind, condition);
 
@@ -95,6 +95,12 @@ function compileCustomField(
   const column = VALUE_COLUMN[field.type];
   const kind = CUSTOM_FIELD_KIND[field.type];
 
+  // A formula is worked out on read and never stored, so there is no column
+  // to compare. Refused by name rather than matching nothing.
+  if (kind === null) {
+    throw AppException.badRequest('BAD_REQUEST', 'Calculated fields cannot be filtered or sorted.');
+  }
+
   if (condition.operator === FilterOperator.IS_EMPTY) {
     return {
       OR: [
@@ -114,7 +120,8 @@ function compileCustomField(
   if (column === 'optionIds' || column === 'userIds') {
     const values = toStringList(condition.value);
     const clause =
-      condition.operator === FilterOperator.NOT_IN || condition.operator === FilterOperator.NOT_EQUALS
+      condition.operator === FilterOperator.NOT_IN ||
+      condition.operator === FilterOperator.NOT_EQUALS
         ? { NOT: { [column]: { hasSome: values } } }
         : { [column]: { hasSome: values } };
 
@@ -177,6 +184,10 @@ function coerce(kind: FieldKind, value: unknown): unknown {
   if (value === null || value === undefined) return null;
 
   if (kind === 'DATE') {
+    // "@today", "@endOfWeek": resolved now, so a saved "due this week" is
+    // still this week next Monday.
+    if (isRelativeDate(value)) return resolveRelativeDate(value);
+
     const date = new Date(String(value));
     if (Number.isNaN(date.getTime())) {
       throw AppException.badRequest('BAD_REQUEST', `"${String(value)}" is not a valid date.`);
@@ -210,12 +221,7 @@ function emptyClause(column: ValueColumn): Record<string, unknown> {
 }
 
 type ValueColumn =
-  | 'textValue'
-  | 'numberValue'
-  | 'dateValue'
-  | 'booleanValue'
-  | 'optionIds'
-  | 'userIds';
+  'textValue' | 'numberValue' | 'dateValue' | 'booleanValue' | 'optionIds' | 'userIds';
 
 /** Which typed column each field type stores its value in. */
 const VALUE_COLUMN: Record<CustomFieldType, ValueColumn> = {
@@ -223,23 +229,15 @@ const VALUE_COLUMN: Record<CustomFieldType, ValueColumn> = {
   URL: 'textValue',
   EMAIL: 'textValue',
   NUMBER: 'numberValue',
+  RATING: 'numberValue',
+  // Never read: a formula is refused before the column is looked up. Listed
+  // so the map stays exhaustive over the enum.
+  FORMULA: 'numberValue',
   DATE: 'dateValue',
   CHECKBOX: 'booleanValue',
   SINGLE_SELECT: 'optionIds',
   MULTI_SELECT: 'optionIds',
   PEOPLE: 'userIds',
-};
-
-const CUSTOM_FIELD_KIND: Record<CustomFieldType, FieldKind> = {
-  TEXT: 'TEXT',
-  URL: 'TEXT',
-  EMAIL: 'TEXT',
-  NUMBER: 'NUMBER',
-  DATE: 'DATE',
-  CHECKBOX: 'BOOLEAN',
-  SINGLE_SELECT: 'ENUM',
-  MULTI_SELECT: 'ENUM',
-  PEOPLE: 'PEOPLE',
 };
 
 /**
@@ -257,6 +255,15 @@ export function compileSorts(sorts: readonly SortEntry[]): Prisma.TaskOrderByWit
   const compiled: Prisma.TaskOrderByWithRelationInput[] = [];
 
   for (const sort of sorts) {
+    // This is the legacy task-only path. A custom-field sort is served by the
+    // work-item route's ordered query; refused here by name rather than
+    // skipped, so a caller is not handed the wrong order without a word.
+    if (parseCustomFieldRef(sort.field)) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Sorting by a custom field is served by the work-items route.',
+      );
+    }
     if (!isSystemField(sort.field)) continue;
 
     const direction = sort.direction === 'DESC' ? 'desc' : 'asc';
@@ -264,5 +271,78 @@ export function compileSorts(sorts: readonly SortEntry[]): Prisma.TaskOrderByWit
   }
 
   compiled.push({ position: 'asc' }, { id: 'asc' });
+  return compiled;
+}
+
+/**
+ * The same conditions, asked of tickets.
+ *
+ * A ticket answers what it can — title, assignee, section, due date, created
+ * and updated, completion (its `resolvedAt`), reporter for "created by" — and
+ * is excluded where it cannot: a custom field it does not hold, a task status
+ * or priority vocabulary, a start date, an estimate. The one exception is
+ * `IS_EMPTY`, which every ticket satisfies for a field it does not have, so a
+ * filter for "no Severity" still lists the tickets alongside the unset tasks.
+ *
+ * Returns `'NONE'` when a condition rules every ticket out, so the caller can
+ * skip the query rather than build an impossible `where`.
+ */
+export function compileTicketFilters(
+  conditions: readonly FilterCondition[],
+  customFields: CustomFieldMap,
+): Prisma.TicketWhereInput[] | 'NONE' {
+  const compiled: Prisma.TicketWhereInput[] = [];
+
+  for (const condition of conditions) {
+    const isEmpty = condition.operator === FilterOperator.IS_EMPTY;
+    const customFieldId = parseCustomFieldRef(condition.field);
+
+    if (customFieldId) {
+      if (!customFields.has(customFieldId)) {
+        throw AppException.badRequest(
+          'BAD_REQUEST',
+          'That filter refers to a field this project does not have.',
+        );
+      }
+      if (isEmpty) continue;
+      return 'NONE';
+    }
+
+    if (!isSystemField(condition.field)) {
+      throw AppException.badRequest('BAD_REQUEST', `Cannot filter by "${condition.field}".`);
+    }
+
+    const kind = SYSTEM_FIELD_KIND[condition.field];
+
+    switch (condition.field) {
+      case SystemField.TITLE:
+      case SystemField.ASSIGNEE:
+      case SystemField.SECTION:
+      case SystemField.DUE_DATE:
+      case SystemField.CREATED_AT:
+      case SystemField.UPDATED_AT:
+        compiled.push({
+          [condition.field]: buildClause(kind, condition),
+        } as Prisma.TicketWhereInput);
+        break;
+      case SystemField.CREATED_BY:
+        compiled.push({ reporterId: buildClause(kind, condition) } as Prisma.TicketWhereInput);
+        break;
+      case SystemField.COMPLETED_AT:
+        compiled.push({ resolvedAt: buildClause(kind, condition) } as Prisma.TicketWhereInput);
+        break;
+      case SystemField.START_DATE:
+      case SystemField.ESTIMATE:
+        // Not a thing a ticket has: empty for every ticket, else none match.
+        if (!isEmpty) return 'NONE';
+        break;
+      case SystemField.STATUS:
+      case SystemField.PRIORITY:
+        // A task's vocabulary. A ticket has a status, so it is never "empty",
+        // and it is never one of the task's values either.
+        return 'NONE';
+    }
+  }
+
   return compiled;
 }

@@ -77,6 +77,13 @@ export const ApiRoutes = {
     archive: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
     restore: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/restore`,
+    /**
+     * Project-scoped, unlike the rest of this group: the parent is checked
+     * against the project in the URL before its children are read, so a task
+     * id cannot reach out of the project it was expanded in.
+     */
+    subtasks: (workspaceId: string, projectId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}/subtasks`,
   },
   /**
    * Like tasks, workspace-scoped: a ticket may have no project, and the queue
@@ -110,6 +117,9 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/tickets/${idOrKey}/attachments`,
     download: (workspaceId: string, attachmentId: string) =>
       `/workspaces/${workspaceId}/attachments/${attachmentId}/download`,
+    /** A short-lived URL that renders inline — images in a description. */
+    view: (workspaceId: string, attachmentId: string) =>
+      `/workspaces/${workspaceId}/attachments/${attachmentId}/view`,
     remove: (workspaceId: string, attachmentId: string) =>
       `/workspaces/${workspaceId}/attachments/${attachmentId}`,
   },
@@ -124,6 +134,28 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/comments/${commentId}`,
     remove: (workspaceId: string, commentId: string) =>
       `/workspaces/${workspaceId}/comments/${commentId}`,
+    /** `POST` to like, `DELETE` to take it back; both return the comment. */
+    like: (workspaceId: string, commentId: string) =>
+      `/workspaces/${workspaceId}/comments/${commentId}/like`,
+    /** `POST` to pin, `DELETE` to unpin; one pinned comment per thread. */
+    pin: (workspaceId: string, commentId: string) =>
+      `/workspaces/${workspaceId}/comments/${commentId}/pin`,
+  },
+  /**
+   * Followers hang off the item like its thread does. Removing one names the
+   * user, since "leave" and "remove someone" are the same route with a
+   * different caller.
+   */
+  followers: {
+    forTask: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/followers`,
+    /** Accepts a UUID or a human key such as `CORE-1001`. */
+    forTicket: (workspaceId: string, idOrKey: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}/followers`,
+    removeFromTask: (workspaceId: string, taskId: string, userId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/followers/${userId}`,
+    removeFromTicket: (workspaceId: string, idOrKey: string, userId: string) =>
+      `/workspaces/${workspaceId}/tickets/${idOrKey}/followers/${userId}`,
   },
   /**
    * Managing invitations is workspace-scoped, but *accepting* one cannot be:
@@ -140,8 +172,76 @@ export const ApiRoutes = {
     preview: (token: string) => `/invitations/${token}`,
     accept: (token: string) => `/invitations/${token}/accept`,
   },
+  /**
+   * A field is defined once per workspace and used by projects; the project
+   * routes read and change it *as this project uses it*, the library route
+   * reaches a definition no project holds any more.
+   */
+  customFields: {
+    forProject: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/custom-fields`,
+    forProjectField: (workspaceId: string, projectId: string, fieldId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/custom-fields/${fieldId}`,
+    attach: (workspaceId: string, projectId: string, fieldId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/custom-fields/${fieldId}/attach`,
+    options: (workspaceId: string, projectId: string, fieldId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/custom-fields/${fieldId}/options`,
+    option: (workspaceId: string, projectId: string, fieldId: string, optionId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/custom-fields/${fieldId}/options/${optionId}`,
+    /** `PUT` sets, `DELETE` clears. */
+    taskValue: (workspaceId: string, taskId: string, fieldId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`,
+    /** The definition itself — rename, re-describe, archive or restore — needing no project. */
+    libraryField: (workspaceId: string, fieldId: string) =>
+      `/workspaces/${workspaceId}/custom-fields/${fieldId}`,
+  },
+  /**
+   * Workspace API keys, nested under the workspace like invitations. `whoami`
+   * is not: a tool calls it to check its credential and learn which workspace
+   * its key belongs to, so it cannot be asked to know that first.
+   */
+  apiKeys: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/api-keys`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/api-keys`,
+    update: (workspaceId: string, apiKeyId: string) =>
+      `/workspaces/${workspaceId}/api-keys/${apiKeyId}`,
+    revoke: (workspaceId: string, apiKeyId: string) =>
+      `/workspaces/${workspaceId}/api-keys/${apiKeyId}`,
+  },
+  integration: {
+    whoami: '/integration/whoami',
+  },
+  webhooks: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
+    create: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
+    detail: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    update: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    remove: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    /** Returns the new signing secret once. */
+    rotateSecret: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}/rotate-secret`,
+    /** Queues a `ping` delivery so the receiver can be checked. */
+    test: (workspaceId: string, endpointId: string) =>
+      `/workspaces/${workspaceId}/webhooks/${endpointId}/test`,
+  },
+  /**
+   * One flat, filterable list rather than a list per endpoint: a rule can send
+   * to an ad-hoc URL, and those deliveries belong to no endpoint at all.
+   */
+  webhookDeliveries: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-deliveries`,
+    detail: (workspaceId: string, deliveryId: string) =>
+      `/workspaces/${workspaceId}/webhook-deliveries/${deliveryId}`,
+    redeliver: (workspaceId: string, deliveryId: string) =>
+      `/workspaces/${workspaceId}/webhook-deliveries/${deliveryId}/redeliver`,
+  },
   activity: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
+    /** One item's stories, newest first, by `entity`, `entityId` and a `before` cursor. */
+    forItem: (workspaceId: string) => `/workspaces/${workspaceId}/activity/item`,
   },
   notifications: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/notifications`,

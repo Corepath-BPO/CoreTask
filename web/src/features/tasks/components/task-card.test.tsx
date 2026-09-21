@@ -1,7 +1,7 @@
 import { DndContext } from '@dnd-kit/core';
 import { SortableContext } from '@dnd-kit/sortable';
 import { TaskPriority, TaskStatus } from '@coretask/contracts';
-import type { Task } from '@coretask/types';
+import type { ProjectFieldMetadata, Task } from '@coretask/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders, screen, userEvent } from '@/test/test-utils';
@@ -20,7 +20,9 @@ const baseTask: Task = {
   priority: TaskPriority.HIGH,
   position: 1000,
   startDate: null,
+  startAt: null,
   dueDate: null,
+  dueAt: null,
   completedAt: null,
   archivedAt: null,
   estimatedMinutes: null,
@@ -29,6 +31,8 @@ const baseTask: Task = {
   createdById: 'u',
   subtaskCount: 0,
   completedSubtaskCount: 0,
+  commentCount: 0,
+  attachmentCount: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -128,5 +132,81 @@ describe('TaskCard', () => {
     });
 
     expect(screen.getByText('MO')).toBeInTheDocument();
+  });
+
+  it('draws the chosen card fields as label and value lines', () => {
+    const metadata = {
+      customFields: [
+        {
+          id: 'f-sev',
+          projectId: 'p',
+          name: 'Severity',
+          description: null,
+          type: 'SINGLE_SELECT',
+          isRequired: false,
+          notifyOnChange: false,
+          isArchived: false,
+          position: 1,
+          settings: {},
+          options: [
+            {
+              id: 'o-high',
+              label: 'High',
+              colorToken: 'red',
+              customColor: null,
+              position: 1,
+              isArchived: false,
+            },
+          ],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      statuses: [],
+      priorities: [],
+      sections: [],
+      members: [],
+    } as unknown as ProjectFieldMetadata;
+    const task = {
+      ...baseTask,
+      // No priority badge, so "High" below is the field's chip alone.
+      priority: TaskPriority.NONE,
+      estimatedMinutes: 90,
+      customFieldValues: [
+        {
+          customFieldId: 'f-sev',
+          text: null,
+          number: null,
+          date: null,
+          checkbox: null,
+          optionIds: ['o-high'],
+          userIds: [],
+        },
+      ],
+    } as Task;
+
+    renderWithProviders(
+      <DndContext>
+        <SortableContext items={[task.id]}>
+          <TaskCard
+            task={task}
+            onOpen={vi.fn()}
+            cardFields={['estimatedMinutes', 'custom:f-sev']}
+            metadata={metadata}
+          />
+        </SortableContext>
+      </DndContext>,
+    );
+
+    expect(screen.getByText('Estimate')).toBeInTheDocument();
+    expect(screen.getByText('90m')).toBeInTheDocument();
+    expect(screen.getByText('Severity')).toBeInTheDocument();
+    expect(screen.getByText('High')).toBeInTheDocument();
+  });
+
+  it('shows no card fields when none are chosen', () => {
+    renderCard();
+
+    expect(screen.queryByText('Estimate')).not.toBeInTheDocument();
   });
 });

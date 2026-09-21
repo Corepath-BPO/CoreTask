@@ -14,6 +14,14 @@ import { useRef, useState } from 'react';
 export function useCellEditor<T>(
   initial: T,
   onCommit: (value: T) => void,
+  options: {
+    /**
+     * Opens in the editing state: the bulk bar's field editor has no
+     * "read" mode to click out of, so the picker is already open when
+     * it mounts.
+     */
+    initiallyEditing?: boolean;
+  } = {},
 ): {
   editing: boolean;
   draft: T;
@@ -23,7 +31,7 @@ export function useCellEditor<T>(
   cancel: () => void;
   onKeyDown: (event: React.KeyboardEvent) => void;
 } {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(options.initiallyEditing ?? false);
   const [draft, setDraft] = useState<T>(initial);
   // What the cell opened with, so Escape has something true to return to.
   const opened = useRef<T>(initial);

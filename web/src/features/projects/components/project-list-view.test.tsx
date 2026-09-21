@@ -20,7 +20,9 @@ const task = (overrides: Partial<Task> = {}): Task =>
     priority: TaskPriority.MEDIUM,
     position: 1,
     startDate: null,
+    startAt: null,
     dueDate: null,
+    dueAt: null,
     completedAt: null,
     archivedAt: null,
     estimatedMinutes: null,
@@ -29,6 +31,8 @@ const task = (overrides: Partial<Task> = {}): Task =>
     createdById: 'u-1',
     subtaskCount: 0,
     completedSubtaskCount: 0,
+    commentCount: 0,
+    attachmentCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -226,16 +230,24 @@ describe('editable cells', () => {
     expect(screen.queryByRole('button', { name: /Due date/ })).not.toBeInTheDocument();
   });
 
-  it('sends a due date to the API as ISO, not as the input’s yyyy-mm-dd', () => {
+  it('sends a picked day to the API as an ISO calendar date, with no time', async () => {
     const onSave = vi.fn();
     render(<DueDateCell {...cellProps} task={task()} onSave={onSave} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Due date for "Ship the grid"' }));
-    const input = screen.getByLabelText('Due date for "Ship the grid"');
-    fireEvent.change(input, { target: { value: '2026-04-09' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(onSave).toHaveBeenCalledWith({ dueDate: '2026-04-09T00:00:00.000Z' });
+    // The picker opens on the current month; today is always on it.
+    const today = new Date();
+    const label = new Intl.DateTimeFormat('en', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(today);
+    fireEvent.click(await screen.findByRole('button', { name: label }));
+
+    const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    expect(onSave).toHaveBeenCalledWith({ dueDate: `${ymd}T00:00:00.000Z`, dueAt: null });
   });
 });
 

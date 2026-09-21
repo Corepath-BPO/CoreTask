@@ -1,3 +1,4 @@
+import { rulesForSection } from '@coretask/contracts';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -19,8 +20,6 @@ export const automationKeys = {
     ['automations', workspaceId, projectId, ruleId, 'graph'] as const,
   metadata: (workspaceId: string, projectId: string) =>
     ['automations', workspaceId, projectId, 'metadata'] as const,
-  forSection: (workspaceId: string, projectId: string, sectionId: string) =>
-    ['automations', workspaceId, projectId, 'section', sectionId] as const,
   executions: (workspaceId: string, projectId: string, ruleId: string) =>
     ['automations', workspaceId, projectId, ruleId, 'executions'] as const,
 };
@@ -28,7 +27,8 @@ export const automationKeys = {
 /** Kept for the call sites in this file. */
 const keys = automationKeys;
 
-function reportError(error: unknown, fallback: string) {
+/** Exported for the rule library's hooks, which answer the same API in the same words. */
+export function reportRuleError(error: unknown, fallback: string) {
   /*
    * Publish failures carry a list of problems, and that list is the whole
    * value of the response — "This rule is not ready" alone tells someone
@@ -57,19 +57,30 @@ export function useAutomations(workspaceId: string | undefined, projectId: strin
   });
 }
 
-/** The rules attached to one section, for the lightning popover. */
+/**
+ * The rules that belong under one section, for the lightning popover.
+ *
+ * A view of the project's rules rather than a request of its own. It used to
+ * hit `?sectionId=` once the popover opened, which meant the icon could not
+ * know whether the section had rules until somebody clicked it — every
+ * lightning sat grey, including on sections with rules — and a board of
+ * twelve sections would have cost twelve requests to find out. One project
+ * query, shared with the rule list through the same key, answers all of them
+ * on first paint, and a save on the builder refreshes every section at once.
+ *
+ * Filtered by the same helper the endpoint uses, so the popover and
+ * `?sectionId=` cannot list different rules.
+ */
 export function useSectionAutomations(
   workspaceId: string | undefined,
   projectId: string,
   sectionId: string,
-  enabled = true,
 ) {
   return useQuery({
-    queryKey: keys.forSection(workspaceId ?? '', projectId, sectionId),
-    queryFn: () => automationsApi.list(workspaceId as string, projectId, sectionId),
-    // Fetched only when the popover opens. A board with twelve sections would
-    // otherwise fire twelve requests nobody asked for on every render.
-    enabled: Boolean(workspaceId) && enabled,
+    queryKey: keys.all(workspaceId ?? '', projectId),
+    queryFn: () => automationsApi.list(workspaceId as string, projectId),
+    select: (rules) => rulesForSection(rules, sectionId),
+    enabled: Boolean(workspaceId),
   });
 }
 
@@ -99,7 +110,7 @@ function useRuleMutation<TArgs>(
       if (success) toast.success(success);
       await queryClient.invalidateQueries({ queryKey: ['automations', workspaceId, projectId] });
     },
-    onError: (error) => reportError(error, failure),
+    onError: (error) => reportRuleError(error, failure),
   });
 }
 
@@ -148,7 +159,7 @@ export function useRemoveRule(workspaceId: string | undefined, projectId: string
       toast.success(result.archived ? 'Rule archived.' : 'Draft deleted.');
       await queryClient.invalidateQueries({ queryKey: ['automations', workspaceId, projectId] });
     },
-    onError: (error) => reportError(error, 'Could not remove that rule.'),
+    onError: (error) => reportRuleError(error, 'Could not remove that rule.'),
   });
 }
 
@@ -159,6 +170,6 @@ export function useCreateRule(workspaceId: string | undefined, projectId: string
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['automations', workspaceId, projectId] });
     },
-    onError: (error) => reportError(error, 'Could not create that rule.'),
+    onError: (error) => reportRuleError(error, 'Could not create that rule.'),
   });
 }

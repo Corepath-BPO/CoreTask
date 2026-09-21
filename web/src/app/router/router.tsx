@@ -10,6 +10,10 @@ import { RegisterPage } from '@/features/auth/pages/register-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
+import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
+import { IntegrationsPage } from '@/features/integrations/pages/integrations-page';
+import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
+import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
@@ -230,12 +234,21 @@ const myTasksRoute = createRoute({
   path: '/my-tasks',
   component: MyTasksPage,
   // Notifications link here with `?task=`, so the entry opens the thing it is
-  // about rather than dropping the reader on a list to find it themselves.
-  validateSearch: (search: Record<string, unknown>): { task?: string } => {
+  // about rather than dropping the reader on a list to find it themselves —
+  // and with `&comment=` when it is about one comment, which the thread then
+  // scrolls to.
+  validateSearch: (search: Record<string, unknown>): { task?: string; comment?: string } => {
     const task = search['task'];
-    return typeof task === 'string' && UUID_PATTERN.test(task) ? { task } : {};
+    if (typeof task !== 'string' || !UUID_PATTERN.test(task)) return {};
+    return { task, ...commentSearch(search) };
   },
 });
+
+/** `?comment=<uuid>`, only ever beside the item it belongs to. */
+function commentSearch(search: Record<string, unknown>): { comment?: string } {
+  const comment = search['comment'];
+  return typeof comment === 'string' && UUID_PATTERN.test(comment) ? { comment } : {};
+}
 
 const ticketsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -243,9 +256,10 @@ const ticketsRoute = createRoute({
   component: TicketsPage,
   // Same as My Tasks, but keyed by the human ticket key — that is what appears
   // in the notification and what somebody would paste to a colleague.
-  validateSearch: (search: Record<string, unknown>): { ticket?: string } => {
+  validateSearch: (search: Record<string, unknown>): { ticket?: string; comment?: string } => {
     const ticket = search['ticket'];
-    return typeof ticket === 'string' && /^[A-Z]{2,8}-\d+$/i.test(ticket) ? { ticket } : {};
+    if (typeof ticket !== 'string' || !/^[A-Z]{2,8}-\d+$/i.test(ticket)) return {};
+    return { ticket, ...commentSearch(search) };
   },
 });
 
@@ -265,6 +279,43 @@ const teamsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/teams',
   component: TeamsPage,
+});
+
+/**
+ * Integrations is a shell with tabs, like a project: the shell owns the header
+ * and the admin gate, the tabs are routes so a URL names one of them.
+ */
+const integrationsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/integrations',
+  component: IntegrationsPage,
+});
+
+/** Bare `/integrations` opens the first tab. */
+const integrationsIndexRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/',
+  beforeLoad: () => {
+    throw redirect({ to: '/integrations/api-keys' });
+  },
+});
+
+const integrationsApiKeysRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/api-keys',
+  component: ApiKeysPage,
+});
+
+const integrationsWebhooksRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/webhooks',
+  component: WebhooksPage,
+});
+
+const integrationsPlaygroundRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/playground',
+  component: PlaygroundPage,
 });
 
 /**
@@ -298,15 +349,31 @@ const acceptInvitationRoute = createRoute({
  * task link is the more specific intent — so in a hand-built URL naming both,
  * the task wins and `customize` is dropped.
  */
-export function validateProjectDetailSearch(
-  search: Record<string, unknown>,
-): { task?: string; customize?: boolean } {
+export function validateProjectDetailSearch(search: Record<string, unknown>): {
+  task?: string;
+  comment?: string;
+  customize?: boolean;
+  view?: string;
+  section?: string;
+} {
   const task = search['task'];
   const validTask = typeof task === 'string' && UUID_PATTERN.test(task) ? task : undefined;
   const customize = search['customize'] === true || search['customize'] === 'true';
+  // Which saved view is open — a personal view lands here after "Save as my
+  // view", and the link keeps it. Independent of the panel and the drawer.
+  const view = search['view'];
+  const validView = typeof view === 'string' && UUID_PATTERN.test(view) ? view : undefined;
+  // The selected section. Clicking a header puts its id here so it can be read
+  // off the address bar the way a task's can — what an n8n flow needs to file
+  // work into it — and a link carrying it lands on that section.
+  const section = search['section'];
+  const validSection =
+    typeof section === 'string' && UUID_PATTERN.test(section) ? section : undefined;
   return {
-    ...(validTask ? { task: validTask } : {}),
+    ...(validTask ? { task: validTask, ...commentSearch(search) } : {}),
     ...(customize && !validTask ? { customize: true } : {}),
+    ...(validView ? { view: validView } : {}),
+    ...(validSection ? { section: validSection } : {}),
   };
 }
 
@@ -387,24 +454,39 @@ const projectAutomationsRoute = createRoute({
  *
  * `?sectionId=` is what makes this different from an empty canvas: it arrives
  * from a section's lightning menu and the builder opens with "when a task moves
- * here" already answered, because the click said so.
+ * here" already answered, because the click said so. `?starter=` is the other
+ * way in — a starter chosen in the rule library, which the builder opens
+ * already shaped, with its blanks left to fill.
  */
 const projectAutomationNewRoute = createRoute({
   getParentRoute: () => projectDetailRoute,
   path: '/automations/new',
-  validateSearch: (search: Record<string, unknown>): { sectionId?: string } =>
-    typeof search['sectionId'] === 'string' && UUID_PATTERN.test(search['sectionId'])
+  validateSearch: (search: Record<string, unknown>): { sectionId?: string; starter?: string } => ({
+    ...(typeof search['sectionId'] === 'string' && UUID_PATTERN.test(search['sectionId'])
       ? { sectionId: search['sectionId'] }
-      : {},
+      : {}),
+    // Only the shape is checked here; the builder opens blank on a key it does
+    // not know, so an old link cannot break the page.
+    ...(typeof search['starter'] === 'string' && /^[a-z0-9-]{1,40}$/.test(search['starter'])
+      ? { starter: search['starter'] }
+      : {}),
+  }),
   component: function AutomationNewRoute() {
     const { projectId } = projectAutomationNewRoute.useParams();
-    const { sectionId } = projectAutomationNewRoute.useSearch();
+    const { sectionId, starter } = projectAutomationNewRoute.useSearch();
 
+    /*
+     * Keyed on what shapes the canvas. A starter chosen from inside the
+     * builder changes only the search, and a page that kept its state would
+     * keep drawing the rule it opened with rather than the one just picked.
+     */
     return (
       <AutomationBuilderDialog
+        key={`${starter ?? ''}:${sectionId ?? ''}`}
         projectId={projectId}
         ruleId={null}
         {...(sectionId ? { sectionId } : {})}
+        {...(starter ? { starter } : {})}
       />
     );
   },
@@ -499,6 +581,12 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     membersRoute,
     teamsRoute,
+    integrationsRoute.addChildren([
+      integrationsIndexRoute,
+      integrationsApiKeysRoute,
+      integrationsWebhooksRoute,
+      integrationsPlaygroundRoute,
+    ]),
     calendarRoute,
     reportsRoute,
     settingsRoute,

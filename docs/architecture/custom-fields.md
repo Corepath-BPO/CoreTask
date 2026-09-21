@@ -129,9 +129,12 @@ choice.
 - **The legacy enums are still authoritative.** `Task.status` and
   `Task.priority` remain `TaskStatus`/`TaskPriority`; the definition FKs shadow
   them. See [the migration note](../database/project-view-migration.md).
-- **Future field types** (`CURRENCY`, `RATING`, `FORMULA`, `RELATION`, `ROLLUP`)
-  are named in the spec and deliberately absent from the enum until implemented.
-  A type that only creates a name would lose the values people put in it.
+- **Future field types** (`RELATION`, `ROLLUP`) are named in the spec and
+  deliberately absent from the enum until implemented. A type that only creates
+  a name would lose the values people put in it. `RATING` and `FORMULA` landed
+  on 2026-09-10; a currency is a `NUMBER` display format rather than a type.
+- **Formulas are not filterable or sortable.** They are worked out on read and
+  never stored — see [ADR 0015](../decisions/0015-formula-fields-computed-on-read.md).
 - **Field names are not unique within a workspace.** Two projects may legitimately
   have kept separate fields that share a name; the picker surfaces the existing
   one rather than a constraint refusing the second. See

@@ -5,7 +5,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useAuthStore } from '@/stores/auth.store';
+
+import { useCommentDraftStore } from '../stores/comment-draft.store';
 
 import { CommentThread } from './comment-thread';
 
@@ -22,6 +25,61 @@ vi.mock('../api/comments.api', () => ({
     remove: (...args: unknown[]) => remove(...args),
   },
 }));
+
+// The item's stories are a separate feed; these tests are about the thread.
+vi.mock('@/features/activity/api/activity.api', () => ({
+  activityApi: { forItem: () => Promise.resolve({ items: [], nextCursor: null }) },
+}));
+
+/*
+ * A textarea standing in for the Tiptap composer. The editor has its own
+ * tests; here the thread is what is under test — what it posts, when it
+ * clears, what it keeps — and a contenteditable under jsdom would make every
+ * one of those about ProseMirror instead.
+ */
+vi.mock('./comment-composer', async () => {
+  const React = await import('react');
+  return {
+    CommentComposer: ({
+      label,
+      initialValue,
+      onChange,
+      onSubmit,
+      disabled,
+      ref,
+    }: {
+      label: string;
+      initialValue?: string | null;
+      onChange: (html: string | null) => void;
+      onSubmit: () => void;
+      disabled?: boolean;
+      ref?: React.Ref<{ focus(): void; clear(): void }>;
+    }) => {
+      const [value, setValue] = React.useState(initialValue ?? '');
+      React.useImperativeHandle(ref, () => ({
+        focus: () => undefined,
+        clear: () => {
+          setValue('');
+          onChange(null);
+        },
+      }));
+      return (
+        <textarea
+          aria-label={label}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => {
+            setValue(event.target.value);
+            onChange(event.target.value.trim() ? event.target.value : null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && event.ctrlKey) onSubmit();
+          }}
+        />
+      );
+    },
+  };
+});
 
 const ME = '019fc880-0000-7000-8000-00000000aaaa';
 const SOMEONE_ELSE = '019fc880-0000-7000-8000-00000000bbbb';
@@ -62,6 +120,12 @@ function comment(overrides: Partial<Comment> = {}): Comment {
     ticketId: null,
     editedAt: null,
     mentions: [],
+    attachments: [],
+    likeCount: 0,
+    likedByMe: false,
+    likedBy: [],
+    pinnedAt: null,
+    pinnedBy: null,
     createdAt: '2026-08-01T10:00:00.000Z',
     updatedAt: '2026-08-01T10:00:00.000Z',
     ...overrides,
@@ -73,11 +137,14 @@ function renderThread(role: WorkspaceRole = WorkspaceRole.MEMBER) {
 
   return render(
     <QueryClientProvider client={client}>
-      <CommentThread
-        workspaceId={WORKSPACE}
-        parent={{ kind: 'task', id: '019fc880-0000-7000-8000-00000000t001' }}
-        role={role}
-      />
+      {/* The like button's tooltip needs the provider the app shell gives it. */}
+      <TooltipProvider>
+        <CommentThread
+          workspaceId={WORKSPACE}
+          parent={{ kind: 'task', id: '019fc880-0000-7000-8000-00000000t001' }}
+          role={role}
+        />
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -89,7 +156,20 @@ describe('CommentThread', () => {
     update.mockReset();
     remove.mockReset();
 
-    list.mockResolvedValue({ items: [], meta: { page: 1, limit: 50, total: 0, totalPages: 0 } });
+    list.mockResolvedValue({
+      items: [],
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 0,
+        totalPages: 0,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
+    });
+    // Drafts outlive a closed panel by design — and a test, unless cleared.
+    useCommentDraftStore.setState({ drafts: {} });
     useAuthStore.setState({
       status: 'authenticated',
       user: {
@@ -112,7 +192,15 @@ describe('CommentThread', () => {
   it('shows each comment with its author', async () => {
     list.mockResolvedValue({
       items: [comment(), comment({ id: 'c2', body: 'Second', createdAt: '2026-08-01T11:00:00Z' })],
-      meta: { page: 1, limit: 50, total: 2, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 2,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();
@@ -125,7 +213,15 @@ describe('CommentThread', () => {
   it('marks an edited comment', async () => {
     list.mockResolvedValue({
       items: [comment({ editedAt: '2026-08-01T12:00:00.000Z' })],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();
@@ -179,7 +275,15 @@ describe('CommentThread', () => {
   it('offers edit and delete on your own comment', async () => {
     list.mockResolvedValue({
       items: [comment()],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();
@@ -201,7 +305,15 @@ describe('CommentThread', () => {
           },
         }),
       ],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread(WorkspaceRole.MEMBER);
@@ -225,7 +337,15 @@ describe('CommentThread', () => {
           },
         }),
       ],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread(WorkspaceRole.MANAGER);
@@ -239,7 +359,15 @@ describe('CommentThread', () => {
   it('hides the composer from a guest but still shows the thread', async () => {
     list.mockResolvedValue({
       items: [comment()],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread(WorkspaceRole.GUEST);
@@ -252,7 +380,15 @@ describe('CommentThread', () => {
     const user = userEvent.setup();
     list.mockResolvedValue({
       items: [comment()],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
     update.mockResolvedValue(comment({ body: 'Revised', editedAt: '2026-08-01T12:00:00Z' }));
 
@@ -273,7 +409,15 @@ describe('CommentThread', () => {
     const user = userEvent.setup();
     list.mockResolvedValue({
       items: [comment()],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();
@@ -290,7 +434,15 @@ describe('CommentThread', () => {
     const user = userEvent.setup();
     list.mockResolvedValue({
       items: [comment()],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();
@@ -308,7 +460,15 @@ describe('CommentThread', () => {
   it('survives an author whose account has been removed', async () => {
     list.mockResolvedValue({
       items: [comment({ author: null, authorId: SOMEONE_ELSE })],
-      meta: { page: 1, limit: 50, total: 1, totalPages: 1 },
+      meta: {
+        page: 1,
+        limit: 50,
+        total: 1,
+        totalPages: 1,
+        hasEarlier: false,
+        earliestId: null,
+        pinnedCommentId: null,
+      },
     });
 
     renderThread();

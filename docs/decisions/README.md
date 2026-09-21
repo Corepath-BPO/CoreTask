@@ -22,6 +22,8 @@ the original choice made sense at the time.
 | [0011](0011-automation-loop-prevention.md)         | Automation loop prevention                      | Accepted |
 | [0012](0012-semantic-colour-tokens.md)             | Semantic colour tokens, not CSS classes         | Accepted |
 | [0013](0013-automation-node-tree.md)               | A node tree for automation rules                | Accepted |
+| [0014](0014-stories-are-filed-under-the-item.md)   | Stories are filed under the item                | Accepted |
+| [0015](0015-formula-fields-computed-on-read.md)    | Formula fields are computed on read             | Accepted |
 
 ## Template
 

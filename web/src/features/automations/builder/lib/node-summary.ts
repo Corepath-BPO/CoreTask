@@ -6,6 +6,8 @@ import {
   isFallbackBranch,
   isTokenValue,
   operatorNeedsValue,
+  subtaskProblems,
+  subtaskTitles,
   toFilterOperator,
   type AutomationAction,
   type AutomationNodeType,
@@ -15,6 +17,7 @@ import {
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
+import { customFieldSetVerb } from '../configuration/condition-value';
 import { readTriggerSections } from '../configuration/trigger-forms';
 
 import { isUnansweredRow, type CanvasNode } from './graph-edits';
@@ -27,9 +30,9 @@ import { isUnansweredRow, type CanvasNode } from './graph-edits';
  * card claims the opposite of the rule.
  */
 const TRIGGER_FORM_VERB: Readonly<Record<string, string>> = {
-  SECTION_CHANGED_TO: '-',
-  SECTION_CHANGED_TO_NOT: '- not',
-  SECTION_CHANGED_TO_ANY_OF: '- one of',
+  SECTION_CHANGED_TO: '—',
+  SECTION_CHANGED_TO_NOT: '— not',
+  SECTION_CHANGED_TO_ANY_OF: '— one of',
 };
 
 /**
@@ -48,6 +51,17 @@ export interface SummarySegment {
   text: string;
   /** Rendered as a token on the card: the value, not the sentence around it. */
   chip?: boolean;
+  /** The value's own colour, where it has one — the chip tints to match the
+      board rather than reading as a different value in grey. */
+  colorToken?: string;
+  /**
+   * A chip standing in for an answer nobody has given — "Unspecified".
+   *
+   * Drawn dashed, because a solid chip says the rule holds this value and a
+   * dashed one says the rule is waiting for it. The words alone cannot carry
+   * that: a field really could be set to an option named "Unspecified".
+   */
+  placeholder?: boolean;
 }
 
 /**
@@ -140,6 +154,16 @@ export function summariseParts(
 
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
 
+      // Narrowed to one field, the card names it; unnarrowed, the generic
+      // label already says "a custom field" and there is nothing to add.
+      if (node.subtype === 'CUSTOM_FIELD_CHANGED' && config['fieldId']) {
+        return [
+          { text: 'When' },
+          { text: name(metadata?.customFields, config['fieldId'], 'any custom field'), chip: true },
+          { text: 'changes' },
+        ];
+      }
+
       /*
        * The card says what was chosen, not just what kind of trigger it is.
        *
@@ -157,7 +181,7 @@ export function summariseParts(
       const named = sections.map((id) => name(metadata?.sections, id, 'any section'));
 
       // The form's own words, so "is not" does not read as "is" with a list.
-      const verb = TRIGGER_FORM_VERB[form] ?? '-';
+      const verb = TRIGGER_FORM_VERB[form] ?? '—';
 
       return [{ text: label }, { text: verb }, { text: named.join(', '), chip: true }];
     }
@@ -196,7 +220,7 @@ export function summariseParts(
       const parts = conditionSummary(config, metadata);
 
       return parts.length === 1 && parts[0]!.text === 'Choose what to check'
-        ? [{ text: 'Split on: choose what to check' }]
+        ? [{ text: 'Split on — choose what to check' }]
         : parts;
     }
 
@@ -259,20 +283,37 @@ function conditionSummary(
    * the card is somebody believing their rule checks two sections when it
    * checks three.
    */
+  // A select-type custom field reads "is set to", the words the panel offers
+  // for it — one sentence, wherever it is printed.
+  const verb = customFieldSetVerb(definition, operator) ?? conditionVerb(operator);
+
+  /*
+   * An answer nobody has given yet is a dashed "Unspecified" chip.
+   *
+   * The sentence keeps its shape — "Outcome is set to ⟨Unspecified⟩" — so the
+   * card reads as the rule it will be rather than as a fragment, and the dash
+   * marks the gap as a gap instead of as a value.
+   */
+  const unspecified: SummarySegment = { text: 'Unspecified', chip: true, placeholder: true };
+
   if (Array.isArray(raw)) {
     const chips = raw
       .filter((entry): entry is string => typeof entry === 'string' && entry !== '')
-      .map((entry) => ({
-        text:
-          definition?.options?.find((option) => option.value === entry)?.label ??
-          readableValue(entry),
-        chip: true,
-      }));
+      .map((entry) => {
+        const option = definition?.options?.find((candidate) => candidate.value === entry);
 
-    return [
-      { text: `${label} ${conditionVerb(operator)}` },
-      ...(chips.length > 0 ? chips : [{ text: '…', chip: true }]),
-    ];
+        return {
+          text: option?.label ?? readableValue(entry),
+          chip: true,
+          ...(option?.colorToken ? { colorToken: option.colorToken } : {}),
+        };
+      });
+
+    return [{ text: `${label} ${verb}` }, ...(chips.length > 0 ? chips : [unspecified])];
+  }
+
+  if (raw === undefined || raw === null || raw === '') {
+    return [{ text: `${label} ${verb}` }, unspecified];
   }
 
   const option = definition?.options?.find((entry) => entry.value === raw);
@@ -288,7 +329,10 @@ function conditionSummary(
    */
   const value = option?.label ?? readableValue(raw);
 
-  return [{ text: `${label} ${conditionVerb(operator)}` }, { text: value, chip: true }];
+  return [
+    { text: `${label} ${verb}` },
+    { text: value, chip: true, ...(option?.colorToken ? { colorToken: option.colorToken } : {}) },
+  ];
 }
 
 /**
@@ -379,32 +423,74 @@ function actionSummary(
       const who = person(config['userId']);
       return who
         ? [{ text: 'Assign to' }, { text: who, chip: true }]
-        : [{ text: 'Assign: choose somebody' }];
+        : [{ text: 'Assign — choose somebody' }];
     }
 
     case 'MOVE_TO_SECTION': {
       const where = section(config['sectionId']);
       return where
         ? [{ text: 'Move to' }, { text: where, chip: true }]
-        : [{ text: 'Move: choose a section' }];
+        : [{ text: 'Move — choose a section' }];
+    }
+
+    // The project, and the section within it when one was chosen. The
+    // section is looked up in *that* project's list, not this one's.
+    case 'MOVE_TO_PROJECT': {
+      const projectId = config['projectId'];
+      if (typeof projectId !== 'string' || projectId === '') {
+        return [{ text: 'Move — choose a project' }];
+      }
+
+      const project = (metadata?.projects ?? []).find((entry) => entry.id === projectId);
+      if (!project)
+        return [{ text: 'Move to' }, { text: 'a project that was removed', chip: true }];
+
+      const where = project.sections.find((entry) => entry.id === config['targetSectionId']);
+      return [
+        { text: 'Move to' },
+        { text: project.name, chip: true },
+        ...(where ? [{ text: '›' }, { text: where.name, chip: true }] : []),
+      ];
+    }
+
+    // A day count reads as one; the card says when, not that a date is set.
+    case 'SET_DUE_DATE':
+    case 'SET_START_DATE': {
+      const days = Number(config['daysFromNow'] ?? 0);
+      const what = subtype === 'SET_DUE_DATE' ? 'due date' : 'start date';
+      const when = days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`;
+      return [{ text: `Set ${what} to` }, { text: when, chip: true }];
+    }
+
+    case 'SET_ESTIMATE': {
+      const minutes = config['minutes'];
+      return typeof minutes === 'number' || (typeof minutes === 'string' && minutes !== '')
+        ? [{ text: 'Set estimate to' }, { text: `${minutes} min`, chip: true }]
+        : [{ text: 'Set estimate — enter the minutes' }];
     }
 
     case 'UPDATE_STATUS': {
       // Canonical first, then the name this used to be written under, so a
       // rule saved before the two sides agreed still reads as itself.
       const status = config['status'] ?? config['statusDefinitionId'];
-      const found = metadata?.statuses.find((entry) => entry.id === status)?.name;
+      const found = metadata?.statuses.find((entry) => entry.id === status);
       return found
-        ? [{ text: 'Set status to' }, { text: found, chip: true }]
-        : [{ text: 'Set status: choose one' }];
+        ? [
+            { text: 'Set status to' },
+            { text: found.name, chip: true, colorToken: found.colorToken },
+          ]
+        : [{ text: 'Set status — choose one' }];
     }
 
     case 'UPDATE_PRIORITY': {
       const priority = config['priority'] ?? config['priorityDefinitionId'];
-      const found = metadata?.priorities.find((entry) => entry.id === priority)?.name;
+      const found = metadata?.priorities.find((entry) => entry.id === priority);
       return found
-        ? [{ text: 'Set priority to' }, { text: found, chip: true }]
-        : [{ text: 'Set priority: choose one' }];
+        ? [
+            { text: 'Set priority to' },
+            { text: found.name, chip: true, colorToken: found.colorToken },
+          ]
+        : [{ text: 'Set priority — choose one' }];
     }
 
     case 'SET_CUSTOM_FIELD': {
@@ -419,7 +505,7 @@ function actionSummary(
       const fieldId = config['fieldId'] ?? config['customFieldId'];
       const field = metadata?.customFields.find((entry) => entry.id === fieldId);
 
-      if (!field) return [{ text: 'Set a field: choose one' }];
+      if (!field) return [{ text: 'Set a field — choose one' }];
 
       const raw = config['value'];
 
@@ -444,9 +530,21 @@ function actionSummary(
         (value) => field.options?.find((option) => option.id === value)?.label ?? value,
       );
 
-      if (shown.length === 0) return [{ text: `Set ${field.name}: choose a value` }];
+      if (shown.length === 0) return [{ text: `Set ${field.name} — choose a value` }];
 
-      return [{ text: `Set ${field.name} to` }, { text: shown.join(', '), chip: true }];
+      // One chosen option carries its own colour; a joined list of several does
+      // not, because one chip cannot honestly wear three colours.
+      const single =
+        chosen.length === 1 ? field.options?.find((option) => option.id === chosen[0]) : undefined;
+
+      return [
+        { text: `Set ${field.name} to` },
+        {
+          text: shown.join(', '),
+          chip: true,
+          ...(single?.colorToken ? { colorToken: single.colorToken } : {}),
+        },
+      ];
     }
 
     case 'ADD_COMMENT': {
@@ -456,7 +554,39 @@ function actionSummary(
             { text: 'Comment:' },
             { text: `“${body.slice(0, 40)}${body.length > 40 ? '…' : ''}”`, chip: true },
           ]
-        : [{ text: 'Comment: write what it says' }];
+        : [{ text: 'Comment — write what it says' }];
+    }
+
+    case 'SEND_WEBHOOK': {
+      const endpointId = config['endpointId'];
+      const url = config['url'];
+
+      if (typeof endpointId === 'string' && endpointId !== '') {
+        const endpoint = (metadata?.webhookEndpoints ?? []).find(
+          (entry) => entry.id === endpointId,
+        );
+        return [
+          { text: 'Send a webhook to' },
+          { text: endpoint?.name ?? 'an endpoint that was removed', chip: true },
+        ];
+      }
+      if (typeof url === 'string' && url.trim() !== '') {
+        // The host, not the whole URL: a path token is nobody's business on a card.
+        return [{ text: 'Send a webhook to' }, { text: hostOf(url), chip: true }];
+      }
+      return [{ text: 'Send a webhook — choose where' }];
+    }
+
+    case 'CREATE_SUBTASK': {
+      // The count rather than the titles: three titles on a card is a
+      // paragraph, and the panel is one click away for anyone who wants them.
+      const titles = subtaskTitles(config);
+      return titles.length === 0
+        ? [{ text: 'Create subtasks — add at least one' }]
+        : [
+            { text: 'Create subtasks' },
+            { text: `${titles.length} subtask${titles.length === 1 ? '' : 's'}`, chip: true },
+          ];
     }
 
     default:
@@ -515,13 +645,33 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return !has('userId');
     case 'MOVE_TO_SECTION':
       return !has('sectionId');
+    // The section is optional — the project's first stands in — so the
+    // project alone decides whether the step is answered.
+    case 'MOVE_TO_PROJECT':
+      return !has('projectId');
     case 'UPDATE_STATUS':
       return !has('statusDefinitionId') && !has('status');
     case 'UPDATE_PRIORITY':
       return !has('priorityDefinitionId') && !has('priority');
     case 'ADD_COMMENT':
       return !has('body');
+    case 'SEND_WEBHOOK':
+      // Either destination will do; a step naming neither has nowhere to send.
+      return !has('endpointId') && !has('url');
+    case 'CREATE_SUBTASK':
+      // No titles, or a row still waiting for its date: a step that reads as
+      // ready and would create something other than what it says.
+      return subtaskTitles(config).length === 0 || subtaskProblems(config).length > 0;
     default:
       return false;
+  }
+}
+
+/** The host of a URL, or the text itself while somebody is still typing it. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }

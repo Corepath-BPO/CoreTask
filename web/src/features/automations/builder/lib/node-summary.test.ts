@@ -19,10 +19,19 @@ const metadata = {
     { field: 'dueDate', label: 'Due date', valueKind: 'DATE' as const },
   ],
   sections: [{ id: 'sec-1', name: 'Incoming Request' }],
+  projects: [
+    {
+      id: 'proj-2',
+      name: 'Renewals',
+      color: '#a855f7',
+      sections: [{ id: 'sec-9', name: 'Notify Tenant' }],
+    },
+  ],
   statuses: [{ id: 'st-1', name: 'In Progress', colorToken: 'blue' }],
   priorities: [{ id: 'pr-1', name: 'High', colorToken: 'orange' }],
   members: [{ id: 'u-1', name: 'Maya Okafor', email: 'maya@example.com', avatarUrl: null }],
   customFields: [],
+  webhookEndpoints: [{ id: 'wh-1', name: 'n8n', host: 'n8n.example.com', enabled: true }],
 } as AutomationMetadata;
 
 const node = (over: Partial<CanvasNode>): CanvasNode =>
@@ -76,7 +85,25 @@ describe('what a node says', () => {
   });
 
   it('asks for what is missing rather than showing a bare label', () => {
-    expect(summarise(node({ configuration: {} }), metadata)).toBe('Assign: choose somebody');
+    expect(summarise(node({ configuration: {} }), metadata)).toBe('Assign — choose somebody');
+    expect(summarise(node({ subtype: 'MOVE_TO_PROJECT', configuration: {} }), metadata)).toBe(
+      'Move — choose a project',
+    );
+  });
+
+  it('reads a move to another project as the project, then its section', () => {
+    const move = (configuration: Record<string, unknown>) =>
+      summarise(node({ subtype: 'MOVE_TO_PROJECT', configuration }), metadata);
+
+    // The section is optional, so the project alone is a complete sentence.
+    expect(move({ projectId: 'proj-2' })).toBe('Move to Renewals');
+    expect(move({ projectId: 'proj-2', targetSectionId: 'sec-9' })).toBe(
+      'Move to Renewals › Notify Tenant',
+    );
+    // Looked up in the *target* project's sections: this project's section of
+    // the same id would be a different column.
+    expect(move({ projectId: 'proj-2', targetSectionId: 'sec-1' })).toBe('Move to Renewals');
+    expect(move({ projectId: 'proj-gone' })).toBe('Move to a project that was removed');
   });
 
   it('reads a condition as a sentence, with the option’s label', () => {
@@ -121,6 +148,17 @@ describe('which nodes are flagged incomplete', () => {
   it('flags an action with nothing chosen', () => {
     expect(isNodeIncomplete(node({ configuration: {} }))).toBe(true);
     expect(isNodeIncomplete(node({ configuration: { userId: 'u-1' } }))).toBe(false);
+  });
+
+  it('flags a subtask step whose dated row has no date yet', () => {
+    const subtasks = (rows: unknown[]) =>
+      node({ subtype: 'CREATE_SUBTASK', configuration: { subtasks: rows } });
+
+    expect(isNodeIncomplete(subtasks([{ title: 'Review', dueDate: '' }]))).toBe(true);
+    expect(
+      isNodeIncomplete(subtasks([{ title: 'Review', dueDate: '2030-01-15', assigneeId: 'u-1' }])),
+    ).toBe(false);
+    expect(isNodeIncomplete(subtasks(['Review', { title: 'Sign off', dueInDays: 3 }]))).toBe(false);
   });
 
   it('flags a condition missing its comparison', () => {
@@ -260,5 +298,35 @@ describe('values that match no option', () => {
     );
 
     expect(summary).toContain('urgent fix');
+  });
+});
+
+describe('the send-a-webhook step', () => {
+  it('names the endpoint, or the host of an ad-hoc URL — never the whole URL', () => {
+    expect(
+      summarise(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'wh-1' } }), metadata),
+    ).toBe('Send a webhook to n8n');
+    expect(
+      summarise(
+        node({
+          subtype: 'SEND_WEBHOOK',
+          configuration: { url: 'https://hooks.example.com/abc123/secret-path' },
+        }),
+        metadata,
+      ),
+    ).toBe('Send a webhook to hooks.example.com');
+    expect(
+      summarise(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'gone' } }), metadata),
+    ).toBe('Send a webhook to an endpoint that was removed');
+  });
+
+  it('is incomplete until it has somewhere to send', () => {
+    expect(isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: {} }))).toBe(true);
+    expect(
+      isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: { url: 'https://x.test' } })),
+    ).toBe(false);
+    expect(
+      isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'wh-1' } })),
+    ).toBe(false);
   });
 });

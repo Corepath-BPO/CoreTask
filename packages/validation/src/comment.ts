@@ -1,4 +1,8 @@
-import { COMMENT_MAX_LENGTH, COMMENT_MIN_LENGTH } from '@coretask/contracts';
+import {
+  COMMENT_MAX_LENGTH,
+  COMMENT_MIN_LENGTH,
+  MAX_ATTACHMENTS_PER_COMMENT,
+} from '@coretask/contracts';
 import { z } from 'zod';
 
 export const commentBodySchema = z
@@ -7,7 +11,10 @@ export const commentBodySchema = z
   .min(COMMENT_MIN_LENGTH, 'Write something first.')
   .max(COMMENT_MAX_LENGTH, `Must be at most ${COMMENT_MAX_LENGTH} characters.`);
 
-export const createCommentSchema = z.object({ body: commentBodySchema });
+export const createCommentSchema = z.object({
+  body: commentBodySchema,
+  attachmentIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_COMMENT).optional(),
+});
 export type CreateCommentInput = z.input<typeof createCommentSchema>;
 
 /**

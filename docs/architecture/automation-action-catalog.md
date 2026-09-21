@@ -58,20 +58,39 @@ entry in `PLANNED_ACTIONS`, no implementation. **absent** — not modelled at al
 
 ### Move task
 
-| Entry              | Action            | State   |
-| ------------------ | ----------------- | ------- |
-| to a section       | `MOVE_TO_SECTION` | runs    |
-| to another project | `MOVE_PROJECT`    | planned |
+| Entry              | Action            | State |
+| ------------------ | ----------------- | ----- |
+| to a section       | `MOVE_TO_SECTION` | runs  |
+| to another project | `MOVE_TO_PROJECT` | runs  |
 
 `MOVE_TO_SECTION` re-checks at execution time that the section is still in the
 rule's own project, and fails the action if it is not — a rule authored months
 ago may name a section that has since been deleted, and moving a task into
 another project's section would be a tenancy hole rather than a mistake.
 
-`MOVE_PROJECT` is unimplemented and non-trivial: a task carries section
-membership, custom field values and view columns that all belong to its current
-project, and none of them survive the move without a decision about what happens
-to them.
+`MOVE_TO_PROJECT` takes a `projectId` and an optional `targetSectionId`, under
+its own key so nothing that reads `sectionId` as "a section of this project"
+ever sees it. Only a move: a task lives in one project here, so Asana's "add to
+project" half is shown in the panel as a disabled option with that reason. What
+the task carries is decided rather than left to chance:
+
+- **Section** — the chosen one, or the project's first; a project with no
+  sections takes the task sectionless.
+- **Position** — appended to the end of the new column.
+- **Status** — kept when the new project's status set holds the definition;
+  otherwise remapped to the same-named status there, then the nearest by
+  category, then the set's default. A task carrying only the legacy enum is left
+  alone.
+- **Custom field values** — kept. Fields are the workspace's; one the new project
+  does not show is simply not shown.
+- **Subtasks** in the task's project go with it; subtasks that belong to no
+  project stay as they are.
+
+Validation refuses the rule's own project, an archived project, a project from
+another workspace, and a section that is not in the chosen project. At run time
+the same is re-checked and the action fails rather than reaching. The follow-up
+`TASK_MOVED_TO_SECTION` event is raised in the _new_ project, so the rules there
+see the task arrive, and the realtime relay is sent to both boards.
 
 ### Change status
 
@@ -144,8 +163,14 @@ is routed to the column matching the field's type by `customFieldValue`.
 | Ticket    | —                  | absent  |
 
 `CREATE_SUBTASK` inherits the parent's project and section and is authored by
-whoever caused the trigger, falling back to the task's creator. It takes a
-literal title, with the same limitation as the absent title action above.
+whoever caused the trigger, falling back to the task's creator. Each row is a
+literal title — with the same limitation as the absent title action above — and
+may name an assignee and a due date of its own: a fixed calendar date, or a
+number of days after the rule runs (`subtaskEntries` in `@coretask/contracts`
+is the one reading of the row). Assignees are re-checked at run time as the
+assign action's is; a row whose person has left is created unassigned and the
+execution log says so, rather than the checklist losing every row. The assignee
+follows the subtask, as one a rule assigns later does.
 
 ### Convert task to…
 
@@ -182,13 +207,24 @@ assignee.
 
 ## External actions
 
-The tab exists in the references. **No external action is implemented.**
-`SEND_EMAIL` and `SEND_WEBHOOK` are in `PLANNED_ACTIONS` and have contract
-entries only.
+`SEND_WEBHOOK` is implemented and is the one row on the External tab. Its
+configuration names a destination — `endpointId` (a webhook endpoint registered
+under Integrations, signed with its secret) or `url` (an ad-hoc address, sent
+unsigned) — and optional `extraFields`, key/value pairs merged into the payload
+as `data.extra`. No secret lives in a rule: every member can read a rule.
 
-The tab is kept for structural parity and says it will be available later, which
-is the same convention applied to a whole surface rather than one row. No fake
-integrations, and no tab quietly removed so that nobody asks.
+The runner does not send anything. It re-checks the endpoint (present, enabled)
+or the URL's syntax, then returns a `RuleWebhookRequest` on the action outcome,
+and `AutomationProcessor` queues it on the webhook queue once the run is over —
+the same arrangement as the events a rule raises. The worker's
+`WebhookDeliveryService.ruleSend` builds an `automation.webhook` payload
+(`data: { task, rule, trigger, extra }`), stores a delivery row carrying the
+`ruleId`, and delivers it with the usual retries. Whether an ad-hoc URL is one
+CoreTask may call (no private addresses unless `WEBHOOK_ALLOW_PRIVATE_URLS`) is
+decided at publish time by the validator and again at delivery time.
+
+`SEND_EMAIL` stays in `PLANNED_ACTIONS` with a contract entry only; a webhook
+into a mail tool covers the need until rules can send mail themselves.
 
 ## AI entries
 
@@ -198,19 +234,20 @@ behind either, and a fake one is worse than a gap.
 
 ## Summary of the eleven that run
 
-| Action                     | Label               | Category            |
-| -------------------------- | ------------------- | ------------------- |
-| `ASSIGN_USER`              | Assign a person     | Assignment          |
-| `UNASSIGN_USER`            | Remove the assignee | Assignment          |
-| `MOVE_TO_SECTION`          | Move to a section   | Status and workflow |
-| `UPDATE_STATUS`            | Change the status   | Status and workflow |
-| `UPDATE_PRIORITY`          | Change the priority | Status and workflow |
-| `SET_DUE_DATE`             | Set the due date    | Dates               |
-| `CLEAR_DUE_DATE`           | Clear the due date  | Dates               |
-| `SET_CUSTOM_FIELD`         | Set a custom field  | Fields              |
-| `ADD_COMMENT`              | Add a comment       | Communication       |
-| `SEND_IN_APP_NOTIFICATION` | Send a notification | Communication       |
-| `CREATE_SUBTASK`           | Create a subtask    | Subtasks            |
+| Action                     | Label                   | Category            |
+| -------------------------- | ----------------------- | ------------------- |
+| `ASSIGN_USER`              | Assign a person         | Assignment          |
+| `UNASSIGN_USER`            | Remove the assignee     | Assignment          |
+| `MOVE_TO_SECTION`          | Move to a section       | Status and workflow |
+| `MOVE_TO_PROJECT`          | Move to another project | Status and workflow |
+| `UPDATE_STATUS`            | Change the status       | Status and workflow |
+| `UPDATE_PRIORITY`          | Change the priority     | Status and workflow |
+| `SET_DUE_DATE`             | Set the due date        | Dates               |
+| `CLEAR_DUE_DATE`           | Clear the due date      | Dates               |
+| `SET_CUSTOM_FIELD`         | Set a custom field      | Fields              |
+| `ADD_COMMENT`              | Add a comment           | Communication       |
+| `SEND_IN_APP_NOTIFICATION` | Send a notification     | Communication       |
+| `CREATE_SUBTASK`           | Create a subtask        | Subtasks            |
 
 Categories come from `AUTOMATION_SELECTOR_CATEGORY` and are how the builder
 groups the list today — they are not the seven groups the references show. The

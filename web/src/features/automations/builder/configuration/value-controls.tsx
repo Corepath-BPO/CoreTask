@@ -10,12 +10,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
+import { OptionChip } from './option-chip';
+
 /** One thing that can be chosen, with a face when the thing is a person. */
 export interface ChoiceOption {
   value: string;
   label: string;
   /** Set only for people, so a member picker looks like one. */
   avatarUrl?: string | null;
+  /** Set where the value has a colour of its own — a status, a select option —
+      so the list offers the same tinted chip the board shows. */
+  colorToken?: string;
 }
 
 /**
@@ -72,11 +77,19 @@ export function MultiSelect({
              words around them are not, which is what makes a filled-in form
              scannable rather than something to read. */
           <span className="flex flex-1 flex-wrap gap-1">
-            {chosen.map((option) => (
-              <Badge key={option.value} variant="muted" className="max-w-full truncate">
-                {option.label}
-              </Badge>
-            ))}
+            {chosen.map((option) =>
+              option.colorToken ? (
+                <OptionChip
+                  key={option.value}
+                  label={option.label}
+                  colorToken={option.colorToken}
+                />
+              ) : (
+                <Badge key={option.value} variant="muted" className="max-w-full truncate">
+                  {option.label}
+                </Badge>
+              ),
+            )}
           </span>
         )}
 
@@ -115,9 +128,13 @@ export function MultiSelect({
  *
  * The avatar is only ever beside a name. A face against a section would be
  * decoration; against a person it is the fastest way to find the right one in a
- * workspace with two Sarahs.
+ * workspace with two Sarahs. A value with a colour of its own renders as the
+ * tinted chip the board shows it as, for the same reason the face renders:
+ * the thing being chosen should look like the thing it is.
  */
 export function OptionFace({ option }: { option: ChoiceOption }) {
+  if (option.colorToken) return <OptionChip label={option.label} colorToken={option.colorToken} />;
+
   if (option.avatarUrl === undefined) return <span className="truncate">{option.label}</span>;
 
   return (

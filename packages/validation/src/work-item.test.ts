@@ -2,6 +2,7 @@ import { WorkItemType } from '@coretask/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  bulkWorkItemSchema,
   createWorkItemSchema,
   moveWorkItemSchema,
   projectWorkItemQuerySchema,
@@ -9,6 +10,7 @@ import {
 } from './work-item.js';
 
 const uuid = '019fc8d5-5365-76b1-b8bd-96599339f7ae';
+const fieldId = '019fc8d5-5365-76b1-b8bd-96599339f7af';
 
 describe('createWorkItemSchema', () => {
   it('accepts the types that have a model behind them', () => {
@@ -128,5 +130,98 @@ describe('projectWorkItemQuerySchema', () => {
   it('caps the page size rather than letting a caller ask for everything', () => {
     expect(projectWorkItemQuerySchema.safeParse({ limit: 500 }).success).toBe(false);
     expect(projectWorkItemQuerySchema.parse({ limit: '50' }).limit).toBe(50);
+  });
+
+  it('reads the view settings from JSON in the query string', () => {
+    const parsed = projectWorkItemQuerySchema.parse({
+      filters: JSON.stringify([{ field: 'assigneeId', operator: 'IN', value: [uuid] }]),
+      sorts: JSON.stringify([{ field: 'dueDate', direction: 'DESC' }]),
+      groupBy: 'status',
+    });
+
+    expect(parsed.filters).toEqual([{ field: 'assigneeId', operator: 'IN', value: [uuid] }]);
+    expect(parsed.sorts).toEqual([{ field: 'dueDate', direction: 'DESC' }]);
+    expect(parsed.groupBy).toBe('status');
+  });
+
+  it('reads showCompleted=false as false, which coercion would have read as true', () => {
+    expect(projectWorkItemQuerySchema.parse({ showCompleted: 'false' }).showCompleted).toBe(false);
+    expect(projectWorkItemQuerySchema.parse({ showCompleted: 'true' }).showCompleted).toBe(true);
+    expect(projectWorkItemQuerySchema.parse({}).showCompleted).toBeUndefined();
+    expect(projectWorkItemQuerySchema.safeParse({ showCompleted: 'yes' }).success).toBe(false);
+  });
+
+  it('reports malformed JSON as an issue on the parameter rather than throwing', () => {
+    const result = projectWorkItemQuerySchema.safeParse({ filters: '{not json' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.path).toEqual(['filters']);
+  });
+
+  it('holds the settings to the same shape a saved view is held to', () => {
+    // An operator that takes no value, given one, is the same mistake here as
+    // it is on PATCH …/views/:id — and refused the same way.
+    expect(
+      projectWorkItemQuerySchema.safeParse({
+        filters: JSON.stringify([{ field: 'dueDate', operator: 'IS_EMPTY', value: 'x' }]),
+      }).success,
+    ).toBe(false);
+    expect(
+      projectWorkItemQuerySchema.safeParse({
+        sorts: JSON.stringify(Array.from({ length: 6 }, () => ({ field: 'title' }))),
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('bulkWorkItemSchema', () => {
+  it('takes custom field values keyed by field id, in the value shape the field route takes', () => {
+    const parsed = bulkWorkItemSchema.parse({
+      workItemIds: [uuid],
+      update: { customFieldValues: { [fieldId]: { optionIds: [uuid] } } },
+    });
+
+    expect(parsed.update?.customFieldValues).toEqual({ [fieldId]: { optionIds: [uuid] } });
+  });
+
+  it('counts a field value as a change, so a request carrying only one is not empty', () => {
+    expect(
+      bulkWorkItemSchema.safeParse({
+        workItemIds: [uuid],
+        update: { customFieldValues: { [fieldId]: { number: 3 } } },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a value shape the field route would not take', () => {
+    // The same strictness as `PUT …/custom-fields/:id`: an unknown key is a
+    // typo, not a value.
+    expect(
+      bulkWorkItemSchema.safeParse({
+        workItemIds: [uuid],
+        update: { customFieldValues: { [fieldId]: { textValue: 'wrong key' } } },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      bulkWorkItemSchema.safeParse({
+        workItemIds: [uuid],
+        update: { customFieldValues: { 'not-a-uuid': { number: 3 } } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('caps how many fields one request sets', () => {
+    const many = Object.fromEntries(
+      Array.from({ length: 11 }, (_, index) => [
+        `019fc8d5-5365-76b1-b8bd-9659933${String(index).padStart(4, '0')}`,
+        { number: index },
+      ]),
+    );
+
+    expect(
+      bulkWorkItemSchema.safeParse({ workItemIds: [uuid], update: { customFieldValues: many } })
+        .success,
+    ).toBe(false);
   });
 });
