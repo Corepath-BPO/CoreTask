@@ -227,7 +227,7 @@ export function ProjectsPage() {
           variant="outline"
           size="sm"
           disabled
-          title="Filtering by members needs project membership — not built yet"
+          title="Filtering by members needs project membership. Not built yet."
           className="rounded-full font-normal"
         >
           Members
@@ -344,7 +344,7 @@ export function ProjectsPage() {
 
       {meta && meta.total > items.length && (
         <p className="text-xs text-muted-foreground">
-          Showing the first {items.length} of {meta.total} projects — search to find the rest.
+          Showing the first {items.length} of {meta.total} projects. Search to find the rest.
         </p>
       )}
 
@@ -462,17 +462,17 @@ function ProjectRow({
           membership the backend doesn't have yet. */}
       <div className="flex items-center">
         {project.lead ? (
-          <Avatar className="size-6" title={`${project.lead.name} — lead`}>
+          <Avatar className="size-6" title={`${project.lead.name} - lead`}>
             {project.lead.avatarUrl && <AvatarImage src={project.lead.avatarUrl} alt="" />}
             <AvatarFallback className="text-[9px]">{initials(project.lead.name)}</AvatarFallback>
           </Avatar>
         ) : (
-          <span className="text-sm text-muted-foreground">—</span>
+          <span className="text-sm text-muted-foreground">-</span>
         )}
       </div>
 
       <div className="flex min-w-0 items-center gap-1.5">
-        {portfolios.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
+        {portfolios.length === 0 && <span className="text-sm text-muted-foreground">-</span>}
         {portfolios.slice(0, 1).map((portfolio) => (
           <Link
             key={portfolio.id}
@@ -511,7 +511,7 @@ function ProjectRow({
             variant="ghost"
             size="sm"
             disabled
-            title="Joining needs project membership — not built yet"
+            title="Joining needs project membership. Not built yet."
           >
             Join
           </Button>

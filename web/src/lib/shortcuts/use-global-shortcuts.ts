@@ -77,11 +77,12 @@ export function useGlobalShortcuts(): void {
         return;
       }
 
-      // Global search is not implemented yet, but the shortcut is reserved so
-      // muscle memory does not have to be relearned later.
+      // Search is not built. The key stays reserved so muscle memory does not
+      // have to be relearned once it is, but it says nothing: the topbar's own
+      // placeholder reads Soon and does nothing when pressed, and a toast
+      // promising a phase here would be the same pretending in another form.
       if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        toast('Global search is coming in the next phase');
       }
     };
 

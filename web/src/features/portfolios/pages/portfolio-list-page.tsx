@@ -146,7 +146,7 @@ export function PortfolioListPage({ portfolioId }: { portfolioId: string }) {
           {!isLoading && rollup.missingCount > 0 && (
             <p className="text-xs text-muted-foreground">
               {rollup.missingCount} referenced {rollup.missingCount === 1 ? 'project' : 'projects'}{' '}
-              could not be found — likely deleted since being added here.
+              could not be found, likely deleted since being added here.
             </p>
           )}
         </div>
@@ -229,7 +229,7 @@ function ProjectRow({ project, selected, onSelect, onRemove }: ProjectRowProps) 
           overdue && 'font-medium text-destructive',
         )}
       >
-        {project.dueDate ? formatDueDate(project.dueDate) : '—'}
+        {project.dueDate ? formatDueDate(project.dueDate) : '-'}
       </td>
 
       <td className="border-r border-border/40 px-3 py-2">
@@ -242,7 +242,7 @@ function ProjectRow({ project, selected, onSelect, onRemove }: ProjectRowProps) 
             <span className="max-w-28 truncate">{project.lead.name}</span>
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">-</span>
         )}
       </td>
 

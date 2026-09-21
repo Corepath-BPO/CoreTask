@@ -117,7 +117,7 @@ export function CalendarPage() {
     );
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1440px] space-y-6">
       <PageHeader
         title="Calendar"
         description={`Deadlines and milestones across ${workspace.name}.`}
@@ -250,11 +250,11 @@ export function CalendarPage() {
               >
                 <Link to={item.to} search={item.search} params={item.params}>
                   {item.kind === 'task' ? (
-                    <CircleCheckBig className="text-primary" />
+                    <CircleCheckBig className="text-primary-strong" />
                   ) : item.kind === 'ticket' ? (
-                    <Ticket className="text-warning" />
+                    <Ticket className="text-warning-strong" />
                   ) : (
-                    <FolderKanban className="text-sky-500" />
+                    <FolderKanban className="text-chart-5" />
                   )}
                   <span className="min-w-0">
                     <span className="block truncate">{item.title}</span>
@@ -302,7 +302,7 @@ function itemTone(kind: ItemKind) {
     ? 'border-primary bg-primary/10'
     : kind === 'ticket'
       ? 'border-warning bg-warning/10'
-      : 'border-sky-500 bg-sky-500/10';
+      : 'border-chart-5 bg-chart-5/10';
 }
 function formatSelectedDate(key: string) {
   const [year, month, day] = key.split('-').map(Number);

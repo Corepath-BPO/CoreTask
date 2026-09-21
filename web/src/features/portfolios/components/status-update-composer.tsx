@@ -61,7 +61,7 @@ export function StatusUpdateComposer({
   const currentUser = useCurrentUser();
 
   const [status, setStatusValue] = useState<ProjectStatusUpdateValue>(initialStatus);
-  const [title, setTitle] = useState(`${project.name} — ${formatDate(new Date())}`);
+  const [title, setTitle] = useState(`${project.name} - ${formatDate(new Date())}`);
   const [summary, setSummary] = useState('');
   const [nextSteps, setNextSteps] = useState('');
   const [railTab, setRailTab] = useState<'previous' | 'highlights' | 'drafts'>('highlights');
@@ -81,7 +81,7 @@ export function StatusUpdateComposer({
       nextSteps: nextSteps.trim() || null,
     });
     toast.success(
-      project.lead ? `Update posted — ${project.lead.name} will be notified` : 'Update posted',
+      project.lead ? `Update posted, ${project.lead.name} will be notified` : 'Update posted',
     );
     onClose();
   };
@@ -89,12 +89,12 @@ export function StatusUpdateComposer({
   /** Rule-based draft over the live numbers — no model, and none needed. */
   const draftWithAi = () => {
     setSummary(
-      `${project.name} is ${progress}% complete — ${project.completedTaskCount} of ${project.taskCount} tasks are done across ${project.sectionCount} ${project.sectionCount === 1 ? 'section' : 'sections'}.${overdue ? ' The project is past its due date.' : ''}`,
+      `${project.name} is ${progress}% complete. ${project.completedTaskCount} of ${project.taskCount} tasks are done across ${project.sectionCount} ${project.sectionCount === 1 ? 'section' : 'sections'}.${overdue ? ' The project is past its due date.' : ''}`,
     );
     setNextSteps(
       remaining > 0
         ? `Close out the remaining ${remaining} ${remaining === 1 ? 'task' : 'tasks'} on the board.`
-        : 'All tasks are complete — wrap up and archive.',
+        : 'All tasks are complete. Wrap up and archive.',
     );
   };
 
@@ -233,7 +233,7 @@ export function StatusUpdateComposer({
                       {project.lead.name}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                    <span className="text-muted-foreground">-</span>
                   )}
                 </dd>
               </div>
@@ -244,11 +244,11 @@ export function StatusUpdateComposer({
                   {project.startDate || project.dueDate ? (
                     <>
                       {project.startDate ? formatDate(project.startDate) : '…'}
-                      {' – '}
+                      {' - '}
                       {project.dueDate ? formatDate(project.dueDate) : '…'}
                     </>
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                    <span className="text-muted-foreground">-</span>
                   )}
                 </dd>
               </div>
@@ -257,7 +257,7 @@ export function StatusUpdateComposer({
                 <dt className="w-36 shrink-0 text-muted-foreground">Priority</dt>
                 {/* Projects have no priority in CoreTask; an honest em dash,
                     like Asana shows for unset fields. */}
-                <dd className="text-muted-foreground">—</dd>
+                <dd className="text-muted-foreground">-</dd>
               </div>
 
               <div className="flex items-center gap-4">
@@ -316,7 +316,7 @@ export function StatusUpdateComposer({
             </section>
 
             <div className="flex items-center gap-3 rounded-full border bg-muted/40 py-1.5 pr-1.5 pl-4">
-              <Sparkles className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <Sparkles className="size-4 shrink-0 text-primary-strong" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                 Draft this update from the project&apos;s live numbers
               </span>
@@ -326,7 +326,7 @@ export function StatusUpdateComposer({
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Local build: posting stores the update in this browser — the notification is
+              Local build: posting stores the update in this browser. The notification is
               simulated.
             </p>
           </div>
@@ -374,7 +374,7 @@ export function StatusUpdateComposer({
               <RailChartCard title="Completed tasks by assignee" />
               <RailChartCard title="Incomplete tasks by section" />
               <p className="text-xs text-muted-foreground">
-                Charts are placeholders — reporting lands with the API.
+                Charts are placeholders. Reporting lands with the API.
               </p>
             </div>
           )}

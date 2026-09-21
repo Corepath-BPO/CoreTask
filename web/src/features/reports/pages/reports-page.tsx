@@ -70,14 +70,14 @@ export function ReportsPage() {
     }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
-  const maxWorkload = Math.max(1, ...workload.map((item) => item.count));
+  const totalWorkload = workload.reduce((sum, item) => sum + item.count, 0);
   const projectRows = (projects.data?.items ?? [])
     .slice()
     .sort((a, b) => b.taskCount - a.taskCount)
     .slice(0, 6);
 
   return (
-    <div className="space-y-7">
+    <div className="mx-auto w-full max-w-[1440px] space-y-7">
       <PageHeader
         title="Reports"
         description={`A live operational view of ${workspace.name}.`}
@@ -153,7 +153,7 @@ export function ReportsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Open workload</CardTitle>
-            <CardDescription>Tasks currently assigned to each teammate.</CardDescription>
+            <CardDescription>Share of the open work carried by each teammate.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-1">
             {workload.length === 0 ? (
@@ -168,10 +168,7 @@ export function ReportsPage() {
                     <div className="mb-1.5 flex justify-between text-sm">
                       <span className="truncate">{member.name}</span>
                     </div>
-                    <Progress
-                      value={(member.count / maxWorkload) * 100}
-                      indicatorClassName="bg-sky-500"
-                    />
+                    <Progress value={totalWorkload === 0 ? 0 : (member.count / totalWorkload) * 100} />
                   </div>
                   <span className="text-right text-sm font-semibold tabular-nums">
                     {member.count}
@@ -187,13 +184,13 @@ export function ReportsPage() {
         <BreakdownCard
           title="Task status"
           description="Distribution of loaded workspace tasks."
-          icon={<CircleGauge className="size-4 text-primary" />}
+          icon={<CircleGauge className="size-4 text-primary-strong" />}
           data={taskStatuses}
         />
         <BreakdownCard
           title="Task priority"
           description="Where urgency is concentrated."
-          icon={<AlertTriangle className="size-4 text-warning" />}
+          icon={<AlertTriangle className="size-4 text-warning-strong" />}
           data={priorities}
         />
       </div>

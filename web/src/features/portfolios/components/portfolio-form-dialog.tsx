@@ -101,7 +101,7 @@ export function PortfolioFormDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit portfolio' : 'Create a portfolio'}</DialogTitle>
           <DialogDescription>
-            A portfolio watches a group of projects together. It only references them — adding or
+            A portfolio watches a group of projects together. It only references them. Adding or
             removing a project never changes the project itself. Portfolios are stored in this
             browser for now.
           </DialogDescription>

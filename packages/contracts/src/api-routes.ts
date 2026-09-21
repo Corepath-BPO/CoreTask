@@ -77,6 +77,13 @@ export const ApiRoutes = {
     archive: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
     restore: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/restore`,
+    /**
+     * Project-scoped, unlike the rest of this group: the parent is checked
+     * against the project in the URL before its children are read, so a task
+     * id cannot reach out of the project it was expanded in.
+     */
+    subtasks: (workspaceId: string, projectId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}/subtasks`,
   },
   /**
    * Like tasks, workspace-scoped: a ticket may have no project, and the queue
