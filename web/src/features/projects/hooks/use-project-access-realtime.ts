@@ -50,7 +50,15 @@ export function useProjectAccessRealtime(workspaceId: string | undefined): void 
       queryClient.removeQueries({ queryKey: queryKeys.workItems.all(workspaceId, projectId) });
       queryClient.removeQueries({ queryKey: queryKeys.projectViews.all(workspaceId, projectId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all(workspaceId) });
+      /*
+       * Every workspace-wide list the server filters by project visibility, not
+       * just tasks: the ticket queue and the activity feed are compiled the
+       * same way, and a cached one goes on showing this project's rows until
+       * something unrelated happens to refetch it.
+       */
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets.all(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activity.all(workspaceId) });
       leaveProjectRoom(projectId);
 
       // Read at event time, so this effect does not re-subscribe on every navigation.

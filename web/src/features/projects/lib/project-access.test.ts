@@ -2,7 +2,7 @@ import { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/c
 import type { ProjectAccess as ApiAccess } from '@coretask/types';
 import { describe, expect, it } from 'vitest';
 
-import { resolveProjectAccess } from './project-access';
+import { resolveProjectAccess, roleForProjectItem } from './project-access';
 
 const project = (visibility: ProjectVisibility, access: ApiAccess) => ({ visibility, access });
 
@@ -82,5 +82,35 @@ describe('resolveProjectAccess', () => {
     expect(result.canJoin).toBe(true);
     expect(result.canLeave).toBe(false);
     expect(result.isAdminOverride).toBe(false);
+  });
+});
+
+describe('roleForProjectItem', () => {
+  const viewer = project(ProjectVisibility.PRIVATE, {
+    effectiveRole: WorkspaceRole.GUEST,
+    projectRole: ProjectMemberRole.VIEWER,
+    isMember: true,
+    canManage: false,
+  });
+
+  it('answers with the workspace role for an item in no project', () => {
+    expect(roleForProjectItem(null, undefined, WorkspaceRole.MEMBER)).toBe(WorkspaceRole.MEMBER);
+    expect(roleForProjectItem(undefined, undefined, WorkspaceRole.MANAGER)).toBe(
+      WorkspaceRole.MANAGER,
+    );
+  });
+
+  it('caps the workspace role once the project is known', () => {
+    expect(roleForProjectItem('proj-1', viewer, WorkspaceRole.MEMBER)).toBe(WorkspaceRole.GUEST);
+  });
+
+  /*
+   * The panel is opened from My Tasks, where the project was never cached. The
+   * uncapped workspace role here is what briefly offered a viewer an editable
+   * panel — and kept offering it if the fetch failed or 404'd.
+   */
+  it('assumes the lowest role while the project is still unknown', () => {
+    expect(roleForProjectItem('proj-1', undefined, WorkspaceRole.MEMBER)).toBe(WorkspaceRole.GUEST);
+    expect(roleForProjectItem('proj-1', null, WorkspaceRole.OWNER)).toBe(WorkspaceRole.GUEST);
   });
 });
