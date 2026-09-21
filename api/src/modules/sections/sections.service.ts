@@ -13,7 +13,7 @@ import { planPlacement, type OrderedItem } from '../../common/utils/position.uti
 import { PrismaService } from '../../database/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ProjectsService } from '../projects/projects.service';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 
 import type { CreateSectionDto, MoveSectionDto, UpdateSectionDto } from './dto/section.dto';
 import { sectionInclude, toSectionDto, type SectionWithCount } from './section.mapper';
@@ -26,7 +26,7 @@ export class SectionsService {
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   async list(workspaceId: string, projectId: string): Promise<Section[]> {
@@ -92,7 +92,7 @@ export class SectionsService {
     });
 
     const section = toSectionDto(created);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.SECTION_CREATED, section);
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.SECTION_CREATED, section);
 
     return section;
   }
@@ -131,7 +131,7 @@ export class SectionsService {
     });
 
     const section = toSectionDto(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.SECTION_UPDATED, section);
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.SECTION_UPDATED, section);
 
     return section;
   }
@@ -201,7 +201,7 @@ export class SectionsService {
     // The whole list, because a rebalance can change every sibling's position
     // and the client should not have to guess which ones moved.
     const ordered = await this.list(workspaceId, projectId);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.SECTION_MOVED, {
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.SECTION_MOVED, {
       projectId,
       sections: ordered,
     });
@@ -246,7 +246,7 @@ export class SectionsService {
       metadata: { projectId, reassignedTaskCount, movedTo: fallback?.id ?? null },
     });
 
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.SECTION_DELETED, {
+    void this.broadcast.emit(workspaceId, projectId, ServerEvent.SECTION_DELETED, {
       projectId,
       sectionId,
       reassignedTaskCount,

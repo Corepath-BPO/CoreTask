@@ -444,6 +444,21 @@ describe('Project members and privacy (e2e)', () => {
       expect(asGuest.body.data.role).toBe('VIEWER');
     });
 
+    it('lets an existing editor of a private project call join again', async () => {
+      const { owner, member, workspaceId, project } = await setup();
+      await addProjectMember(workspaceId, project.id, owner, member.userId, 'EDITOR').expect(201);
+
+      // Idempotent for a member who is already in, exactly as on a public
+      // project: only a stranger is turned away from a private one.
+      const again = await request(server())
+        .post(url(`${projectUrl(workspaceId, project.id)}/join`))
+        .set(auth(member))
+        .expect(200);
+
+      expect(again.body.data).toMatchObject({ userId: member.userId, role: 'EDITOR' });
+      expect((await listMembers(workspaceId, project.id, owner)).length).toBe(2);
+    });
+
     it('cannot join a private project it cannot see', async () => {
       const { member, workspaceId, project } = await setup();
 

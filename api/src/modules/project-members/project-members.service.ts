@@ -267,7 +267,9 @@ export class ProjectMembersService {
    * a workspace admin, who may put themselves on any roster.
    */
   async join(access: ProjectAccessContext, actor: ActorContext): Promise<ProjectMember> {
-    if (access.visibility === ProjectVisibility.PRIVATE && !access.canManage) {
+    // An existing member calling again is the idempotent case, not a
+    // self-invitation: only a stranger is turned away from a private project.
+    if (access.visibility === ProjectVisibility.PRIVATE && !access.canManage && !access.isMember) {
       throw AppException.forbidden(
         'FORBIDDEN',
         'This project is private. Ask one of its admins to add you.',

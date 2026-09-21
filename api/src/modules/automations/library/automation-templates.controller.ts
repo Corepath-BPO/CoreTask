@@ -50,8 +50,12 @@ export class AutomationTemplatesController {
       'Every saved template with its graph, sorted by name. Any member may browse; ' +
       'only a manager can add to it or apply from it, because either creates or copies a rule.',
   })
-  list(@Param('workspaceId', ParseUUIDPipe) workspaceId: string) {
-    return this.templates.list(workspaceId);
+  list(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+  ) {
+    return this.templates.list(workspaceId, { userId, role });
   }
 
   @Post()
@@ -80,10 +84,11 @@ export class AutomationTemplatesController {
   update(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,
+    @CurrentUser('id') userId: string,
     @CurrentWorkspace('role') role: WorkspaceRole,
     @Body() dto: UpdateAutomationTemplateDto,
   ) {
-    return this.templates.update(workspaceId, role, templateId, dto);
+    return this.templates.update(workspaceId, { userId, role }, templateId, dto);
   }
 
   @Delete(':templateId')

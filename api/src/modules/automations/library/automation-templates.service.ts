@@ -11,6 +11,7 @@ import { Injectable } from '@nestjs/common';
 import { TaskStatus, type Prisma } from '@prisma/client';
 
 import { AppException } from '../../../common/exceptions/app.exception';
+import type { ActorContext } from '../../../common/types/api.types';
 import { PrismaService } from '../../../database/prisma.service';
 import { ProjectAccessService } from '../../project-access/project-access.service';
 import { AutomationsService } from '../automations.service';
@@ -118,14 +119,46 @@ export class AutomationTemplatesService {
     private readonly automations: AutomationsService,
   ) {}
 
-  async list(workspaceId: string) {
+  async list(workspaceId: string, actor: ActorContext) {
     const templates = await this.prisma.automationTemplate.findMany({
       where: { workspaceId },
       include: templateInclude,
       orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
     });
 
-    return templates.map(toResponse);
+    const visible = await this.visibleSourceIds(workspaceId, actor, templates);
+
+    return templates.map((template) =>
+      toResponse(template, template.sourceProjectId === null || visible.has(template.sourceProjectId)),
+    );
+  }
+
+  /**
+   * Which of these templates' source projects the reader may see. The library
+   * is workspace-wide, so a template saved from a private project would
+   * otherwise announce that project's name to everybody who browses it.
+   */
+  private async visibleSourceIds(
+    workspaceId: string,
+    actor: ActorContext,
+    templates: readonly { sourceProjectId: string | null }[],
+  ): Promise<Set<string>> {
+    const ids = [
+      ...new Set(
+        templates
+          .map((template) => template.sourceProjectId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
+    if (ids.length === 0) return new Set();
+
+    const rows = await this.prisma.project.findMany({
+      where: { AND: [{ workspaceId, id: { in: ids } }, this.access.projectWhere(actor)] },
+      select: { id: true },
+    });
+
+    return new Set(rows.map((row) => row.id));
   }
 
   /**
@@ -143,6 +176,15 @@ export class AutomationTemplatesService {
     dto: SaveAutomationTemplateDto,
   ) {
     this.assertMayManage(role);
+    // The rule's project arrives in the body, out of `ProjectAccessGuard`'s
+    // sight: invisible is a 404, and the caller must still be a manager
+    // *inside* it before its graph is copied into the workspace-wide library.
+    await this.access.requireAccess(
+      workspaceId,
+      dto.projectId,
+      { userId, role },
+      WorkspaceRole.MANAGER,
+    );
 
     const rule = await this.automations.get(workspaceId, dto.projectId, dto.ruleId);
 
@@ -209,15 +251,17 @@ export class AutomationTemplatesService {
       include: templateInclude,
     });
 
-    return toResponse(template);
+    // The caller just proved they may see the source project.
+    return toResponse(template, true);
   }
 
   async update(
     workspaceId: string,
-    role: WorkspaceRole,
+    actor: ActorContext,
     templateId: string,
     dto: UpdateAutomationTemplateDto,
   ) {
+    const { role } = actor;
     this.assertMayManage(role);
     await this.requireTemplate(workspaceId, templateId);
 
@@ -231,7 +275,12 @@ export class AutomationTemplatesService {
       include: templateInclude,
     });
 
-    return toResponse(template);
+    const visible = await this.visibleSourceIds(workspaceId, actor, [template]);
+
+    return toResponse(
+      template,
+      template.sourceProjectId === null || visible.has(template.sourceProjectId),
+    );
   }
 
   /**
@@ -805,11 +854,15 @@ function asReferences(value: unknown): TemplateReferences {
  */
 function toResponse(
   template: Prisma.AutomationTemplateGetPayload<{ include: typeof templateInclude }>,
+  canSeeSource: boolean,
 ) {
   const { references: _references, sourceProjectId: _sourceProjectId, ...rest } = template;
 
   return {
     ...rest,
+    // A private source project must not name itself to a reader who is not in
+    // it. The template stays in the library for everyone either way.
+    sourceProject: canSeeSource ? rest.sourceProject : null,
     triggerConfig: asConfiguration(template.triggerConfig),
     nodes: asNodes(template.nodes),
   };

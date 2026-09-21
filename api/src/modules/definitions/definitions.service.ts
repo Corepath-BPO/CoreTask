@@ -189,12 +189,14 @@ export class DefinitionsService {
     this.assertMayManage(role);
 
     const owned = await this.prisma.statusDefinition.findMany({
-      where: { workspaceId, id: { in: dto.ids } },
+      // Scoped to this project exactly as `requireStatus` is: its own statuses
+      // or the workspace set it inherits. Matching on the workspace alone let
+      // a reorder write a position onto another project's status — and told
+      // the caller, through the error, which ids exist elsewhere.
+      where: { workspaceId, id: { in: dto.ids }, OR: [{ projectId }, { projectId: null }] },
       select: { id: true },
     });
 
-    // Every id must belong to this workspace, or a reorder becomes a way to
-    // discover which ids exist elsewhere.
     if (owned.length !== dto.ids.length) {
       throw AppException.badRequest('BAD_REQUEST', 'That list contains an unknown status.');
     }

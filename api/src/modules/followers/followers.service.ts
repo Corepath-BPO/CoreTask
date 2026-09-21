@@ -185,7 +185,20 @@ export class FollowersService {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
 
-    return rows.map((row) => ({ user: row.user, followedAt: row.createdAt.toISOString() }));
+    // A follower row outlives its author's removal from a private project.
+    // Showing them as a collaborator on an item they can no longer open — and
+    // will never be notified about — misreads who is actually on this.
+    const visible = new Set(
+      await this.access.filterVisibleTo(
+        workspaceId,
+        await this.projectIdOf(link),
+        rows.map((row) => row.userId),
+      ),
+    );
+
+    return rows
+      .filter((row) => visible.has(row.userId))
+      .map((row) => ({ user: row.user, followedAt: row.createdAt.toISOString() }));
   }
 
   /**

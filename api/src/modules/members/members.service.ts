@@ -4,9 +4,11 @@ import {
   CLOSED_TASK_STATUSES,
   CLOSED_TICKET_STATUSES,
   NotificationType,
+  ProjectVisibility,
   WorkspaceRole,
   canGrantRole,
   canManageMember,
+  hasProjectAdminOverride,
 } from '@coretask/contracts';
 import type { RemoveMemberResult, WorkspaceMember as WorkspaceMemberDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -14,6 +16,7 @@ import type { WorkspaceMember } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -47,6 +50,7 @@ export class MembersService {
     private readonly activity: ActivityLogsService,
     private readonly notifications: NotificationDispatcher,
     private readonly realtime: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   /**
@@ -83,6 +87,8 @@ export class MembersService {
     if (target.role !== role) {
       await this.prisma.workspaceMember.update({ where: { id: memberId }, data: { role } });
 
+      await this.closeProjectsLostTo(workspaceId, target.userId, target.role, role);
+
       await this.activity.record({
         workspaceId,
         actorId,
@@ -95,6 +101,42 @@ export class MembersService {
     }
 
     return this.readMember(memberId);
+  }
+
+  /**
+   * Shuts the private projects a demotion just closed.
+   *
+   * A workspace admin sees every project without a membership row. Drop them
+   * below admin and those projects become invisible — but a socket checks its
+   * room when it joins and never again, so their open tabs would keep
+   * receiving work items, attachments and roster changes from projects they
+   * can no longer open. `remove` has the same problem and solves it the same
+   * way; this is the demotion half of it.
+   *
+   * Only the projects they held by rank alone: where they are on the roster,
+   * the membership still stands and the per-request role check handles the
+   * rest.
+   */
+  private async closeProjectsLostTo(
+    workspaceId: string,
+    userId: string,
+    from: WorkspaceRole,
+    to: WorkspaceRole,
+  ): Promise<void> {
+    if (!hasProjectAdminOverride(from) || hasProjectAdminOverride(to)) return;
+
+    const stranded = await this.prisma.project.findMany({
+      where: {
+        workspaceId,
+        visibility: ProjectVisibility.PRIVATE,
+        members: { none: { userId } },
+      },
+      select: { id: true },
+    });
+
+    await Promise.all(
+      stranded.map((project) => this.broadcast.revoke(workspaceId, project.id, [userId])),
+    );
   }
 
   /**

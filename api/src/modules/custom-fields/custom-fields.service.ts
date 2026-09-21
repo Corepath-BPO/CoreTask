@@ -26,6 +26,7 @@ import { AppException } from '../../common/exceptions/app.exception';
 import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
 import { FieldChangeNotifier } from '../../integrations/notifications/field-change.notifier';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
@@ -118,6 +119,7 @@ export class CustomFieldsService {
     private readonly access: ProjectAccessService,
     private readonly activity: ActivityLogsService,
     private readonly realtime: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
     private readonly automation: AutomationEventPublisher,
     private readonly fieldChanges: FieldChangeNotifier,
   ) {}
@@ -864,7 +866,7 @@ export class CustomFieldsService {
     });
 
     if (task) {
-      this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, toTaskDto(task));
+      void this.broadcast.emit(workspaceId, projectId, ServerEvent.TASK_UPDATED, toTaskDto(task));
 
       /*
        * The project room as well as the workspace one. The List and Board
