@@ -1,12 +1,15 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type {
+  AddProjectMemberPayload,
   CreateProjectPayload,
   CreateSectionPayload,
   MoveSectionPayload,
   PaginationMeta,
   ProjectDetail,
+  ProjectMember,
   ProjectSummary,
   Section,
+  UpdateProjectMemberRolePayload,
   UpdateProjectPayload,
   UpdateSectionPayload,
 } from '@coretask/types';
@@ -46,6 +49,41 @@ export const projectsApi = {
 
   restore: (workspaceId: string, projectId: string): Promise<ProjectSummary> =>
     apiClient.post<ProjectSummary>(ApiRoutes.projects.restore(workspaceId, projectId)),
+};
+
+/** A project's roster — the list a private project is private to. */
+export const projectMembersApi = {
+  list: (workspaceId: string, projectId: string): Promise<ProjectMember[]> =>
+    apiClient.get<ProjectMember[]>(ApiRoutes.projectMembers.list(workspaceId, projectId)),
+
+  add: (
+    workspaceId: string,
+    projectId: string,
+    payload: AddProjectMemberPayload,
+  ): Promise<ProjectMember> =>
+    apiClient.post<ProjectMember>(ApiRoutes.projectMembers.add(workspaceId, projectId), payload),
+
+  updateRole: (
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    payload: UpdateProjectMemberRolePayload,
+  ): Promise<ProjectMember> =>
+    apiClient.patch<ProjectMember>(
+      ApiRoutes.projectMembers.updateRole(workspaceId, projectId, userId),
+      payload,
+    ),
+
+  remove: (workspaceId: string, projectId: string, userId: string): Promise<{ removed: boolean }> =>
+    apiClient.delete<{ removed: boolean }>(
+      ApiRoutes.projectMembers.remove(workspaceId, projectId, userId),
+    ),
+
+  join: (workspaceId: string, projectId: string): Promise<ProjectMember> =>
+    apiClient.post<ProjectMember>(ApiRoutes.projectMembers.join(workspaceId, projectId)),
+
+  leave: (workspaceId: string, projectId: string): Promise<{ left: boolean }> =>
+    apiClient.post<{ left: boolean }>(ApiRoutes.projectMembers.leave(workspaceId, projectId)),
 };
 
 export const sectionsApi = {

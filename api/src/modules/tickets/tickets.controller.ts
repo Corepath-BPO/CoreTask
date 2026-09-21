@@ -18,10 +18,9 @@ import {
   ApiErrorResponseDoc,
   ApiPaginatedEnvelopeResponse,
 } from '../../common/decorators/api-envelope.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
-import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
-import type { PaginatedResult } from '../../common/types/api.types';
+import { Actor, RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import type { ActorContext, PaginatedResult } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { TicketDetailDto, TicketDto } from './dto/ticket-response.dto';
@@ -55,10 +54,10 @@ export class TicketsController {
   @ApiPaginatedEnvelopeResponse(TicketDto)
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Query() query: TicketListQueryDto,
   ): Promise<PaginatedResult<Ticket, TicketListMeta>> {
-    return this.tickets.list(workspaceId, userId, query);
+    return this.tickets.list(workspaceId, actor, query);
   }
 
   @Post()
@@ -74,10 +73,10 @@ export class TicketsController {
   @ApiErrorResponseDoc(422, 'Validation failed')
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: CreateTicketDto,
   ): Promise<Ticket> {
-    return this.tickets.create(workspaceId, userId, dto);
+    return this.tickets.create(workspaceId, actor, dto);
   }
 
   @Get(':idOrKey')
@@ -91,8 +90,9 @@ export class TicketsController {
   get(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
+    @Actor() actor: ActorContext,
   ): Promise<TicketDetail> {
-    return this.tickets.getDetail(workspaceId, idOrKey);
+    return this.tickets.getDetail(workspaceId, idOrKey, actor);
   }
 
   @Patch(':idOrKey')
@@ -109,9 +109,9 @@ export class TicketsController {
   update(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('idOrKey') idOrKey: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: UpdateTicketDto,
   ): Promise<Ticket> {
-    return this.tickets.update(workspaceId, userId, idOrKey, dto);
+    return this.tickets.update(workspaceId, actor, idOrKey, dto);
   }
 }

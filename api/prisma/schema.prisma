@@ -50,6 +50,24 @@ enum ProjectStatus {
   ARCHIVED
 }
 
+/// Who can see a project. `PUBLIC` is every member of the workspace — the
+/// behaviour every project had before privacy existed, and still the default.
+/// `PRIVATE` is the project's own members plus the workspace's admins.
+enum ProjectVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+/// A member's standing inside one project. It can only *lower* what the
+/// workspace role allows: an EDITOR acts as at most a workspace MEMBER, a
+/// VIEWER as at most a GUEST, and an ADMIN keeps their workspace role and may
+/// also manage the roster and the project's privacy.
+enum ProjectMemberRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
 enum TaskPriority {
   NONE
   LOW
@@ -114,6 +132,8 @@ enum NotificationType {
   TICKET_UPDATED
   /// A custom field flagged "notify collaborators" changed value.
   FIELD_CHANGED
+  /// Someone added you to a project's members.
+  PROJECT_MEMBER_ADDED
 }
 
 /// What happened. A story's kind is what the audit trail and the task panel's
@@ -192,6 +212,8 @@ model User {
   invitedMembers             WorkspaceMember[]       @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]             @relation("WorkspaceCreatedBy")
   ledProjects                Project[]               @relation("ProjectLead")
+  projectMemberships         ProjectMember[]         @relation("ProjectMemberships")
+  projectMembersAdded        ProjectMember[]         @relation("ProjectMemberAddedBy")
   createdTasks               Task[]                  @relation("TaskCreatedBy")
   assignedTasks              Task[]                  @relation("TaskAssignee")
   reportedTickets            Ticket[]                @relation("TicketReporter")
@@ -393,6 +415,7 @@ model Workspace {
   webhookDeliveries    WebhookDelivery[]
   teams                Team[]
   projects             Project[]
+  projectMembers       ProjectMember[]
   sections             Section[]
   tasks                Task[]
   tickets              Ticket[]
@@ -491,6 +514,9 @@ model Project {
   /// What the "+ Add" control creates without being asked. Backfilled from
   /// each project's own mix of tasks and tickets — see the migration.
   defaultWorkItemType CreatableWorkItemType @default(TASK)
+  /// Who can open it. See `ProjectVisibility`; `members` is the list a
+  /// private project is private *to*.
+  visibility          ProjectVisibility     @default(PUBLIC)
   leadId              String?               @db.Uuid
   startDate           DateTime?
   dueDate             DateTime?
@@ -506,6 +532,7 @@ model Project {
   workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead             User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
   team             Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  members          ProjectMember[]
   sections         Section[]
   tasks            Task[]
   tickets          Ticket[]
@@ -514,6 +541,7 @@ model Project {
   views            ProjectView[]
   automations      AutomationRule[]
   webhookEndpoints WebhookEndpoint[]
+  activityLogs     ActivityLog[]
   /// Templates saved from this project's rules. Informational — a template
   /// outlives the project, which is why the link nulls rather than cascades.
   savedTemplates   AutomationTemplate[] @relation("TemplateSourceProject")
@@ -521,9 +549,43 @@ model Project {
   @@unique([workspaceId, key])
   @@index([workspaceId, status])
   @@index([workspaceId, archivedAt])
+  @@index([workspaceId, visibility])
   @@index([leadId])
   @@index([workspaceId, teamId])
   @@map("projects")
+}
+
+/// Membership of a project — the list a private project is private to, and
+/// the people a public one shows as "members".
+///
+/// Always a subset of the workspace's members: the API refuses to add anyone
+/// who is not already in the workspace, and drops these rows when someone
+/// leaves it. `role` only ever narrows the workspace role (see
+/// `ProjectMemberRole`), so a project can never grant more than the workspace
+/// did. Workspace OWNER and ADMIN see and manage every project without a row
+/// here, which is what keeps a private project recoverable when its admins
+/// have all gone.
+model ProjectMember {
+  projectId   String            @db.Uuid
+  userId      String            @db.Uuid
+  /// Denormalised so "drop every membership when someone leaves the workspace"
+  /// is one indexed statement (see the schema conventions).
+  workspaceId String            @db.Uuid
+  role        ProjectMemberRole @default(EDITOR)
+  /// Who added them. Null for the creator's own row and for backfilled leads.
+  addedById   String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation("ProjectMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  addedBy   User?     @relation("ProjectMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@id([projectId, userId])
+  @@index([workspaceId, userId])
+  @@index([projectId, role])
+  @@map("project_members")
 }
 
 /// A named group of people inside a workspace.
@@ -866,12 +928,18 @@ model ActivityLog {
   summary     String         @db.VarChar(500)
   /// Before/after payload, request id, and anything else worth auditing.
   metadata    Json?
+  /// The project the entity belongs to, when it belongs to one. Recorded so
+  /// the workspace feed can leave out lines from projects the reader cannot
+  /// see; a line about a project itself carries its own id here.
+  projectId   String?        @db.Uuid
   createdAt   DateTime       @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([entity, entityId])
   @@index([actorId])
   @@map("activity_logs")

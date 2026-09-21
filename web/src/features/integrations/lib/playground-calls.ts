@@ -214,13 +214,9 @@ export const PLAYGROUND_CALLS: readonly PlaygroundCall[] = [
     description:
       'The subtasks of one task, each with its own id and status. Pick one to hand its id to the next call.',
     method: 'GET',
-    fields: [PROJECT_FIELD, PARENT_TASK_ID_FIELD],
+    fields: [PARENT_TASK_ID_FIELD],
     path: (workspaceId, values) =>
-      ApiRoutes.tasks.subtasks(
-        workspaceId,
-        values['projectId'] ?? '',
-        values['parentTaskId'] ?? '',
-      ),
+      ApiRoutes.tasks.subtasks(workspaceId, values['parentTaskId'] ?? ''),
     picks: { key: 'taskId', label: 'Task ID' },
   },
 ];

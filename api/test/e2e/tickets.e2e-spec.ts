@@ -504,7 +504,7 @@ describe('Tickets (e2e)', () => {
         .post(ticketsUrl(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .send({ title: 'Cross-tenant', projectId: other.projectId })
-        .expect(400);
+        .expect(404);
     });
 
     it('rejects an assignee who is not a member', async () => {

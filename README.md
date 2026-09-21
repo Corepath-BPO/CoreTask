@@ -704,6 +704,7 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 | [List selection, bulk edit and shortcuts](docs/architecture/list-selection-and-shortcuts.md) | Multi-select rules, the bulk bar and route, Tab chords                      |
 | [Comments and collaboration](docs/architecture/comments-and-collaboration.md)                | Followers, who gets told, stories in the panel, rich-text threads           |
 | [Comments, followers and activity API](docs/api/comments-followers-activity.md)              | Threads by cursor, likes, pins, followers, an item's stories                |
+| [Project privacy and members API](docs/api/project-members.md)                               | Public/private projects, the roster and its roles, what `access` means      |
 | [Custom field system](docs/architecture/custom-field-system.md)                              | Eleven types incl. rating and formula, formats, stories, remove modes       |
 | [Field library](docs/architecture/field-library.md)                                          | Sharing one field across projects                                           |
 | [List view columns](docs/architecture/list-view-columns.md)                                  | Storage, pinning, sizing, the fixed Task column                             |

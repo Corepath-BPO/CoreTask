@@ -1,4 +1,4 @@
-import { ProjectViewType, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
+import { ProjectViewType } from '@coretask/contracts';
 import type { ViewColumn } from '@coretask/types';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -16,6 +16,8 @@ import {
   useProjectViews,
   useViewSettingsEditor,
 } from '../hooks/use-project-views';
+import { useProject } from '../hooks/use-projects';
+import { useProjectAccess } from '../lib/project-access';
 import { TaskDetailPanel } from '@/features/tasks/components/task-detail-dialog';
 
 /** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
@@ -34,8 +36,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 export function ProjectListPage({ projectId }: { projectId: string }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
-  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const me = useCurrentUser();
+  // Already cached by the shell, so this is free — and it is where the
+  // reader's standing in *this* project comes from.
+  const { data: project } = useProject(workspaceId, projectId);
+  const access = useProjectAccess(project);
+  const role = access.effectiveRole;
 
   const { data: views, isLoading } = useProjectViews(workspaceId, projectId);
 
@@ -124,10 +130,10 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
       <ProjectListView
         workspaceId={workspaceId}
         projectId={projectId}
-        canEdit={hasAtLeastRole(role, WorkspaceRole.MEMBER)}
+        canEdit={access.canEdit}
         // Archiving hides work from everyone, so the bulk bar offers it to
         // the same people the task route does.
-        canArchive={hasAtLeastRole(role, WorkspaceRole.MANAGER)}
+        canArchive={access.canManage}
         columns={editor.settings.columns}
         onColumnsChange={onColumnsChange}
         onOpenTask={openTask}

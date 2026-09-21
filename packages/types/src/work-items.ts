@@ -1,6 +1,7 @@
 import type {
   CreatableWorkItemType,
   ProjectStatus,
+  ProjectVisibility,
   TaskPriority,
   TaskStatus,
   TicketPriority,
@@ -11,6 +12,7 @@ import type {
 
 import type { PaginationMeta } from './api.js';
 import type { Attachment } from './attachment.js';
+import type { ProjectAccess, ProjectMemberPreview } from './project-members.js';
 
 /** Minimal user projection embedded in list responses. */
 export interface UserRef {
@@ -40,6 +42,8 @@ export interface Project {
    * refuse renders a button that fails on click.
    */
   defaultWorkItemType: CreatableWorkItemType;
+  /** Who can open it. Private projects are visible to their members and the workspace's admins. */
+  visibility: ProjectVisibility;
   leadId: string | null;
   /** The team that owns this project, or null when it belongs to nobody in particular. */
   teamId: string | null;
@@ -58,6 +62,11 @@ export interface ProjectSummary extends Project {
   sectionCount: number;
   lead: UserRef | null;
   team: ProjectTeamRef | null;
+  memberCount: number;
+  /** The first few members, admins first — enough for an avatar stack, never the full roster. */
+  members: ProjectMemberPreview[];
+  /** The caller's own standing in this project. Per reader, so never broadcast. */
+  access: ProjectAccess;
 }
 
 /** Just enough of a team to render a badge without loading the whole thing. */
@@ -80,6 +89,8 @@ export interface CreateProjectPayload {
   status?: ProjectStatus;
   color?: string;
   defaultWorkItemType?: CreatableWorkItemType;
+  /** Defaults to PUBLIC. The creator becomes a project admin either way. */
+  visibility?: ProjectVisibility;
   leadId?: string | null;
   teamId?: string | null;
   startDate?: string | null;
@@ -92,6 +103,8 @@ export interface UpdateProjectPayload {
   status?: ProjectStatus;
   color?: string;
   defaultWorkItemType?: CreatableWorkItemType;
+  /** Only a project admin (or a workspace admin) may change this. */
+  visibility?: ProjectVisibility;
   leadId?: string | null;
   teamId?: string | null;
   startDate?: string | null;

@@ -379,6 +379,71 @@ describe('Automation templates (e2e)', () => {
     });
   });
 
+  describe('privacy', () => {
+    /** Shuts the source project and returns a manager who is not on its roster. */
+    const closeSource = async (scope: Scope) => {
+      await context.prisma.project.update({
+        where: { id: scope.source.projectId },
+        data: { visibility: 'PRIVATE' },
+      });
+
+      const manager = await registerUser('Manager');
+      await context.prisma.workspaceMember.create({
+        data: { workspaceId: scope.workspaceId, userId: manager.userId, role: WorkspaceRole.MANAGER },
+      });
+
+      return manager;
+    };
+
+    it('refuses to save a rule from a private project the caller cannot see', async () => {
+      const scope = await setupScope();
+      const rule = await createSourceRule(scope);
+      const manager = await closeSource(scope);
+
+      // The project id arrives in the body, where `ProjectAccessGuard` cannot
+      // reach it. Being a workspace manager is not enough: an invisible
+      // project is a 404, or its graph would reach the shared library.
+      await request(server())
+        .post(libraryUrl(scope))
+        .set('Authorization', `Bearer ${manager.token}`)
+        .send({ projectId: scope.source.projectId, ruleId: rule.id })
+        .expect(404);
+
+      const library = await request(server())
+        .get(libraryUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(library.body.data).toEqual([]);
+    });
+
+    it('does not name a private source project to a reader who is not in it', async () => {
+      const scope = await setupScope();
+      const rule = await createSourceRule(scope);
+      const template = await saveTemplate(scope, rule.id);
+      expect(template.sourceProject).not.toBeNull();
+
+      await closeSource(scope);
+
+      // The template stays in the workspace library for everyone; the project
+      // that gave it is the part the outsider may not read.
+      const asMember = await request(server())
+        .get(libraryUrl(scope))
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(200);
+      expect(asMember.body.data).toHaveLength(1);
+      expect(asMember.body.data[0].sourceProject).toBeNull();
+
+      const asOwner = await request(server())
+        .get(libraryUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      expect(asOwner.body.data[0].sourceProject).toEqual({
+        id: scope.source.projectId,
+        name: 'Platform Foundation',
+      });
+    });
+  });
+
   describe('applying', () => {
     it('creates a draft in the target project and counts the use', async () => {
       const scope = await setupScope();

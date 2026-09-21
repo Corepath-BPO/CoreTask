@@ -1,3 +1,4 @@
+import type { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/contracts';
 import type { PaginationMeta } from '@coretask/types';
 import type { Request } from 'express';
 
@@ -21,16 +22,45 @@ export interface AuthenticatedUser {
   apiKey?: ApiKeyPrincipal;
 }
 
-/** Membership resolved by `WorkspaceMemberGuard`, scoped to the current request. */
+/**
+ * Membership resolved by `WorkspaceMemberGuard`, scoped to the current request.
+ *
+ * On a route under a project, `ProjectAccessGuard` lowers `role` to the
+ * caller's *effective* role inside that project, so everything downstream that
+ * reads it honours the project's cap without knowing projects exist.
+ */
 export interface WorkspaceContext {
   workspaceId: string;
   membershipId: string;
-  role: string;
+  role: WorkspaceRole;
+}
+
+/** Who is acting, with the role they act with here. What services take instead of a bare user id. */
+export interface ActorContext {
+  userId: string;
+  role: WorkspaceRole;
+}
+
+/** The caller's standing in the project a route is under, resolved by `ProjectAccessGuard`. */
+export interface ProjectAccessContext {
+  projectId: string;
+  workspaceId: string;
+  visibility: ProjectVisibility;
+  /** Null when the caller is not on the roster (public project, or the admin override). */
+  projectRole: ProjectMemberRole | null;
+  isMember: boolean;
+  /** The workspace role after the project role's cap. */
+  effectiveRole: WorkspaceRole;
+  /** May change the roster and the project's privacy. */
+  canManage: boolean;
+  /** Reached the project as a workspace OWNER/ADMIN rather than as a member. */
+  override: boolean;
 }
 
 export interface RequestWithUser extends Request {
   user: AuthenticatedUser;
   workspace?: WorkspaceContext;
+  project?: ProjectAccessContext;
 }
 
 /**

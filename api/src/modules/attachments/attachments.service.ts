@@ -13,12 +13,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Attachment as PrismaAttachment } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
 import { StorageService } from '../../integrations/storage/storage.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
 
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { taskInclude, toTaskDto } from '../tasks/task.mapper';
 import { ticketInclude, toTicketDto } from '../tickets/ticket.mapper';
@@ -30,7 +33,11 @@ import type { CreateAttachmentDto } from './dto/attachment.dto';
 interface AttachmentParent {
   link: { taskId: string | null; ticketId: string | null };
   label: string;
+  projectId: string | null;
 }
+
+/** An attachment row plus the project its item sits in. */
+type AttachmentRow = PrismaAttachment & { projectId: string | null };
 
 @Injectable()
 export class AttachmentsService {
@@ -42,7 +49,9 @@ export class AttachmentsService {
     private readonly activity: ActivityLogsService,
     private readonly tasks: TasksService,
     private readonly tickets: TicketsService,
+    private readonly access: ProjectAccessService,
     private readonly realtime: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   /**
@@ -63,8 +72,9 @@ export class AttachmentsService {
           include: taskInclude,
         });
         if (!task) return;
-        this.realtime.emitToWorkspace(
+        void this.broadcast.emit(
           attachment.workspaceId,
+          task.projectId,
           ServerEvent.TASK_UPDATED,
           toTaskDto(task),
         );
@@ -81,8 +91,9 @@ export class AttachmentsService {
           include: ticketInclude,
         });
         if (!ticket) return;
-        this.realtime.emitToWorkspace(
+        void this.broadcast.emit(
           attachment.workspaceId,
+          ticket.projectId,
           ServerEvent.TICKET_UPDATED,
           toTicketDto(ticket),
         );
@@ -109,10 +120,11 @@ export class AttachmentsService {
    */
   async create(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     dto: CreateAttachmentDto,
   ): Promise<PresignedUpload> {
-    const parent = await this.resolveParent(workspaceId, dto);
+    const { userId } = actor;
+    const parent = await this.resolveParent(workspaceId, actor, dto);
 
     this.storage.assertUploadAllowed({
       filename: dto.filename,
@@ -161,8 +173,13 @@ export class AttachmentsService {
    * already known to be unwanted, and paying for it until a cron notices would
    * be the wrong default.
    */
-  async confirm(workspaceId: string, userId: string, attachmentId: string): Promise<Attachment> {
-    const attachment = await this.requireAttachment(workspaceId, attachmentId, {
+  async confirm(
+    workspaceId: string,
+    actor: ActorContext,
+    attachmentId: string,
+  ): Promise<Attachment> {
+    const { userId } = actor;
+    const attachment = await this.requireAttachment(workspaceId, attachmentId, actor, {
       includePending: true,
     });
 
@@ -216,6 +233,7 @@ export class AttachmentsService {
       action: ActivityAction.ATTACHED,
       entity: attachment.taskId ? ActivityEntity.TASK : ActivityEntity.TICKET,
       entityId: (attachment.taskId ?? attachment.ticketId) as string,
+      projectId: attachment.projectId,
       summary: `Attached "${attachment.filename}"`,
       metadata: {
         attachmentId,
@@ -235,13 +253,21 @@ export class AttachmentsService {
     return toAttachmentDto(ready);
   }
 
-  async listForTask(workspaceId: string, taskId: string): Promise<Attachment[]> {
-    const task = await this.tasks.requireTask(workspaceId, taskId);
+  async listForTask(
+    workspaceId: string,
+    taskId: string,
+    actor: ActorContext,
+  ): Promise<Attachment[]> {
+    const task = await this.tasks.requireTask(workspaceId, taskId, actor);
     return this.listFor({ taskId: task.id });
   }
 
-  async listForTicket(workspaceId: string, idOrKey: string): Promise<Attachment[]> {
-    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey);
+  async listForTicket(
+    workspaceId: string,
+    idOrKey: string,
+    actor: ActorContext,
+  ): Promise<Attachment[]> {
+    const ticket = await this.tickets.requireTicket(workspaceId, idOrKey, actor);
     return this.listFor({ ticketId: ticket.id });
   }
 
@@ -252,8 +278,12 @@ export class AttachmentsService {
    * URL is possession of the file, and a link that never expires would outlive
    * the membership that justified it.
    */
-  async download(workspaceId: string, attachmentId: string): Promise<AttachmentDownload> {
-    const attachment = await this.requireAttachment(workspaceId, attachmentId);
+  async download(
+    workspaceId: string,
+    attachmentId: string,
+    actor: ActorContext,
+  ): Promise<AttachmentDownload> {
+    const attachment = await this.requireAttachment(workspaceId, attachmentId, actor);
     return this.storage.presignDownload(attachment.objectKey, attachment.filename);
   }
 
@@ -265,8 +295,12 @@ export class AttachmentsService {
    * Raster images only. The download route is the honest path for anything
    * else, and the only path for an SVG, which can carry script.
    */
-  async view(workspaceId: string, attachmentId: string): Promise<AttachmentDownload> {
-    const attachment = await this.requireAttachment(workspaceId, attachmentId);
+  async view(
+    workspaceId: string,
+    attachmentId: string,
+    actor: ActorContext,
+  ): Promise<AttachmentDownload> {
+    const attachment = await this.requireAttachment(workspaceId, attachmentId, actor);
 
     if (!INLINE_IMAGE_MIME_TYPES.includes(attachment.mimeType)) {
       throw AppException.badRequest(
@@ -281,16 +315,18 @@ export class AttachmentsService {
 
   async remove(
     workspaceId: string,
-    userId: string,
-    role: WorkspaceRole,
+    actor: ActorContext,
     attachmentId: string,
   ): Promise<{ deleted: true }> {
-    const attachment = await this.requireAttachment(workspaceId, attachmentId, {
+    const { userId } = actor;
+    const attachment = await this.requireAttachment(workspaceId, attachmentId, actor, {
       includePending: true,
     });
 
+    // "Manager" as judged inside the item's project.
     const isUploader = attachment.uploaderId === userId;
-    if (!isUploader && !hasAtLeastRole(role, WorkspaceRole.MANAGER)) {
+    const effective = await this.access.effectiveRoleFor(attachment.projectId, actor);
+    if (!isUploader && !hasAtLeastRole(effective, WorkspaceRole.MANAGER)) {
       throw AppException.forbidden(
         'FORBIDDEN',
         'Only the uploader or a workspace manager can delete an attachment.',
@@ -305,6 +341,7 @@ export class AttachmentsService {
       action: ActivityAction.DETACHED,
       entity: attachment.taskId ? ActivityEntity.TASK : ActivityEntity.TICKET,
       entityId: (attachment.taskId ?? attachment.ticketId) as string,
+      projectId: attachment.projectId,
       summary: `Removed "${attachment.filename}"`,
       metadata: {
         attachmentId,
@@ -350,6 +387,7 @@ export class AttachmentsService {
    */
   private async resolveParent(
     workspaceId: string,
+    actor: ActorContext,
     dto: CreateAttachmentDto,
   ): Promise<AttachmentParent> {
     /*
@@ -370,13 +408,31 @@ export class AttachmentsService {
     }
 
     if (dto.taskId) {
-      const task = await this.tasks.requireTask(workspaceId, dto.taskId);
-      return { link: { taskId: task.id, ticketId: null }, label: task.title };
+      const task = await this.tasks.requireTask(
+        workspaceId,
+        dto.taskId,
+        actor,
+        WorkspaceRole.MEMBER,
+      );
+      return {
+        link: { taskId: task.id, ticketId: null },
+        label: task.title,
+        projectId: task.projectId,
+      };
     }
 
     if (dto.ticketId) {
-      const ticket = await this.tickets.requireTicket(workspaceId, dto.ticketId);
-      return { link: { taskId: null, ticketId: ticket.id }, label: ticket.key };
+      const ticket = await this.tickets.requireTicket(
+        workspaceId,
+        dto.ticketId,
+        actor,
+        WorkspaceRole.MEMBER,
+      );
+      return {
+        link: { taskId: null, ticketId: ticket.id },
+        label: ticket.key,
+        projectId: ticket.projectId,
+      };
     }
 
     throw AppException.badRequest('BAD_REQUEST', 'Attach to exactly one of a task or a ticket.');
@@ -400,24 +456,29 @@ export class AttachmentsService {
     }
   }
 
+  /** An attachment on an item the caller can see; anything else does not exist for them. */
   private async requireAttachment(
     workspaceId: string,
     attachmentId: string,
+    actor: ActorContext,
     options: { includePending?: boolean } = {},
-  ): Promise<PrismaAttachment> {
+  ): Promise<AttachmentRow> {
     const attachment = await this.prisma.attachment.findFirst({
       where: {
         id: attachmentId,
         workspaceId,
         ...(options.includePending ? {} : { status: AttachmentStatus.READY }),
+        AND: [this.access.itemParentWhere(actor)],
       },
+      include: { task: { select: { projectId: true } }, ticket: { select: { projectId: true } } },
     });
 
     if (!attachment) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Attachment not found.');
     }
 
-    return attachment;
+    const { task, ticket, ...row } = attachment;
+    return { ...row, projectId: task?.projectId ?? ticket?.projectId ?? null };
   }
 
   private async read(attachmentId: string): Promise<Attachment> {

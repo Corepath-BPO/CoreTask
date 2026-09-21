@@ -39,6 +39,15 @@ The denormalisation is deliberate. A tenant filter is then always one indexed
 column away, so no query depends on remembering a join to stay scoped, and a
 missing join cannot silently widen a result set.
 
+Below the workspace there is one more boundary: a `PRIVATE` project is visible
+only to its `project_members` and to workspace `OWNER`/`ADMIN`. Every query that
+spans projects — the project list, the workspace-wide task and ticket lists, the
+activity feed — carries the visibility predicate from `ProjectAccessService`
+under `AND: [...]`. `activity_logs.projectId` exists for exactly this: a feed
+line about a task in a private project has to be filterable without joining
+through six entity types, so the project is stamped on the line when it is
+written (and resolved from the entity when the writer did not pass it).
+
 ## Soft deletion
 
 Applied only where history matters, never as a blanket policy:
@@ -107,6 +116,31 @@ _membership_:
 `Project.teamId` is nullable with `onDelete: SetNull`: deleting a team must never
 take projects with it.
 
+## Project members
+
+`ProjectMember` is the list a `PRIVATE` project is private to, and what a public
+one shows as "members". It is keyed `[projectId, userId]` like `TeamMember`, but
+also carries `workspaceId` — per the tenancy convention — so "drop every
+membership when someone leaves the workspace" is one indexed statement. `role`
+(`ADMIN`, `EDITOR`, `VIEWER`) only narrows the workspace role; see
+[ADR 0016](../decisions/0016-project-privacy-is-a-membership-list.md).
+
+Invariants kept by the services rather than the schema:
+
+- The creator and the lead are `ADMIN` from creation; naming a lead later adds
+  them as `ADMIN` unless they are already on the roster.
+- A private project keeps at least one `ADMIN`. Roster writes take a row lock on
+  the project first, so two concurrent demotions cannot both pass the count.
+- `MembersService.remove` deletes the person's `ProjectMember` rows for that
+  workspace in the same transaction as their team rows, and clears any
+  `Project.leadId` they held.
+
+Workspace `OWNER`/`ADMIN` see every project without a row here, which is what
+keeps a private project reachable when its admins have all gone. The migration
+`20260915130000_project_privacy` backfilled every existing lead as their
+project's first admin and stamped `activity_logs.projectId` from each line's
+entity.
+
 ## Ordering
 
 `Section.position` and `Task.position` are `Float`. Fractional ordering means
@@ -145,12 +179,17 @@ the development container can run it on every boot without duplicating anything.
 It refuses to run when `NODE_ENV=production`.
 
 It creates one demo user plus three teammates, one workspace, two teams
-(`Platform`, `Support`), one project with four default sections, six tasks, five
-tickets (`CORE-1001`…`CORE-1005`), seed activity and one notification.
+(`Platform`, `Support`), a public project "Platform Foundation" with four default
+sections, six tasks, five tickets (`CORE-1001`…`CORE-1005`), seed activity and
+one notification — and a **private** project, "Leadership Planning" (`LEAD`),
+whose roster is the owner and Maya as admins. Jonas and Priya cannot see it
+anywhere, which is what the privacy tests and a manual check sign in as both
+sides of. Platform Foundation's roster is the owner (admin), Maya and Jonas
+(editors) and Priya (viewer).
 
-Team rosters are added to, never pruned, on a re-run: the seed is run against
-databases people have been clicking around in, and silently ejecting somebody
-they added would be a surprising thing for a seed to do.
+Team and project rosters are added to, never pruned or demoted, on a re-run: the
+seed is run against databases people have been clicking around in, and silently
+ejecting somebody they added would be a surprising thing for a seed to do.
 
 ## Extensions
 

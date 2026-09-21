@@ -40,6 +40,9 @@ export const PROJECT_COLORS: readonly string[] = [
   '#14B8A6',
 ];
 
+/** How many members a project summary carries for its avatar stack; the count says the rest. */
+export const PROJECT_MEMBER_PREVIEW_LIMIT = 5;
+
 export const TEAM_NAME_MIN_LENGTH = 2;
 export const TEAM_NAME_MAX_LENGTH = 80;
 /** A workspace cannot have an unbounded number of groupings. */

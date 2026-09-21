@@ -22,7 +22,9 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import { Actor, CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { CustomFieldsService } from './custom-fields.service';
@@ -51,7 +53,7 @@ import {
 @ApiTags('Custom fields')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId/custom-fields')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
@@ -275,10 +277,10 @@ export class TaskCustomFieldsController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: SetCustomFieldValueDto,
   ): Promise<TaskCustomFieldValue> {
-    return this.fields.setValue(workspaceId, taskId, userId, fieldId, dto);
+    return this.fields.setValue(workspaceId, taskId, actor.userId, fieldId, dto, { actor });
   }
 
   @Delete(':fieldId')
@@ -289,8 +291,8 @@ export class TaskCustomFieldsController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
     @Param('fieldId', ParseUUIDPipe) fieldId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<void> {
-    return this.fields.clearValue(workspaceId, taskId, fieldId, userId);
+    return this.fields.clearValue(workspaceId, taskId, fieldId, actor.userId, actor);
   }
 }

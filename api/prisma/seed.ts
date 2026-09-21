@@ -16,7 +16,9 @@ import {
   ActivityEntity,
   NotificationType,
   PrismaClient,
+  ProjectMemberRole,
   ProjectStatus,
+  ProjectVisibility,
   TaskPriority,
   TaskStatus,
   TicketPriority,
@@ -38,6 +40,8 @@ const DEMO_EMAIL = process.env.SEED_USER_EMAIL ?? 'demo@coretask.dev';
 const DEMO_PASSWORD = process.env.SEED_USER_PASSWORD ?? 'CoreTask!2024';
 const WORKSPACE_SLUG = 'coretask-demo';
 const PROJECT_KEY = 'PLAT';
+/** A private project, so the demo shows what privacy looks like from both sides. */
+const PRIVATE_PROJECT_KEY = 'LEAD';
 
 async function main(): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
@@ -131,9 +135,13 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   const project = await prisma.project.upsert({
     where: { workspaceId_key: { workspaceId: workspace.id, key: PROJECT_KEY } },
-    // `teamId` is re-applied on update so an existing demo database picks the
-    // association up too, rather than only fresh installs showing it.
-    update: { name: 'Platform Foundation', teamId: platformTeam.id },
+    // `teamId` and `visibility` are re-applied on update so an existing demo
+    // database picks them up too, rather than only fresh installs showing them.
+    update: {
+      name: 'Platform Foundation',
+      teamId: platformTeam.id,
+      visibility: ProjectVisibility.PUBLIC,
+    },
     create: {
       workspaceId: workspace.id,
       name: 'Platform Foundation',
@@ -141,12 +149,23 @@ async function main(): Promise<void> {
       description: 'Authentication, workspaces and the shared application shell.',
       status: ProjectStatus.ACTIVE,
       color: '#6366F1',
+      visibility: ProjectVisibility.PUBLIC,
       leadId: owner.id,
       teamId: platformTeam.id,
       startDate: daysFromNow(-21),
       dueDate: daysFromNow(30),
     },
   });
+
+  // Everyone is on the public project, with a spread of roles so the Share
+  // dialog has something to show: the lead runs it, two editors work in it,
+  // and the supporter can only read it.
+  await upsertProjectMembers(workspace.id, project.id, [
+    { userId: owner.id, role: ProjectMemberRole.ADMIN },
+    { userId: admin?.id, role: ProjectMemberRole.EDITOR },
+    { userId: engineer?.id, role: ProjectMemberRole.EDITOR },
+    { userId: supporter?.id, role: ProjectMemberRole.VIEWER },
+  ]);
 
   const sectionNames = ['Backlog', 'In Progress', 'In Review', 'Done'];
   const sections = [];
@@ -159,6 +178,74 @@ async function main(): Promise<void> {
   if (!backlog || !inProgress || !inReview || !done) {
     throw new Error('Seed failed to create the default sections.');
   }
+
+  // ---------------------------------------------------------------------------
+  // A private project: the owner and the admin run it; Jonas and Priya must
+  // not see it anywhere. This is the fixture the privacy tests sign in as
+  // both sides of.
+  // ---------------------------------------------------------------------------
+  const privateProject = await prisma.project.upsert({
+    where: { workspaceId_key: { workspaceId: workspace.id, key: PRIVATE_PROJECT_KEY } },
+    update: {
+      name: 'Leadership Planning',
+      teamId: platformTeam.id,
+      visibility: ProjectVisibility.PRIVATE,
+    },
+    create: {
+      workspaceId: workspace.id,
+      name: 'Leadership Planning',
+      key: PRIVATE_PROJECT_KEY,
+      description: 'Hiring, budget and roadmap decisions before they are announced.',
+      status: ProjectStatus.ACTIVE,
+      color: '#8B5CF6',
+      visibility: ProjectVisibility.PRIVATE,
+      leadId: owner.id,
+      teamId: platformTeam.id,
+      startDate: daysFromNow(-7),
+      dueDate: daysFromNow(60),
+    },
+  });
+
+  await upsertProjectMembers(workspace.id, privateProject.id, [
+    { userId: owner.id, role: ProjectMemberRole.ADMIN },
+    { userId: admin?.id, role: ProjectMemberRole.ADMIN },
+  ]);
+
+  const privateSections = [];
+  for (const [index, name] of sectionNames.entries()) {
+    privateSections.push(await upsertSection(workspace.id, privateProject.id, name, index * 1000));
+  }
+  const [privateBacklog, privateInProgress] = privateSections;
+  if (!privateBacklog || !privateInProgress) {
+    throw new Error('Seed failed to create the private project sections.');
+  }
+
+  await upsertTask({
+    workspaceId: workspace.id,
+    projectId: privateProject.id,
+    sectionId: privateInProgress.id,
+    title: 'Q4 hiring plan',
+    status: TaskStatus.IN_PROGRESS,
+    priority: TaskPriority.HIGH,
+    position: 0,
+    assigneeId: owner.id,
+    createdById: owner.id,
+    dueDate: daysFromNow(12),
+    completedAt: null,
+  });
+  await upsertTask({
+    workspaceId: workspace.id,
+    projectId: privateProject.id,
+    sectionId: privateBacklog.id,
+    title: 'Budget review with finance',
+    status: TaskStatus.TODO,
+    priority: TaskPriority.MEDIUM,
+    position: 1000,
+    assigneeId: admin?.id ?? owner.id,
+    createdById: owner.id,
+    dueDate: daysFromNow(20),
+    completedAt: null,
+  });
 
   // ---------------------------------------------------------------------------
   // Integrations: a paused example webhook aimed at a local n8n
@@ -469,7 +556,8 @@ async function main(): Promise<void> {
       '',
       'Seed complete.',
       `  Workspace   CoreTask Demo (${workspace.slug})`,
-      `  Project     Platform Foundation (${PROJECT_KEY})`,
+      `  Project     Platform Foundation (${PROJECT_KEY}) — public`,
+      `  Project     Leadership Planning (${PRIVATE_PROJECT_KEY}) — private to the owner and Maya`,
       `  Tickets     ${workspace.ticketPrefix}-1001 .. ${workspace.ticketPrefix}-${1000 + ticketSeeds.length}`,
       '',
       '  Demo login  ' + DEMO_EMAIL,
@@ -531,6 +619,26 @@ async function upsertTeam(
   });
 
   return record;
+}
+
+/**
+ * Puts people on a project's roster. Added, never pruned or demoted, for the
+ * same reason `upsertTeam` leaves rosters alone: the seed re-runs against
+ * databases people have been changing.
+ */
+async function upsertProjectMembers(
+  workspaceId: string,
+  projectId: string,
+  members: { userId: string | undefined; role: ProjectMemberRole }[],
+) {
+  await prisma.projectMember.createMany({
+    data: members
+      .filter((member): member is { userId: string; role: ProjectMemberRole } =>
+        Boolean(member.userId),
+      )
+      .map((member) => ({ projectId, workspaceId, userId: member.userId, role: member.role })),
+    skipDuplicates: true,
+  });
 }
 
 /**

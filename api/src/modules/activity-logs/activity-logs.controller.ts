@@ -7,6 +7,8 @@ import {
   ApiEnvelopeResponse,
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
+import { Actor } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { ActivityLogsService } from './activity-logs.service';
@@ -51,10 +53,12 @@ export class ActivityLogsController {
   @ApiErrorResponseDoc(422, 'Validation failed')
   listForItem(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Actor() actor: ActorContext,
     @Query() query: ItemActivityQueryDto,
   ): Promise<ItemActivityPage> {
     return this.activity.listForEntity(
       workspaceId,
+      actor,
       query.entity === 'TASK' ? ActivityEntity.TASK : ActivityEntity.TICKET,
       query.entityId,
       { before: query.before, limit: query.limit },
@@ -69,8 +73,9 @@ export class ActivityLogsController {
   @ApiEnvelopeResponse(ActivityEntryDto, { isArray: true })
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Actor() actor: ActorContext,
     @Query() query: ActivityQueryDto,
   ): Promise<ActivityEntry[]> {
-    return this.activity.listFeed(workspaceId, query.limit);
+    return this.activity.listFeed(workspaceId, actor, query.limit);
   }
 }

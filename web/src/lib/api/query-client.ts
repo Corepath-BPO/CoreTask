@@ -62,6 +62,9 @@ export const queryKeys = {
       [...queryKeys.projects.all(workspaceId), 'list', filters] as const,
     detail: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'detail', projectId] as const,
+    /** Under the project prefix on purpose: one invalidation reaches the roster too. */
+    members: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
   },
   tasks: {
     all: (workspaceId: string) => ['tasks', workspaceId] as const,

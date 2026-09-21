@@ -5,11 +5,9 @@ import { Reflector } from '@nestjs/core';
 import { WORKSPACE_ROLES_KEY } from '../../common/decorators/workspace.decorator';
 import { AppException } from '../../common/exceptions/app.exception';
 import type { RequestWithUser } from '../../common/types/api.types';
+import { UUID_PATTERN } from '../../common/utils/uuid.util';
 
 import { WorkspaceMembersService } from './workspace-members.service';
-
-/** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Enforces tenant isolation for any route carrying a `:workspaceId` parameter.

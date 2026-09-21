@@ -32,8 +32,8 @@ export function useProject(workspaceId: string | undefined, projectId: string) {
   });
 }
 
-/** Invalidates every project query for a workspace after a mutation. */
-function invalidateProjects(workspaceId: string) {
+/** Invalidates every project query for a workspace after a mutation — the roster included. */
+export function invalidateProjects(workspaceId: string) {
   return queryClient.invalidateQueries({ queryKey: queryKeys.projects.all(workspaceId) });
 }
 

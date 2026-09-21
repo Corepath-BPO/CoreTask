@@ -66,6 +66,15 @@ describe('createProjectSchema', () => {
   it('treats an empty date string as cleared', () => {
     expect(createProjectSchema.parse({ name: 'Platform', dueDate: '' }).dueDate).toBeNull();
   });
+
+  it('accepts either visibility and rejects anything else', () => {
+    expect(createProjectSchema.parse({ name: 'Platform', visibility: 'PRIVATE' }).visibility).toBe(
+      'PRIVATE',
+    );
+    expect(createProjectSchema.safeParse({ name: 'Platform', visibility: 'TEAM' }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe('projectFormSchema', () => {
@@ -107,5 +116,10 @@ describe('projectFormSchema', () => {
 
   it('accepts a due date with no start date', () => {
     expect(projectFormSchema.safeParse({ ...valid, dueDate: '2026-08-01' }).success).toBe(true);
+  });
+
+  it('defaults visibility to PUBLIC when the form does not send one', () => {
+    expect(projectFormSchema.parse(valid).visibility).toBe('PUBLIC');
+    expect(projectFormSchema.parse({ ...valid, visibility: 'PRIVATE' }).visibility).toBe('PRIVATE');
   });
 });

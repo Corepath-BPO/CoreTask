@@ -199,6 +199,63 @@ membership is validated — the foreign key alone would accept a valid team id
 belonging to someone else's workspace, leaking its name and colour through the
 project badge.
 
+### Project privacy and membership
+
+A project is `PUBLIC` — every workspace member, as every project was before —
+or `PRIVATE`: its own members plus the workspace's `OWNER` and `ADMIN`. Membership
+is a `project_members` row with a role of `ADMIN`, `EDITOR` or `VIEWER`, and a
+project role only ever **narrows** the workspace role: EDITOR acts as at most a
+MEMBER, VIEWER as at most a GUEST, ADMIN keeps their workspace role and may also
+manage the roster and the privacy. The rules live in
+`@coretask/contracts/project-roles.ts` so the Share dialog offers exactly what
+the API enforces. See [ADR 0016](../decisions/0016-project-privacy-is-a-membership-list.md).
+
+There is one access primitive, `ProjectAccessService` in
+`modules/project-access/` — a Prisma-only leaf so followers, activity,
+notifications and the websocket gateway can all import it. It answers "may this
+person see this project, and as what?" (`resolveAccess`, a 404 when they may
+not) and turns the same rule into query fragments: `projectWhere` for the
+project list, `scopedWhere` for anything carrying a nullable `projectId` (tasks,
+tickets, activity lines) and `itemParentWhere` for rows that hang off a task
+_or_ a ticket (comments, attachments). Compose them under `AND: [...]` — several
+list queries already own a top-level `OR`.
+
+`ProjectAccessGuard` runs after `WorkspaceMemberGuard` on every route under
+`projects/:projectId`. It resolves the caller's standing, attaches it as
+`request.project`, and **lowers `request.workspace.role` to the effective
+role** — so every downstream `@RequireWorkspaceRole` and `hasAtLeastRole(role, …)`
+honours the cap without knowing projects exist. `@RequireProjectAdmin()` is the
+one new decorator, for the roster routes. Where a project id arrives in a request
+body instead (creating a task or ticket in a project, moving a task into a
+section, applying a rule template), the service calls
+`ProjectAccessService.requireAccess(…, minimumRole)` itself; those six sites are
+the only ones the guard cannot see.
+
+Three invariants are maintained in `ProjectsService` and `ProjectMembersService`:
+
+- The creator and the lead are admins from the first moment, so a private project
+  is never born without one. Naming an existing member as lead never demotes them.
+- A private project keeps at least one admin (`409 LAST_PROJECT_ADMIN`), and going
+  private adds the actor as one when they were not on the roster. Roster writes
+  lock the project row first, so two admins demoting each other cannot both count
+  two admins.
+- Removing someone from the workspace drops their project memberships in the
+  same transaction as their team rows, and clears any `leadId` they held.
+
+Fan-out follows visibility rather than roster: `FollowersService.ensure` and
+`followerIds`, description and comment mentions, and the assignee rule all pass
+through `filterVisibleTo` / `assertUsersCanSee`, so nobody is told about — or
+handed — work they cannot open. Realtime goes through `ProjectBroadcastService`
+in the global websocket module, which sends a public or unscoped item's event to
+the workspace room and a private item's to its members' and the admins' own
+rooms; `project:access-revoked` and a room eviction follow anyone a private
+project disappears for.
+
+The service account behind an API key is a member capped at MANAGER and never
+has the override — a key must be added to a private project to reach it. A
+workspace-wide webhook endpoint, which only an ADMIN can create, still receives
+private-project events.
+
 ### Ticket keys
 
 `Workspace.ticketCounter` is incremented **inside the ticket-creation
@@ -364,6 +421,15 @@ resolves membership, enforces `@RequireWorkspaceRole(...)`, and attaches the
 result to the request. Note that guards run _before_ pipes, so it validates the
 UUID shape itself — otherwise a malformed id would reach PostgreSQL as a uuid
 comparison and surface as a 500 instead of a 400.
+
+`ProjectAccessGuard` follows it on any route with a `:projectId` parameter,
+always as `@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)` — it refuses to
+run without the membership the first guard attached. It hides a private project
+from non-members (a 404, so the response cannot reveal that something private is
+there) and lowers `request.workspace.role` to the caller's effective role inside
+the project, re-checking `@RequireWorkspaceRole` against it with
+`INSUFFICIENT_PROJECT_ROLE`. `@Actor()` injects `{ userId, role }` with that
+lowered role, which is what services take instead of a bare user id.
 
 ## Validation
 

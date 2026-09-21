@@ -183,10 +183,8 @@ describe('PlaygroundPage', () => {
     // Listing keeps the parent; every row can be handed to the next call.
     await user.click(screen.getByRole('button', { name: /List subtasks/ }));
     expect(screen.getByLabelText(/Parent task ID/)).toHaveValue('task-1');
-    // Project-scoped: the parent is checked against the project in the URL, so
-    // the project carried over from the create step is part of the path.
     expect(screen.getByTestId('playground-url')).toHaveTextContent(
-      `${env.apiUrl}/workspaces/${WORKSPACE}/projects/${PROJECT}/tasks/task-1/subtasks`,
+      `${env.apiUrl}/workspaces/${WORKSPACE}/tasks/task-1/subtasks`,
     );
     await user.click(screen.getByRole('button', { name: 'Run' }));
     expect(await screen.findByLabelText('HTTP 200')).toBeInTheDocument();

@@ -21,10 +21,9 @@ import {
   ApiErrorResponseDoc,
   ApiPaginatedEnvelopeResponse,
 } from '../../common/decorators/api-envelope.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
-import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
-import type { PaginatedResult } from '../../common/types/api.types';
+import { Actor, RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import type { ActorContext, PaginatedResult } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { TaskDetailDto, TaskDto } from './dto/task-response.dto';
@@ -57,10 +56,10 @@ export class TasksController {
   @ApiPaginatedEnvelopeResponse(TaskDto)
   list(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Query() query: TaskListQueryDto,
   ): Promise<PaginatedResult<Task, TaskListMeta>> {
-    return this.tasks.list(workspaceId, userId, query);
+    return this.tasks.list(workspaceId, actor, query);
   }
 
   @Post()
@@ -76,10 +75,10 @@ export class TasksController {
   @ApiErrorResponseDoc(422, 'Validation failed')
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: CreateTaskDto,
   ): Promise<Task> {
-    return this.tasks.create(workspaceId, userId, dto);
+    return this.tasks.create(workspaceId, actor, dto);
   }
 
   @Get(':taskId')
@@ -90,8 +89,26 @@ export class TasksController {
   get(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
   ): Promise<TaskDetail> {
-    return this.tasks.getDetail(workspaceId, taskId);
+    return this.tasks.getDetail(workspaceId, taskId, actor);
+  }
+
+  @Get(':taskId/subtasks')
+  @ApiOperation({
+    summary: 'List the subtasks of a task',
+    description:
+      'The children of one task, in board order. Each is an ordinary task: complete or comment on one through `/tasks/{subtaskId}`. Needs only the parent’s id, unlike the project-scoped route the list view uses.',
+  })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiEnvelopeResponse(TaskDto, { isArray: true })
+  @ApiErrorResponseDoc(404, 'No such task in this workspace')
+  subtasks(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<Task[]> {
+    return this.tasks.listSubtasks(workspaceId, taskId, actor);
   }
 
   @Patch(':taskId')
@@ -107,10 +124,10 @@ export class TasksController {
   update(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: UpdateTaskDto,
   ): Promise<Task> {
-    return this.tasks.update(workspaceId, userId, taskId, dto);
+    return this.tasks.update(workspaceId, actor, taskId, dto);
   }
 
   @Patch(':taskId/move')
@@ -126,10 +143,10 @@ export class TasksController {
   move(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
     @Body() dto: MoveTaskDto,
   ): Promise<Task> {
-    return this.tasks.move(workspaceId, userId, taskId, dto);
+    return this.tasks.move(workspaceId, actor, taskId, dto);
   }
 
   @Delete(':taskId')
@@ -145,9 +162,9 @@ export class TasksController {
   archive(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Task> {
-    return this.tasks.archive(workspaceId, userId, taskId);
+    return this.tasks.archive(workspaceId, actor, taskId);
   }
 
   @Post(':taskId/restore')
@@ -160,8 +177,8 @@ export class TasksController {
   restore(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') userId: string,
+    @Actor() actor: ActorContext,
   ): Promise<Task> {
-    return this.tasks.restore(workspaceId, userId, taskId);
+    return this.tasks.restore(workspaceId, actor, taskId);
   }
 }

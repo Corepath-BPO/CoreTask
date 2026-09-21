@@ -39,6 +39,30 @@ export const ProjectStatus = {
 export type ProjectStatus = (typeof ProjectStatus)[keyof typeof ProjectStatus];
 export const PROJECT_STATUSES = Object.values(ProjectStatus);
 
+/**
+ * Who can see a project. `PUBLIC` is every member of the workspace — what every
+ * project was before privacy existed, and still the default. `PRIVATE` is the
+ * project's own members plus the workspace's admins.
+ */
+export const ProjectVisibility = {
+  PUBLIC: 'PUBLIC',
+  PRIVATE: 'PRIVATE',
+} as const;
+export type ProjectVisibility = (typeof ProjectVisibility)[keyof typeof ProjectVisibility];
+export const PROJECT_VISIBILITIES = Object.values(ProjectVisibility);
+
+/**
+ * A member's standing inside one project. It only ever narrows the workspace
+ * role — see `project-roles.ts` for how the two combine.
+ */
+export const ProjectMemberRole = {
+  ADMIN: 'ADMIN',
+  EDITOR: 'EDITOR',
+  VIEWER: 'VIEWER',
+} as const;
+export type ProjectMemberRole = (typeof ProjectMemberRole)[keyof typeof ProjectMemberRole];
+export const PROJECT_MEMBER_ROLES = Object.values(ProjectMemberRole);
+
 export const TaskPriority = {
   NONE: 'NONE',
   LOW: 'LOW',
@@ -122,6 +146,8 @@ export const NotificationType = {
   TICKET_UPDATED: 'TICKET_UPDATED',
   /** A custom field flagged "notify collaborators" changed value. */
   FIELD_CHANGED: 'FIELD_CHANGED',
+  /** Someone added you to a project's members. */
+  PROJECT_MEMBER_ADDED: 'PROJECT_MEMBER_ADDED',
 } as const;
 export type NotificationType = (typeof NotificationType)[keyof typeof NotificationType];
 export const NOTIFICATION_TYPES = Object.values(NotificationType);

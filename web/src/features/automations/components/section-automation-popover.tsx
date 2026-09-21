@@ -1,10 +1,4 @@
-import {
-  AUTOMATION_STATE_COLOR,
-  AutomationRuleStatus,
-  TRIGGER_LABEL,
-  WorkspaceRole,
-  hasAtLeastRole,
-} from '@coretask/contracts';
+import { AUTOMATION_STATE_COLOR, AutomationRuleStatus, TRIGGER_LABEL } from '@coretask/contracts';
 import { Link } from '@tanstack/react-router';
 import { AlertTriangle, LibraryBig, Plus, Settings2, Zap } from 'lucide-react';
 import { useState } from 'react';
@@ -13,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
+import { useProject } from '@/features/projects/hooks/use-projects';
+import { useProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
@@ -97,10 +93,10 @@ export function SectionAutomationPopover({
    */
   const [libraryOpen, setLibraryOpen] = useState(false);
   const { workspace } = useActiveWorkspace();
-  const canManage = hasAtLeastRole(
-    (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole,
-    WorkspaceRole.MANAGER,
-  );
+  // Cached by the project shell, so this costs nothing; it carries the
+  // reader's standing in this project.
+  const { data: project } = useProject(workspace?.id, projectId);
+  const canManage = useProjectAccess(project).canManage;
 
   const { data: rules, isLoading } = useSectionAutomations(workspace?.id, projectId, sectionId);
 

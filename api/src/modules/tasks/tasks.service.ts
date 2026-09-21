@@ -5,6 +5,7 @@ import {
   NotificationType,
   ServerEvent,
   TaskStatus,
+  WorkspaceRole,
 } from '@coretask/contracts';
 import type {
   Task,
@@ -28,7 +29,7 @@ import {
   compileSorts,
   type CustomFieldMap,
 } from '../project-views/lib/query-compiler';
-import { PaginatedResult } from '../../common/types/api.types';
+import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
 import { buildPaginationMeta, toSkipTake } from '../../common/utils/pagination.util';
 import { planPlacement, type OrderedItem } from '../../common/utils/position.util';
 import { normalizeRichText } from '../../common/utils/rich-text.util';
@@ -41,7 +42,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
-import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import {
   diffItemStories,
@@ -52,6 +53,7 @@ import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { FormulaValuesService } from '../custom-fields/formula-values.service';
 import { FollowersService } from '../followers/followers.service';
 import { taskLink, taskRef } from '../followers/item-ref';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
 import {
@@ -81,7 +83,8 @@ export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityLogsService,
-    private readonly realtime: RealtimeGateway,
+    private readonly access: ProjectAccessService,
+    private readonly broadcast: ProjectBroadcastService,
     private readonly automation: AutomationEventPublisher,
     private readonly notifications: NotificationDispatcher,
     private readonly mentions: DescriptionMentionNotifier,
@@ -92,10 +95,10 @@ export class TasksService {
 
   async list(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     query: TaskListQueryDto,
   ): Promise<PaginatedResult<Task, TaskListMeta>> {
-    const where = this.buildWhere(workspaceId, userId, query);
+    const where = this.buildWhere(workspaceId, actor, query);
 
     const [total, tasks] = await Promise.all([
       this.prisma.task.count({ where }),
@@ -258,9 +261,9 @@ export class TasksService {
     return grouped;
   }
 
-  async getDetail(workspaceId: string, taskId: string): Promise<TaskDetail> {
+  async getDetail(workspaceId: string, taskId: string, actor: ActorContext): Promise<TaskDetail> {
     const task = await this.prisma.task.findFirst({
-      where: { id: taskId, workspaceId },
+      where: { id: taskId, workspaceId, AND: [this.access.scopedWhere(actor)] },
       include: taskDetailInclude,
     });
 
@@ -271,11 +274,43 @@ export class TasksService {
     return toTaskDetailDto(task);
   }
 
-  async create(workspaceId: string, userId: string, dto: CreateTaskDto): Promise<Task> {
-    const placement = await this.resolvePlacement(workspaceId, dto);
-    await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
+  /**
+   * The subtasks of one task, by the parent's id alone.
+   *
+   * The list view has its own route under the project (`listSubtasksForView`),
+   * shaped for its cells. This one is for callers that hold nothing but a task
+   * id — an n8n flow that created a task and wants to tick its children off one
+   * by one — so it asks for no project and speaks the plain task shape the rest
+   * of `/tasks` does. The parent is checked against the workspace first, for
+   * the same reason as there: the guard proves the caller's membership, never
+   * that the id in the path is theirs.
+   */
+  async listSubtasks(
+    workspaceId: string,
+    parentTaskId: string,
+    actor: ActorContext,
+  ): Promise<Task[]> {
+    await this.requireTask(workspaceId, parentTaskId, actor);
 
-    const parent = dto.parentTaskId ? await this.requireTask(workspaceId, dto.parentTaskId) : null;
+    const subtasks = await this.prisma.task.findMany({
+      where: { parentTaskId, workspaceId, archivedAt: null },
+      include: taskInclude,
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
+    });
+
+    // Nesting stops at one level, so a subtask's own completed count is always 0.
+    return subtasks.map((subtask) => toTaskDto(subtask));
+  }
+
+  async create(workspaceId: string, actor: ActorContext, dto: CreateTaskDto): Promise<Task> {
+    const { userId } = actor;
+    const placement = await this.resolvePlacement(workspaceId, actor, dto);
+    await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
+    await this.assertAssigneeCanSee(workspaceId, placement.projectId, dto.assigneeId);
+
+    const parent = dto.parentTaskId
+      ? await this.requireTask(workspaceId, dto.parentTaskId, actor, WorkspaceRole.MEMBER)
+      : null;
 
     if (parent?.parentTaskId) {
       // One level of nesting. Deeper trees need a different UI and a recursive
@@ -332,6 +367,7 @@ export class TasksService {
       action: ActivityAction.CREATED,
       entity: ActivityEntity.TASK,
       entityId: created.id,
+      projectId: created.projectId,
       summary: `Created task "${created.title}"`,
       metadata: { projectId: created.projectId, sectionId: created.sectionId },
     });
@@ -345,13 +381,14 @@ export class TasksService {
         action: ActivityAction.SUBTASK_ADDED,
         entity: ActivityEntity.TASK,
         entityId: parent.id,
+        projectId: parent.projectId,
         summary: `Added subtask “${created.title}”`,
         metadata: { subtaskId: created.id, title: created.title },
       });
     }
 
     const task = toTaskDto(created);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_CREATED, task);
+    void this.broadcast.emit(workspaceId, created.projectId, ServerEvent.TASK_CREATED, task);
 
     // The creator and the assignee follow from the start, as in Asana.
     await this.followers.ensure(workspaceId, taskLink(created.id), [userId, created.assigneeId]);
@@ -374,6 +411,7 @@ export class TasksService {
       actorId: userId,
       entity: 'TASK',
       entityId: created.id,
+      projectId: created.projectId,
       label: `“${created.title}”`,
       actionUrl: `/my-tasks?task=${created.id}`,
       before: null,
@@ -385,12 +423,14 @@ export class TasksService {
 
   async update(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     taskId: string,
     dto: UpdateTaskDto,
   ): Promise<Task> {
-    const existing = await this.requireTask(workspaceId, taskId);
+    const { userId } = actor;
+    const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
+    await this.assertAssigneeCanSee(workspaceId, existing.projectId, dto.assigneeId);
 
     const data: Prisma.TaskUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
@@ -449,7 +489,13 @@ export class TasksService {
       snapshotFromTask(updated, { assignee: this.assigneeRef(updated.assignee) }),
       'task',
     );
-    const context = { workspaceId, actorId: userId, entity: ActivityEntity.TASK, entityId: taskId };
+    const context = {
+      workspaceId,
+      actorId: userId,
+      entity: ActivityEntity.TASK,
+      entityId: taskId,
+      projectId: updated.projectId,
+    };
     if (stories.length > 0) {
       await this.activity.recordStories(context, stories);
     } else {
@@ -462,7 +508,7 @@ export class TasksService {
     }
 
     const task = await this.withSubtaskRollup(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, task);
+    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_UPDATED, task);
 
     if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
       await this.followers.ensure(workspaceId, taskLink(updated.id), [updated.assigneeId]);
@@ -520,6 +566,7 @@ export class TasksService {
         actorId: userId,
         entity: 'TASK',
         entityId: updated.id,
+        projectId: updated.projectId,
         label: `“${updated.title}”`,
         actionUrl: `/my-tasks?task=${updated.id}`,
         before: existing.description,
@@ -531,14 +578,26 @@ export class TasksService {
   }
 
   /** Moves a task within or between columns. */
-  async move(workspaceId: string, userId: string, taskId: string, dto: MoveTaskDto): Promise<Task> {
-    const existing = await this.requireTask(workspaceId, taskId);
+  async move(
+    workspaceId: string,
+    actor: ActorContext,
+    taskId: string,
+    dto: MoveTaskDto,
+  ): Promise<Task> {
+    const { userId } = actor;
+    const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
 
     const section = dto.sectionId ? await this.requireSection(workspaceId, dto.sectionId) : null;
 
     // A task cannot sit in a column that belongs to a different project.
     if (section && existing.projectId && section.projectId !== existing.projectId) {
       throw AppException.badRequest('BAD_REQUEST', 'That section belongs to a different project.');
+    }
+
+    // A workspace-level task joining a project's column is a write into that
+    // project, which the caller must be allowed to make.
+    if (section && !existing.projectId) {
+      await this.access.requireAccess(workspaceId, section.projectId, actor, WorkspaceRole.MEMBER);
     }
 
     const projectId = section?.projectId ?? existing.projectId;
@@ -574,7 +633,13 @@ export class TasksService {
         : null;
 
       await this.activity.recordStories(
-        { workspaceId, actorId: userId, entity: ActivityEntity.TASK, entityId: taskId },
+        {
+          workspaceId,
+          actorId: userId,
+          entity: ActivityEntity.TASK,
+          entityId: taskId,
+          projectId: updated.projectId,
+        },
         diffItemStories(
           snapshotFromTask(existing, { section: from ? { id: from.id, label: from.name } : null }),
           snapshotFromTask(updated, {
@@ -600,7 +665,7 @@ export class TasksService {
       });
     }
 
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_MOVED, {
+    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_MOVED, {
       task,
       fromSectionId: existing.sectionId,
     });
@@ -612,8 +677,9 @@ export class TasksService {
    * Archives rather than deletes: activity, comments and subtasks keep
    * referring to the task, and archiving is reversible.
    */
-  async archive(workspaceId: string, userId: string, taskId: string): Promise<Task> {
-    const existing = await this.requireTask(workspaceId, taskId);
+  async archive(workspaceId: string, actor: ActorContext, taskId: string): Promise<Task> {
+    const { userId } = actor;
+    const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MANAGER);
 
     if (existing.archivedAt !== null) {
       throw AppException.conflict('RESOURCE_CONFLICT', 'This task is already archived.');
@@ -642,17 +708,19 @@ export class TasksService {
       action: ActivityAction.ARCHIVED,
       entity: ActivityEntity.TASK,
       entityId: taskId,
+      projectId: existing.projectId,
       summary: `Archived task "${existing.title}"`,
     });
 
     const task = await this.withSubtaskRollup(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_ARCHIVED, task);
+    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_ARCHIVED, task);
 
     return task;
   }
 
-  async restore(workspaceId: string, userId: string, taskId: string): Promise<Task> {
-    const existing = await this.requireTask(workspaceId, taskId);
+  async restore(workspaceId: string, actor: ActorContext, taskId: string): Promise<Task> {
+    const { userId } = actor;
+    const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MANAGER);
 
     if (existing.archivedAt === null) {
       throw AppException.conflict('RESOURCE_CONFLICT', 'This task is not archived.');
@@ -670,11 +738,12 @@ export class TasksService {
       action: ActivityAction.RESTORED,
       entity: ActivityEntity.TASK,
       entityId: taskId,
+      projectId: existing.projectId,
       summary: `Restored task "${existing.title}"`,
     });
 
     const task = await this.withSubtaskRollup(updated);
-    this.realtime.emitToWorkspace(workspaceId, ServerEvent.TASK_UPDATED, task);
+    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_UPDATED, task);
 
     return task;
   }
@@ -685,15 +754,17 @@ export class TasksService {
 
   private buildWhere(
     workspaceId: string,
-    userId: string,
+    actor: ActorContext,
     query: TaskListQueryDto,
   ): Prisma.TaskWhereInput {
     // `me` saves the client a round trip to learn its own id, and means a
     // shared "my tasks" link resolves per viewer.
-    const assigneeId = query.assigneeId === 'me' ? userId : query.assigneeId;
+    const assigneeId = query.assigneeId === 'me' ? actor.userId : query.assigneeId;
 
     return {
       workspaceId,
+      // Under AND: `summarize` spreads this where and sets its own OR on top.
+      AND: [this.access.scopedWhere(actor)],
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.includeSubtasks ? {} : { parentTaskId: null }),
       ...(query.projectId ? { projectId: query.projectId } : {}),
@@ -745,10 +816,16 @@ export class TasksService {
    */
   private async resolvePlacement(
     workspaceId: string,
+    actor: ActorContext,
     dto: CreateTaskDto,
   ): Promise<{ projectId: string | null; sectionId: string | null }> {
+    // The project arrives in the body, where `ProjectAccessGuard` cannot see
+    // it, so the check happens here: invisible is a 404, visible but read-only
+    // is a 403.
     if (!dto.sectionId) {
-      if (dto.projectId) await this.requireProject(workspaceId, dto.projectId);
+      if (dto.projectId) {
+        await this.access.requireAccess(workspaceId, dto.projectId, actor, WorkspaceRole.MEMBER);
+      }
       return { projectId: dto.projectId ?? null, sectionId: null };
     }
 
@@ -760,6 +837,8 @@ export class TasksService {
         'The section does not belong to the given project.',
       );
     }
+
+    await this.access.requireAccess(workspaceId, section.projectId, actor, WorkspaceRole.MEMBER);
 
     return { projectId: section.projectId, sectionId: section.id };
   }
@@ -810,12 +889,27 @@ export class TasksService {
    * Public so other modules can resolve a task without reimplementing the
    * workspace scoping — `CommentsService` uses it to attach a thread to a task
    * it has proven the caller can see.
+   *
+   * "Can see" now includes the project's privacy: a task in a private project
+   * the caller is not in does not exist for them. With `minimumRole`, it also
+   * checks the caller acts with at least that role in the task's project.
    */
-  async requireTask(workspaceId: string, taskId: string): Promise<PrismaTask> {
-    const task = await this.prisma.task.findFirst({ where: { id: taskId, workspaceId } });
+  async requireTask(
+    workspaceId: string,
+    taskId: string,
+    actor: ActorContext,
+    minimumRole?: WorkspaceRole,
+  ): Promise<PrismaTask> {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, workspaceId, AND: [this.access.scopedWhere(actor)] },
+    });
 
     if (!task) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
+    }
+
+    if (minimumRole) {
+      await this.access.assertEffectiveRole(task.projectId, actor, minimumRole);
     }
 
     return task;
@@ -832,17 +926,6 @@ export class TasksService {
     }
 
     return section;
-  }
-
-  private async requireProject(workspaceId: string, projectId: string): Promise<void> {
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, workspaceId },
-      select: { id: true },
-    });
-
-    if (!project) {
-      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Project not found.');
-    }
   }
 
   private assigneeRef(
@@ -889,6 +972,22 @@ export class TasksService {
     if (!membership) {
       throw AppException.badRequest('BAD_REQUEST', 'The assignee must be a workspace member.');
     }
+  }
+
+  /** Assigning work someone cannot open helps nobody: they would get a notification to a 404. */
+  private async assertAssigneeCanSee(
+    workspaceId: string,
+    projectId: string | null,
+    assigneeId: string | null | undefined,
+  ): Promise<void> {
+    if (!assigneeId) return;
+
+    await this.access.assertUsersCanSee(
+      workspaceId,
+      projectId,
+      [assigneeId],
+      'The assignee must be able to see this project.',
+    );
   }
 
   /** Completed-subtask counts for a page of tasks, in one grouped query. */

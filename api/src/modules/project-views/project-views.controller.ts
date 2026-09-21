@@ -21,6 +21,7 @@ import {
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { ProjectViewDto, DeleteViewResultDto } from './dto/project-view-response.dto';
@@ -37,7 +38,7 @@ import { ProjectViewsService } from './project-views.service';
 @ApiTags('Project views')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/projects/:projectId/views')
-@UseGuards(WorkspaceMemberGuard)
+@UseGuards(WorkspaceMemberGuard, ProjectAccessGuard)
 @ApiParam({ name: 'workspaceId', format: 'uuid' })
 @ApiParam({ name: 'projectId', format: 'uuid' })
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')

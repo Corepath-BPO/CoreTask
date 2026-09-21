@@ -47,6 +47,11 @@ export const ErrorCode = {
   WORKSPACE_ACCESS_DENIED: 'WORKSPACE_ACCESS_DENIED',
   INSUFFICIENT_WORKSPACE_ROLE: 'INSUFFICIENT_WORKSPACE_ROLE',
   WORKSPACE_CONTEXT_REQUIRED: 'WORKSPACE_CONTEXT_REQUIRED',
+  /** Used by the realtime gateway; over REST an invisible project is a 404. */
+  PROJECT_ACCESS_DENIED: 'PROJECT_ACCESS_DENIED',
+  /** The project is visible, but the caller's role inside it is too low. */
+  INSUFFICIENT_PROJECT_ROLE: 'INSUFFICIENT_PROJECT_ROLE',
+  LAST_PROJECT_ADMIN: 'LAST_PROJECT_ADMIN',
 
   // Domain
   WORKSPACE_SLUG_TAKEN: 'WORKSPACE_SLUG_TAKEN',
@@ -94,6 +99,9 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   WORKSPACE_ACCESS_DENIED: 'You are not a member of this workspace.',
   INSUFFICIENT_WORKSPACE_ROLE: 'Your workspace role does not allow this action.',
   WORKSPACE_CONTEXT_REQUIRED: 'A workspace context is required for this request.',
+  PROJECT_ACCESS_DENIED: 'You do not have access to this project.',
+  INSUFFICIENT_PROJECT_ROLE: 'Your role in this project does not allow this action.',
+  LAST_PROJECT_ADMIN: 'A private project must keep at least one admin.',
 
   WORKSPACE_SLUG_TAKEN: 'That workspace URL is already in use.',
   PROJECT_KEY_TAKEN: 'That project key is already in use in this workspace.',

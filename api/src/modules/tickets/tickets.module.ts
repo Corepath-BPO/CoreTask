@@ -4,6 +4,7 @@ import { NotificationsIntegrationModule } from '../../integrations/notifications
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
 import { FollowersModule } from '../followers/followers.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
 import { TicketsController } from './tickets.controller';
@@ -16,6 +17,7 @@ import { TicketsService } from './tickets.service';
     ActivityLogsModule,
     NotificationsIntegrationModule,
     FollowersModule,
+    ProjectAccessModule,
   ],
   controllers: [TicketsController],
   providers: [TicketsService],

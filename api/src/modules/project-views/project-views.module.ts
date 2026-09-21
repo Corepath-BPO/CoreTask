@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
 import { DefinitionsModule } from '../definitions/definitions.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
@@ -17,6 +18,7 @@ import { ProjectViewsService } from './project-views.service';
   // tenant-scoped without restating the rule.
   imports: [
     WorkspaceMembersModule,
+    ProjectAccessModule,
     ProjectsModule,
     TasksModule,
     CustomFieldsModule,

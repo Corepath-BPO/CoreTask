@@ -1,9 +1,4 @@
-import {
-  AutomationRuleStatus,
-  WorkspaceRole,
-  hasAtLeastRole,
-  type AutomationNodeType,
-} from '@coretask/contracts';
+import { AutomationRuleStatus, type AutomationNodeType } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
@@ -28,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProject } from '@/features/projects/hooks/use-projects';
+import { useProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { RuleLibraryDialog } from '../../components/rule-library-dialog';
@@ -142,10 +138,11 @@ export function AutomationBuilderPage({
 }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
-  const canManage = hasAtLeastRole(
-    (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole,
-    WorkspaceRole.MANAGER,
-  );
+  /* The same query the project pages use, so the name in the header comes from
+     the cache they have already filled rather than from a request of its own —
+     and the reader's standing in this project comes with it. */
+  const { data: project } = useProject(workspaceId, projectId);
+  const canManage = useProjectAccess(project).canManage;
   const navigate = useNavigate();
 
   const {
@@ -160,9 +157,6 @@ export function AutomationBuilderPage({
     isError: metadataError,
     refetch: refetchMetadata,
   } = useAutomationMetadata(workspaceId, projectId);
-  /* The same query the project pages use, so the name in the header comes from
-     the cache they have already filled rather than from a request of its own. */
-  const { data: project } = useProject(workspaceId, projectId);
   const saveGraph = useSaveGraph(workspaceId, projectId);
   const createRule = useCreateRule(workspaceId, projectId);
   const publishRule = usePublishRule(workspaceId, projectId);

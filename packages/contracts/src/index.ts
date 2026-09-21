@@ -11,6 +11,7 @@ export * from './formula.js';
 export * from './integrations.js';
 export * from './limits.js';
 export * from './mentions.js';
+export * from './project-roles.js';
 export * from './query.js';
 export * from './socket-events.js';
 export * from './webhooks.js';

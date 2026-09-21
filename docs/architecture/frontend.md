@@ -47,6 +47,28 @@ Three kinds, three tools — mixing them is what makes dashboards unmaintainable
 Query keys come from one factory (`lib/api/query-client.ts`) so invalidation
 cannot miss a cache entry.
 
+## Project access
+
+The API computes the reader's standing in a project on every project summary —
+`access: { effectiveRole, projectRole, isMember, canManage }` — and
+`features/projects/lib/project-access.ts` is the only place that turns it into
+`canEdit`, `canManage`, `canManageMembers`, `canJoin` and the rest. Project
+screens (the shell, List, Board, the task panel, the automations pages, the
+work-item add controls) gate from that; the workspace role is read only on
+workspace-level screens (members, teams, settings, integrations, "create a
+project"). A project role only lowers the workspace role, so a workspace
+manager who is a viewer of one project gets a read-only project — the same
+answer the API would give, shown before the click rather than after.
+
+Membership lives under the project query prefix (`queryKeys.projects.members`),
+so the one `invalidateProjects` after any change reaches the roster, the detail
+and every list. `project:access-revoked` on the user's own room
+(`use-project-access-realtime.ts`, mounted with the socket provider) removes
+the project's caches rather than refetching them — a refetch would 404 — and
+sends a tab sitting on that project back to the browse page with a word about
+why. See [ADR 0016](../decisions/0016-project-privacy-is-a-membership-list.md)
+and [the sharing UI notes](../ui/project-sharing.md).
+
 ## Authentication in the browser
 
 The access token lives in **module scope inside the API client** — not

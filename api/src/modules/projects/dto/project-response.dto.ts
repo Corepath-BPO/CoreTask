@@ -1,4 +1,9 @@
-import { PROJECT_STATUSES } from '@coretask/contracts';
+import {
+  PROJECT_MEMBER_ROLES,
+  PROJECT_STATUSES,
+  PROJECT_VISIBILITIES,
+  WORKSPACE_ROLES,
+} from '@coretask/contracts';
 import { ApiProperty } from '@nestjs/swagger';
 
 import { SectionDto } from '../../sections/dto/section-response.dto';
@@ -17,6 +22,33 @@ export class ProjectLeadDto {
 
   @ApiProperty({ nullable: true, example: null })
   avatarUrl!: string | null;
+}
+
+export class ProjectMemberPreviewDto {
+  @ApiProperty({ type: ProjectLeadDto })
+  user!: ProjectLeadDto;
+
+  @ApiProperty({ enum: PROJECT_MEMBER_ROLES, example: 'EDITOR' })
+  role!: string;
+}
+
+/** The caller's own standing in the project. Computed per reader, never broadcast. */
+export class ProjectAccessDto {
+  @ApiProperty({
+    enum: WORKSPACE_ROLES,
+    example: 'MEMBER',
+    description: 'The workspace role after the project role’s cap — what every edit check reads.',
+  })
+  effectiveRole!: string;
+
+  @ApiProperty({ enum: PROJECT_MEMBER_ROLES, nullable: true, example: 'ADMIN' })
+  projectRole!: string | null;
+
+  @ApiProperty({ example: true })
+  isMember!: boolean;
+
+  @ApiProperty({ example: true, description: 'May change the members and the privacy.' })
+  canManage!: boolean;
 }
 
 export class ProjectTeamRefDto {
@@ -58,6 +90,13 @@ export class ProjectSummaryDto {
   @ApiProperty({ example: '#6366F1' })
   color!: string;
 
+  @ApiProperty({
+    enum: PROJECT_VISIBILITIES,
+    example: 'PUBLIC',
+    description: 'PRIVATE projects are visible to their members and the workspace’s admins only.',
+  })
+  visibility!: string;
+
   @ApiProperty({ format: 'uuid', nullable: true })
   leadId!: string | null;
 
@@ -94,6 +133,18 @@ export class ProjectSummaryDto {
 
   @ApiProperty({ example: 4 })
   sectionCount!: number;
+
+  @ApiProperty({ example: 6 })
+  memberCount!: number;
+
+  @ApiProperty({
+    type: [ProjectMemberPreviewDto],
+    description: 'The first few members, admins first — enough for an avatar stack.',
+  })
+  members!: ProjectMemberPreviewDto[];
+
+  @ApiProperty({ type: ProjectAccessDto })
+  access!: ProjectAccessDto;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;

@@ -1,10 +1,4 @@
-import {
-  AUTOMATION_STATE_COLOR,
-  AutomationRuleStatus,
-  TRIGGER_LABEL,
-  WorkspaceRole,
-  hasAtLeastRole,
-} from '@coretask/contracts';
+import { AUTOMATION_STATE_COLOR, AutomationRuleStatus, TRIGGER_LABEL } from '@coretask/contracts';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import {
   AlertCircle,
@@ -44,6 +38,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
+import { useProject } from '@/features/projects/hooks/use-projects';
+import { useProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -73,8 +69,10 @@ export function AutomationsPage() {
   const { projectId } = useParams({ strict: false }) as { projectId: string };
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
-  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
-  const canManage = hasAtLeastRole(role, WorkspaceRole.MANAGER);
+  // Managing rules is a manager's job *in this project* — the workspace role
+  // capped by the reader's project role.
+  const { data: project } = useProject(workspaceId, projectId);
+  const canManage = useProjectAccess(project).canManage;
 
   const { data: rules, isLoading, isError, refetch } = useAutomations(workspaceId, projectId);
   const publish = usePublishRule(workspaceId, projectId);
