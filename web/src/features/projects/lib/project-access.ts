@@ -67,6 +67,28 @@ export function resolveProjectAccess(
   };
 }
 
+/**
+ * The role one item is acted on with, for a screen that may not hold the
+ * item's project yet.
+ *
+ * An item outside any project answers to the workspace role alone. Inside one,
+ * the project caps that role — and until the project has arrived the cap is
+ * unknown, so this answers with the lowest role rather than the uncapped one.
+ * Reaching for the workspace role in the meantime handed a viewer an editable
+ * panel for as long as the fetch took, and kept it editable if the fetch never
+ * landed. The API refuses the write either way; this is about not offering it.
+ */
+export function roleForProjectItem(
+  projectId: string | null | undefined,
+  project: AccessSource,
+  workspaceRole: WorkspaceRole,
+): WorkspaceRole {
+  if (!projectId) return workspaceRole;
+  if (!project) return WorkspaceRole.GUEST;
+
+  return resolveProjectAccess(project, workspaceRole).effectiveRole;
+}
+
 /** `resolveProjectAccess` against the active workspace's role. */
 export function useProjectAccess(project: AccessSource): ProjectAccess {
   const { workspace } = useActiveWorkspace();

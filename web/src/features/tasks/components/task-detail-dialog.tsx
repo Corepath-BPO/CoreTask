@@ -60,7 +60,7 @@ import {
   useSubtasks,
 } from '@/features/projects/hooks/use-project-views';
 import { useProject } from '@/features/projects/hooks/use-projects';
-import { useProjectAccess } from '@/features/projects/lib/project-access';
+import { roleForProjectItem } from '@/features/projects/lib/project-access';
 import {
   useMoveProjectWorkItem,
   useProjectWorkItem,
@@ -499,8 +499,7 @@ function TaskDetailBody({
    * project*, which caps the workspace role the caller passed. Reached from
    * My Tasks or the inbox, this is what keeps a viewer's panel read-only.
    */
-  const projectAccess = useProjectAccess(project);
-  const role = task.projectId && project ? projectAccess.effectiveRole : workspaceRole;
+  const role = roleForProjectItem(task.projectId, project, workspaceRole);
   const updateTask = useUpdateTask(workspaceId);
   const archiveTask = useArchiveTask(workspaceId);
   const createTask = useCreateTask(workspaceId);
