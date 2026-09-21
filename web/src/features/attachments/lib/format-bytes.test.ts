@@ -19,8 +19,8 @@ describe('formatBytes', () => {
   });
 
   it('does not pretend nonsense is a size', () => {
-    expect(formatBytes(-1)).toBe('—');
-    expect(formatBytes(Number.NaN)).toBe('—');
-    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('—');
+    expect(formatBytes(-1)).toBe('-');
+    expect(formatBytes(Number.NaN)).toBe('-');
+    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('-');
   });
 });

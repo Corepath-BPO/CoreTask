@@ -87,7 +87,7 @@ export function WorkspaceSwitcher({ collapsed = false }: WorkspaceSwitcherProps)
                 {candidate.role}
               </span>
               {candidate.id === workspace?.id && (
-                <Check className="size-4 text-primary" aria-label="Current workspace" />
+                <Check className="size-4 text-primary-strong" aria-label="Current workspace" />
               )}
             </DropdownMenuItem>
           ))}

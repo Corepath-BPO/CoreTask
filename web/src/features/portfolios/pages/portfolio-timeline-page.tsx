@@ -308,7 +308,7 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
                         <span className="truncate">{project.lead.name}</span>
                       </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-xs text-muted-foreground">-</span>
                     )}
                   </div>
                   <div className="flex min-w-0 flex-1 items-center px-3">
@@ -460,7 +460,7 @@ function TimelineLane({
         <Link
           to="/projects/$projectId"
           params={{ projectId: project.id }}
-          aria-label={`${project.name}: ${project.startDate ? formatDate(project.startDate) : 'no start'} – ${project.dueDate ? formatDate(project.dueDate) : 'no due date'}`}
+          aria-label={`${project.name}: ${project.startDate ? formatDate(project.startDate) : 'no start'} - ${project.dueDate ? formatDate(project.dueDate) : 'no due date'}`}
           className="absolute top-1/2 flex h-7 -translate-y-1/2 items-center overflow-hidden rounded-md px-2 text-xs font-medium whitespace-nowrap text-white shadow-sm transition-transform hover:scale-y-105 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
           style={{
             left: geometry.offset * pxPerMonth,

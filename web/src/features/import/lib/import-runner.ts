@@ -219,10 +219,10 @@ export async function runImport(args: {
           const backoff = rateLimitWaits[rateLimitTry++];
           if (backoff === undefined) {
             throw new ImportAborted(
-              'The server kept rate-limiting the import — something else may be using the connection. The items created so far were kept.',
+              'The server kept rate-limiting the import. Something else may be using the connection. The items created so far were kept.',
             );
           }
-          report(`Rate limited — resuming in ${Math.round(backoff / 1000)}s`);
+          report(`Rate limited, resuming in ${Math.round(backoff / 1000)}s`);
           await deps.sleep(backoff, signal).catch(rethrowAsCancelled);
           continue;
         }
@@ -277,7 +277,7 @@ export async function runImport(args: {
         result.errors.push({
           rowIndex: null,
           label: `Section "${name}"`,
-          message: 'Could not be created — its tasks were imported without a section.',
+          message: 'Could not be created. Its tasks were imported without a section.',
         });
       } else {
         result.createdSections++;
@@ -316,7 +316,7 @@ export async function runImport(args: {
         result.errors.push({
           rowIndex: null,
           label: `Field "${column.header}"`,
-          message: 'Could not be created — its values were skipped.',
+          message: 'Could not be created. Its values were skipped.',
         });
       } else {
         result.createdFields++;
@@ -356,7 +356,7 @@ export async function runImport(args: {
             rowIndex: null,
             label: 'List view',
             message:
-              'The imported fields exist but could not be added as columns — add them from the Fields menu.',
+              'The imported fields exist but could not be added as columns. Add them from the Fields menu.',
           });
         }
       } else {
@@ -366,7 +366,7 @@ export async function runImport(args: {
           rowIndex: null,
           label: 'List view',
           message:
-            'No List view was found to add the imported fields to — add them from the Fields menu.',
+            'No List view was found to add the imported fields to. Add them from the Fields menu.',
         });
       }
     } else if (includedAny) {

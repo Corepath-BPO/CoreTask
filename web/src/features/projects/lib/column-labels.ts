@@ -32,7 +32,7 @@ export const COLUMN_LABEL: Record<string, string> = {
  * column is still in the stored settings. That used to put the raw reference —
  * `custom:019fd248-…` — in the header, which tells a reader nothing and puts an
  * internal id on screen. A deleted field gets a plain label instead, matching
- * the `—` its cells already render.
+ * the `-` its cells already render.
  */
 /**
  * The narrowest a column may draw or drag: its full label plus the header's

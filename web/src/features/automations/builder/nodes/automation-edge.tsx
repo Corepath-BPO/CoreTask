@@ -171,8 +171,8 @@ export function AutomationEdge({
                   aria-label="More for this branch"
                   className={cn(
                     'pointer-events-auto flex size-6 cursor-pointer items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors',
-                    'hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
-                    'data-[state=open]:border-primary data-[state=open]:text-primary',
+                    'hover:border-primary hover:text-primary-strong focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+                    'data-[state=open]:border-primary data-[state=open]:text-primary-strong',
                   )}
                 >
                   <MoreHorizontal className="size-3.5" aria-hidden="true" />
@@ -250,7 +250,7 @@ export function AutomationEdge({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="pointer-events-auto flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:border-primary"
+                    className="pointer-events-auto flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary-strong focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:border-primary"
                   >
                     <GitBranch className="size-3.5" aria-hidden="true" />
                     Add branch

@@ -373,7 +373,7 @@ export function ProjectsPage() {
 
       {meta && meta.total > items.length && (
         <p className="text-xs text-muted-foreground">
-          Showing the first {items.length} of {meta.total} projects — search to find the rest.
+          Showing the first {items.length} of {meta.total} projects. Search to find the rest.
         </p>
       )}
 
@@ -525,7 +525,7 @@ function ProjectRow({
       </div>
 
       <div className="flex min-w-0 items-center gap-1.5">
-        {portfolios.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
+        {portfolios.length === 0 && <span className="text-sm text-muted-foreground">-</span>}
         {portfolios.slice(0, 1).map((portfolio) => (
           <Link
             key={portfolio.id}
