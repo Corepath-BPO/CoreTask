@@ -1,4 +1,6 @@
-import { TaskPriority, TaskStatus } from '@prisma/client';
+import { StatusCategory, TaskPriority, TaskStatus } from '@prisma/client';
+
+import type { PrismaService } from '../../database/prisma.service';
 
 /**
  * What an action's settings are called, and how to read them.
@@ -64,6 +66,44 @@ export function statusData(statusId: string): {
   // The scalar rather than a `connect`, because this is spread into an update
   // and the relation form is not valid there.
   return { statusDefinitionId: statusId };
+}
+
+/**
+ * Whether a chosen status means the task is finished, and what that does to
+ * `completedAt`.
+ *
+ * The same two shapes as `statusData`, and the same reason they both have to
+ * work: an enum name answers for itself, while a definition's uuid answers
+ * through its category. Reading only the enum left every workspace that had
+ * defined its own statuses — which is every workspace that ever opened the
+ * status editor — with rules that moved a task to Done and left it
+ * uncompleted, so the dashboard's count, the completion filters and
+ * `TASK_COMPLETED` all disagreed with the board.
+ *
+ * Stamped once on the way in and cleared on the way out, so the timestamp
+ * means the moment it was finished rather than the last time a rule touched
+ * it. `TaskWorkItemRepository.completionData` is the same rule on the path a
+ * person drives; this is it for the path a rule drives.
+ */
+export async function completionData(
+  prisma: PrismaService,
+  statusId: string,
+  completedAt: Date | null,
+): Promise<{ completedAt?: Date | null }> {
+  const done =
+    statusId in TaskStatus
+      ? statusId === TaskStatus.DONE
+      : (
+          await prisma.statusDefinition.findFirst({
+            where: { id: statusId },
+            select: { category: true },
+          })
+        )?.category === StatusCategory.COMPLETED;
+
+  if (done && completedAt === null) return { completedAt: new Date() };
+  if (!done && completedAt !== null) return { completedAt: null };
+
+  return {};
 }
 
 export function priorityData(priorityId: string): {

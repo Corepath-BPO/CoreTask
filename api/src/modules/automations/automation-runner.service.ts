@@ -32,7 +32,6 @@ import {
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  TaskStatus,
   type AutomationNode,
   type Prisma,
   type Task,
@@ -47,7 +46,7 @@ import { diffItemStories, snapshotFromTask } from '../activity-logs/item-stories
 import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { labelValue } from '../custom-fields/lib/value-labels';
 
-import { priorityData, readActionId, statusData } from './action-config';
+import { completionData, priorityData, readActionId, statusData } from './action-config';
 import type { RuleWebhookRequest } from '../../jobs/queue-names';
 
 import type { AutomationEvent } from './automation-event.publisher';
@@ -1057,26 +1056,13 @@ export class AutomationRunnerService {
         const data = statusData(status);
         const before = task.status;
 
-        const events = await this.updateTask(
-          task,
-          {
-            ...data,
-            // Completion is a fact about the task, not a separate action
-            // somebody has to remember to add to the rule. Kept in step the
-            // way a person's edit keeps it — stamped once on the way into
-            // DONE, cleared on the way out — so TASK_COMPLETED means it.
-            ...(data.status === TaskStatus.DONE && task.completedAt === null
-              ? { completedAt: new Date() }
-              : {}),
-            ...(data.status !== undefined &&
-            data.status !== TaskStatus.DONE &&
-            task.completedAt !== null
-              ? { completedAt: null }
-              : {}),
-          },
-          rule,
-          event,
-        );
+        // Completion is a fact about the task, not a separate action somebody
+        // has to remember to add to the rule. Kept in step the way a person's
+        // edit keeps it, so TASK_COMPLETED means it — including when the
+        // status is one the workspace defined rather than a legacy enum.
+        const completion = await completionData(this.prisma, status, task.completedAt);
+
+        const events = await this.updateTask(task, { ...data, ...completion }, rule, event);
 
         return { succeeded: true, before, after: status, events };
       }
