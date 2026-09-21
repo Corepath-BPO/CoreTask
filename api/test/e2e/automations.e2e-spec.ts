@@ -610,6 +610,84 @@ describe('Automations (e2e)', () => {
       expect(task?.completedAt).not.toBeNull();
     });
 
+    /**
+     * The definition case above is an ACTIVE status, so it never asked what
+     * completion does. A workspace that has defined its own statuses has a
+     * completing one too, and that is the shape the seed and the status editor
+     * both produce — the enum path is the fallback for a workspace that never
+     * opened it.
+     */
+    it('completes the task when the chosen definition is a completing one', async () => {
+      const scope = await setupScope();
+
+      const done = await context.prisma.statusDefinition.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          name: 'Shipped',
+          slug: 'shipped',
+          category: 'COMPLETED',
+          position: 2,
+        },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: done.id } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.statusDefinitionId).toBe(done.id);
+      // Reading only the enum left this null, so the board said Shipped while
+      // the completion count, the filters and TASK_COMPLETED all disagreed.
+      expect(task?.completedAt).not.toBeNull();
+    });
+
+    it('clears completion when a rule moves the task back out of a completing status', async () => {
+      const scope = await setupScope();
+
+      const [done, active] = await Promise.all([
+        context.prisma.statusDefinition.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Shipped',
+            slug: 'shipped-reopen',
+            category: 'COMPLETED',
+            position: 2,
+          },
+        }),
+        context.prisma.statusDefinition.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId,
+            name: 'Reopened',
+            slug: 'reopened',
+            category: 'ACTIVE',
+            position: 3,
+          },
+        }),
+      ]);
+
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { statusDefinitionId: done.id, completedAt: new Date() },
+      });
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'UPDATE_STATUS', configuration: { status: active.id } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.statusDefinitionId).toBe(active.id);
+      expect(task?.completedAt).toBeNull();
+    });
+
     it('sets a priority the builder chose', async () => {
       const scope = await setupScope();
 
