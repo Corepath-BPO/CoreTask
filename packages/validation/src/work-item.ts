@@ -34,23 +34,28 @@ const stateRef = z
  * Accepts any declared type — including one that cannot be created yet.
  *
  * Used where the value is being *read* (a project default, a filter). Creation
- * uses `creatableWorkItemType` below, which is the stricter one.
+ * uses `addableWorkItemType` below, which is the stricter one.
  */
 export const workItemType = z.enum(WORK_ITEM_TYPES as [WorkItemType, ...WorkItemType[]]);
 
 /**
- * Rejects a type with no model behind it, naming the ones that work.
+ * What may be added to a project: a task, a ticket, a milestone or an approval.
  *
- * The picker disables Milestone and Approval, but a disabled control is not a
- * check — anything can post the body. Refusing here is what keeps a row from
- * being written as a task wearing a milestone's label.
+ * A milestone and an approval are stored as a task of that kind, so the type
+ * is what tells the repository which kind to write — without it, a milestone
+ * would be written as a task wearing a milestone's label.
  */
-/** What may be added to a project: a task, a ticket, a milestone or an approval. */
 export const addableWorkItemType = workItemType.refine(
   (value) => ADDABLE_WORK_ITEM_TYPES.includes(value),
   { message: `Only ${ADDABLE_WORK_ITEM_TYPES.join(', ')} can be added` },
 );
 
+/**
+ * Rejects a type with no record of its own, naming the ones that have one.
+ *
+ * Narrower than `addableWorkItemType`: a milestone or an approval is a task, so
+ * only TASK and TICKET name a record type a project can default to.
+ */
 export const creatableWorkItemType = workItemType.refine(
   (value) => CREATABLE_WORK_ITEM_TYPES.includes(value),
   {
