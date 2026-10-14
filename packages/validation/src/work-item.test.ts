@@ -19,16 +19,20 @@ describe('createWorkItemSchema', () => {
     }
   });
 
-  it('refuses a type that cannot be stored yet', () => {
-    // The picker disables Milestone, but a disabled control is not a check —
-    // anything can post the body. Without this, a milestone would be written as
-    // a task wearing a different label.
+  it('accepts a milestone and an approval, which are added as kinds of task', () => {
+    // Both are tasks with a `kind`, so the Add menu offers them and the
+    // repository writes the kind from the type. Refusing them here would
+    // make the menu offer something the server turns away.
     for (const type of [WorkItemType.MILESTONE, WorkItemType.APPROVAL]) {
-      const result = createWorkItemSchema.safeParse({ type, title: 'A thing' });
-
-      expect(result.success).toBe(false);
-      expect(result.error?.issues[0]?.message).toMatch(/only TASK and TICKET/i);
+      expect(createWorkItemSchema.safeParse({ type, title: 'A thing' }).success).toBe(true);
     }
+  });
+
+  it('refuses a type it does not know', () => {
+    const result = createWorkItemSchema.safeParse({ type: 'EPIC', title: 'A thing' });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['type']);
   });
 
   it('refuses a blank or whitespace-only title', () => {
