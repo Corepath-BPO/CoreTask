@@ -148,6 +148,9 @@ export const AutomationAction = {
   SET_TASK_TYPE: 'SET_TASK_TYPE',
   /** E-mails people on the task — never an address typed into the rule. */
   SEND_EMAIL: 'SEND_EMAIL',
+  /** A ticket rule's own: its status and priority are a ticket's, not a project's. */
+  SET_TICKET_STATUS: 'SET_TICKET_STATUS',
+  SET_TICKET_PRIORITY: 'SET_TICKET_PRIORITY',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -177,6 +180,8 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SET_TASK_DESCRIPTION: 'Set the task description',
   SET_TASK_TYPE: 'Set the task type',
   SEND_EMAIL: 'Send an email',
+  SET_TICKET_STATUS: 'Set the ticket status',
+  SET_TICKET_PRIORITY: 'Set the ticket priority',
 };
 
 /**

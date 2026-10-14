@@ -23,6 +23,11 @@ import {
   type CustomFieldType,
   type TriggerConfigForm,
   type WorkspaceRole,
+  TICKET_ONLY_ACTIONS,
+  TICKET_RULE_ACTIONS,
+  isTicketTrigger,
+  TicketConditionField,
+  isTicketConditionField,
 } from '@coretask/contracts';
 import type { AutomationCatalogEntry } from '@coretask/types';
 
@@ -353,12 +358,7 @@ const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
  * builder can sell: the rule saves, publishes, validates, and then waits
  * forever for an event that is never sent.
  */
-const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {
-  [AutomationTrigger.TICKET_CREATED]:
-    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
-  [AutomationTrigger.TICKET_STATUS_CHANGED]:
-    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
-};
+const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {};
 
 /** Why the runner cannot execute a trigger, or null when it can. */
 export function triggerUnavailableReason(trigger: string): string | null {
@@ -601,6 +601,7 @@ export function triggerCatalogue(
       available: reason === null,
       reason,
       configForms: configFormsFor(subtype),
+      subjects: isTicketTrigger(subtype) ? ['TICKET' as const] : ['TASK' as const],
     };
   });
 
@@ -713,9 +714,6 @@ interface ConditionSpec {
 }
 
 const FORMS_AND_EMAIL_REASON = 'Forms and inbound email are not built yet.';
-const TASK_ALONE_REASON =
-  'The engine loads the task an event is about and nothing beside it, so this cannot be checked.';
-
 /** The generic answer, for a field the runner has no case for. */
 const UNREADABLE_FIELD_REASON =
   'The engine cannot read this on a task, so the check would never match.';
@@ -854,12 +852,41 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
      */
     description: 'Holds when this task is complete, or when its last open subtask just was.',
   },
+  // For ticket rules: the ticket's own fields, read by the ticket half of the runner.
   {
-    subtype: 'TICKET',
-    label: 'Ticket is…',
+    subtype: TicketConditionField.TYPE,
+    label: 'Ticket type is…',
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: TASK_ALONE_REASON,
+    description: 'Bug, feature, support, question, maintenance or incident.',
+  },
+  {
+    subtype: TicketConditionField.PRIORITY,
+    label: 'Ticket priority is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Low, medium, high or urgent.',
+  },
+  {
+    subtype: TicketConditionField.SEVERITY,
+    label: 'Ticket severity is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Minor, major or critical.',
+  },
+  {
+    subtype: TicketConditionField.STATUS,
+    label: 'Ticket status is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Open, triaged, in progress, waiting, resolved or closed.',
+  },
+  {
+    subtype: TicketConditionField.ASSIGNEE,
+    label: 'Ticket assignee is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.PEOPLE,
+    description: 'Who the ticket is assigned to, or nobody.',
   },
   {
     subtype: 'APPROVAL_STATUS',
@@ -997,13 +1024,16 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
    * explanation is still an explanation, and a greyed row with none is the
    * thing this catalogue exists to avoid.
    */
+  // A ticket's fields are read by the ticket half of the runner, not `readField`.
   const reason =
     spec.reason ??
-    (!runnerCanReadField(spec.subtype)
-      ? UNREADABLE_FIELD_REASON
-      : !runnerCanCompare(spec.subtype, spec.valueType)
-        ? UNCOMPARABLE_FIELD_REASON
-        : null);
+    (isTicketConditionField(spec.subtype)
+      ? null
+      : !runnerCanReadField(spec.subtype)
+        ? UNREADABLE_FIELD_REASON
+        : !runnerCanCompare(spec.subtype, spec.valueType)
+          ? UNCOMPARABLE_FIELD_REASON
+          : null);
 
   return {
     subtype: spec.subtype,
@@ -1013,6 +1043,7 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
     valueType: spec.valueType,
     available: reason === null,
     reason,
+    subjects: isTicketConditionField(spec.subtype) ? ['TICKET'] : ['TASK'],
   };
 }
 
@@ -1093,10 +1124,17 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'Moves the task to the project’s Done status, or back to its first open one.',
   },
   {
-    subtype: 'SET_TICKET',
-    label: 'Set Ticket to…',
+    subtype: AutomationAction.SET_TICKET_STATUS,
+    label: 'Set ticket status to…',
     category: ACTION_CATEGORY.CHANGE_STATUS,
-    reason: 'No automation action writes a ticket; the engine acts on the task an event is about.',
+    description:
+      'For ticket rules. Resolving or closing stamps the ticket as a person’s change does.',
+  },
+  {
+    subtype: AutomationAction.SET_TICKET_PRIORITY,
+    label: 'Set ticket priority to…',
+    category: ACTION_CATEGORY.CHANGE_STATUS,
+    description: 'For ticket rules: Low, Medium, High or Urgent.',
   },
   {
     subtype: AutomationAction.UPDATE_STATUS,
@@ -1281,6 +1319,11 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
     category: spec.category,
     available,
     reason: available ? null : (spec.reason ?? NOT_IMPLEMENTED_REASON),
+    subjects: TICKET_ONLY_ACTIONS.includes(spec.subtype)
+      ? ['TICKET']
+      : TICKET_RULE_ACTIONS.includes(spec.subtype)
+        ? ['TASK', 'TICKET']
+        : ['TASK'],
   };
 }
 

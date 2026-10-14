@@ -28,6 +28,7 @@ import { customFieldSetVerb } from '../configuration/condition-value';
 import { readTriggerSections } from '../configuration/trigger-forms';
 
 import { isUnansweredRow, type CanvasNode } from './graph-edits';
+import { humanizeEnum } from '@/lib/utils';
 
 /**
  * How each trigger shape reads on a card.
@@ -160,6 +161,17 @@ export function summariseParts(
       if (node.subtype === '') return [{ text: 'Choose what starts this rule' }];
 
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
+
+      // "When a ticket's status changes to Resolved" — or to anything.
+      if (node.subtype === 'TICKET_STATUS_CHANGED') {
+        const status = config['status'];
+        return typeof status === 'string' && status !== ''
+          ? [
+              { text: 'When a ticket’s status changes to' },
+              { text: humanizeEnum(status), chip: true },
+            ]
+          : [{ text: label }];
+      }
 
       // The clock's triggers say when; a manual one says what the menu calls it.
       if (node.subtype === 'SCHEDULED_TIME') {
@@ -535,6 +547,15 @@ function actionSummary(
         : [{ text: 'Set status — choose one' }];
     }
 
+    case 'SET_TICKET_STATUS':
+    case 'SET_TICKET_PRIORITY': {
+      const what = subtype === 'SET_TICKET_STATUS' ? 'status' : 'priority';
+      const value = config[what];
+      return typeof value === 'string' && value !== ''
+        ? [{ text: `Set ticket ${what} to` }, { text: humanizeEnum(value), chip: true }]
+        : [{ text: `Set ticket ${what} — choose one` }];
+    }
+
     case 'UPDATE_PRIORITY': {
       const priority = config['priority'] ?? config['priorityDefinitionId'];
       const found = metadata?.priorities.find((entry) => entry.id === priority);
@@ -766,6 +787,10 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return !has('endpointId') && !has('url');
     case 'SEND_EMAIL':
       return emailRecipientsOf(config).length === 0 || !has('subject');
+    case 'SET_TICKET_STATUS':
+      return !has('status');
+    case 'SET_TICKET_PRIORITY':
+      return !has('priority');
     case 'CREATE_SUBTASK':
       // No titles, or a row still waiting for its date: a step that reads as
       // ready and would create something other than what it says.

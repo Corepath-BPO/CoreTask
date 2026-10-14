@@ -426,3 +426,38 @@ describe('sending an email', () => {
     expect(screen.queryByRole('textbox', { name: /address/i })).toBeNull();
   });
 });
+
+describe('ticket rules', () => {
+  function renderNode(type: string, subtype: string, configuration: Record<string, unknown>) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type,
+      subtype,
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+    return onChange;
+  }
+
+  it('sets a ticket status from the ticket’s own list', async () => {
+    const onChange = renderNode('ACTION', 'SET_TICKET_STATUS', {});
+
+    await userEvent.click(screen.getByLabelText('Ticket status'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Triaged' }));
+    expect(onChange).toHaveBeenLastCalledWith({ status: 'TRIAGED' });
+  });
+
+  it('narrows "ticket status changes" to one status, or back to any', async () => {
+    const onChange = renderNode('TRIGGER', 'TICKET_STATUS_CHANGED', {});
+
+    expect(screen.getByLabelText('When the status changes to')).toHaveTextContent('Any status');
+    await userEvent.click(screen.getByLabelText('When the status changes to'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Resolved' }));
+    expect(onChange).toHaveBeenLastCalledWith({ status: 'RESOLVED' });
+  });
+});

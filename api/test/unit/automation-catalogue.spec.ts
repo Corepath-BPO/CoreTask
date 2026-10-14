@@ -7,6 +7,7 @@ import {
   WorkspaceRole,
   defaultOperatorForConditionField,
   isEvaluableOperator,
+  isTicketConditionField,
 } from '@coretask/contracts';
 import type { Task } from '@prisma/client';
 
@@ -303,8 +304,11 @@ describe('the automation catalogue', () => {
 
       for (const condition of conditions) {
         if (!condition.available) continue;
+        // A ticket's fields are read by the ticket half of the runner.
         expect(
-          readable.has(condition.subtype) || condition.subtype.startsWith('customField:'),
+          readable.has(condition.subtype) ||
+            condition.subtype.startsWith('customField:') ||
+            isTicketConditionField(condition.subtype),
         ).toBe(true);
       }
     });
@@ -621,7 +625,7 @@ describe('the automation catalogue', () => {
       expect(comment?.reason).toBeNull();
     });
 
-    it('disables ticket triggers while actions only operate on tasks', () => {
+    it('offers the ticket triggers, marked as ticket rules', () => {
       const ticketTriggerTypes = new Set<string>([
         AutomationTrigger.TICKET_CREATED,
         AutomationTrigger.TICKET_STATUS_CHANGED,
@@ -629,7 +633,8 @@ describe('the automation catalogue', () => {
       const ticketTriggers = triggers.filter((trigger) => ticketTriggerTypes.has(trigger.subtype));
 
       expect(ticketTriggers).toHaveLength(2);
-      expect(ticketTriggers.every((trigger) => !trigger.available && trigger.reason)).toBe(true);
+      expect(ticketTriggers.every((trigger) => trigger.available)).toBe(true);
+      expect(ticketTriggers.every((trigger) => trigger.subjects?.includes('TICKET'))).toBe(true);
     });
   });
 

@@ -10,6 +10,9 @@ import {
   APPROVAL_STATUS_LABEL,
   TASK_KINDS,
   TASK_KIND_LABEL,
+  TICKET_CONDITION_FIELD_LABEL,
+  TICKET_CONDITION_VALUES,
+  TicketConditionField,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -279,8 +282,35 @@ export class AutomationMetadataService {
           : {}),
     }));
 
+    // A ticket rule's fields: fixed values, and the members for its assignee.
+    const ticketChoices = (values: readonly string[]) =>
+      values.map((value) => ({
+        value,
+        label: value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, ' '),
+      }));
+    const ticketFields: ConditionFieldDefinition[] = [
+      ...(
+        Object.entries(TICKET_CONDITION_VALUES) as [
+          keyof typeof TICKET_CONDITION_VALUES,
+          readonly string[],
+        ][]
+      ).map(([field, values]) => ({
+        field,
+        label: TICKET_CONDITION_FIELD_LABEL[field],
+        valueKind: ConditionValueKind.ENUM,
+        options: ticketChoices(values),
+      })),
+      {
+        field: TicketConditionField.ASSIGNEE,
+        label: TICKET_CONDITION_FIELD_LABEL[TicketConditionField.ASSIGNEE],
+        valueKind: ConditionValueKind.REFERENCE,
+        options: members.map((row) => ({ value: row.user.id, label: row.user.name })),
+      },
+    ];
+
     return [
       ...generated,
+      ...ticketFields,
       /*
        * Definitions when the workspace has them, the legacy enum when it does
        * not.
