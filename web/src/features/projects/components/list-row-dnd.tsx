@@ -28,7 +28,10 @@ export function ListDndContext({
   onDrop,
   children,
 }: {
-  onDrop: (taskId: string, target: { id: string; type: 'task' | 'column'; sectionId?: string }) => void;
+  onDrop: (
+    taskId: string,
+    target: { id: string; type: 'task' | 'column'; sectionId?: string },
+  ) => void;
   children: React.ReactNode;
 }) {
   const sensors = useSensors(
@@ -69,7 +72,10 @@ export function SectionDropZone({
   children,
 }: {
   sectionId: string;
-  children: (props: { ref: (node: HTMLElement | null) => void; isOver: boolean }) => React.ReactNode;
+  children: (props: {
+    ref: (node: HTMLElement | null) => void;
+    isOver: boolean;
+  }) => React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `section:${sectionId}`,

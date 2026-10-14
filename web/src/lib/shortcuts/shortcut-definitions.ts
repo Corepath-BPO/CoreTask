@@ -74,7 +74,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
     items: [
       { keys: ['Esc'], description: 'Clear the selection, close the task' },
       { keys: ['?'], description: 'Show these shortcuts' },
-      { keys: [MOD_KEY, 'K'], description: 'Search (coming soon)' },
+      { keys: [MOD_KEY, 'K'], description: 'Search' },
+      { keys: ['/'], description: 'Search' },
     ],
   },
 ];

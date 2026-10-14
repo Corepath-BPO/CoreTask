@@ -77,6 +77,9 @@ interface BulkActionBarProps {
   onFieldValue: (field: CustomField, payload: Record<string, unknown>) => void;
   onArchive: () => void;
   onClear: () => void;
+  /** The project's live manual rules — Asana's "Run rule" — when there are any. */
+  manualRules?: { id: string; label: string }[];
+  onRunRule?: (rule: { id: string; label: string }) => void;
   ref?: Ref<BulkActionBarHandle>;
 }
 
@@ -107,6 +110,8 @@ export function BulkActionBar({
   onFieldValue,
   onArchive,
   onClear,
+  manualRules = [],
+  onRunRule,
   ref,
 }: BulkActionBarProps) {
   const [assigneeOpen, setAssigneeOpen] = useState(false);
@@ -335,6 +340,28 @@ export function BulkActionBar({
             )}
           </PopoverContent>
         </Popover>
+
+        {/* A manual rule acts on tasks; a ticket in the selection has none to run. */}
+        {manualRules.length > 0 && onRunRule && !hasTicket && (
+          <Select
+            value=""
+            onValueChange={(ruleId) => {
+              const rule = manualRules.find((entry) => entry.id === ruleId);
+              if (rule) onRunRule(rule);
+            }}
+          >
+            <SelectTrigger aria-label="Run rule" className={PILL_TRIGGER}>
+              <SelectValue placeholder="Run rule" />
+            </SelectTrigger>
+            <SelectContent>
+              {manualRules.map((rule) => (
+                <SelectItem key={rule.id} value={rule.id}>
+                  {rule.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         {canArchive && (
           <span title={hasTicket ? 'Tickets cannot be archived from here' : undefined}>

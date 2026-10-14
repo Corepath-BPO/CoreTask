@@ -17,6 +17,7 @@ const COLUMN_WIDTHS: Record<string, number> = {
   [SystemField.DUE_DATE]: 130,
   [SystemField.START_DATE]: 130,
   [SystemField.ESTIMATE]: 120,
+  [SystemField.TAGS]: 180,
 };
 
 /*

@@ -1,6 +1,11 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type { NotificationType } from '@coretask/contracts';
-import type { ActivityEntry, ItemActivityPage, NotificationFeed } from '@coretask/types';
+import type {
+  ActivityEntry,
+  ItemActivityPage,
+  NotificationFeed,
+  NotificationView,
+} from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
 
@@ -16,6 +21,14 @@ export const activityApi = {
   list: (workspaceId: string, limit?: number): Promise<ActivityEntry[]> =>
     apiClient.get<ActivityEntry[]>(ApiRoutes.activity.list(workspaceId), {
       params: limit ? { limit } : undefined,
+    }),
+
+  forProject: (
+    workspaceId: string,
+    query: { projectId: string; before?: string },
+  ): Promise<ItemActivityPage> =>
+    apiClient.get<ItemActivityPage>(ApiRoutes.activity.forProject(workspaceId), {
+      params: { projectId: query.projectId, ...(query.before ? { before: query.before } : {}) },
     }),
 
   forItem: (workspaceId: string, query: ItemActivityQuery): Promise<ItemActivityPage> =>
@@ -35,6 +48,7 @@ export interface NotificationQuery {
   unreadOnly?: boolean;
   types?: NotificationType[];
   cursor?: string;
+  view?: NotificationView;
 }
 
 export const notificationsApi = {
@@ -48,6 +62,8 @@ export const notificationsApi = {
         ...(query.unreadOnly ? { unreadOnly: true } : {}),
         ...(query.types?.length ? { types: query.types } : {}),
         ...(query.cursor ? { cursor: query.cursor } : {}),
+        // `inbox` is the server's default; sent only for the other piles.
+        ...(query.view && query.view !== 'inbox' ? { view: query.view } : {}),
       },
     }),
 
@@ -69,4 +85,30 @@ export const notificationsApi = {
       ApiRoutes.notifications.markRead(workspaceId),
       notificationIds ? { notificationIds } : {},
     ),
+
+  /** Omitting `notificationIds` archives the whole inbox. */
+  archive: (
+    workspaceId: string,
+    notificationIds?: string[],
+  ): Promise<{ updated: number; unreadCount: number }> =>
+    apiClient.post<{ updated: number; unreadCount: number }>(
+      ApiRoutes.notifications.archive(workspaceId),
+      notificationIds ? { notificationIds } : {},
+    ),
+
+  unarchive: (workspaceId: string, notificationId: string) =>
+    apiClient.post<{ updated: number; unreadCount: number }>(
+      ApiRoutes.notifications.unarchive(workspaceId, notificationId),
+      {},
+    ),
+
+  setBookmark: (workspaceId: string, notificationId: string, bookmarked: boolean) =>
+    bookmarked
+      ? apiClient.post<{ updated: number; unreadCount: number }>(
+          ApiRoutes.notifications.bookmark(workspaceId, notificationId),
+          {},
+        )
+      : apiClient.delete<{ updated: number; unreadCount: number }>(
+          ApiRoutes.notifications.bookmark(workspaceId, notificationId),
+        ),
 };

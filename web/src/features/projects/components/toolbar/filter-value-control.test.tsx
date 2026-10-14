@@ -14,6 +14,7 @@ const metadata: ProjectFieldMetadata = {
   customFields: [],
   statuses: [{ id: 'st-1', name: 'To do', category: 'TODO', colorToken: 'gray' }],
   priorities: [],
+  tags: [],
   sections: [],
   members: [
     { id: 'u-other', name: 'Ada', email: 'ada@x.dev', avatarUrl: null },

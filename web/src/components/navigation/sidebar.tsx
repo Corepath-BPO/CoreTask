@@ -23,7 +23,9 @@ export function Sidebar() {
         collapsed ? 'w-[72px]' : 'w-[17rem]',
       )}
     >
-      <div className={cn('flex h-16 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
+      <div
+        className={cn('flex h-16 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}
+      >
         <Link
           to="/"
           className="flex items-center gap-2 rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"

@@ -18,10 +18,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { WorkspaceTagsCard } from '@/features/tags/components/workspace-tags-card';
 import { useActiveWorkspace, useUpdateWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 import { type Theme, useTheme } from '@/stores/theme.store';
+
+import { NotificationEmailsCard } from '../components/notification-emails-card';
+import { ProfileCard } from '../components/profile-card';
 
 export function SettingsPage() {
   const { workspace, isLoading } = useActiveWorkspace();
@@ -161,32 +165,14 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
               ))}
             </CardContent>
           </Card>
+
+          <NotificationEmailsCard workspaceId={workspace.id} />
+
+          <WorkspaceTagsCard workspaceId={workspace.id} role={workspace.role} userId={user?.id} />
         </div>
 
         <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle>Your account</CardTitle>
-              <CardDescription>Signed-in identity for this session.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-1">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Name
-                </p>
-                <p className="mt-1 text-sm font-semibold">{user?.name ?? '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Email
-                </p>
-                <p className="mt-1 break-all text-sm">{user?.email ?? '-'}</p>
-              </div>
-              <p className="border-t pt-4 text-xs text-muted-foreground">
-                Account identity is managed by your sign-in profile.
-              </p>
-            </CardContent>
-          </Card>
+          {user && <ProfileCard key={user.id} user={user} />}
           <Card className="bg-muted/25">
             <CardHeader>
               <CardTitle>Team access</CardTitle>

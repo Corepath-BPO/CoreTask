@@ -74,6 +74,10 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
     completedAt: item.completedAt,
     archivedAt: item.archivedAt,
     estimatedMinutes: item.details.kind === 'TASK' ? item.details.estimatedMinutes : null,
+    // The list does not carry the repeat; the task pane reads it off the task.
+    recurrence: null,
+    kind: item.details.kind === 'TASK' ? item.details.taskKind : 'TASK',
+    approvalStatus: item.details.kind === 'TASK' ? item.details.approvalStatus : null,
 
     // The contract carries a list because other kinds may have several; a Task
     // holds one. Taking the first is lossless for both kinds today.
@@ -85,6 +89,7 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
     completedSubtaskCount: item.completedSubtaskCount,
     commentCount: item.commentCount,
     attachmentCount: item.attachmentCount,
+    tags: item.tags ?? [],
 
     /*
      * Renamed, not merely copied. The wire shape says `textValue`; the List's

@@ -53,12 +53,17 @@ export const CUSTOMIZE_GROUPS: CustomizeGroupDescriptor[] = [
     label: 'Workflow features',
     rows: [
       { id: 'fields', label: 'Fields', icon: SlidersHorizontal, built: true },
-      { id: 'forms', label: 'Forms', icon: ClipboardList, built: false },
-      { id: 'emails', label: 'Emails', icon: Mail, built: false },
-      { id: 'apps', label: 'Apps', icon: Blocks, built: false },
-      { id: 'task-templates', label: 'Task types and templates', icon: LayoutTemplate, built: false },
-      { id: 'bundles', label: 'Bundles', icon: Package, built: false },
-      { id: 'status-templates', label: 'Status templates', icon: CircleDot, built: false },
+      { id: 'forms', label: 'Forms', icon: ClipboardList, built: true },
+      { id: 'emails', label: 'Emails', icon: Mail, built: true },
+      { id: 'apps', label: 'Apps', icon: Blocks, built: true },
+      {
+        id: 'task-templates',
+        label: 'Task types and templates',
+        icon: LayoutTemplate,
+        built: true,
+      },
+      { id: 'bundles', label: 'Bundles', icon: Package, built: true },
+      { id: 'status-templates', label: 'Status templates', icon: CircleDot, built: true },
     ],
   },
 ];

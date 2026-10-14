@@ -8,6 +8,7 @@ import { TaskPriorityBadge } from '@/components/data-display/status-badge';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 import { CustomFieldValue } from '@/features/projects/components/cells/custom-field-value';
+import { TagChips } from '@/features/tags/components/tag-chip';
 import { WorkItemTypeIcon } from '@/features/work-items/components/work-item-type-icon';
 import { isTicketRow, type WorkItemRow } from '@/features/work-items/lib/work-item-row';
 import { cn, daysUntil, formatDate, formatDue, isOverdue } from '@/lib/utils';
@@ -93,6 +94,8 @@ export function TaskCard({
           <span className="min-w-0 flex-1">{task.title}</span>
         </p>
       </button>
+
+      {task.tags?.length > 0 && <TagChips tags={task.tags} max={3} className="mt-1.5" />}
 
       {(task.priority !== 'NONE' ||
         task.dueDate ||

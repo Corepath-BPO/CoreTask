@@ -8,6 +8,7 @@ const metadata = (customFields: CustomField[]): ProjectFieldMetadata => ({
   customFields,
   statuses: [],
   priorities: [],
+  tags: [],
   sections: [],
   members: [],
 });

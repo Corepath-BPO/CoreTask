@@ -89,6 +89,8 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   TASK_START_DATE_CHANGED: glyph(CalendarPlus),
   START_DATE_APPROACHING: glyph(CalendarPlus),
   START_DATE_PASSED: glyph(CalendarOff),
+  CUSTOM_DATE_APPROACHING: glyph(CalendarClock),
+  CUSTOM_DATE_PASSED: glyph(CalendarOff),
   APPROVAL_STATUS_CHANGED: glyph(ShieldCheck),
   TASK_NO_LONGER_BLOCKED: glyph(CircleSlash),
   ATTACHMENT_ADDED: glyph(Paperclip),

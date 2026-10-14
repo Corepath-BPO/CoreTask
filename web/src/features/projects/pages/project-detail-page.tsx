@@ -1,28 +1,35 @@
+import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import { Link, Outlet, useNavigate, useSearch } from '@tanstack/react-router';
 import { ArrowLeft, FolderKanban } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CalendarSyncDialog } from '@/features/calendar-sync/components/calendar-sync-dialog';
 import { StatusUpdateComposer } from '@/features/portfolios/components/status-update-composer';
 import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
 import { useProjectRealtime } from '@/features/work-items/hooks/use-project-realtime';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { ApiError } from '@/lib/api/api-error';
+import { useCurrentUser } from '@/stores/auth.store';
 import {
   useProjectStatusUpdate,
+  useRequestProjectStatus,
   type ProjectStatusUpdateValue,
-} from '@/stores/status-update.store';
+} from '@/features/projects/hooks/use-project-updates';
 
 import { CustomizePanel } from '../components/customize/customize-panel';
 import { ProjectFormDialog } from '../components/project-form-dialog';
+import { DuplicateProjectDialog, SaveTemplateDialog } from '../components/project-template-dialogs';
 import { ProjectHeader } from '../components/project-header';
 import { ProjectViewTabs } from '../components/project-view-tabs';
 import { ShareProjectDialog } from '../components/sharing/share-project-dialog';
 import { ViewToolbarProvider, ViewToolbarSlot } from '../components/view-toolbar-slot';
 import { useJoinProject, useLeaveProject } from '../hooks/use-project-members';
 import { useArchiveProject, useProject } from '../hooks/use-projects';
+import { downloadProjectCsv } from '../lib/download-project-csv';
 import { useProjectAccess } from '../lib/project-access';
 
 /**
@@ -52,8 +59,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const archiveProject = useArchiveProject(workspaceId);
   const joinProject = useJoinProject(workspaceId);
   const leaveProject = useLeaveProject(workspaceId);
+  const requestStatus = useRequestProjectStatus(workspaceId);
+  const currentUser = useCurrentUser();
   const [editOpen, setEditOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   /** Non-null while the status composer is open — the same one portfolios use. */
@@ -131,6 +143,24 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         customizeOpen={customizeOpen}
         joinPending={joinProject.isPending}
         onEdit={() => setEditOpen(true)}
+        canStartProjects={hasAtLeastRole(
+          workspace?.role ?? WorkspaceRole.GUEST,
+          WorkspaceRole.MEMBER,
+        )}
+        onDuplicate={() => setDuplicateOpen(true)}
+        onSyncCalendar={() => setCalendarOpen(true)}
+        onRequestStatus={
+          project.lead && project.lead.id !== currentUser?.id
+            ? () => requestStatus.mutate(project.id)
+            : undefined
+        }
+        onExportCsv={() =>
+          workspaceId &&
+          downloadProjectCsv(workspaceId, project.id).catch(() =>
+            toast.error('Could not export the project.'),
+          )
+        }
+        onSaveTemplate={() => setSaveTemplateOpen(true)}
         onArchive={() => archiveProject.mutate({ projectId: project.id, archived })}
         onShare={() => setShareOpen(true)}
         onJoin={() => joinProject.mutate({ projectId: project.id, name: project.name })}
@@ -169,6 +199,30 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         workspaceId={workspaceId}
         project={project}
       />
+
+      <DuplicateProjectDialog
+        workspaceId={workspaceId}
+        project={project}
+        open={duplicateOpen}
+        onOpenChange={setDuplicateOpen}
+      />
+
+      <SaveTemplateDialog
+        workspaceId={workspaceId}
+        project={project}
+        open={saveTemplateOpen}
+        onOpenChange={setSaveTemplateOpen}
+      />
+
+      {workspaceId && (
+        <CalendarSyncDialog
+          workspaceId={workspaceId}
+          projectId={project.id}
+          label={project.name}
+          open={calendarOpen}
+          onOpenChange={setCalendarOpen}
+        />
+      )}
 
       <ShareProjectDialog
         open={shareOpen}

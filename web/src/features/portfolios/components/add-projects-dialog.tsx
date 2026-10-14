@@ -14,7 +14,10 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { usePortfolioStore, type Portfolio } from '@/stores/portfolio.store';
+import {
+  useAddPortfolioProjects,
+  type Portfolio,
+} from '@/features/portfolios/hooks/use-portfolios';
 
 import { usePortfolioProjectIndex } from '../hooks/use-portfolio-projects';
 
@@ -31,7 +34,7 @@ export function AddProjectsDialog({
   workspaceId,
   portfolio,
 }: AddProjectsDialogProps) {
-  const addProjects = usePortfolioStore((state) => state.addProjects);
+  const addProjects = useAddPortfolioProjects(workspaceId);
 
   // Fetch only while the dialog is open — an id of `undefined` disables the query.
   const { projectsById, isLoading } = usePortfolioProjectIndex(open ? workspaceId : undefined);
@@ -73,11 +76,18 @@ export function AddProjectsDialog({
   const confirm = () => {
     if (!workspaceId || !portfolio || selected.size === 0) return;
 
-    addProjects(workspaceId, portfolio.id, [...selected]);
-    toast.success(
-      `${selected.size} ${selected.size === 1 ? 'project' : 'projects'} added to "${portfolio.name}"`,
+    const count = selected.size;
+    addProjects.mutate(
+      { portfolioId: portfolio.id, projectIds: [...selected] },
+      {
+        onSuccess: () => {
+          toast.success(
+            `${count} ${count === 1 ? 'project' : 'projects'} added to "${portfolio.name}"`,
+          );
+          handleOpenChange(false);
+        },
+      },
     );
-    handleOpenChange(false);
   };
 
   return (

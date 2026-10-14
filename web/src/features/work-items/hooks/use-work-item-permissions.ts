@@ -1,5 +1,5 @@
 import {
-  CREATABLE_WORK_ITEM_TYPES,
+  ADDABLE_WORK_ITEM_TYPES,
   WorkItemType,
   WorkspaceRole,
   hasAtLeastRole,
@@ -57,9 +57,9 @@ export function useWorkItemPermissions(archived = false): WorkItemPermissions {
       // A section changes the shape of the project for everybody in it, which
       // is a manager's call rather than an ordinary edit.
       canCreateSection: !archived && hasAtLeastRole(role, WorkspaceRole.MANAGER),
-      creatableTypes: canEdit ? [...CREATABLE_WORK_ITEM_TYPES] : [],
+      creatableTypes: canEdit ? [...ADDABLE_WORK_ITEM_TYPES] : [],
       comingSoonTypes: canEdit
-        ? Object.values(WorkItemType).filter((type) => !CREATABLE_WORK_ITEM_TYPES.includes(type))
+        ? Object.values(WorkItemType).filter((type) => !ADDABLE_WORK_ITEM_TYPES.includes(type))
         : [],
     };
   }, [project, workspaceRole, archived]);

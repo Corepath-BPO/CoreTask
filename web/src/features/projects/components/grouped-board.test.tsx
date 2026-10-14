@@ -56,8 +56,11 @@ const item = (id: string, status: { id: string; name: string } | null): ProjectW
   commentCount: 0,
   attachmentCount: 0,
   customFieldValues: [],
+  tags: [],
   details: {
     kind: 'TASK',
+    taskKind: 'TASK',
+    approvalStatus: null,
     estimatedMinutes: null,
     rawStatus: TaskStatus.TODO,
     rawPriority: TaskPriority.NONE,
@@ -75,6 +78,7 @@ const metadata: ProjectFieldMetadata = {
     { id: 'st-doing', name: 'Doing', category: 'IN_PROGRESS', colorToken: 'blue' },
   ],
   priorities: [],
+  tags: [],
   sections: [{ id: 's-1', name: 'Backlog' }],
   members: [],
 };

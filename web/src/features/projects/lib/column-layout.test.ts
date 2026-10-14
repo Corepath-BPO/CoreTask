@@ -189,16 +189,14 @@ describe('columns a saved view can no longer show', () => {
       customFields: customFields as never,
       statuses: [],
       priorities: [],
+      tags: [],
       sections: [],
       members: [],
     }) as ProjectFieldMetadata;
 
   it('drops the Section column, which the grouping already says', () => {
     expect(
-      visibleColumns(
-        [{ field: SystemField.TITLE }, { field: SystemField.SECTION }],
-        metadata([]),
-      ),
+      visibleColumns([{ field: SystemField.TITLE }, { field: SystemField.SECTION }], metadata([])),
     ).toEqual([{ field: SystemField.TITLE }]);
   });
 
@@ -206,30 +204,28 @@ describe('columns a saved view can no longer show', () => {
     // A view outlives the fields it names. A column of dashes under a header
     // reading "Deleted field" is worse than no column.
     expect(
-      visibleColumns(
-        [{ field: SystemField.TITLE }, { field: 'custom:gone' }],
-        metadata([]),
-      ),
+      visibleColumns([{ field: SystemField.TITLE }, { field: 'custom:gone' }], metadata([])),
     ).toEqual([{ field: SystemField.TITLE }]);
   });
 
   it('keeps a custom column whose field is still there', () => {
-    expect(
-      visibleColumns([{ field: 'custom:f-1' }], metadata([{ id: 'f-1' }])),
-    ).toEqual([{ field: 'custom:f-1' }]);
+    expect(visibleColumns([{ field: 'custom:f-1' }], metadata([{ id: 'f-1' }]))).toEqual([
+      { field: 'custom:f-1' },
+    ]);
   });
 
   it('keeps every custom column while metadata is still loading', () => {
     // Nothing is known to exist yet, and filtering now would drop them all and
     // add them back a moment later.
-    expect(visibleColumns([{ field: 'custom:f-1' }], undefined)).toEqual([
-      { field: 'custom:f-1' },
-    ]);
+    expect(visibleColumns([{ field: 'custom:f-1' }], undefined)).toEqual([{ field: 'custom:f-1' }]);
   });
 
   it('leaves system columns alone regardless', () => {
     expect(
-      visibleColumns([{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }], metadata([])),
+      visibleColumns(
+        [{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }],
+        metadata([]),
+      ),
     ).toEqual([{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }]);
   });
 });

@@ -303,7 +303,10 @@ export function FieldPickerPopover({
                           })
                         }
                       >
-                        <Library className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <Library
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
                         <span className="flex-1 truncate">{field.name}</span>
                         <span className="text-xs text-muted-foreground">
                           {field.usageCount === 1 ? '1 project' : `${field.usageCount} projects`}
@@ -332,7 +335,6 @@ export function FieldPickerPopover({
                 </>
               )}
             </CommandList>
-
           </Command>
           {/*
             Outside `Command`, not merely below the list.
@@ -370,7 +372,6 @@ export function FieldPickerPopover({
               Create a new field
             </button>
           </div>
-
         </PopoverContent>
       </Popover>
 

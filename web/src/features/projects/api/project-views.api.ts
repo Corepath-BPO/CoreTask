@@ -39,6 +39,12 @@ export const projectViewsApi = {
   remove: (workspaceId: string, projectId: string, viewId: string): Promise<{ deleted: boolean }> =>
     apiClient.delete<{ deleted: boolean }>(`${base(workspaceId, projectId)}/views/${viewId}`),
 
+  duplicate: (workspaceId: string, projectId: string, viewId: string): Promise<ProjectView> =>
+    apiClient.post<ProjectView>(`${base(workspaceId, projectId)}/views/${viewId}/duplicate`),
+
+  setDefault: (workspaceId: string, projectId: string, viewId: string): Promise<ProjectView> =>
+    apiClient.post<ProjectView>(`${base(workspaceId, projectId)}/views/${viewId}/set-default`),
+
   subtasks: (workspaceId: string, projectId: string, taskId: string): Promise<Task[]> =>
     apiClient.get<Task[]>(`${base(workspaceId, projectId)}/tasks/${taskId}/subtasks`),
 

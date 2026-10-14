@@ -166,22 +166,13 @@ describe('the subtask list', () => {
     expect(written(onChange)).toEqual([{ title: 'Review' }, { title: '' }]);
   });
 
-  it('offers variables only to say they are not here yet', async () => {
-    renderSubtasks(['Review']);
+  it('adds a variable to the end of a title', async () => {
+    const onChange = renderSubtasks(['Inspect']);
 
     await userEvent.click(screen.getByRole('button', { name: 'Add a variable to subtask 1' }));
-    const items = await screen.findAllByRole('menuitem');
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Task name' }));
 
-    expect(items.map((item) => item.textContent)).toEqual([
-      'Use AI',
-      'Task',
-      'People',
-      'Dates',
-      'Custom fields',
-      'Project',
-      'Section',
-    ]);
-    expect(items.every((item) => item.getAttribute('aria-disabled') === 'true')).toBe(true);
+    expect(written(onChange)[0]).toMatchObject({ title: 'Inspect {{task.name}}' });
   });
 
   it('shows the options it cannot offer, and why', () => {
@@ -284,7 +275,7 @@ describe('moving a task to another project', () => {
     return onChange;
   }
 
-  it('asks the three questions in order, with only the move on offer', () => {
+  it('asks the three questions in order, starting on a move', () => {
     renderMove({});
 
     expect(screen.getByLabelText('Choose an option')).toHaveTextContent(
@@ -313,6 +304,29 @@ describe('moving a task to another project', () => {
       'Renewals',
     );
     expect(screen.getByLabelText('Choose a column/section')).toHaveTextContent('Notify Tenant');
+  });
+
+  it('switches between moving the task and adding it there too', async () => {
+    const onChange = renderMove({ projectId: 'p-2' });
+
+    await userEvent.click(screen.getByLabelText('Choose an option'));
+    await userEvent.click(
+      await screen.findByRole('option', { name: /Add task to another project/ }),
+    );
+    expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2', mode: 'ADD' });
+  });
+
+  it('drops the add back to a move', async () => {
+    const onChange = renderMove({ projectId: 'p-2', mode: 'ADD' });
+
+    expect(screen.getByLabelText('Choose an option')).toHaveTextContent(
+      'Add task to another project',
+    );
+    await userEvent.click(screen.getByLabelText('Choose an option'));
+    await userEvent.click(
+      await screen.findByRole('option', { name: /Move task to another project/ }),
+    );
+    expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2' });
   });
 
   it('clears the project from the field itself', async () => {
@@ -379,5 +393,36 @@ describe('sending a webhook', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Remove field 1' }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ extraFields: [] }));
+  });
+});
+
+describe('sending an email', () => {
+  function renderEmail(configuration: Record<string, unknown>) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type: 'ACTION',
+      subtype: 'SEND_EMAIL',
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+    return onChange;
+  }
+
+  it('chooses who hears from the people on the task', async () => {
+    const onChange = renderEmail({ recipients: ['ASSIGNEE'], subject: 'Hi' });
+
+    expect(screen.getByRole('checkbox', { name: 'The assignee' })).toBeChecked();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Collaborators' }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      recipients: ['ASSIGNEE', 'COLLABORATORS'],
+      subject: 'Hi',
+    });
+    // No box for an address: a rule does not send mail to whoever it likes.
+    expect(screen.queryByRole('textbox', { name: /address/i })).toBeNull();
   });
 });

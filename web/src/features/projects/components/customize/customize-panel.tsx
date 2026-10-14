@@ -4,13 +4,29 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAutomations } from '@/features/automations/hooks/use-automations';
 import { usePanelFocus } from '@/lib/hooks/use-panel-focus';
 import { cn } from '@/lib/utils';
 
+import { useBundles } from '../../hooks/use-bundles';
+import { useProjectForms } from '../../hooks/use-forms';
+import { useProjectApps } from '../../hooks/use-project-apps';
+import { useProjectEmail } from '../../hooks/use-project-email';
 import { useFieldMetadata } from '../../hooks/use-project-views';
+import { useStatusTemplates } from '../../hooks/use-status-templates';
+import { useTaskTemplates } from '../../hooks/use-task-templates';
 
+import { CustomizeAppsSection } from './customize-apps-section';
+import { CustomizeBundlesSection } from './customize-bundles-section';
+import { CustomizeEmailsSection } from './customize-emails-section';
 import { CustomizeFieldsSection } from './customize-fields-section';
+import { CustomizeFormsSection } from './customize-forms-section';
 import {
   CUSTOMIZE_GROUPS,
   type CustomizeCounts,
@@ -18,6 +34,8 @@ import {
   type CustomizeRowId,
 } from './customize-rows';
 import { CustomizeRulesSection } from './customize-rules-section';
+import { CustomizeStatusTemplatesSection } from './customize-status-templates-section';
+import { CustomizeTemplatesSection } from './customize-templates-section';
 
 const ROW_LABEL: Record<CustomizeRowId, string> = Object.fromEntries(
   CUSTOMIZE_GROUPS.flatMap((group) => group.rows.map((row) => [row.id, row.label])),
@@ -32,9 +50,9 @@ const ROW_LABEL: Record<CustomizeRowId, string> = Object.fromEntries(
  * `?customize=` on the project route, so it survives a tab switch and a reload,
  * and Back puts it away.
  *
- * The rows are a table of contents. Rules and Fields open their sections in
- * place; the rest name features that do not exist yet and say so, rather than
- * padding the panel with doors to nowhere.
+ * The rows are a table of contents, and every one opens its section in place.
+ * A row whose feature does not exist yet would say so with a "Soon" badge
+ * rather than pad the panel with a door to nowhere; today none is left.
  */
 export function CustomizePanel({
   workspaceId,
@@ -83,6 +101,25 @@ export function CustomizePanel({
      fetches the metadata, the Automations tab the rules. */
   const metadataQuery = useFieldMetadata(open ? workspaceId : undefined, projectId);
   const rulesQuery = useAutomations(open ? workspaceId : undefined, projectId);
+  // Forms are an editor's tool; nobody else is shown them, so nobody else asks.
+  const formsQuery = useProjectForms(
+    open && hasAtLeastRole(role, WorkspaceRole.MEMBER) ? workspaceId : undefined,
+    projectId,
+  );
+  const emailQuery = useProjectEmail(
+    open && hasAtLeastRole(role, WorkspaceRole.MEMBER) ? workspaceId : undefined,
+    projectId,
+  );
+  const appsQuery = useProjectApps(
+    open && hasAtLeastRole(role, WorkspaceRole.MEMBER) ? workspaceId : undefined,
+    projectId,
+  );
+  const templatesQuery = useTaskTemplates(open ? workspaceId : undefined, projectId);
+  const statusTemplatesQuery = useStatusTemplates(open ? workspaceId : undefined, projectId);
+  const bundlesQuery = useBundles(open ? workspaceId : undefined);
+  const bundlesHere = bundlesQuery.data?.filter((bundle) =>
+    bundle.projects.some((link) => link.id === projectId),
+  );
 
   const activeFields = (metadataQuery.data?.customFields ?? []).filter(
     (field) => !field.isArchived,
@@ -90,6 +127,12 @@ export function CustomizePanel({
   const counts: CustomizeCounts = {
     ...(rulesQuery.data ? { rules: rulesQuery.data.length } : {}),
     ...(metadataQuery.data ? { fields: activeFields.length } : {}),
+    ...(formsQuery.data ? { forms: formsQuery.data.length } : {}),
+    ...(emailQuery.data ? { emails: emailQuery.data.receivedCount } : {}),
+    ...(appsQuery.data ? { apps: appsQuery.data.length } : {}),
+    ...(templatesQuery.data ? { 'task-templates': templatesQuery.data.length } : {}),
+    ...(statusTemplatesQuery.data ? { 'status-templates': statusTemplatesQuery.data.length } : {}),
+    ...(bundlesHere ? { bundles: bundlesHere.length } : {}),
   };
 
   const canEdit = hasAtLeastRole(role, WorkspaceRole.MEMBER);
@@ -151,16 +194,26 @@ export function CustomizePanel({
                   View and edit features on this project
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled
-                title="Adding features is not built yet"
-                className="shrink-0"
-              >
-                Add
-                <ChevronDown />
-              </Button>
+              {/* Asana's Add: every feature in one menu, each opening its own
+                  section to set one up. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="shrink-0">
+                    Add
+                    <ChevronDown />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {CUSTOMIZE_GROUPS.flatMap((group) => group.rows)
+                    .filter((row) => row.built)
+                    .map((row) => (
+                      <DropdownMenuItem key={row.id} onSelect={() => setActiveSection(row.id)}>
+                        <row.icon />
+                        {row.label}
+                      </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             {CUSTOMIZE_GROUPS.map((group) => (
@@ -190,6 +243,56 @@ export function CustomizePanel({
             rules={rulesQuery.data}
             isLoading={rulesQuery.isLoading}
             canManage={canManage}
+          />
+        )}
+
+        {activeSection === 'forms' && (
+          <CustomizeFormsSection
+            workspaceId={workspaceId}
+            projectId={projectId}
+            canEdit={canEdit}
+          />
+        )}
+
+        {activeSection === 'emails' && (
+          <CustomizeEmailsSection
+            workspaceId={workspaceId}
+            projectId={projectId}
+            canEdit={canEdit}
+          />
+        )}
+
+        {activeSection === 'apps' && (
+          <CustomizeAppsSection workspaceId={workspaceId} projectId={projectId} canEdit={canEdit} />
+        )}
+
+        {activeSection === 'task-templates' && (
+          <CustomizeTemplatesSection
+            workspaceId={workspaceId}
+            projectId={projectId}
+            canEdit={canEdit}
+          />
+        )}
+
+        {activeSection === 'bundles' && (
+          <CustomizeBundlesSection
+            workspaceId={workspaceId}
+            projectId={projectId}
+            canManage={canManage}
+            partCounts={{
+              ...(metadataQuery.data ? { SECTIONS: metadataQuery.data.sections.length } : {}),
+              ...(metadataQuery.data ? { FIELDS: activeFields.length } : {}),
+              ...(rulesQuery.data ? { RULES: rulesQuery.data.length } : {}),
+              ...(templatesQuery.data ? { TASK_TEMPLATES: templatesQuery.data.length } : {}),
+            }}
+          />
+        )}
+
+        {activeSection === 'status-templates' && (
+          <CustomizeStatusTemplatesSection
+            workspaceId={workspaceId}
+            projectId={projectId}
+            canEdit={canEdit}
           />
         )}
 

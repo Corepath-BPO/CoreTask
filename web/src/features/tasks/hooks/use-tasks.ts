@@ -38,12 +38,19 @@ export function useTaskDetail(workspaceId: string | undefined, taskId: string | 
   });
 }
 
-export function useCreateTask(workspaceId: string | undefined) {
+/**
+ * `announce: false` leaves the confirmation to the caller — for one that
+ * wants its own toast, with an action, rather than two stacked.
+ */
+export function useCreateTask(
+  workspaceId: string | undefined,
+  { announce = true }: { announce?: boolean } = {},
+) {
   return useMutation({
     mutationFn: (payload: CreateTaskPayload) => tasksApi.create(workspaceId as string, payload),
     onSuccess: async (task) => {
       await invalidateTasks(workspaceId as string);
-      toast.success(`Task "${task.title}" created`);
+      if (announce) toast.success(`Task "${task.title}" created`);
     },
     onError: (error) => reportError(error, 'Could not create the task.'),
   });
@@ -91,6 +98,67 @@ export function useMoveTaskToSection(workspaceId: string | undefined) {
       });
     },
     onError: (error) => reportError(error, 'Could not move the task.'),
+  });
+}
+
+/**
+ * Everything a change to a task's projects touches: the task, every task list,
+ * every project's rows and rollups. Broad on purpose — the task now appears on
+ * a different set of boards, and which ones were open is not known here.
+ */
+async function invalidateMemberships(workspaceId: string, taskId: string) {
+  await Promise.all([
+    invalidateTasks(workspaceId),
+    queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(workspaceId, taskId) }),
+    queryClient.invalidateQueries({ queryKey: ['work-items'] }),
+  ]);
+}
+
+/** Multi-homing: add the task to another project, in a section there. */
+export function useAddTaskToProject(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      projectId,
+      sectionId,
+    }: {
+      taskId: string;
+      projectId: string;
+      sectionId?: string | null;
+    }) =>
+      tasksApi.addToProject(workspaceId as string, taskId, {
+        projectId,
+        ...(sectionId !== undefined ? { sectionId } : {}),
+      }),
+    onSuccess: (_, { taskId }) => invalidateMemberships(workspaceId as string, taskId),
+    onError: (error) => reportError(error, 'Could not add the task to that project.'),
+  });
+}
+
+/** The task's section in one of its other projects. */
+export function useSetTaskProjectSection(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      projectId,
+      sectionId,
+    }: {
+      taskId: string;
+      projectId: string;
+      sectionId: string | null;
+    }) => tasksApi.setProjectSection(workspaceId as string, taskId, projectId, sectionId),
+    onSuccess: (_, { taskId }) => invalidateMemberships(workspaceId as string, taskId),
+    onError: (error) => reportError(error, 'Could not move the task.'),
+  });
+}
+
+/** Takes the task out of one project; leaving its home promotes another. */
+export function useRemoveTaskFromProject(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: ({ taskId, projectId }: { taskId: string; projectId: string }) =>
+      tasksApi.removeFromProject(workspaceId as string, taskId, projectId),
+    onSuccess: (_, { taskId }) => invalidateMemberships(workspaceId as string, taskId),
+    onError: (error) => reportError(error, 'Could not remove the task from that project.'),
   });
 }
 

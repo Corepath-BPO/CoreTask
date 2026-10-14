@@ -64,6 +64,7 @@ const metadata: ProjectFieldMetadata = {
   ],
   statuses: [{ id: 'st-1', name: 'To do', category: 'TODO', colorToken: 'gray' }],
   priorities: [],
+  tags: [],
   sections: [{ id: 's-1', name: 'Backlog' }],
   members: [{ id: 'u-me', name: 'Me', email: 'me@x.dev', avatarUrl: null }],
 };
@@ -165,14 +166,15 @@ describe('SortPopover', () => {
 });
 
 describe('GroupPopover', () => {
-  it('offers the project’s select field and refuses a date with a reason', () => {
+  it('offers due date and the project’s select field, but never a formula', () => {
     const onChange = vi.fn();
     renderWithProviders(
       <GroupPopover settings={settings()} metadata={metadata} onChange={onChange} />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Group' }));
-    expect(screen.getByRole('radio', { name: 'Due date' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: 'Due date' }));
+    expect(onChange).toHaveBeenCalledWith({ groupBy: 'dueDate' });
     // A formula is never offered: nothing can be grouped by a value that is
     // worked out after the rows arrive.
     expect(screen.queryByRole('radio', { name: 'Total' })).not.toBeInTheDocument();

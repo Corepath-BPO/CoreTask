@@ -23,6 +23,7 @@ export const COLUMN_LABEL: Record<string, string> = {
   [SystemField.CREATED_AT]: 'Created',
   [SystemField.UPDATED_AT]: 'Updated',
   [SystemField.ESTIMATE]: 'Estimate',
+  [SystemField.TAGS]: 'Tags',
 };
 
 /**

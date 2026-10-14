@@ -16,12 +16,12 @@ import {
   ChevronDown,
   Folder,
   FolderKanban,
+  LayoutTemplate,
   List,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
-  Star,
   Ticket,
   Upload,
   Users,
@@ -45,9 +45,11 @@ import { ImportProjectDialog } from '@/features/import/components/import-project
 import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatDate, humanizeEnum } from '@/lib/utils';
-import { usePortfolios, type Portfolio } from '@/stores/portfolio.store';
+import { usePortfolios, type Portfolio } from '@/features/portfolios/hooks/use-portfolios';
 
 import { ProjectFormDialog } from '../components/project-form-dialog';
+import { UseTemplateDialog } from '../components/project-template-dialogs';
+import { ProjectStarButton } from '../components/project-star-button';
 import { ProjectMembersStack } from '../components/sharing/project-members-stack';
 import { ProjectPrivacyBadge } from '../components/sharing/project-privacy-badge';
 import { ShareProjectDialog } from '../components/sharing/share-project-dialog';
@@ -89,6 +91,7 @@ export function ProjectsPage() {
   const [editing, setEditing] = useState<ProjectSummary | null>(null);
   const [sharing, setSharing] = useState<ProjectSummary | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
   // Debounced so typing does not fire a request per keystroke.
@@ -208,6 +211,10 @@ export function ProjectsPage() {
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 <Upload />
                 Import CSV
+              </Button>
+              <Button variant="outline" onClick={() => setTemplateOpen(true)}>
+                <LayoutTemplate />
+                Use a template
               </Button>
               <Button onClick={openCreate}>
                 <Plus />
@@ -376,6 +383,12 @@ export function ProjectsPage() {
           Showing the first {items.length} of {meta.total} projects. Search to find the rest.
         </p>
       )}
+
+      <UseTemplateDialog
+        workspaceId={workspaceId}
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+      />
 
       <ProjectFormDialog
         open={formOpen}
@@ -551,15 +564,11 @@ function ProjectRow({
 
       <div className="flex items-center justify-end gap-1">
         <div className="relative z-10 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled
-            title="Starring projects is not built yet"
-            aria-label="Star project (not built yet)"
-          >
-            <Star />
-          </Button>
+          <ProjectStarButton
+            workspaceId={project.workspaceId}
+            projectId={project.id}
+            projectName={project.name}
+          />
           {canJoin && (
             <Button
               variant="ghost"

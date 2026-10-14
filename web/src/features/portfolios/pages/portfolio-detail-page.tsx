@@ -1,3 +1,4 @@
+import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import { Link, Outlet, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Briefcase, Folder, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
@@ -25,10 +26,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
+import type { ProjectStatusUpdateValue } from '@/features/projects/hooks/use-project-updates';
 import { initials } from '@/lib/utils';
-import { usePortfolio, usePortfolioStore } from '@/stores/portfolio.store';
+import { useCurrentUser } from '@/stores/auth.store';
+import {
+  useDeletePortfolio,
+  usePortfolio,
+  useTogglePortfolioStar,
+} from '@/features/portfolios/hooks/use-portfolios';
 
 import { PortfolioFormDialog } from '../components/portfolio-form-dialog';
+import { PortfolioStatusDialog } from '../components/portfolio-status-dialog';
+import { useRequestPortfolioStatus } from '../hooks/use-portfolio-status';
+import { StatusUpdateChip, StatusUpdateMenu } from '../components/status-update';
 import { PortfolioViewTabs } from '../components/portfolio-view-tabs';
 import { StarButton } from '../components/star-button';
 import { usePortfolioProjectIndex } from '../hooks/use-portfolio-projects';
@@ -48,16 +58,19 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
   const workspaceId = workspace?.id;
   const navigate = useNavigate();
 
-  const portfolio = usePortfolio(workspaceId, portfolioId);
-  const toggleStarred = usePortfolioStore((state) => state.toggleStarred);
-  const deletePortfolio = usePortfolioStore((state) => state.deletePortfolio);
+  const { portfolio, isLoading: portfolioLoading } = usePortfolio(workspaceId, portfolioId);
+  const toggleStarred = useTogglePortfolioStar(workspaceId);
+  const deletePortfolio = useDeletePortfolio(workspaceId);
 
   const { projectsById } = usePortfolioProjectIndex(workspaceId);
 
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [composing, setComposing] = useState<ProjectStatusUpdateValue | null>(null);
+  const currentUser = useCurrentUser();
+  const requestStatus = useRequestPortfolioStatus(workspaceId, portfolioId);
 
-  if (workspaceLoading) return <PortfolioDetailSkeleton />;
+  if (workspaceLoading || portfolioLoading) return <PortfolioDetailSkeleton />;
 
   if (!workspace) {
     return (
@@ -71,15 +84,14 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
   }
 
   if (!portfolio) {
-    // The URL is bookmarkable but the data is not: portfolios live in this
-    // browser's storage, so an id from elsewhere has nothing to resolve against.
+    // A deleted portfolio, or an id from another workspace's link.
     return (
       <div className="space-y-6">
         <BackLink />
         <EmptyState
           icon={Briefcase}
           title="Portfolio not found"
-          description="It may have been deleted, or created in another browser. Portfolios are stored locally for now."
+          description="It may have been deleted, or it belongs to a different workspace."
           action={
             <Button variant="outline" asChild>
               <Link to="/portfolios">Back to portfolios</Link>
@@ -91,10 +103,15 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
   }
 
   const rollup = rollupPortfolio(portfolio, projectsById);
+  // The people who may change the portfolio set its status too; anyone else
+  // may ask its owner for one.
+  const isOwner = portfolio.owner?.id === currentUser?.id;
+  const canSetStatus =
+    isOwner || hasAtLeastRole(workspace.role ?? WorkspaceRole.GUEST, WorkspaceRole.MANAGER);
   const leads = projectLeads(rollup.projects);
 
   const confirmDelete = () => {
-    deletePortfolio(workspace.id, portfolio.id);
+    deletePortfolio.mutate(portfolio.id);
     toast.success(`Portfolio "${portfolio.name}" deleted`);
     void navigate({ to: '/portfolios' });
   };
@@ -122,10 +139,24 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
             fill="currentColor"
           />
           <h1 className="text-xl font-semibold tracking-tight">{portfolio.name}</h1>
-          <StarButton
-            portfolio={portfolio}
-            onToggleStar={() => toggleStarred(workspace.id, portfolio.id)}
-          />
+          <StarButton portfolio={portfolio} onToggleStar={() => toggleStarred.mutate(portfolio)} />
+          {portfolio.status && (
+            <StatusUpdateChip
+              status={portfolio.status.value.toLowerCase() as ProjectStatusUpdateValue}
+            />
+          )}
+          {(canSetStatus || !isOwner) && (
+            <StatusUpdateMenu
+              onPick={setComposing}
+              canPick={canSetStatus}
+              onRequest={!isOwner && portfolio.owner ? () => requestStatus.mutate() : undefined}
+              trigger={
+                <Button variant="ghost" size="sm" className="text-muted-foreground">
+                  Set status
+                </Button>
+              }
+            />
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             {leads.length > 0 && (
@@ -166,6 +197,13 @@ export function PortfolioDetailPage({ portfolioId }: PortfolioDetailPageProps) {
 
         <PortfolioViewTabs portfolioId={portfolio.id} />
       </div>
+
+      <PortfolioStatusDialog
+        workspaceId={workspace.id}
+        portfolio={portfolio}
+        initialStatus={composing}
+        onClose={() => setComposing(null)}
+      />
 
       {/* Each tab renders here — the list is one representation of the
           portfolio, not the portfolio itself. Tabs own their scrolling. */}

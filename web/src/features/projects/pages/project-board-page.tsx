@@ -23,6 +23,7 @@ import { CreateSectionDialog } from '../components/create-section-dialog';
 import { GroupedBoard } from '../components/grouped-board';
 import { SectionBoard } from '../components/section-board';
 import { SaveViewDialog } from '../components/toolbar/save-view-dialog';
+import { ViewPicker } from '../components/toolbar/view-picker';
 import { ViewToolbarControls } from '../components/toolbar/view-toolbar-controls';
 import { ViewToolbar } from '../components/view-toolbar-slot';
 import {
@@ -36,6 +37,7 @@ import {
 import { useCreateSection, useProject } from '../hooks/use-projects';
 import { useProjectAccess } from '../lib/project-access';
 import { isManualOrder } from '../lib/group-value';
+import { useTaskTemplates, useUseTaskTemplate } from '../hooks/use-task-templates';
 
 /** Accepts any RFC 4122 version, including the v7 ids this schema generates. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -150,6 +152,8 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
     });
 
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
+  const { data: templates } = useTaskTemplates(workspaceId, projectId);
+  const applyTemplate = useUseTaskTemplate(workspaceId, projectId);
   const createSection = useCreateSection(workspaceId, projectId);
   const [addingSection, setAddingSection] = useState(false);
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
@@ -174,6 +178,24 @@ export function ProjectBoardPage({ projectId }: { projectId: string }) {
             pending={createWorkItem.isPending}
             onCreate={(type) => setComposing(type as CreatableWorkItemType)}
             onCreateSection={() => setAddingSection(true)}
+            templates={templates}
+            onUseTemplate={(templateId) => applyTemplate.mutate({ templateId })}
+          />
+          <ViewPicker
+            workspaceId={workspaceId}
+            projectId={projectId}
+            views={(views ?? []).filter((view) => view.type === ProjectViewType.BOARD)}
+            activeView={boardView}
+            meId={me?.id}
+            role={role}
+            onSelect={(viewId) =>
+              void navigate({
+                to: '/projects/$projectId/board',
+                params: { projectId },
+                search: { view: viewId },
+                resetScroll: false,
+              })
+            }
           />
           <div className="ml-auto">
             <ViewToolbarControls

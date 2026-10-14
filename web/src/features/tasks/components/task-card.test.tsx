@@ -26,6 +26,10 @@ const baseTask: Task = {
   completedAt: null,
   archivedAt: null,
   estimatedMinutes: null,
+  recurrence: null,
+  kind: 'TASK',
+  tags: [],
+  approvalStatus: null,
   assigneeId: null,
   assignee: null,
   createdById: 'u',
@@ -164,6 +168,7 @@ describe('TaskCard', () => {
       ],
       statuses: [],
       priorities: [],
+      tags: [],
       sections: [],
       members: [],
     } as unknown as ProjectFieldMetadata;

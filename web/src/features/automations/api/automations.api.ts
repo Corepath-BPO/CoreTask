@@ -20,6 +20,8 @@ export interface AutomationRule {
   triggerConfig: Record<string, unknown>;
   nodes: AutomationNode[];
   createdBy: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+  /** Set when a bundle wrote this rule; the bundle replaces it when it changes. */
+  bundleId?: string | null;
   lastRunAt: string | null;
   lastRunStatus: string | null;
   runCount: number;
@@ -107,6 +109,19 @@ export const automationsApi = {
     apiClient.delete<{ deleted: boolean; archived: boolean }>(
       `${base(workspaceId, projectId)}/${ruleId}`,
     ),
+
+  /** Queues a manual rule on some tasks; the runs land in its history. */
+  run: (
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+    taskIds: string[],
+    timezone?: string,
+  ): Promise<{ queued: number }> =>
+    apiClient.post<{ queued: number }>(`${base(workspaceId, projectId)}/${ruleId}/run`, {
+      taskIds,
+      ...(timezone ? { timezone } : {}),
+    }),
 
   executions: (
     workspaceId: string,

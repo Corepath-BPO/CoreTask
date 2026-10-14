@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import {
   useProjectStatusUpdate,
   type ProjectStatusUpdateValue,
-} from '@/stores/status-update.store';
+} from '@/features/projects/hooks/use-project-updates';
 
 import { STATUS_UPDATE_OPTIONS, statusUpdateOption } from '../lib/status-updates';
 
@@ -36,7 +36,7 @@ export function StatusUpdateChip({ status }: { status: ProjectStatusUpdateValue 
   );
 }
 
-/** The latest local update for a project, or Asana's "No recent updates". */
+/** A project's newest posted update, or Asana's "No recent updates". */
 export function ProjectStatusUpdateChip({ projectId }: { projectId: string }) {
   const update = useProjectStatusUpdate(projectId);
 
@@ -59,10 +59,16 @@ export function ProjectStatusUpdateChip({ projectId }: { projectId: string }) {
  */
 export function StatusUpdateMenu({
   onPick,
+  onRequest,
+  canPick = true,
   tabIndex,
   trigger,
 }: {
   onPick: (status: ProjectStatusUpdateValue) => void;
+  /** "Request status update": ask the owner. Left out, the item is not offered. */
+  onRequest?: () => void;
+  /** False for someone who may ask for an update but not post one. */
+  canPick?: boolean;
   tabIndex?: number;
   /** Replaces the default "Update status" button — the menu stays the same. */
   trigger?: React.ReactElement;
@@ -78,15 +84,16 @@ export function StatusUpdateMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        {STATUS_UPDATE_OPTIONS.map((option) => (
-          <DropdownMenuItem key={option.value} onSelect={() => onPick(option.value)}>
-            <StatusUpdateChip status={option.value} />
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        {/* Asking someone for an update needs notifications, which this
-            browser-local build does not have. */}
-        <DropdownMenuItem disabled>Request status update</DropdownMenuItem>
+        {canPick &&
+          STATUS_UPDATE_OPTIONS.map((option) => (
+            <DropdownMenuItem key={option.value} onSelect={() => onPick(option.value)}>
+              <StatusUpdateChip status={option.value} />
+            </DropdownMenuItem>
+          ))}
+        {canPick && onRequest && <DropdownMenuSeparator />}
+        {onRequest && (
+          <DropdownMenuItem onSelect={onRequest}>Request status update</DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

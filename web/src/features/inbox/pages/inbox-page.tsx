@@ -2,8 +2,11 @@ import { NotificationType } from '@coretask/contracts';
 import type { NotificationEntry } from '@coretask/types';
 import { useNavigate } from '@tanstack/react-router';
 import {
+  Archive,
+  ArchiveRestore,
   AtSign,
   Bell,
+  Bookmark,
   CalendarClock,
   CheckCheck,
   Inbox as InboxIcon,
@@ -20,9 +23,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  useArchiveNotifications,
+  useBookmarkNotification,
   useInbox,
   useMarkNotificationUnread,
   useMarkNotificationsRead,
+  useUnarchiveNotification,
   type InboxFilter,
 } from '@/features/activity/hooks/use-activity';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
@@ -32,6 +38,8 @@ const FILTERS: { value: InboxFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'unread', label: 'Unread' },
   { value: 'mentions', label: 'Mentions' },
+  { value: 'bookmarked', label: 'Bookmarks' },
+  { value: 'archived', label: 'Archive' },
 ];
 
 export function InboxPage() {
@@ -45,6 +53,10 @@ export function InboxPage() {
   );
   const markRead = useMarkNotificationsRead(workspace?.id);
   const markUnread = useMarkNotificationUnread(workspace?.id);
+  const archive = useArchiveNotifications(workspace?.id);
+  const unarchive = useUnarchiveNotification(workspace?.id);
+  const bookmark = useBookmarkNotification(workspace?.id);
+  const inArchive = filter === 'archived';
 
   const pages = data?.pages ?? [];
   const items = pages.flatMap((page) => page.items);
@@ -65,16 +77,29 @@ export function InboxPage() {
         title="Inbox"
         description="Mentions, assignments and replies to things you are part of."
         actions={
-          unreadCount > 0 ? (
-            <Button
-              variant="outline"
-              onClick={() => markRead.mutate(undefined)}
-              loading={markRead.isPending}
-            >
-              <CheckCheck className="size-4" aria-hidden="true" />
-              Mark all read
-            </Button>
-          ) : null
+          <div className="flex flex-wrap gap-2">
+            {unreadCount > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => markRead.mutate(undefined)}
+                loading={markRead.isPending}
+              >
+                <CheckCheck className="size-4" aria-hidden="true" />
+                Mark all read
+              </Button>
+            )}
+            {/* Asana's inbox zero: everything filed away in one go. */}
+            {filter === 'all' && items.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => archive.mutate(undefined)}
+                loading={archive.isPending}
+              >
+                <Archive className="size-4" aria-hidden="true" />
+                Archive all
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -107,11 +132,23 @@ export function InboxPage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={InboxIcon}
-          title={filter === 'all' ? 'Nothing here yet' : 'Nothing matching that filter'}
+          title={
+            filter === 'all'
+              ? 'Nothing here yet'
+              : filter === 'archived'
+                ? 'Nothing archived'
+                : filter === 'bookmarked'
+                  ? 'No bookmarks'
+                  : 'Nothing matching that filter'
+          }
           description={
             filter === 'all'
               ? 'When someone mentions you, assigns you work or replies to a thread you are part of, it lands here.'
-              : 'Try a different filter to see the rest of your inbox.'
+              : filter === 'archived'
+                ? 'Archive notifications you are done with, and they wait here instead of crowding the inbox.'
+                : filter === 'bookmarked'
+                  ? 'Bookmark a notification to keep it at hand, archived or not.'
+                  : 'Try a different filter to see the rest of your inbox.'
           }
         />
       ) : (
@@ -149,25 +186,73 @@ export function InboxPage() {
                     </p>
                   </button>
 
-                  {entry.readAt ? (
+                  <div className="flex shrink-0 items-center">
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label={`Mark "${entry.title}" unread`}
-                      onClick={() => markUnread.mutate(entry.id)}
+                      aria-pressed={Boolean(entry.bookmarkedAt)}
+                      aria-label={
+                        entry.bookmarkedAt
+                          ? `Remove the bookmark on "${entry.title}"`
+                          : `Bookmark "${entry.title}"`
+                      }
+                      onClick={() =>
+                        bookmark.mutate({
+                          notificationId: entry.id,
+                          bookmarked: !entry.bookmarkedAt,
+                        })
+                      }
                     >
-                      <RotateCcw className="size-4" aria-hidden="true" />
+                      <Bookmark
+                        className={cn(
+                          'size-4',
+                          entry.bookmarkedAt && 'fill-current text-primary-strong',
+                        )}
+                        aria-hidden="true"
+                      />
                     </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Mark "${entry.title}" read`}
-                      onClick={() => markRead.mutate([entry.id])}
-                    >
-                      <CheckCheck className="size-4" aria-hidden="true" />
-                    </Button>
-                  )}
+
+                    {!inArchive &&
+                      (entry.readAt ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Mark "${entry.title}" unread`}
+                          onClick={() => markUnread.mutate(entry.id)}
+                        >
+                          <RotateCcw className="size-4" aria-hidden="true" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Mark "${entry.title}" read`}
+                          onClick={() => markRead.mutate([entry.id])}
+                        >
+                          <CheckCheck className="size-4" aria-hidden="true" />
+                        </Button>
+                      ))}
+
+                    {entry.archivedAt ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Move "${entry.title}" back to the inbox`}
+                        onClick={() => unarchive.mutate(entry.id)}
+                      >
+                        <ArchiveRestore className="size-4" aria-hidden="true" />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Archive "${entry.title}"`}
+                        onClick={() => archive.mutate([entry.id])}
+                      >
+                        <Archive className="size-4" aria-hidden="true" />
+                      </Button>
+                    )}
+                  </div>
                 </article>
               </li>
             ))}

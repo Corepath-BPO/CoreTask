@@ -85,6 +85,7 @@ function detail(overrides: Partial<TeamDetail> = {}): TeamDetail {
       { id: ME, name: 'Demo Owner', email: 'demo@coretask.dev', avatarUrl: null },
       { id: OTHER, name: 'Jonas Feld', email: 'jonas@coretask.dev', avatarUrl: null },
     ],
+    projects: [],
     ...overrides,
   };
 }
@@ -250,9 +251,7 @@ describe('TeamsPage', () => {
       await userEvent.click(
         within(dialog).getByRole('button', { name: /remove demo owner from platform/i }),
       );
-      await waitFor(() =>
-        expect(removeTeamMember).toHaveBeenCalledWith(WORKSPACE, 'team-1', ME),
-      );
+      await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith(WORKSPACE, 'team-1', ME));
     });
 
     it('marks the lead on the roster', async () => {

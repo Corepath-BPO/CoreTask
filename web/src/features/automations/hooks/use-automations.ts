@@ -1,11 +1,11 @@
-import { rulesForSection } from '@coretask/contracts';
+import { AutomationRuleStatus, AutomationTrigger, rulesForSection } from '@coretask/contracts';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { ApiError } from '@/lib/api/api-error';
 import { queryClient } from '@/lib/api/query-client';
 
-import { automationsApi } from '../api/automations.api';
+import { automationsApi, type AutomationRule } from '../api/automations.api';
 
 /**
  * One key family for everything automation.
@@ -171,5 +171,55 @@ export function useCreateRule(workspaceId: string | undefined, projectId: string
       await queryClient.invalidateQueries({ queryKey: ['automations', workspaceId, projectId] });
     },
     onError: (error) => reportRuleError(error, 'Could not create that rule.'),
+  });
+}
+
+/** A rule somebody can run from a task's menu, under the label the menu shows. */
+export interface ManualRule {
+  id: string;
+  label: string;
+}
+
+const toManualRules = (rules: AutomationRule[]): ManualRule[] =>
+  rules
+    .filter(
+      (rule) =>
+        rule.status === AutomationRuleStatus.ACTIVE &&
+        rule.triggerType === AutomationTrigger.RUN_MANUALLY,
+    )
+    .map((rule) => {
+      const label = rule.triggerConfig['label'];
+      return { id: rule.id, label: typeof label === 'string' && label.trim() ? label : rule.name };
+    });
+
+/**
+ * The live manual rules of a project — Asana's "Run rule" submenu.
+ *
+ * A view of the same query the rule list reads, so publishing or pausing a
+ * rule there changes the menu here without a request of its own.
+ */
+export function useManualRules(workspaceId: string | undefined, projectId: string | null) {
+  return useQuery({
+    queryKey: keys.all(workspaceId ?? '', projectId ?? ''),
+    queryFn: () => automationsApi.list(workspaceId as string, projectId as string),
+    enabled: Boolean(workspaceId && projectId),
+    select: toManualRules,
+  });
+}
+
+/** Runs a manual rule on the tasks given. The rule's own changes arrive over the socket. */
+export function useRunRule(workspaceId: string | undefined, projectId: string | null) {
+  return useMutation({
+    mutationFn: ({ rule, taskIds }: { rule: ManualRule; taskIds: string[] }) =>
+      automationsApi.run(
+        workspaceId as string,
+        projectId as string,
+        rule.id,
+        taskIds,
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ),
+    onSuccess: ({ queued }, { rule }) =>
+      toast.success(`Running “${rule.label}” on ${queued} task${queued === 1 ? '' : 's'}.`),
+    onError: (error) => reportRuleError(error, 'Could not run that rule.'),
   });
 }

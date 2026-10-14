@@ -5,7 +5,7 @@ import {
   type CreatableWorkItemType,
   type WorkItemType,
 } from '@coretask/contracts';
-import { ChevronDown, Loader2, Plus, Rows3 } from 'lucide-react';
+import { ChevronDown, LayoutTemplate, Loader2, Plus, Rows3 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,9 @@ interface Props {
   /** Opens the create experience for a type. The caller decides quick vs full. */
   onCreate: (type: WorkItemType, context: WorkItemCreateContext) => void;
   onCreateSection?: (() => void) | undefined;
+  /** The project's task templates, offered under the types. */
+  templates?: { id: string; name: string }[] | undefined;
+  onUseTemplate?: ((templateId: string) => void) | undefined;
   pending?: boolean;
   size?: 'sm' | 'default';
   /** Asana's list toolbar wears the neutral outline; the default stays filled. */
@@ -70,6 +73,8 @@ export function ProjectWorkItemCreateButton({
   context,
   onCreate,
   onCreateSection,
+  templates = [],
+  onUseTemplate,
   pending = false,
   size = 'sm',
   variant = 'default',
@@ -159,6 +164,26 @@ export function ProjectWorkItemCreateButton({
               <span className="text-xs text-muted-foreground">Coming soon</span>
             </DropdownMenuItem>
           ))}
+
+          {onUseTemplate && templates.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>From template</DropdownMenuLabel>
+              {templates.map((template) => (
+                <DropdownMenuItem
+                  key={template.id}
+                  className="cursor-pointer gap-2"
+                  onSelect={() => onUseTemplate(template.id)}
+                >
+                  <LayoutTemplate
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span className="flex-1 truncate">{template.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
 
           {onCreateSection && permissions.canCreateSection && (
             <>

@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { toast } from 'sonner';
 
 import { useUiStore } from '@/stores/ui.store';
 
@@ -59,8 +58,10 @@ export function useGlobalShortcuts(): void {
         const action = CHORD_ACTIONS[event.key.toLowerCase()];
         if (action) {
           event.preventDefault();
+          // Tab+N with no list on screen to take it: Asana's answer is a
+          // new task anyway, so the quick-add dialog opens.
           if (!dispatchShortcut(action) && action === 'newTask') {
-            toast('Open a project to create a task');
+            useUiStore.getState().setQuickAddTaskOpen(true);
           }
           return;
         }
@@ -77,12 +78,17 @@ export function useGlobalShortcuts(): void {
         return;
       }
 
-      // Search is not built. The key stays reserved so muscle memory does not
-      // have to be relearned once it is, but it says nothing: the topbar's own
-      // placeholder reads Soon and does nothing when pressed, and a toast
-      // promising a phase here would be the same pretending in another form.
+      // Search: Ctrl/⌘ K from anywhere, even mid-field, as every app with a
+      // command bar does; "/" only where it would not be typed.
       if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
+        useUiStore.getState().setCommandPaletteOpen(true);
+        return;
+      }
+
+      if (event.key === '/' && !editable && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        useUiStore.getState().setCommandPaletteOpen(true);
       }
     };
 

@@ -1,4 +1,18 @@
-import { TaskStatus, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
+import {
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TaskStatus,
+  WorkspaceRole,
+  hasAtLeastRole,
+  type TaskPriority,
+  type TicketPriority,
+  type TicketStatus,
+  TASK_KINDS,
+  TASK_KIND_LABEL,
+  TaskKind,
+} from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task, TaskCustomFieldValue, TaskDetail } from '@coretask/types';
 import {
   Archive,
@@ -8,6 +22,7 @@ import {
   CircleCheck,
   CircleUserRound,
   Copy,
+  CopyCheck,
   ExternalLink,
   Eye,
   Link2,
@@ -15,17 +30,26 @@ import {
   ListPlus,
   Loader2,
   Maximize2,
+  Minimize2,
+  MoreHorizontal,
   Plus,
   Repeat2,
-  ThumbsUp,
   UserRound,
+  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
 import { IntegrationBadge } from '@/components/common/integration-badge';
+import { OutOfOfficeHint } from '@/components/data-display/out-of-office';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
+import {
+  TaskPriorityBadge,
+  TaskStatusBadge,
+  TicketPriorityBadge,
+  TicketStatusBadge,
+} from '@/components/data-display/status-badge';
 import { RichTextEditor } from '@/components/forms/rich-text-editor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +59,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -47,7 +74,9 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TaskTagsField } from '@/features/tags/components/task-tags-field';
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel';
+import { useManualRules, useRunRule } from '@/features/automations/hooks/use-automations';
 import { useAttachFiles } from '@/features/attachments/hooks/use-paste-to-attach';
 import type { CommentComposerHandle } from '@/features/comments/components/comment-composer';
 import { CommentThread } from '@/features/comments/components/comment-thread';
@@ -95,7 +124,17 @@ import {
   useTaskDetail,
   useUpdateTask,
 } from '../hooks/use-tasks';
+import { useClearDuplicate } from '../hooks/use-task-duplicates';
+import { FollowUpTaskDialog, type FollowUpSource } from './follow-up-task-dialog';
+import { MarkDuplicateDialog } from './mark-duplicate-dialog';
+import { completeLabel, kindOf } from '../lib/task-kinds';
+
+import { ApprovalDecision } from './approval-decision';
 import { TaskDatePopover } from './task-date-popover';
+import { AddToProjectPicker, OtherProjectRow, RemoveFromHomeButton } from './task-projects-field';
+import { TaskRepeatControl } from './task-repeat';
+import { TaskTimeField } from './task-time-field';
+import { DependenciesField, TaskLikeButton } from './task-relations';
 
 const UNASSIGNED = '__unassigned__';
 const NO_SECTION = '__none__';
@@ -230,7 +269,9 @@ export function TaskDetailPanel({
           subtasks: (fallbackSubtasks ?? []) as Task[],
           project: null,
           section: null,
+          otherProjects: [],
           createdBy: null,
+          duplicateOf: null,
         }
       : undefined);
   const isLoading = taskQuery.isLoading || (wantFallback && workItemQuery.isLoading);
@@ -251,6 +292,13 @@ export function TaskDetailPanel({
 
   const asideRef = useRef<HTMLElement>(null);
   usePanelFocus(asideRef, open);
+
+  /*
+   * Asana's expand: the same pane, given the whole window. Kept as a width
+   * rather than a separate route so the URL, focus and scroll position all
+   * carry across the toggle untouched.
+   */
+  const [expanded, setExpanded] = useState(false);
 
   const canEdit = hasAtLeastRole(role, WorkspaceRole.MEMBER);
   const updateTask = useUpdateTask(workspaceId);
@@ -292,15 +340,15 @@ export function TaskDetailPanel({
         // a `margin-block-end`. On an element pinned to both `inset-y` edges a
         // bottom margin does not offset it, it *shortens* it, which left a gap
         // between the panel and the bottom of the window.
-        'fixed inset-y-0 right-0 z-40 m-0 flex w-full max-w-[42rem] flex-col border-l bg-card shadow-xl outline-none transition-transform',
+        'fixed inset-y-0 right-0 z-40 m-0 flex w-full flex-col border-l bg-card shadow-xl outline-none transition-[transform,max-width]',
+        expanded ? 'max-w-full' : 'max-w-[42rem]',
         // Decelerate into place; leave quicker than arriving. The global
         // reduced-motion kill-switch already flattens these transitions.
         open ? 'translate-x-0 duration-300 ease-out' : 'translate-x-full duration-200 ease-in',
       )}
     >
       {/* Asana's pane top bar: the type chip and Mark complete on the left,
-          the icon tail on the right. Like and expand are honestly inert until
-          they have something real to do. */}
+          the icon tail on the right. */}
       <div
         className={cn(
           'flex shrink-0 items-center gap-2 border-b px-3 py-2 transition-[border-color,box-shadow]',
@@ -309,12 +357,22 @@ export function TaskDetailPanel({
       >
         {task && (
           <Badge variant="outline" className="text-xs">
-            {isTicketRow(task) ? 'Ticket' : 'Task'}
+            {isTicketRow(task) ? 'Ticket' : TASK_KIND_LABEL[kindOf(task)]}
           </Badge>
+        )}
+        {/* An approval is answered rather than ticked off. */}
+        {task && !isTicketRow(task) && kindOf(task) === TaskKind.APPROVAL && (
+          <ApprovalDecision
+            status={task.approvalStatus}
+            disabled={!canEdit || updateTask.isPending}
+            onDecide={(approvalStatus) =>
+              updateTask.mutate({ taskId: task.id, payload: { approvalStatus } })
+            }
+          />
         )}
         {/* The circle from the List rows, promoted to words. Tickets sit this
             out — "complete" is a different word in their vocabulary. */}
-        {task && !isTicketRow(task) && (
+        {task && !isTicketRow(task) && kindOf(task) !== TaskKind.APPROVAL && (
           <Button
             variant="outline"
             size="sm"
@@ -329,19 +387,14 @@ export function TaskDetailPanel({
             className={cn(completed && 'border-success/40 text-success hover:text-success')}
           >
             <CircleCheck />
-            {completed ? 'Completed' : 'Mark complete'}
+            {completeLabel(kindOf(task), completed)}
           </Button>
         )}
         <div className="ml-auto flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled
-            title="Likes are not built yet"
-            aria-label="Like (not built yet)"
-          >
-            <ThumbsUp />
-          </Button>
+          {/* Likes are a task's; a ticket's pane leaves the thumb out. */}
+          {task && !isTicketRow(task) && (
+            <TaskLikeButton workspaceId={workspaceId} taskId={task.id} />
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -353,12 +406,23 @@ export function TaskDetailPanel({
           <Button
             variant="ghost"
             size="icon-sm"
-            disabled
-            title="The full-screen view is not built yet"
-            aria-label="Expand (not built yet)"
+            aria-pressed={expanded}
+            aria-label={expanded ? 'Collapse to side pane' : 'Expand to full screen'}
+            title={expanded ? 'Collapse' : 'Full screen'}
+            onClick={() => setExpanded((value) => !value)}
           >
-            <Maximize2 />
+            {expanded ? <Minimize2 /> : <Maximize2 />}
           </Button>
+          {task && (
+            <TaskActionsMenu
+              task={task}
+              workspaceId={workspaceId}
+              role={role}
+              onCopyLink={copyLink}
+              onOpenTask={onOpenTask}
+              onClose={onClose}
+            />
+          )}
           <Button variant="ghost" size="icon-sm" aria-label="Close task details" onClick={onClose}>
             <ArrowRightToLine />
           </Button>
@@ -371,7 +435,7 @@ export function TaskDetailPanel({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {task ? (
-          <div className="grid gap-4 px-6 py-5">
+          <div className={cn('grid gap-4 px-6 py-5', expanded && 'mx-auto w-full max-w-3xl')}>
             <TaskDetailBody
               key={task.id}
               task={task}
@@ -533,6 +597,9 @@ function TaskDetailBody({
 
   /* The project chip: the task endpoint embeds it; the work-item fallback
      does not, but the project query already has everything the chip shows. */
+  // Multi-homing: the other projects the task is in, as the reader sees them.
+  const otherProjects = task.otherProjects ?? [];
+
   const projectRef =
     task.project ??
     (project
@@ -551,6 +618,8 @@ function TaskDetailBody({
   const [addingSubtask, setAddingSubtask] = useState(false);
   /** Where a right-click landed, and on which subtask — Asana's row menu. */
   const [menu, setMenu] = useState<{ x: number; y: number; subtask: Task } | null>(null);
+  // The task a follow-up is being written for, from the subtask menu.
+  const [followUpFor, setFollowUpFor] = useState<FollowUpSource | null>(null);
 
   const focusOnMount = useCallback((node: HTMLInputElement | null) => node?.focus(), []);
 
@@ -574,6 +643,17 @@ function TaskDetailBody({
   };
 
   const subtaskProgress = percentage(task.completedSubtaskCount, task.subtaskCount);
+
+  /*
+   * A subtask's address is this page's with the subtask in the `task`
+   * parameter — every surface that opens the pane reads it from there, so a
+   * copied link opens the subtask wherever the parent was being viewed.
+   */
+  const linkTo = (taskId: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('task', taskId);
+    return url.toString();
+  };
 
   const taskDone = !ticket && task.status === TaskStatus.DONE;
 
@@ -658,6 +738,16 @@ function TaskDetailBody({
           {task.archivedAt && <Badge variant="destructive">Archived</Badge>}
         </div>
 
+        {task.duplicateOf && (
+          <DuplicateBanner
+            workspaceId={workspaceId}
+            taskId={task.id}
+            original={task.duplicateOf}
+            canEdit={canEdit}
+            onOpenTask={onOpenTask}
+          />
+        )}
+
         <Input
           value={title}
           onChange={(event) => setTitle(event.target.value)}
@@ -702,6 +792,7 @@ function TaskDetailBody({
                       fallbackClassName="text-[9px]"
                     />
                     {member.user.name}
+                    <OutOfOfficeHint period={member.user.outOfOffice} />
                   </span>
                 </SelectItem>
               ))}
@@ -717,6 +808,11 @@ function TaskDetailBody({
             onOpenChange={setDateOpen}
             // A ticket's deadline is a day: no start date, no time of day.
             dateOnly={ticket}
+            repeat={
+              ticket
+                ? undefined
+                : { recurrence: task.recurrence, onChange: (recurrence) => save({ recurrence }) }
+            }
           >
             <button
               type="button"
@@ -737,72 +833,200 @@ function TaskDetailBody({
           </TaskDatePopover>
         </FieldRow>
 
-        <FieldRow label="Dependencies">
-          {/* Nothing models a dependency yet — present but honest. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled
-            title="Dependencies are not built yet"
-            className="text-muted-foreground"
+        {/* Asana's "Set to repeat". A ticket's deadline does not recur. */}
+        {!ticket && (
+          <FieldRow label="Repeats">
+            <TaskRepeatControl
+              recurrence={task.recurrence}
+              disabled={!canEdit}
+              onChange={(recurrence) => save({ recurrence })}
+            />
+          </FieldRow>
+        )}
+
+        {/* Asana's time tracking: logged time against the estimate. Tasks only
+            — a ticket's effort is the queue's business. */}
+        {!ticket && (
+          <FieldRow label="Time">
+            <TaskTimeField
+              workspaceId={workspaceId}
+              taskId={task.id}
+              estimatedMinutes={task.estimatedMinutes}
+              canEdit={canEdit}
+              canManage={canArchive}
+              currentUserId={me?.id}
+              onEstimate={(estimatedMinutes) => save({ estimatedMinutes })}
+            />
+          </FieldRow>
+        )}
+
+        {/* Status and priority, which Asana keeps as fields in the pane; here
+            they are built in, in each kind's own vocabulary. */}
+        <FieldRow label="Status">
+          <Select
+            value={task.status}
+            onValueChange={(value) => save({ status: value as TaskStatus })}
+            disabled={!canEdit}
           >
-            Add dependencies
-          </Button>
+            <SelectTrigger
+              aria-label="Status"
+              className="h-8 w-fit min-w-32 border-0 bg-transparent px-2 shadow-none hover:bg-muted"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(ticket ? TICKET_STATUSES : TASK_STATUSES).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {ticket ? (
+                    <TicketStatusBadge status={value as TicketStatus} />
+                  ) : (
+                    <TaskStatusBadge status={value as TaskStatus} />
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </FieldRow>
 
-        {projectRef && (
-          <FieldRow label="Projects">
-            <div className="flex min-w-0 flex-wrap items-center gap-1">
-              <span className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-sm">
-                <span
-                  aria-hidden="true"
-                  className="size-2.5 rounded-sm"
-                  style={{ backgroundColor: projectRef.color }}
-                />
-                <span className="truncate">{projectRef.name}</span>
-              </span>
+        <FieldRow label="Priority">
+          <Select
+            value={task.priority}
+            onValueChange={(value) => save({ priority: value as TaskPriority })}
+            disabled={!canEdit}
+          >
+            <SelectTrigger
+              aria-label="Priority"
+              className="h-8 w-fit min-w-32 border-0 bg-transparent px-2 shadow-none hover:bg-muted"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(ticket ? TICKET_PRIORITIES : TASK_PRIORITIES).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value === 'NONE' ? (
+                    <span className="text-muted-foreground">No priority</span>
+                  ) : ticket ? (
+                    <TicketPriorityBadge priority={value as TicketPriority} />
+                  ) : (
+                    <TaskPriorityBadge priority={value as TaskPriority} />
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldRow>
 
-              {/*
-                The keyboard path for moving a task between columns, in the
-                spot Asana hangs the section from the project chip. Board
-                cards are pointer-drag only, so without this, reordering
-                would be a gesture some users simply cannot perform.
-              */}
-              {sections.length > 0 && (
-                <Select
-                  value={task.sectionId ?? NO_SECTION}
-                  onValueChange={(value) => {
-                    if (!canEdit) return;
-                    const sectionId = value === NO_SECTION ? null : value;
-                    if (ticket) {
-                      moveWorkItem.mutate({
-                        workItemId: task.id,
-                        payload: { targetSectionId: sectionId },
-                      });
-                    } else {
-                      moveTask.mutate({
-                        taskId: task.id,
-                        payload: { sectionId, afterTaskId: null },
-                      });
-                    }
-                  }}
-                  disabled={!canEdit || moveTask.isPending || moveWorkItem.isPending}
-                >
-                  <SelectTrigger
-                    aria-label="Section"
-                    className="h-8 w-fit border-0 bg-transparent px-2 text-muted-foreground shadow-none hover:bg-muted"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_SECTION}>No section</SelectItem>
-                    {sections.map((section) => (
-                      <SelectItem key={section.id} value={section.id}>
-                        {section.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        {/* Dependencies are between tasks; tickets have none. */}
+        {!ticket && (
+          <FieldRow label="Dependencies">
+            <DependenciesField
+              workspaceId={workspaceId}
+              taskId={task.id}
+              canEdit={canEdit}
+              onOpenTask={onOpenTask}
+            />
+          </FieldRow>
+        )}
+
+        {/* Tags are a task's; a ticket has its own vocabulary. */}
+        {!ticket && (
+          <FieldRow label="Tags">
+            <TaskTagsField
+              workspaceId={workspaceId}
+              taskId={task.id}
+              tags={task.tags ?? []}
+              canEdit={canEdit}
+            />
+          </FieldRow>
+        )}
+
+        {(projectRef || (canEdit && !ticket)) && (
+          <FieldRow label="Projects">
+            <div className="flex min-w-0 flex-col items-start gap-1">
+              {projectRef && (
+                <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  <span className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-sm">
+                    <span
+                      aria-hidden="true"
+                      className="size-2.5 rounded-sm"
+                      style={{ backgroundColor: projectRef.color }}
+                    />
+                    <span className="truncate">{projectRef.name}</span>
+                  </span>
+
+                  {/*
+                    The keyboard path for moving a task between columns, in the
+                    spot Asana hangs the section from the project chip. Board
+                    cards are pointer-drag only, so without this, reordering
+                    would be a gesture some users simply cannot perform.
+                  */}
+                  {sections.length > 0 && (
+                    <Select
+                      value={task.sectionId ?? NO_SECTION}
+                      onValueChange={(value) => {
+                        if (!canEdit) return;
+                        const sectionId = value === NO_SECTION ? null : value;
+                        if (ticket) {
+                          moveWorkItem.mutate({
+                            workItemId: task.id,
+                            payload: { targetSectionId: sectionId },
+                          });
+                        } else {
+                          moveTask.mutate({
+                            taskId: task.id,
+                            payload: { sectionId, afterTaskId: null },
+                          });
+                        }
+                      }}
+                      disabled={!canEdit || moveTask.isPending || moveWorkItem.isPending}
+                    >
+                      <SelectTrigger
+                        aria-label="Section"
+                        className="h-8 w-fit border-0 bg-transparent px-2 text-muted-foreground shadow-none hover:bg-muted"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_SECTION}>No section</SelectItem>
+                        {sections.map((section) => (
+                          <SelectItem key={section.id} value={section.id}>
+                            {section.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {canEdit && !ticket && otherProjects.length > 0 && (
+                    <RemoveFromHomeButton
+                      workspaceId={workspaceId}
+                      taskId={task.id}
+                      projectId={projectRef.id}
+                      projectName={projectRef.name}
+                    />
+                  )}
+                </div>
+              )}
+              {/* Multi-homing: the other projects it is in, each with its
+                  own section, and a way to add another. */}
+              {!ticket &&
+                otherProjects.map((membership) => (
+                  <OtherProjectRow
+                    key={membership.project.id}
+                    workspaceId={workspaceId}
+                    taskId={task.id}
+                    membership={membership}
+                    canEdit={canEdit}
+                  />
+                ))}
+              {canEdit && !ticket && !task.parentTaskId && (
+                <AddToProjectPicker
+                  workspaceId={workspaceId}
+                  taskId={task.id}
+                  excludeIds={[
+                    ...(projectRef ? [projectRef.id] : []),
+                    ...otherProjects.map((membership) => membership.project.id),
+                  ]}
+                />
               )}
             </div>
           </FieldRow>
@@ -989,6 +1213,16 @@ function TaskDetailBody({
             </button>
           ))}
 
+        {followUpFor && (
+          <FollowUpTaskDialog
+            workspaceId={workspaceId}
+            source={followUpFor}
+            open
+            onOpenChange={(open) => !open && setFollowUpFor(null)}
+            onCreated={onOpenTask}
+          />
+        )}
+
         {/* Asana's right-click menu, portalled out of the transformed panel
             and anchored where the click landed. */}
         {menu &&
@@ -1008,14 +1242,33 @@ function TaskDetailBody({
                     Duplicate subtask
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem disabled title="Follow-up tasks are not built yet">
-                  <ListPlus />
-                  Create follow-up task
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled title="Converting between types is not built yet">
-                  <Repeat2 />
-                  Convert to…
-                </DropdownMenuItem>
+                {canEdit && (
+                  <DropdownMenuItem onSelect={() => setFollowUpFor(menu.subtask)}>
+                    <ListPlus />
+                    Create follow-up task
+                  </DropdownMenuItem>
+                )}
+                {canEdit && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Repeat2 />
+                      Convert to…
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {TASK_KINDS.map((kind) => (
+                        <DropdownMenuItem
+                          key={kind}
+                          disabled={kindOf(menu.subtask) === kind}
+                          onSelect={() =>
+                            updateTask.mutate({ taskId: menu.subtask.id, payload: { kind } })
+                          }
+                        >
+                          {TASK_KIND_LABEL[kind]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
                 <DropdownMenuSeparator />
                 {onOpenTask && (
                   <DropdownMenuItem onSelect={() => onOpenTask(menu.subtask.id)}>
@@ -1023,11 +1276,20 @@ function TaskDetailBody({
                     View subtask details
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem disabled title="Subtasks have no page of their own yet">
+                <DropdownMenuItem
+                  onSelect={() => window.open(linkTo(menu.subtask.id), '_blank', 'noopener')}
+                >
                   <ExternalLink />
                   Open in new tab
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled title="Subtasks have no link to copy yet">
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void navigator.clipboard.writeText(linkTo(menu.subtask.id)).then(
+                      () => toast.success('Subtask link copied'),
+                      () => toast.error('Could not copy the link'),
+                    )
+                  }
+                >
                   <Link2 />
                   Copy subtask link
                 </DropdownMenuItem>
@@ -1297,6 +1559,227 @@ function GroupRow({
         <span className="truncate">{label}</span>
       </span>
       <div className="flex min-w-0 items-center">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The pane's "…" menu — Asana's More actions, trimmed to what this app can
+ * actually do.
+ */
+function TaskActionsMenu({
+  task,
+  workspaceId,
+  role,
+  onCopyLink,
+  onOpenTask,
+  onClose,
+}: {
+  task: TaskDetail;
+  workspaceId: string | undefined;
+  role: WorkspaceRole;
+  onCopyLink: () => void;
+  onOpenTask?: ((taskId: string) => void) | undefined;
+  onClose: () => void;
+}) {
+  const createTask = useCreateTask(workspaceId);
+  const archiveTask = useArchiveTask(workspaceId);
+  const { data: project } = useProject(workspaceId, task.projectId ?? '');
+  // The same project cap the body applies — a viewer's menu offers no edits.
+  const effective = roleForProjectItem(task.projectId, project, role);
+  const ticket = isTicketRow(task);
+  const canEdit = hasAtLeastRole(effective, WorkspaceRole.MEMBER);
+  const canArchive = hasAtLeastRole(effective, WorkspaceRole.MANAGER);
+  // Asana's "Run rule": the project's live manual rules, for anyone who can edit.
+  const { data: manualRules = [] } = useManualRules(
+    canEdit && !ticket ? workspaceId : undefined,
+    task.projectId,
+  );
+  const runRule = useRunRule(workspaceId, task.projectId);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const convert = useUpdateTask(workspaceId);
+
+  /*
+   * A copy carries what describes the work — name, notes, dates, owner,
+   * priority, place — and leaves its history behind: comments, attachments
+   * and completion stay with the original, as in Asana's default duplicate.
+   */
+  const duplicate = () =>
+    createTask.mutate(
+      {
+        title: `${task.title} (copy)`.slice(0, 500),
+        ...(task.description ? { description: task.description } : {}),
+        projectId: task.projectId,
+        sectionId: task.sectionId,
+        parentTaskId: task.parentTaskId,
+        priority: task.priority,
+        assigneeId: task.assigneeId,
+        startDate: task.startDate,
+        dueDate: task.dueDate,
+      },
+      { onSuccess: (created) => onOpenTask?.(created.id) },
+    );
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="More actions for this task">
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          {canEdit && !ticket && (
+            <DropdownMenuItem onSelect={duplicate} disabled={createTask.isPending}>
+              <Copy />
+              Duplicate task
+            </DropdownMenuItem>
+          )}
+          {canEdit && !ticket && (
+            <DropdownMenuItem onSelect={() => setFollowUpOpen(true)}>
+              <ListPlus />
+              Create follow-up task
+            </DropdownMenuItem>
+          )}
+          {canEdit && !ticket && !task.duplicateOf && (
+            <DropdownMenuItem onSelect={() => setDuplicateOpen(true)}>
+              <CopyCheck />
+              Mark as duplicate…
+            </DropdownMenuItem>
+          )}
+          {canEdit && !ticket && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Repeat2 />
+                Convert to…
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {TASK_KINDS.map((kind) => (
+                  <DropdownMenuItem
+                    key={kind}
+                    disabled={kindOf(task) === kind}
+                    onSelect={() => convert.mutate({ taskId: task.id, payload: { kind } })}
+                  >
+                    {TASK_KIND_LABEL[kind]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+          {manualRules.length > 0 && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Zap />
+                Run rule
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-56">
+                {manualRules.map((rule) => (
+                  <DropdownMenuItem
+                    key={rule.id}
+                    disabled={runRule.isPending}
+                    onSelect={() => runRule.mutate({ rule, taskIds: [task.id] })}
+                  >
+                    {rule.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+          <DropdownMenuItem onSelect={onCopyLink}>
+            <Link2 />
+            Copy {ticket ? 'ticket' : 'task'} link
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => window.open(window.location.href, '_blank', 'noopener')}
+          >
+            <ExternalLink />
+            Open in new tab
+          </DropdownMenuItem>
+          {canArchive && !ticket && !task.archivedAt && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() =>
+                  archiveTask.mutate(
+                    { taskId: task.id, archived: false },
+                    { onSuccess: () => onClose() },
+                  )
+                }
+              >
+                <Archive />
+                Archive task
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {duplicateOpen && (
+        <MarkDuplicateDialog
+          workspaceId={workspaceId}
+          taskId={task.id}
+          onOpenChange={setDuplicateOpen}
+        />
+      )}
+      <FollowUpTaskDialog
+        workspaceId={workspaceId}
+        source={task}
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        onCreated={onOpenTask}
+      />
+    </>
+  );
+}
+
+/** "This task is a duplicate of …", with the original a click away and an undo. */
+function DuplicateBanner({
+  workspaceId,
+  taskId,
+  original,
+  canEdit,
+  onOpenTask,
+}: {
+  workspaceId: string | undefined;
+  taskId: string;
+  original: { id: string; title: string };
+  canEdit: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
+}) {
+  const clear = useClearDuplicate(workspaceId, taskId);
+  return (
+    <div
+      role="note"
+      className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm"
+    >
+      <CopyCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span>
+        This task is a duplicate of{' '}
+        {onOpenTask ? (
+          <button
+            type="button"
+            onClick={() => onOpenTask(original.id)}
+            className="font-medium underline-offset-2 hover:underline"
+          >
+            {original.title}
+          </button>
+        ) : (
+          <span className="font-medium">{original.title}</span>
+        )}
+        .
+      </span>
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7"
+          disabled={clear.isPending}
+          onClick={() => clear.mutate()}
+        >
+          Undo
+        </Button>
+      )}
     </div>
   );
 }

@@ -32,6 +32,21 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * behind "Show earlier activity". Keyed apart from the workspace feed so the
  * dashboard is not refetched every time somebody opens a task.
  */
+/** A project's Activity tab, paged with "load more". Under the activity prefix, so any change refreshes it. */
+export function useProjectActivity(workspaceId: string | undefined, projectId: string) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.activity.all(workspaceId ?? ''), 'project', projectId],
+    queryFn: ({ pageParam }) =>
+      activityApi.forProject(workspaceId as string, {
+        projectId,
+        ...(pageParam ? { before: pageParam } : {}),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: Boolean(workspaceId) && UUID.test(projectId),
+  });
+}
+
 export function useItemActivity(workspaceId: string | undefined, parent: ActivityParent | null) {
   return useInfiniteQuery({
     queryKey: queryKeys.activity.item(workspaceId ?? '', parent?.kind ?? '', parent?.id ?? ''),
@@ -74,6 +89,8 @@ export function useInbox(workspaceId: string | undefined, filter: InboxFilter) {
         limit: INBOX_PAGE_SIZE,
         ...(filter === 'unread' ? { unreadOnly: true } : {}),
         ...(filter === 'mentions' ? { types: [NotificationType.MENTIONED] } : {}),
+        ...(filter === 'archived' ? { view: 'archived' as const } : {}),
+        ...(filter === 'bookmarked' ? { view: 'bookmarked' as const } : {}),
         ...(pageParam ? { cursor: pageParam } : {}),
       }),
     initialPageParam: undefined as string | undefined,
@@ -114,8 +131,51 @@ export function useMarkNotificationsRead(workspaceId: string | undefined) {
   });
 }
 
+/**
+ * Every notification write invalidates the whole inbox: an entry archived from
+ * one tab must leave it and appear under Archive, and the badge must follow.
+ */
+function useNotificationMutation<T>(
+  workspaceId: string | undefined,
+  mutationFn: (variables: T) => Promise<unknown>,
+) {
+  return useMutation({
+    mutationFn,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.notifications.all(workspaceId as string),
+      });
+    },
+    onError: (error) =>
+      toast.error(
+        error instanceof ApiError ? error.message : 'Could not update your notifications.',
+      ),
+  });
+}
+
+/** Archives entries; with no ids, the whole inbox — Asana's "Archive all". */
+export function useArchiveNotifications(workspaceId: string | undefined) {
+  return useNotificationMutation(workspaceId, (notificationIds?: string[]) =>
+    notificationsApi.archive(workspaceId as string, notificationIds),
+  );
+}
+
+export function useUnarchiveNotification(workspaceId: string | undefined) {
+  return useNotificationMutation(workspaceId, (notificationId: string) =>
+    notificationsApi.unarchive(workspaceId as string, notificationId),
+  );
+}
+
+export function useBookmarkNotification(workspaceId: string | undefined) {
+  return useNotificationMutation(
+    workspaceId,
+    ({ notificationId, bookmarked }: { notificationId: string; bookmarked: boolean }) =>
+      notificationsApi.setBookmark(workspaceId as string, notificationId, bookmarked),
+  );
+}
+
 /** Which slice of the inbox is on screen. */
-export type InboxFilter = 'all' | 'unread' | 'mentions';
+export type InboxFilter = 'all' | 'unread' | 'mentions' | 'bookmarked' | 'archived';
 
 /** Big enough that most inboxes need no second page, small enough to stay fast. */
 const INBOX_PAGE_SIZE = 25;

@@ -2,7 +2,7 @@ import { Star } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { Portfolio } from '@/stores/portfolio.store';
+import type { Portfolio } from '@/features/portfolios/hooks/use-portfolios';
 
 interface StarButtonProps {
   portfolio: Portfolio;
