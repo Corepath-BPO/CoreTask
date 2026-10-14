@@ -11,6 +11,10 @@ import {
   tokensForFieldType,
   type ConditionOperator,
   type ConditionValueType,
+  AUTOMATION_DELAY_UNITS,
+  AUTOMATION_DELAY_UNIT_LABEL,
+  AutomationDelayUnit,
+  delayProblem,
 } from '@coretask/contracts';
 import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
 import { ChevronDown, X } from 'lucide-react';
@@ -113,6 +117,11 @@ export function NodeConfigFields({
         onChange={onChange}
       />
     );
+  }
+
+  // How long a Wait step waits.
+  if (node.type === 'DELAY') {
+    return <DelayFields configuration={node.configuration} onChange={onChange} />;
   }
 
   /* A branch holds the comparison that chooses its arm, so it is configured
@@ -1254,5 +1263,73 @@ function TicketStatusTriggerFields({
         </SelectContent>
       </Select>
     </Field>
+  );
+}
+
+/**
+ * "Wait…": how many minutes, hours or days before what follows runs. What
+ * follows is judged on the task as it is by then, so a condition after the
+ * wait is how a rule says "if it is still open".
+ */
+function DelayFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const unit = AUTOMATION_DELAY_UNITS.includes(configuration['unit'] as AutomationDelayUnit)
+    ? (configuration['unit'] as AutomationDelayUnit)
+    : AutomationDelayUnit.DAYS;
+  const amount = typeof configuration['amount'] === 'number' ? configuration['amount'] : '';
+  const problem = delayProblem(configuration);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Wait for" htmlFor="step-delay-amount" error={problem ?? undefined}>
+          <Input
+            id="step-delay-amount"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={amount}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              onChange({
+                ...configuration,
+                unit,
+                amount: event.target.value === '' || Number.isNaN(next) ? undefined : next,
+              });
+            }}
+          />
+        </Field>
+        <Field label="Unit" htmlFor="step-delay-unit">
+          <Select
+            value={unit}
+            onValueChange={(next) => {
+              // Radix answers a reset with an empty value; that is not a choice.
+              if (next) onChange({ ...configuration, unit: next });
+            }}
+          >
+            <SelectTrigger id="step-delay-unit" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_DELAY_UNITS.map((entry) => (
+                <RadioItem key={entry} value={entry}>
+                  {AUTOMATION_DELAY_UNIT_LABEL[entry]}
+                </RadioItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Steps after this run once the time has passed, checked against the task as it is then — add
+        a condition after it to act only if something is still true.
+      </p>
+    </div>
   );
 }

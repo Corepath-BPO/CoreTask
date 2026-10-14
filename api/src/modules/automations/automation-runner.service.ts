@@ -44,6 +44,8 @@ import {
   isTicketTrigger,
   ticketConditionHolds,
   isTicketConditionField,
+  delayMs,
+  describeDelay,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -642,11 +644,18 @@ export class AutomationRunnerService {
     // Conditions are all-or-nothing: a rule whose conditions do not hold has
     // not failed, it simply does not apply. Recorded as SKIPPED with a reason
     // so the history distinguishes "did not match" from "went wrong".
-    const plan = this.plan(rule.nodes, (node) => this.conditionHolds(node, asFound, event));
+    const plan = this.plan(
+      rule.nodes,
+      (node) => this.conditionHolds(node, asFound, event),
+      event.resumeFromNodeId,
+    );
 
     if (plan.skippedBy) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
-        skippedReason: `Condition not met: ${plan.skippedBy}.`,
+        skippedReason:
+          plan.skippedBy === 'the rule changed while it was waiting'
+            ? 'The rule changed while this run was waiting.'
+            : `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
       return { ran: false, events: [], webhooks: [], emails: [] };
@@ -696,6 +705,7 @@ export class AutomationRunnerService {
           ? AutomationExecutionStatus.FAILED
           : AutomationExecutionStatus.PARTIALLY_FAILED;
 
+    await this.scheduleDelays(rule, event, plan.delays, execution.id, started);
     await this.finish(execution.id, status, started, {});
     await this.bumpRule(rule.id, status, failures > 0);
 
@@ -873,26 +883,55 @@ export class AutomationRunnerService {
   private plan(
     nodes: AutomationNode[],
     holds: (node: AutomationNode) => boolean,
-  ): { actions: AutomationNode[]; skippedBy: string | null } {
+    /** A Wait step to pick up after, when the clock resumes a run. */
+    resumeFrom?: string | null,
+  ): { actions: AutomationNode[]; delays: AutomationNode[]; skippedBy: string | null } {
     const isTree = nodes.some((node) => node.parentNodeId !== null);
 
     if (!isTree) {
+      // Every condition, again on a resumed run: the task may have changed
+      // while the run waited.
       const unmet = nodes
         .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
         .find((node) => !holds(node));
 
-      if (unmet) return { actions: [], skippedBy: unmet.subtype };
+      if (unmet) return { actions: [], delays: [], skippedBy: unmet.subtype };
 
-      return {
-        actions: nodes.filter((node) => node.nodeType === AutomationNodeType.ACTION),
-        skippedBy: null,
-      };
+      // In order, up to the next Wait step — or from just after the one a
+      // resumed run waited at.
+      const steps = nodes
+        .filter(
+          (node) =>
+            node.nodeType === AutomationNodeType.ACTION ||
+            node.nodeType === AutomationNodeType.DELAY,
+        )
+        .sort((a, b) => a.position - b.position);
+      const from = resumeFrom ? steps.findIndex((node) => node.id === resumeFrom) + 1 : 0;
+      if (resumeFrom && from === 0) {
+        return { actions: [], delays: [], skippedBy: 'the rule changed while it was waiting' };
+      }
+      const actions: AutomationNode[] = [];
+      const delays: AutomationNode[] = [];
+      for (const node of steps.slice(from)) {
+        if (node.nodeType === AutomationNodeType.DELAY) {
+          delays.push(node);
+          break;
+        }
+        actions.push(node);
+      }
+      return { actions, delays, skippedBy: null };
     }
 
     const trigger = nodes.find((node) => node.nodeType === AutomationNodeType.TRIGGER);
-    if (!trigger) return { actions: [], skippedBy: 'no trigger' };
+    if (!trigger) return { actions: [], delays: [], skippedBy: 'no trigger' };
+    // A run resumed after a Wait step the rule no longer has: it was edited
+    // while the run waited, and what followed that step is gone with it.
+    if (resumeFrom && !nodes.some((node) => node.id === resumeFrom)) {
+      return { actions: [], delays: [], skippedBy: 'the rule changed while it was waiting' };
+    }
 
     const actions: AutomationNode[] = [];
+    const delays: AutomationNode[] = [];
     let skippedBy: string | null = null;
 
     const childrenOf = (parentId: string, arm: string | null) =>
@@ -947,14 +986,24 @@ export class AutomationRunnerService {
           actions.push(node);
           walk(node.id, null, depth + 1);
         }
+
+        // A Wait step: what follows it runs later, when the clock resumes the
+        // run from here — not now.
+        if (node.nodeType === AutomationNodeType.DELAY) delays.push(node);
       }
     };
 
-    walk(trigger.id, null, 0, true);
+    if (resumeFrom) walk(resumeFrom, null, 0);
+    else walk(trigger.id, null, 0, true);
 
     // "Nothing ran" is only a skip when something stopped it. A rule whose
-    // branch legitimately led nowhere has run and done nothing.
-    return { actions, skippedBy: actions.length === 0 ? skippedBy : null };
+    // branch legitimately led nowhere has run and done nothing — and one that
+    // reached a Wait step has made progress.
+    return {
+      actions,
+      delays,
+      skippedBy: actions.length === 0 && delays.length === 0 ? skippedBy : null,
+    };
   }
 
   private conditionHolds(
@@ -2838,16 +2887,23 @@ export class AutomationRunnerService {
       status: ticket.status as string,
       assigneeId: ticket.assigneeId,
     };
-    const plan = this.plan(rule.nodes, (node) => {
-      const config = (node.configuration ?? {}) as Record<string, unknown>;
-      return (
-        isFallbackBranch(node.configuration) ||
-        (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
-      );
-    });
+    const plan = this.plan(
+      rule.nodes,
+      (node) => {
+        const config = (node.configuration ?? {}) as Record<string, unknown>;
+        return (
+          isFallbackBranch(node.configuration) ||
+          (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
+        );
+      },
+      event.resumeFromNodeId,
+    );
     if (plan.skippedBy) {
       await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
-        skippedReason: `Condition not met: ${plan.skippedBy}.`,
+        skippedReason:
+          plan.skippedBy === 'the rule changed while it was waiting'
+            ? 'The rule changed while this run was waiting.'
+            : `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
       return { ran: false, events: [], webhooks: [], emails: [] };
@@ -2890,6 +2946,7 @@ export class AutomationRunnerService {
         : failures === actions.length
           ? AutomationExecutionStatus.FAILED
           : AutomationExecutionStatus.PARTIALLY_FAILED;
+    await this.scheduleDelays(rule, event, plan.delays, executionId, started);
     await this.finish(executionId, status, started, {});
     await this.bumpRule(rule.id, status, failures > 0);
 
@@ -3193,6 +3250,63 @@ export class AutomationRunnerService {
     after: Record<string, unknown>,
   ): AutomationEvent {
     return { ...this.follow(rule, event, trigger, entityId, before, after), entityType: 'TICKET' };
+  }
+
+  // -------------------------------------------------------------------------
+  // Wait steps
+  // -------------------------------------------------------------------------
+
+  /**
+   * The Wait steps a run reached: each becomes a row the clock picks up when
+   * its time has passed, and a line in this run's log saying until when.
+   */
+  private async scheduleDelays(
+    rule: RunnableRule,
+    event: AutomationEvent,
+    delays: readonly AutomationNode[],
+    executionId: string,
+    started: number,
+  ): Promise<void> {
+    for (const node of delays) {
+      const ms = delayMs((node.configuration ?? {}) as Record<string, unknown>);
+      if (ms === null) {
+        await this.prisma.automationExecutionLog.create({
+          data: {
+            executionId,
+            nodeId: node.id,
+            nodeType: node.nodeType,
+            subtype: node.subtype,
+            succeeded: false,
+            message: 'The wait has no length, so nothing after it ran.',
+          },
+        });
+        continue;
+      }
+      const runAt = new Date(started + ms);
+      // The event as it started, minus what made this run a resumption.
+      const { resumeFromNodeId: _resumed, ...original } = event;
+      await this.prisma.automationDelayedRun.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          ruleId: rule.id,
+          nodeId: node.id,
+          runAt,
+          event: original as unknown as Prisma.InputJsonValue,
+        },
+      });
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: true,
+          message: `${describeDelay((node.configuration ?? {}) as Record<string, unknown>)} — continues at ${runAt.toISOString()}`,
+          afterValue: { runAt: runAt.toISOString() } as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 }
 

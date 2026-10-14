@@ -2,6 +2,8 @@ import {
   AutomationRuleStatus,
   type AutomationNodeType,
   isTicketTrigger,
+  DELAY_SUBTYPE,
+  DEFAULT_DELAY,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -303,9 +305,18 @@ export function AutomationBuilderPage({
   /** Answers with the step it added, so the caller can go on to set it up. */
   const addAction = (subtype: string, configuration: Record<string, unknown> = {}): CanvasNode => {
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
+    // "Wait…" is a step of its own kind, not an action, and starts at a day.
+    const wait = subtype === DELAY_SUBTYPE;
     const node = {
-      ...makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
-      configuration,
+      ...makeNodeUnder(
+        wait ? 'DELAY' : 'ACTION',
+        subtype,
+        target.parentId || null,
+        target.arm,
+        realNodes,
+      ),
+      configuration:
+        wait && Object.keys(configuration).length === 0 ? { ...DEFAULT_DELAY } : configuration,
     };
 
     setEdits((previous) => ({

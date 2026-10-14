@@ -73,7 +73,14 @@ every row the engine can run is enabled.
   from it ("Fix {{task.name}}" names the ticket). The builder greys out the
   steps that belong to the other kind of rule, and publishing refuses them.
   Setting a ticket's status raises _Ticket status changes_ for the next rule.
-- Still greyed, with reasons: AI steps, a Delay step.
+- **Wait…** pauses a rule for 1 minute to 90 days before the steps after it.
+  What comes before runs at once; the clock picks the run up once the time
+  has passed and judges what follows on the task or ticket as it is by then.
+  So _Wait 2 days → Task is incomplete → Add comment_ nudges only if nobody
+  finished it. The rule's log says when it will continue. A run whose rule
+  was paused in the meantime is cancelled, and one whose wait step was edited
+  away is skipped. Webhooks fire once, for the event, not again on resuming.
+- Still greyed, with reasons: AI steps.
 
 ## Project templates and duplicates
 

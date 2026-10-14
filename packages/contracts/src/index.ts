@@ -33,5 +33,6 @@ export * from './task-kinds.js';
 export * from './time-tracking.js';
 export * from './profile.js';
 export * from './automation-tickets.js';
+export * from './automation-delay.js';
 export * from './webhooks.js';
 export * from './work-item-types.js';

@@ -3,7 +3,13 @@ import type { AutomationMetadata } from '@coretask/types';
 import type { CanvasNode } from './graph-edits';
 import { describe, expect, it } from 'vitest';
 
-import { isNodeIncomplete, nodeCategory, nodeHeading, summarise } from './node-summary';
+import {
+  isNodeIncomplete,
+  nodeCategory,
+  nodeHeading,
+  summarise,
+  summariseParts,
+} from './node-summary';
 
 const metadata = {
   triggers: [],
@@ -474,5 +480,26 @@ describe('the triggers that are not edits, and the newer actions', () => {
     expect(isNodeIncomplete(node({ subtype: 'SET_TASK_DESCRIPTION', configuration: {} }))).toBe(
       false,
     );
+  });
+});
+
+describe('the Wait step', () => {
+  const wait = (configuration: Record<string, unknown>) =>
+    node({ type: 'DELAY', subtype: 'DELAY', configuration });
+
+  it('says how long it waits, the length set apart as the value', () => {
+    expect(summarise(wait({ amount: 2, unit: 'DAYS' }), metadata)).toBe('Wait 2 days');
+    expect(summarise(wait({ amount: 1, unit: 'HOURS' }), metadata)).toBe('Wait 1 hour');
+    expect(summariseParts(wait({ amount: 30, unit: 'MINUTES' }), metadata)).toEqual([
+      { text: 'Wait' },
+      { text: '30 minutes', chip: true },
+    ]);
+  });
+
+  it('asks how long until it knows, and is flagged until then', () => {
+    expect(summarise(wait({}), metadata)).toBe('Wait — choose how long');
+    expect(isNodeIncomplete(wait({}))).toBe(true);
+    expect(isNodeIncomplete(wait({ amount: 91, unit: 'DAYS' }))).toBe(true);
+    expect(isNodeIncomplete(wait({ amount: 1, unit: 'DAYS' }))).toBe(false);
   });
 });

@@ -1420,28 +1420,34 @@ describe('Automations (e2e)', () => {
       );
     });
 
-    it('refuses a step type nothing executes', async () => {
-      /*
-       * DELAY is in the schema and nothing runs it. A published rule containing
-       * one would look like it waits and would run straight through — worse
-       * than not offering it at all. BRANCH was refused for the same reason
-       * until the runner learned to walk the tree.
-       */
+    it('asks a Wait step how long, now that the runner waits', async () => {
       const scope = await setupScope();
       const ruleId = await draftWithNodes(scope, []);
+      const withWait = (configuration: Record<string, unknown>) =>
+        check(scope, ruleId, {
+          name: 'Has a delay',
+          nodes: [
+            { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+            { id: 'd', nodeType: 'DELAY', subtype: 'DELAY', parentId: 't', configuration },
+            {
+              id: 'a',
+              nodeType: 'ACTION',
+              subtype: 'ASSIGN_USER',
+              parentId: 'd',
+              configuration: { userId: scope.owner.userId },
+            },
+          ],
+        });
 
-      const result = await check(scope, ruleId, {
-        name: 'Has a delay',
-        nodes: [
-          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
-          { id: 'd', nodeType: 'DELAY', subtype: 'WAIT', parentId: 't' },
-          { id: 'a', nodeType: 'ACTION', subtype: 'ASSIGN_USER', parentId: 'd' },
-        ],
-      });
+      const unset = await withWait({});
+      expect(unset.publishable).toBe(false);
+      expect(unset.issues.map((issue) => issue.message)).toContain(
+        'Choose minutes, hours or days.',
+      );
 
-      expect(result.publishable).toBe(false);
-      expect(result.issues.map((issue) => issue.message)).toContain(
-        'This step type cannot run yet.',
+      const set = await withWait({ amount: 2, unit: 'DAYS' });
+      expect(set.issues.map((issue) => issue.message)).not.toContain(
+        'Choose minutes, hours or days.',
       );
     });
 

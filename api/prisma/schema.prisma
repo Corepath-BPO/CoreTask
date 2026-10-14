@@ -2144,6 +2144,7 @@ model AutomationRule {
   createdBy         User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   nodes             AutomationNode[]
   executions        AutomationExecution[]
+  delayedRuns       AutomationDelayedRun[]
   webhookDeliveries WebhookDelivery[]
   versions          AutomationRuleVersion[] @relation("RuleVersions")
   draftVersion      AutomationRuleVersion?  @relation("RuleDraft", fields: [draftVersionId], references: [id], onDelete: SetNull)
@@ -2588,4 +2589,27 @@ model PortfolioStatusUpdate {
 
   @@index([portfolioId, createdAt])
   @@map("portfolio_status_updates")
+}
+
+/// A rule run waiting at a Wait step. The clock publishes `event` again, aimed
+/// at the rule and marked to resume from `nodeId`, once `runAt` has passed.
+model AutomationDelayedRun {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  ruleId      String   @db.Uuid
+  /// The Wait step the run resumes after.
+  nodeId      String   @db.Uuid
+  runAt       DateTime
+  /// The event the run started from, to be published again.
+  event       Json
+  /// PENDING until the clock takes it; DONE once republished; CANCELLED when
+  /// the rule had stopped by then.
+  status      String   @default("PENDING") @db.VarChar(16)
+  createdAt   DateTime @default(now())
+
+  rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@map("automation_delayed_runs")
 }
