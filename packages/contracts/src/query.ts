@@ -208,6 +208,8 @@ export const SystemField = {
   CREATED_AT: 'createdAt',
   UPDATED_AT: 'updatedAt',
   ESTIMATE: 'estimatedMinutes',
+  /** The task's tags — a relation, so filterable but never a sort or a group. */
+  TAGS: 'tags',
 } as const;
 export type SystemField = (typeof SystemField)[keyof typeof SystemField];
 export const SYSTEM_FIELDS = Object.values(SystemField);
@@ -225,6 +227,7 @@ export const SYSTEM_FIELD_KIND: Record<SystemField, FieldKind> = {
   createdAt: 'DATE',
   updatedAt: 'DATE',
   estimatedMinutes: 'NUMBER',
+  tags: 'ENUM',
 };
 
 /** Prefix marking a custom-field reference in a filter, sort or grouping. */
@@ -249,6 +252,8 @@ export const GROUPABLE_SYSTEM_FIELDS: readonly SystemField[] = [
   SystemField.STATUS,
   SystemField.PRIORITY,
   SystemField.ASSIGNEE,
+  /** Into Asana's headings — overdue, today, tomorrow, this week, next week, later. */
+  SystemField.DUE_DATE,
 ];
 
 /**
@@ -341,13 +346,25 @@ export const SYSTEM_FIELD_CATALOG: readonly SystemFieldDefinition[] = [
     isColumn: false,
   },
   {
+    key: SystemField.TAGS,
+    label: 'Tags',
+    description: 'Labels the task carries, in any project',
+    dataType: CustomFieldType.MULTI_SELECT,
+    isSortable: false,
+    isFilterable: true,
+    isGroupable: false,
+    // Changed in the task panel, where a tag can be made as it is added.
+    isEditable: false,
+    isColumn: true,
+  },
+  {
     key: SystemField.DUE_DATE,
     label: 'Due date',
     description: 'When the task is expected to be finished',
     dataType: CustomFieldType.DATE,
     isSortable: true,
     isFilterable: true,
-    isGroupable: false,
+    isGroupable: true,
     isEditable: true,
     isColumn: true,
   },

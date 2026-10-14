@@ -1,5 +1,6 @@
 import {
   BULK_FIELD_VALUE_LIMIT,
+  ADDABLE_WORK_ITEM_TYPES,
   CREATABLE_WORK_ITEM_TYPES,
   MAX_FILTERS_PER_VIEW,
   MAX_SORTS_PER_VIEW,
@@ -44,6 +45,12 @@ export const workItemType = z.enum(WORK_ITEM_TYPES as [WorkItemType, ...WorkItem
  * check — anything can post the body. Refusing here is what keeps a row from
  * being written as a task wearing a milestone's label.
  */
+/** What may be added to a project: a task, a ticket, a milestone or an approval. */
+export const addableWorkItemType = workItemType.refine(
+  (value) => ADDABLE_WORK_ITEM_TYPES.includes(value),
+  { message: `Only ${ADDABLE_WORK_ITEM_TYPES.join(', ')} can be added` },
+);
+
 export const creatableWorkItemType = workItemType.refine(
   (value) => CREATABLE_WORK_ITEM_TYPES.includes(value),
   {
@@ -77,7 +84,7 @@ const TIME_NEEDS_DATE = { message: 'A time needs a date to go with it', path: ['
 
 export const createWorkItemSchema = z
   .object({
-    type: creatableWorkItemType,
+    type: addableWorkItemType,
     title,
     description: z.string().max(RICH_TEXT_MAX_LENGTH).nullish(),
     sectionId: optionalNullableUuid,

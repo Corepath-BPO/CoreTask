@@ -36,6 +36,28 @@ export const CREATABLE_WORK_ITEM_TYPES: readonly WorkItemType[] = [
   WorkItemType.TICKET,
 ];
 
+/**
+ * What the Add menu offers: the two record types, and the two kinds of task.
+ *
+ * A milestone and an approval are tasks with a `kind` (see `task-kinds.ts`),
+ * so they are added like any task and come back as one. They are not
+ * creatable as a project's *default* type, which is why this is a list of its
+ * own rather than a change to `CREATABLE_WORK_ITEM_TYPES`.
+ */
+export const ADDABLE_WORK_ITEM_TYPES: readonly WorkItemType[] = [
+  WorkItemType.TASK,
+  WorkItemType.TICKET,
+  WorkItemType.MILESTONE,
+  WorkItemType.APPROVAL,
+];
+
+/** The task kind an added type becomes, or null for a ticket. */
+export function taskKindForWorkItemType(
+  type: WorkItemType,
+): 'TASK' | 'MILESTONE' | 'APPROVAL' | null {
+  return type === WorkItemType.TICKET ? null : type;
+}
+
 export function isCreatableWorkItemType(type: WorkItemType): boolean {
   return CREATABLE_WORK_ITEM_TYPES.includes(type);
 }
@@ -95,6 +117,11 @@ export interface WorkItemEventPayload<TItem = unknown> {
   actorId: string | null;
   correlationId?: string;
   occurredAt: string;
+  /**
+   * Set when a rule made the change. A rule can comment, add collaborators and
+   * write history as well as edit the row, so a listener refreshes those too.
+   */
+  source?: 'automation';
 }
 
 /**

@@ -1,5 +1,7 @@
 import type { WorkspaceRole } from '@coretask/contracts';
 
+import type { OutOfOffice } from './auth.js';
+
 export interface Workspace {
   id: string;
   name: string;
@@ -30,6 +32,10 @@ export interface WorkspaceMember {
     name: string;
     email: string;
     avatarUrl: string | null;
+    jobTitle?: string | null;
+    pronouns?: string | null;
+    /** Their time off, if set — pickers say "out of office" from it. */
+    outOfOffice?: OutOfOffice | null;
   };
 }
 

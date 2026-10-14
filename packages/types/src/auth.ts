@@ -7,6 +7,31 @@ export interface AuthUser {
   timezone: string;
   emailVerified: boolean;
   createdAt: string;
+  pronouns: string | null;
+  jobTitle: string | null;
+  department: string | null;
+  aboutMe: string | null;
+  /** When they are away, set by them; null when no time off is set. */
+  outOfOffice: OutOfOffice | null;
+}
+
+/** Calendar days, both ends inclusive, as `yyyy-mm-dd`. */
+export interface OutOfOffice {
+  from: string;
+  until: string;
+  note: string | null;
+}
+
+/** What `PATCH /users/me` takes; each field left out is left alone. */
+export interface UpdateProfilePayload {
+  name?: string;
+  timezone?: string;
+  pronouns?: string | null;
+  jobTitle?: string | null;
+  department?: string | null;
+  aboutMe?: string | null;
+  /** Null clears it; the note may be left out. */
+  outOfOffice?: { from: string; until: string; note?: string | null } | null;
 }
 
 /**
