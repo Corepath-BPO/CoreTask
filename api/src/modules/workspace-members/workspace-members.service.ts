@@ -5,6 +5,7 @@ import type { Prisma, WorkspaceMember } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
+import { UsersService } from '../users/users.service';
 
 const MEMBER_USER_SELECT = {
   id: true,
@@ -12,6 +13,11 @@ const MEMBER_USER_SELECT = {
   email: true,
   avatarUrl: true,
   isServiceAccount: true,
+  jobTitle: true,
+  pronouns: true,
+  outOfOfficeFrom: true,
+  outOfOfficeUntil: true,
+  outOfOfficeNote: true,
 } as const;
 
 @Injectable()
@@ -70,7 +76,15 @@ export class WorkspaceMembersService {
       workspaceId: member.workspaceId,
       role: member.role,
       joinedAt: member.joinedAt.toISOString(),
-      user: member.user,
+      user: {
+        id: member.user.id,
+        name: member.user.name,
+        email: member.user.email,
+        avatarUrl: member.user.avatarUrl,
+        jobTitle: member.user.jobTitle,
+        pronouns: member.user.pronouns,
+        outOfOffice: UsersService.outOfOfficeOf(member.user),
+      },
     }));
   }
 

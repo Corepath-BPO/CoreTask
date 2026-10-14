@@ -284,7 +284,8 @@ export class WebhooksService {
   }
 
   private async assertCapacity(workspaceId: string): Promise<void> {
-    const count = await this.prisma.webhookEndpoint.count({ where: { workspaceId } });
+    // Apps have their own per-project cap; this one is for the admin's webhooks.
+    const count = await this.prisma.webhookEndpoint.count({ where: { workspaceId, app: null } });
 
     if (count >= MAX_WEBHOOK_ENDPOINTS_PER_WORKSPACE) {
       throw AppException.conflict('WEBHOOK_ENDPOINT_LIMIT_REACHED');

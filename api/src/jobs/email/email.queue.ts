@@ -6,6 +6,7 @@ import {
   EmailJob,
   QueueName,
   type InvitationEmailJobData,
+  type MessageEmailJobData,
   type WelcomeEmailJobData,
 } from '../queue-names';
 
@@ -53,6 +54,23 @@ export class EmailQueue {
       });
     } catch (error) {
       this.logger.error({ err: error, email: data.email }, 'Failed to enqueue invitation e-mail');
+    }
+  }
+
+  /**
+   * Enqueues a message the API has already written. Never rejects: these are
+   * updates to an email thread, and the comment behind one is already saved.
+   */
+  async enqueueMessage(data: MessageEmailJobData): Promise<void> {
+    try {
+      await this.queue.add(EmailJob.MESSAGE, data, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { age: 3_600, count: 1_000 },
+        removeOnFail: { age: 86_400 },
+      });
+    } catch (error) {
+      this.logger.error({ err: error, to: data.to }, 'Failed to enqueue an e-mail message');
     }
   }
 }

@@ -73,8 +73,18 @@ function compileCondition(
 }
 
 function compileSystemField(field: SystemField, condition: FilterCondition): Prisma.TaskWhereInput {
+  if (field === SystemField.TAGS) return compileTags(condition);
   const kind = SYSTEM_FIELD_KIND[field];
   const clause = buildClause(kind, condition);
+
+  // A section is the home's column or, for a task linked in from another
+  // project, its link's. Sections belong to one project each, so matching a
+  // link by section alone already means "in this project".
+  if (field === SystemField.SECTION) {
+    return {
+      OR: [{ sectionId: clause }, { projectLinks: { some: { sectionId: clause } } }],
+    } as Prisma.TaskWhereInput;
+  }
 
   return { [field]: clause } as Prisma.TaskWhereInput;
 }
@@ -133,6 +143,33 @@ function compileCustomField(
       some: { customFieldId: field.id, [column]: buildClause(kind, condition) },
     },
   };
+}
+
+/**
+ * Tags live in a join table: "is any of" is some link to one of them, "is
+ * none of" no link to any, and empty means no tags at all.
+ */
+function compileTags(condition: FilterCondition): Prisma.TaskWhereInput {
+  const ids = (Array.isArray(condition.value) ? condition.value : [condition.value]).filter(
+    (value): value is string => typeof value === 'string',
+  );
+  switch (condition.operator) {
+    case FilterOperator.IS_EMPTY:
+      return { tags: { none: {} } };
+    case FilterOperator.IS_NOT_EMPTY:
+      return { tags: { some: {} } };
+    case FilterOperator.IN:
+    case FilterOperator.EQUALS:
+      return { tags: { some: { tagId: { in: ids } } } };
+    case FilterOperator.NOT_IN:
+    case FilterOperator.NOT_EQUALS:
+      return { tags: { none: { tagId: { in: ids } } } };
+    default:
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Tags are filtered by "is any of" or "is none of".',
+      );
+  }
 }
 
 /** How each operator becomes a Prisma filter, per kind. */
@@ -265,6 +302,9 @@ export function compileSorts(sorts: readonly SortEntry[]): Prisma.TaskOrderByWit
       );
     }
     if (!isSystemField(sort.field)) continue;
+    if (sort.field === SystemField.TAGS) {
+      throw AppException.badRequest('BAD_REQUEST', 'Tasks cannot be sorted by their tags.');
+    }
 
     const direction = sort.direction === 'DESC' ? 'desc' : 'asc';
     compiled.push({ [sort.field]: direction } as Prisma.TaskOrderByWithRelationInput);
@@ -333,6 +373,7 @@ export function compileTicketFilters(
         break;
       case SystemField.START_DATE:
       case SystemField.ESTIMATE:
+      case SystemField.TAGS:
         // Not a thing a ticket has: empty for every ticket, else none match.
         if (!isEmpty) return 'NONE';
         break;

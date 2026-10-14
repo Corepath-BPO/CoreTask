@@ -18,8 +18,17 @@ export interface AutomationEvent {
   workspaceId: string;
   projectId: string;
   trigger: AutomationTrigger;
-  entityType: 'TASK' | 'TICKET' | 'COMMENT';
+  /**
+   * What the event is about. `PROJECT` is a scheduled run with no tasks in
+   * scope, whose `entityId` is the project: there is nothing else to name.
+   */
+  entityType: 'TASK' | 'TICKET' | 'COMMENT' | 'PROJECT';
   entityId: string;
+  /**
+   * Set when the event is for one rule only — a person pressing "Run rule",
+   * or the clock finding one rule due — so rules sharing its trigger stay put.
+   */
+  ruleId?: string | null;
   /**
    * The person whose change started this.
    *
@@ -96,7 +105,10 @@ export class AutomationEventPublisher {
      * is how a receiver learns about what a rule changed — flagged by
      * `causedByRuleId`, so it can ignore them if it prefers.
      */
-    if (webhookEventTypeFor(payload.trigger, payload.entityType) !== null) {
+    if (
+      payload.entityType !== 'PROJECT' &&
+      webhookEventTypeFor(payload.trigger, payload.entityType) !== null
+    ) {
       await this.webhooks.enqueueFanOut(payload);
     }
   }

@@ -5,6 +5,7 @@ import {
   NOTIFICATION_TYPES,
   NotificationType,
 } from '@coretask/contracts';
+import type { NotificationView } from '@coretask/types';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -12,6 +13,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsUUID,
@@ -65,6 +67,16 @@ export class NotificationQueryDto {
   @IsOptional()
   @IsUUID()
   cursor?: string;
+
+  @ApiPropertyOptional({
+    enum: ['inbox', 'archived', 'bookmarked'],
+    default: 'inbox',
+    description:
+      '`inbox` leaves archived entries out; `archived` is only those; `bookmarked` is every bookmarked entry, archived or not.',
+  })
+  @IsOptional()
+  @IsIn(['inbox', 'archived', 'bookmarked'])
+  view?: NotificationView;
 }
 
 export class MarkNotificationsReadDto {
@@ -110,6 +122,12 @@ export class NotificationEntryDto {
 
   @ApiProperty({ format: 'date-time', nullable: true, description: 'Null while unread.' })
   readAt!: string | null;
+
+  @ApiProperty({ format: 'date-time', nullable: true, description: 'Null while in the inbox.' })
+  archivedAt!: string | null;
+
+  @ApiProperty({ format: 'date-time', nullable: true })
+  bookmarkedAt!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;

@@ -3,9 +3,9 @@ import {
   type ActivityEntity,
   type NotificationType,
 } from '@coretask/contracts';
-import type { NotificationEntry, NotificationFeed } from '@coretask/types';
+import type { NotificationEntry, NotificationFeed, NotificationView } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
-import type { Notification } from '@prisma/client';
+import type { Notification, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
@@ -55,9 +55,13 @@ export class NotificationsService {
 
     // Scoped by `userId` before anything else. An inbox is one person's, and
     // membership of the workspace must never be enough to read someone else's.
-    const where = {
+    const view = options.view ?? 'inbox';
+    const where: Prisma.NotificationWhereInput = {
       userId,
       workspaceId,
+      ...(view === 'inbox' ? { archivedAt: null } : {}),
+      ...(view === 'archived' ? { archivedAt: { not: null } } : {}),
+      ...(view === 'bookmarked' ? { bookmarkedAt: { not: null } } : {}),
       ...(options.unreadOnly ? { readAt: null } : {}),
       ...(options.types?.length ? { type: { in: options.types } } : {}),
     };
@@ -74,7 +78,9 @@ export class NotificationsService {
         // One extra row answers "is there more?" without a second count.
         take: limit + 1,
       }),
-      this.prisma.notification.count({ where: { userId, workspaceId, readAt: null } }),
+      this.prisma.notification.count({
+        where: { userId, workspaceId, readAt: null, archivedAt: null },
+      }),
     ]);
 
     const items = rows.slice(0, limit);
@@ -125,8 +131,65 @@ export class NotificationsService {
     return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
   }
 
+  /**
+   * Archives entries — Asana's "done with this". Archiving reads them too:
+   * an unread badge for something filed away is a count nobody can clear.
+   * Omitting `notificationIds` archives the whole inbox.
+   */
+  async archive(
+    userId: string,
+    workspaceId: string,
+    notificationIds?: string[],
+  ): Promise<{ updated: number; unreadCount: number }> {
+    const now = new Date();
+    const scope = {
+      userId,
+      workspaceId,
+      archivedAt: null,
+      ...(notificationIds?.length ? { id: { in: notificationIds } } : {}),
+    };
+
+    const [, { count }] = await this.prisma.$transaction([
+      this.prisma.notification.updateMany({
+        where: { ...scope, readAt: null },
+        data: { readAt: now },
+      }),
+      this.prisma.notification.updateMany({ where: scope, data: { archivedAt: now } }),
+    ]);
+
+    return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
+  }
+
+  /** Back into the inbox, read — the reader has already seen it. */
+  async unarchive(
+    userId: string,
+    workspaceId: string,
+    notificationId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { id: notificationId, userId, workspaceId, archivedAt: { not: null } },
+      data: { archivedAt: null },
+    });
+    return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
+  }
+
+  async setBookmark(
+    userId: string,
+    workspaceId: string,
+    notificationId: string,
+    bookmarked: boolean,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { id: notificationId, userId, workspaceId },
+      data: { bookmarkedAt: bookmarked ? new Date() : null },
+    });
+    return { updated: count, unreadCount: await this.countUnread(userId, workspaceId) };
+  }
+
   private countUnread(userId: string, workspaceId: string): Promise<number> {
-    return this.prisma.notification.count({ where: { userId, workspaceId, readAt: null } });
+    return this.prisma.notification.count({
+      where: { userId, workspaceId, readAt: null, archivedAt: null },
+    });
   }
 }
 
@@ -136,6 +199,7 @@ export interface FeedOptions {
   unreadOnly?: boolean;
   types?: NotificationType[];
   cursor?: string;
+  view?: NotificationView;
 }
 
 function toNotificationEntry(notification: Notification): NotificationEntry {
@@ -150,6 +214,8 @@ function toNotificationEntry(notification: Notification): NotificationEntry {
     entityId: notification.entityId,
     actionUrl: notification.actionUrl,
     readAt: notification.readAt?.toISOString() ?? null,
+    archivedAt: notification.archivedAt?.toISOString() ?? null,
+    bookmarkedAt: notification.bookmarkedAt?.toISOString() ?? null,
     createdAt: notification.createdAt.toISOString(),
   };
 }

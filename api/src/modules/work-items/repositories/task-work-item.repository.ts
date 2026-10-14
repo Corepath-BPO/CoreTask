@@ -1,3 +1,4 @@
+import { taskKindForWorkItemType } from '@coretask/contracts';
 import type {
   CreateWorkItemPayload,
   ProjectWorkItem,
@@ -90,20 +91,34 @@ export class TaskWorkItemRepository {
   ): Prisma.TaskWhereInput {
     return {
       workspaceId,
-      projectId,
+      // The tasks whose home this is, and the tasks linked in from elsewhere
+      // — multi-homing — each read in this project's place for it.
+      OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
       // Top-level only. Subtasks are fetched when a row is expanded — a
       // project of two hundred tasks would otherwise ship every child nobody
       // looked at.
       parentTaskId: null,
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.showCompleted === false ? { completedAt: null } : {}),
-      ...(query.sectionId === undefined ? {} : { sectionId: query.sectionId }),
       ...(query.search
         ? { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }
         : {}),
       // AND rather than spreading: two conditions on the same field would
-      // otherwise overwrite each other and silently drop a filter.
-      ...(filters.length > 0 ? { AND: [...filters] } : {}),
+      // otherwise overwrite each other and silently drop a filter. A section
+      // is the home's column or, for a linked task, its link's.
+      AND: [
+        ...(query.sectionId === undefined
+          ? []
+          : [
+              {
+                OR: [
+                  { projectId, sectionId: query.sectionId },
+                  { projectLinks: { some: { projectId, sectionId: query.sectionId } } },
+                ],
+              },
+            ]),
+        ...filters,
+      ],
     };
   }
 
@@ -115,12 +130,20 @@ export class TaskWorkItemRepository {
     sectionId: string | null,
     position: number,
   ): Promise<ProjectWorkItem> {
+    // A parent here by home or by link. A subtask lives with its parent's
+    // home, so one added from a board the parent is linked into is filed
+    // there, beside its siblings, rather than in a project its parent visits.
     const parent = payload.parentId
       ? await this.prisma.task.findFirst({
-          where: { id: payload.parentId, workspaceId, projectId },
-          select: { id: true, parentTaskId: true },
+          where: {
+            id: payload.parentId,
+            workspaceId,
+            OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
+          },
+          select: { id: true, parentTaskId: true, projectId: true, sectionId: true },
         })
       : null;
+    const linkedParent = parent !== null && parent.projectId !== projectId;
 
     if (payload.parentId && !parent) {
       throw AppException.badRequest('BAD_REQUEST', 'That parent is not in this project.');
@@ -141,12 +164,16 @@ export class TaskWorkItemRepository {
     const created = await this.prisma.task.create({
       data: {
         workspaceId,
-        projectId,
-        sectionId,
+        projectId: linkedParent ? parent.projectId : projectId,
+        sectionId: linkedParent ? parent.sectionId : sectionId,
         parentTaskId: payload.parentId ?? null,
         title: payload.title,
         description: normalizeRichText(payload.description) ?? null,
         position,
+        // A milestone or an approval is a task of that kind; an approval
+        // starts out waiting for its answer.
+        kind: taskKindForWorkItemType(payload.type) ?? 'TASK',
+        approvalStatus: payload.type === 'APPROVAL' ? 'PENDING' : null,
         // A task carries one assignee; the contract allows a list because other
         // kinds may. The first is taken rather than silently dropping the rest.
         assigneeId: payload.assigneeIds?.[0] ?? null,
@@ -271,6 +298,39 @@ export class TaskWorkItemRepository {
          */
         ...(section?.defaultStatusId ? { statusDefinitionId: section.defaultStatusId } : {}),
       },
+      include: workItemTaskInclude,
+    });
+
+    return taskToWorkItem(moved);
+  }
+
+  /**
+   * Moves a task on a board it is linked into: its link there takes the
+   * section and position, and its home placement is untouched. The section's
+   * default status applies as it would to a task at home in it.
+   */
+  async moveLink(
+    workspaceId: string,
+    taskId: string,
+    projectId: string,
+    sectionId: string | null,
+    position: number,
+  ): Promise<ProjectWorkItem> {
+    const section = sectionId
+      ? await this.prisma.section.findFirst({
+          where: { id: sectionId },
+          select: { defaultStatusId: true },
+        })
+      : null;
+
+    await this.prisma.taskProject.update({
+      where: { taskId_projectId: { taskId, projectId } },
+      data: { sectionId, position },
+    });
+
+    const moved = await this.prisma.task.update({
+      where: { id: taskId },
+      data: section?.defaultStatusId ? { statusDefinitionId: section.defaultStatusId } : {},
       include: workItemTaskInclude,
     });
 

@@ -652,7 +652,7 @@ export class CustomFieldsService {
       where: {
         id: taskId,
         workspaceId,
-        ...(actor ? { AND: [this.access.scopedWhere(actor)] } : {}),
+        ...(actor ? { AND: [this.access.taskWhere(actor)] } : {}),
       },
       select: { id: true, projectId: true, title: true },
     });
@@ -662,10 +662,33 @@ export class CustomFieldsService {
     }
 
     if (actor) {
-      await this.access.assertEffectiveRole(task.projectId, actor, WorkspaceRole.MEMBER);
+      await this.access.assertEffectiveTaskRole(task, actor, WorkspaceRole.MEMBER);
     }
 
     return task;
+  }
+
+  /**
+   * Which of the task's projects shows this field — its home first, then the
+   * projects it is linked into. A task in two projects carries both projects'
+   * fields, as Asana's pane lists each project's fields under it.
+   */
+  private async projectShowing(
+    task: { id: string; projectId: string | null },
+    fieldId: string,
+  ): Promise<string | null> {
+    if (!task.projectId) return null;
+    const links = await this.prisma.taskProject.findMany({
+      where: { taskId: task.id },
+      select: { projectId: true },
+    });
+    const candidates = [task.projectId, ...links.map((link) => link.projectId)];
+    const showing = await this.prisma.projectCustomField.findMany({
+      where: { customFieldId: fieldId, projectId: { in: candidates } },
+      select: { projectId: true },
+    });
+    const has = new Set(showing.map((row) => row.projectId));
+    return candidates.find((projectId) => has.has(projectId)) ?? task.projectId;
   }
 
   /**
@@ -694,7 +717,8 @@ export class CustomFieldsService {
       );
     }
 
-    const field = resolve(await this.requireField(workspaceId, task.projectId, fieldId));
+    const projectId = (await this.projectShowing(task, fieldId)) ?? task.projectId;
+    const field = resolve(await this.requireField(workspaceId, projectId, fieldId));
     this.assertWritable(field);
     const data = await this.buildValue(workspaceId, field, dto);
 
@@ -710,7 +734,7 @@ export class CustomFieldsService {
 
     await this.announce({
       workspaceId,
-      projectId: task.projectId,
+      projectId,
       taskId,
       taskTitle: task.title,
       actorId: userId,
@@ -746,10 +770,11 @@ export class CustomFieldsService {
     // Clearing a value is a change like any other. Skipped when there was
     // nothing there, so a repeated delete does not wake every rule again.
     if (previous && task.projectId) {
-      const field = resolve(await this.requireField(workspaceId, task.projectId, fieldId));
+      const projectId = (await this.projectShowing(task, fieldId)) ?? task.projectId;
+      const field = resolve(await this.requireField(workspaceId, projectId, fieldId));
       await this.announce({
         workspaceId,
-        projectId: task.projectId,
+        projectId,
         taskId,
         taskTitle: task.title,
         actorId: userId ?? null,

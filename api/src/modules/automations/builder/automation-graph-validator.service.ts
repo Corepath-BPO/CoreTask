@@ -11,6 +11,19 @@ import {
   subtaskEntries,
   subtaskProblems,
   subtaskTitles,
+  APPROACHING_DAYS,
+  AutomationTrigger,
+  ExecutionScope,
+  isApproachingTrigger,
+  isCustomDateTrigger,
+  isDateTrigger,
+  isTimeZone,
+  MANUAL_RULE_LABEL_MAX,
+  readSchedule,
+  scheduleProblems,
+  unknownVariables,
+  TASK_KINDS,
+  emailRecipientsOf,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -96,6 +109,7 @@ export class AutomationGraphValidatorService {
     const issues: AutomationGraphIssue[] = [
       ...validateGraphStructure(graph, name),
       ...this.checkSubtypes(graph),
+      ...this.checkSettings(graph),
       ...(await this.checkReferences(projectId, workspaceId, graph)),
       ...this.checkLoopRisk(graph),
     ];
@@ -188,6 +202,171 @@ export class AutomationGraphValidatorService {
   }
 
   /**
+   * Settings only this engine can judge: a schedule that would never run, a
+   * name that would come out empty, a step a task-less run cannot perform.
+   *
+   * Each is checkable before publishing and would otherwise publish cleanly
+   * and then fail — or do nothing — on every run.
+   */
+  private checkSettings(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
+    const issues: AutomationGraphIssue[] = [];
+    const error = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.ERROR, nodeId, path, message });
+    const warn = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.WARNING, nodeId, path, message });
+
+    const trigger = nodes.find((node) => node.type === AutomationNodeType.TRIGGER);
+
+    if (trigger) {
+      const config = trigger.configuration;
+
+      if (trigger.subtype === AutomationTrigger.SCHEDULED_TIME) {
+        for (const problem of scheduleProblems(config)) error(trigger.id, 'configuration', problem);
+      }
+
+      if (trigger.subtype === AutomationTrigger.RUN_MANUALLY) {
+        const label = config['label'];
+        if (typeof label === 'string' && label.trim().length > MANUAL_RULE_LABEL_MAX) {
+          error(
+            trigger.id,
+            'label',
+            `Keep the menu label to ${MANUAL_RULE_LABEL_MAX} characters, so it fits on one line.`,
+          );
+        }
+      }
+
+      if (isApproachingTrigger(trigger.subtype) && config['days'] !== undefined) {
+        const days = config['days'];
+        if (
+          typeof days !== 'number' ||
+          !Number.isInteger(days) ||
+          days < APPROACHING_DAYS.MIN ||
+          days > APPROACHING_DAYS.MAX
+        ) {
+          error(
+            trigger.id,
+            'days',
+            `Choose between ${APPROACHING_DAYS.MIN} and ${APPROACHING_DAYS.MAX} days.`,
+          );
+        }
+      }
+
+      // A custom date trigger watches one field; without it there is no date.
+      if (isCustomDateTrigger(trigger.subtype)) {
+        const fieldId = config['fieldId'];
+        if (typeof fieldId !== 'string' || fieldId === '') {
+          error(trigger.id, 'fieldId', 'Choose the date field this rule watches.');
+        }
+      }
+
+      if (isDateTrigger(trigger.subtype) && config['timezone'] !== undefined) {
+        if (!isTimeZone(config['timezone'])) {
+          error(trigger.id, 'timezone', 'That timezone is not one this server recognises.');
+        }
+      }
+    }
+
+    /*
+     * A schedule with no tasks in scope runs with nothing to check and nothing
+     * to change, so only "Create a task" has anything to do.
+     */
+    const taskless =
+      trigger?.subtype === AutomationTrigger.SCHEDULED_TIME &&
+      readSchedule(trigger.configuration).scope === ExecutionScope.NONE;
+
+    for (const node of nodes) {
+      const config = node.configuration;
+
+      if (taskless) {
+        if (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so there is nothing to check. Choose tasks for it to run on, or remove the check.',
+          );
+        }
+        if (
+          node.type === AutomationNodeType.ACTION &&
+          node.subtype !== AutomationAction.CREATE_TASK
+        ) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so it can only create new ones. Choose tasks for it to run on.',
+          );
+        }
+      }
+
+      if (node.type !== AutomationNodeType.ACTION) continue;
+
+      const text = (key: string) => (typeof config[key] === 'string' ? config[key] : '');
+      const flagUnknown = (key: string) => {
+        const unknown = unknownVariables(text(key));
+        if (unknown.length) {
+          warn(
+            node.id,
+            key,
+            `${unknown.map((name) => `{{${name}}}`).join(', ')} is not a variable this rule knows, so it is written as is.`,
+          );
+        }
+      };
+
+      switch (node.subtype) {
+        case AutomationAction.CREATE_TASK:
+          if (text('title').trim() === '') error(node.id, 'title', 'Give the new task a name.');
+          flagUnknown('title');
+          flagUnknown('description');
+          if (
+            config['dueInDays'] !== undefined &&
+            config['dueInDays'] !== null &&
+            !(
+              typeof config['dueInDays'] === 'number' &&
+              Number.isInteger(config['dueInDays']) &&
+              config['dueInDays'] >= 0
+            )
+          ) {
+            error(
+              node.id,
+              'dueInDays',
+              'Days until it is due has to be a whole number, zero or more.',
+            );
+          }
+          break;
+        case AutomationAction.SET_TASK_NAME:
+          if (text('text').trim() === '') error(node.id, 'text', 'Write the name to set.');
+          flagUnknown('text');
+          break;
+        case AutomationAction.SET_TASK_DESCRIPTION:
+          flagUnknown('text');
+          break;
+        case AutomationAction.ADD_COMMENT:
+          flagUnknown('body');
+          break;
+        case AutomationAction.SEND_EMAIL:
+          if (text('subject').trim() === '') error(node.id, 'subject', 'Give the email a subject.');
+          if (emailRecipientsOf(config).length === 0) {
+            error(node.id, 'recipients', 'Choose who the email goes to.');
+          }
+          flagUnknown('subject');
+          flagUnknown('body');
+          break;
+        case AutomationAction.ADD_REMOVE_COLLABORATORS:
+          if (peopleIn(config['add']).length === 0 && peopleIn(config['remove']).length === 0) {
+            error(node.id, 'add', 'Choose somebody to add or remove.');
+          }
+          break;
+        case AutomationAction.SET_TASK_TYPE:
+          if (!(TASK_KINDS as readonly unknown[]).includes(config['kind'])) {
+            error(node.id, 'kind', 'Choose the type to convert to.');
+          }
+          break;
+      }
+    }
+
+    return issues;
+  }
+
+  /**
    * Everything a rule points at has to still be here, and be here in *this*
    * project.
    *
@@ -240,6 +419,12 @@ export class AutomationGraphValidatorService {
         for (const entry of subtaskEntries(config)) {
           if (entry.assigneeId) userIds.add(entry.assigneeId);
         }
+      }
+
+      // So is everybody a collaborators step adds; removing someone who has
+      // left is harmless, so only the additions are references.
+      if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
+        for (const id of peopleIn(config['add'])) userIds.add(id);
       }
 
       // A webhook step names a workspace endpoint; a rule may not send to
@@ -417,6 +602,17 @@ export class AutomationGraphValidatorService {
         });
       }
 
+      if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
+        if (peopleIn(config['add']).some((id) => !liveMembers.has(id))) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'add',
+            message: 'Somebody this step adds is no longer a member of this workspace.',
+          });
+        }
+      }
+
       if (node.subtype === AutomationAction.CREATE_SUBTASK) {
         subtaskEntries(config).forEach((entry, index) => {
           if (entry.assigneeId && !liveMembers.has(entry.assigneeId)) {
@@ -457,6 +653,17 @@ export class AutomationGraphValidatorService {
           nodeId: node.id,
           path: 'customFieldId',
           message: 'That field no longer exists.',
+        });
+      } else if (
+        fieldId &&
+        isCustomDateTrigger(node.subtype) &&
+        fieldType.get(fieldId) !== 'DATE'
+      ) {
+        issues.push({
+          level: GraphIssueLevel.ERROR,
+          nodeId: node.id,
+          path: 'fieldId',
+          message: 'Only a date field can approach or pass.',
         });
       }
 
@@ -587,6 +794,12 @@ export class AutomationGraphValidatorService {
       TASK_DUE_DATE_CHANGED: ['SET_DUE_DATE', 'CLEAR_DUE_DATE'],
       TASK_START_DATE_CHANGED: ['SET_START_DATE', 'CLEAR_START_DATE'],
       TASK_ESTIMATE_CHANGED: ['SET_ESTIMATE'],
+      TASK_TITLE_CHANGED: ['SET_TASK_NAME'],
+      TASK_DESCRIPTION_CHANGED: ['SET_TASK_DESCRIPTION'],
+      TASK_COMPLETED: ['SET_COMPLETION'],
+      COLLABORATOR_ADDED: ['ADD_REMOVE_COLLABORATORS'],
+      TASK_CREATED: ['CREATE_TASK'],
+      TASK_TYPE_CHANGED: ['SET_TASK_TYPE'],
     };
 
     const risky = willRetrigger[trigger.subtype] ?? [];
@@ -632,4 +845,11 @@ function asConfiguration(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
 
   return value as Record<string, unknown>;
+}
+
+/** The people a collaborators step names, from whatever the column holds. */
+function peopleIn(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '')
+    : [];
 }

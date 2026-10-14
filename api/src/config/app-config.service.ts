@@ -142,6 +142,18 @@ export class AppConfigService {
     } as const;
   }
 
+  /**
+   * Email to a project. `enabled` checks one value because the schema refuses
+   * a domain without a secret and the other way round.
+   */
+  get inboundEmail() {
+    return {
+      domain: this.env.INBOUND_EMAIL_DOMAIN?.trim().toLowerCase() ?? null,
+      secret: this.env.INBOUND_EMAIL_SECRET ?? null,
+      enabled: Boolean(this.env.INBOUND_EMAIL_DOMAIN),
+    } as const;
+  }
+
   get microsoftGraph() {
     return {
       tenantId: this.env.MICROSOFT_GRAPH_TENANT_ID,

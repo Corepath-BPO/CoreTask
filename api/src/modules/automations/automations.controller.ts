@@ -18,7 +18,8 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } fro
 
 import { ApiErrorResponseDoc } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import { Actor, CurrentWorkspace } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
 
 import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
 import { AutomationMetadataService } from './builder/automation-metadata.service';
@@ -27,7 +28,7 @@ import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AutomationsService } from './automations.service';
-import { AutomationNodeDto, CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import { AutomationNodeDto, CreateRuleDto, RunRuleDto, UpdateRuleDto } from './dto/automation.dto';
 import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 /**
@@ -207,6 +208,34 @@ export class AutomationsController {
     @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
     return this.automations.publish(workspaceId, projectId, role, ruleId);
+  }
+
+  @Post(':ruleId/run')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Run a manual rule on some tasks',
+    description:
+      'For a live rule whose trigger is “Rule is run manually”. Anyone who can edit the ' +
+      'project’s tasks may run one. The runs are queued, one per task, and land in the rule’s ' +
+      'history like any other.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  @ApiErrorResponseDoc(400, 'The rule is not a live manual rule')
+  runManually(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Actor() actor: ActorContext,
+    @Body() dto: RunRuleDto,
+  ) {
+    return this.automations.runManually(
+      workspaceId,
+      projectId,
+      ruleId,
+      actor,
+      dto.taskIds,
+      dto.timezone,
+    );
   }
 
   @Post(':ruleId/pause')

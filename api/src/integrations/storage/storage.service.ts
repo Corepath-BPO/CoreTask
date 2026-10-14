@@ -234,6 +234,22 @@ export class StorageService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Writes bytes the server already holds — a file that arrived attached to
+   * an email. Uploads from people go straight to the bucket instead.
+   */
+  async putObject(objectKey: string, body: Buffer, mimeType: string): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Body: body,
+        ContentType: mimeType,
+        ContentLength: body.length,
+      }),
+    );
+  }
+
   /** Deleting something that is not there is a success, not an error. */
   async deleteObject(objectKey: string): Promise<void> {
     try {

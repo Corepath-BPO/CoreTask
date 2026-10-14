@@ -25,13 +25,27 @@ import {
   isDirectOperator,
   AutomationTrigger,
   isComputedFieldType,
+  isTimeZone,
+  renderAutomationText,
+  TASK_TITLE_MAX_LENGTH,
+  TRIGGER_CONFIG_FORM,
+  type AutomationTextVariable,
   type CustomFieldStoryMetadata,
   type CustomFieldType,
   type SubtaskEntry,
+  TASK_KINDS,
+  type TaskKind,
+  AUTOMATION_EMAIL_SUBJECT_MAX,
+  AutomationEmailRecipient,
+  MAX_EMAIL_RECIPIENTS,
+  emailRecipientsOf,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  StatusCategory,
+  TaskStatus,
+  WorkspaceRole,
   type AutomationNode,
   type Prisma,
   type Task,
@@ -39,6 +53,7 @@ import {
 } from '@prisma/client';
 
 import { appendPosition } from '../../common/utils/position.util';
+import { plainTextToHtml } from '../../common/utils/rich-text.util';
 import { toCalendarDate } from '../../common/utils/schedule.util';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeRelayPublisher } from '../../websocket/realtime-relay.publisher';
@@ -47,10 +62,13 @@ import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { labelValue } from '../custom-fields/lib/value-labels';
 
 import { completionData, priorityData, readActionId, statusData } from './action-config';
-import type { RuleWebhookRequest } from '../../jobs/queue-names';
+import type { RuleEmailRequest, RuleWebhookRequest } from '../../jobs/queue-names';
 
 import type { AutomationEvent } from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
+import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
+import { spawnNextOccurrence } from '../tasks/task-recurrence';
+
 import { fieldChangeTriggers } from './task-field-triggers';
 
 /** What one action attempt produced, for the log. */
@@ -67,6 +85,8 @@ interface ActionOutcome {
   events?: AutomationEvent[];
   /** What a "Send a webhook" action wants delivered; queued by the caller like `events`. */
   webhooks?: RuleWebhookRequest[];
+  /** What a "Send an email" action wants sent; queued by the caller like `webhooks`. */
+  emails?: RuleEmailRequest[];
 }
 
 /** What `handle` reports back: counts for the log, events for the queue. */
@@ -75,6 +95,8 @@ export interface AutomationRunResult {
   skipped: number;
   /** Webhook requests from "Send a webhook" actions, handed back for the same reason as `events`. */
   webhooks: RuleWebhookRequest[];
+  /** Messages from "Send an email" actions, handed back for the same reason. */
+  emails: RuleEmailRequest[];
   /**
    * Every event the rules' actions raised, in the order the actions ran.
    *
@@ -92,7 +114,39 @@ export interface AutomationRunResult {
  * The task as conditions read it: its own columns plus its custom-field values,
  * loaded together so evaluation never reaches for the database mid-walk.
  */
-type EvaluableTask = Task & { customFieldValues?: TaskCustomFieldValue[] };
+type EvaluableTask = Task & { customFieldValues?: TaskCustomFieldValue[]; facts?: TaskFacts };
+
+/**
+ * What a condition can ask about the task beyond its own columns — "has an
+ * attachment", "has a comment", "is no longer blocked" — counted once with the
+ * task rather than queried per condition mid-walk.
+ */
+interface TaskFacts {
+  attachments: number;
+  comments: number;
+  /** Unfinished, unarchived tasks still blocking this one. */
+  openBlockers: number;
+}
+
+/** The rule as the runner needs it. */
+interface RunnableRule {
+  id: string;
+  name: string;
+  workspaceId: string;
+  projectId: string;
+  createdById: string | null;
+  /** Read for the timezone a clock rule was set in, which dates in its text use. */
+  triggerConfig: Prisma.JsonValue;
+  nodes: AutomationNode[];
+}
+
+/** A calendar date as the text variables print it: "Oct 20, 2026". */
+const DAY_FORMAT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
 
 /**
  * The task an event is about, twice over.
@@ -151,14 +205,17 @@ export class AutomationRunnerService {
         'Automation chain stopped at the depth limit',
       );
       await this.recordSkipped(event, 'Depth limit reached — this looks like a loop.');
-      return { executed: 0, skipped: 1, events: [], webhooks: [] };
+      return { executed: 0, skipped: 1, events: [], webhooks: [], emails: [] };
     }
 
     const rules = await this.prisma.automationRule.findMany({
       where: {
-        projectId: event.projectId,
+        projectId: { in: await this.ruleProjects(event) },
         status: AutomationRuleStatus.ACTIVE,
         triggerType: event.trigger,
+        // A run somebody asked for by name, or one the clock found due, is
+        // for that rule alone — not every rule that shares its trigger.
+        ...(event.ruleId ? { id: event.ruleId } : {}),
       },
       include: { nodes: { orderBy: { position: 'asc' } } },
       // Oldest first, ids as the tie-break: two rules writing the same column
@@ -173,6 +230,7 @@ export class AutomationRunnerService {
     let skipped = 0;
     const events: AutomationEvent[] = [];
     const webhooks: RuleWebhookRequest[] = [];
+    const emails: RuleEmailRequest[] = [];
 
     for (const rule of rules) {
       // A rule reacting to its own write is the commonest loop there is: one
@@ -201,11 +259,12 @@ export class AutomationRunnerService {
         continue;
       }
 
-      const run = await this.runRule(rule, event, context);
+      const run = await this.runRule(rule, event, await this.inRuleProject(context, rule));
       if (run.ran) executed += 1;
       else skipped += 1;
       events.push(...run.events);
       webhooks.push(...run.webhooks);
+      emails.push(...run.emails);
     }
 
     /*
@@ -216,14 +275,81 @@ export class AutomationRunnerService {
     if (event.trigger === AutomationTrigger.TASK_COMPLETED) {
       const rollup = await this.subtaskRollup(event);
       if (rollup) events.push(rollup);
+
+      // And the tasks it was holding up may be free to start.
+      events.push(...(await this.unblockedDependents(event)));
     }
 
-    return { executed, skipped, events, webhooks };
+    return { executed, skipped, events, webhooks, emails };
   }
 
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * Whose rules hear an event — multi-homing.
+   *
+   * A change to the task itself (its status, assignee, fields, a comment) is
+   * news to every project it is in, so each of their rules may answer. Where
+   * it sits is not: "added to this project" and "moved to a section" belong to
+   * the one project where that happened, and a run asked for by name is for
+   * its own project alone.
+   */
+  private async ruleProjects(event: AutomationEvent): Promise<string[]> {
+    if (
+      event.ruleId ||
+      event.trigger === AutomationTrigger.TASK_CREATED ||
+      event.trigger === AutomationTrigger.TASK_MOVED_TO_SECTION
+    ) {
+      return [event.projectId];
+    }
+
+    const taskId =
+      event.entityType === 'TASK'
+        ? event.entityId
+        : event.entityType === 'COMMENT' && typeof event.after?.['taskId'] === 'string'
+          ? event.after['taskId']
+          : null;
+    if (!taskId) return [event.projectId];
+
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, workspaceId: event.workspaceId },
+      select: { projectId: true, projectLinks: { select: { projectId: true } } },
+    });
+    if (!task) return [event.projectId];
+
+    return [
+      ...new Set([
+        event.projectId,
+        ...(task.projectId ? [task.projectId] : []),
+        ...task.projectLinks.map((link) => link.projectId),
+      ]),
+    ];
+  }
+
+  /**
+   * The task as a rule in one of its other projects sees it: in that project's
+   * section, so "section is Review" means that board's Review. Its home
+   * project id stays, which is how an action tells a link from the home.
+   */
+  private async inRuleProject(
+    context: TaskContext | null,
+    rule: { projectId: string },
+  ): Promise<TaskContext | null> {
+    if (!context || !context.live.projectId || context.live.projectId === rule.projectId) {
+      return context;
+    }
+    const link = await this.prisma.taskProject.findUnique({
+      where: { taskId_projectId: { taskId: context.live.id, projectId: rule.projectId } },
+      select: { sectionId: true },
+    });
+    if (!link) return context;
+    return {
+      live: { ...context.live, sectionId: link.sectionId },
+      asFound: { ...context.asFound, sectionId: link.sectionId },
+    };
+  }
 
   /**
    * The other half of "task or all subtasks completed".
@@ -272,6 +398,67 @@ export class AutomationRunnerService {
   }
 
   /**
+   * "Task is no longer blocked", for every task this completion freed.
+   *
+   * Worked out here for the same reason the checklist roll-up is: nothing in
+   * the request path looks across dependencies. A dependent is free when no
+   * unfinished task blocks it any more — this one was merely the last — and it
+   * hears about it in its own project, at the depth of the completion that
+   * freed it, because a person finishing the blocker is still a person doing it.
+   *
+   * Not for the roll-up event raised when a parent's last subtask completes:
+   * the parent itself is still open, and has blocked nothing free yet.
+   */
+  private async unblockedDependents(event: AutomationEvent): Promise<AutomationEvent[]> {
+    if (event.entityType !== 'TASK') return [];
+
+    const blocker = await this.prisma.task.findFirst({
+      where: { id: event.entityId, workspaceId: event.workspaceId },
+      select: { completedAt: true },
+    });
+    if (!blocker?.completedAt) return [];
+
+    const links = await this.prisma.taskDependency.findMany({
+      where: { blockingTaskId: event.entityId },
+      select: {
+        blockedTask: {
+          select: {
+            id: true,
+            projectId: true,
+            completedAt: true,
+            archivedAt: true,
+            blockedBy: {
+              where: { blockingTask: { completedAt: null, archivedAt: null } },
+              select: { id: true },
+            },
+          },
+        },
+      },
+    });
+
+    return links
+      .map((link) => link.blockedTask)
+      .filter(
+        (task): task is typeof task & { projectId: string } =>
+          task.projectId !== null &&
+          task.completedAt === null &&
+          task.archivedAt === null &&
+          task.blockedBy.length === 0,
+      )
+      .map((task) => ({
+        ...event,
+        eventId: randomUUID(),
+        projectId: task.projectId,
+        trigger: AutomationTrigger.TASK_NO_LONGER_BLOCKED,
+        entityType: 'TASK' as const,
+        entityId: task.id,
+        before: { blocked: true },
+        after: { blocked: false, blockerId: event.entityId },
+        ruleId: null,
+      }));
+  }
+
+  /**
    * Trigger-level scoping, before conditions are considered.
    *
    * `TASK_MOVED_TO_SECTION` with a section in its config only fires for that
@@ -281,10 +468,32 @@ export class AutomationRunnerService {
    * narrowing existed stored.
    */
   private triggerMatches(config: Prisma.JsonValue, event: AutomationEvent): boolean {
-    const scope = (config ?? {}) as { sectionId?: string; fieldId?: string };
+    const scope = (config ?? {}) as {
+      form?: string;
+      sectionId?: string;
+      sectionIds?: unknown;
+      fieldId?: string;
+    };
 
-    if (scope.sectionId && event.trigger === 'TASK_MOVED_TO_SECTION') {
-      return event.after?.['sectionId'] === scope.sectionId;
+    /*
+     * The stored form is read before the section, always. A rule saved as
+     * "section is not Done" that fell through to the equality test would fire
+     * on exactly the moves it was written to exclude.
+     */
+    if (event.trigger === AutomationTrigger.TASK_MOVED_TO_SECTION) {
+      const landed = event.after?.['sectionId'];
+
+      switch (scope.form) {
+        case TRIGGER_CONFIG_FORM.SECTION_CHANGED:
+          return true;
+        case TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_NOT:
+          return !scope.sectionId || landed !== scope.sectionId;
+        case TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_ANY_OF:
+          return Array.isArray(scope.sectionIds) && scope.sectionIds.includes(landed);
+        default:
+          // "Section is…", and every rule saved before forms existed.
+          return !scope.sectionId || landed === scope.sectionId;
+      }
     }
 
     // Matched on the id, never the name: the name is somebody's to rename.
@@ -315,30 +524,45 @@ export class AutomationRunnerService {
 
     if (!taskId) return null;
 
-    const live = await this.prisma.task.findFirst({
+    const row = await this.prisma.task.findFirst({
       where: { id: taskId, workspaceId: event.workspaceId },
       include: { customFieldValues: true },
     });
 
-    if (!live) return null;
+    if (!row) return null;
+
+    // Counted the way the task row counts them: live comments, finished
+    // uploads, and blockers that are neither done nor archived.
+    const [attachments, comments, openBlockers] = await Promise.all([
+      this.prisma.attachment.count({ where: { taskId, status: 'READY' } }),
+      this.prisma.comment.count({ where: { taskId, deletedAt: null } }),
+      this.prisma.taskDependency.count({
+        where: { blockedTaskId: taskId, blockingTask: { completedAt: null, archivedAt: null } },
+      }),
+    ]);
+    const facts: TaskFacts = { attachments, comments, openBlockers };
+    const live: EvaluableTask = { ...row, facts };
 
     return {
       live,
-      asFound: { ...live, customFieldValues: live.customFieldValues.map((row) => ({ ...row })) },
+      asFound: {
+        ...row,
+        customFieldValues: row.customFieldValues.map((value) => ({ ...value })),
+        facts: { ...facts },
+      },
     };
   }
 
   private async runRule(
-    rule: {
-      id: string;
-      name: string;
-      workspaceId: string;
-      projectId: string;
-      nodes: AutomationNode[];
-    },
+    rule: RunnableRule,
     event: AutomationEvent,
     context: TaskContext | null,
-  ): Promise<{ ran: boolean; events: AutomationEvent[]; webhooks: RuleWebhookRequest[] }> {
+  ): Promise<{
+    ran: boolean;
+    events: AutomationEvent[];
+    webhooks: RuleWebhookRequest[];
+    emails: RuleEmailRequest[];
+  }> {
     const started = Date.now();
 
     const execution = await this.prisma.automationExecution.create({
@@ -356,11 +580,16 @@ export class AutomationRunnerService {
       },
     });
 
+    // A scheduled rule with no tasks in scope: it can only make new ones.
+    if (!context && event.entityType === 'PROJECT') {
+      return this.runTaskless(rule, event, execution.id, started);
+    }
+
     if (!context) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
         skippedReason: 'The task no longer exists.',
       });
-      return { ran: false, events: [], webhooks: [] };
+      return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
     // Judged on the task as the event found it, run against the live row:
@@ -377,7 +606,7 @@ export class AutomationRunnerService {
         skippedReason: `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
-      return { ran: false, events: [], webhooks: [] };
+      return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
     const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
@@ -385,6 +614,7 @@ export class AutomationRunnerService {
     let failures = 0;
     const events: AutomationEvent[] = [];
     const webhooks: RuleWebhookRequest[] = [];
+    const emails: RuleEmailRequest[] = [];
 
     for (const node of actions) {
       // One failing action does not abandon the rest: a rule that assigns
@@ -400,6 +630,7 @@ export class AutomationRunnerService {
       if (!outcome.succeeded) failures += 1;
       events.push(...(outcome.events ?? []));
       webhooks.push(...(outcome.webhooks ?? []));
+      emails.push(...(outcome.emails ?? []));
 
       await this.prisma.automationExecutionLog.create({
         data: {
@@ -484,10 +715,91 @@ export class AutomationRunnerService {
       }
     }
 
-    return { ran: true, events, webhooks };
+    return { ran: true, events, webhooks, emails };
   }
 
-  /** Evaluates one condition against the task the event is about. */
+  /**
+   * A rule run with no task at all — a schedule whose scope is "no tasks".
+   *
+   * Only "Create a task" has anything to act on; the validator refuses the
+   * rest, and refuses conditions, so a rule reaching here holds what it can
+   * run. Anything else is logged as a failure rather than skipped quietly.
+   */
+  private async runTaskless(
+    rule: RunnableRule,
+    event: AutomationEvent,
+    executionId: string,
+    started: number,
+  ): Promise<{
+    ran: boolean;
+    events: AutomationEvent[];
+    webhooks: RuleWebhookRequest[];
+    emails: RuleEmailRequest[];
+  }> {
+    const actions = rule.nodes
+      .filter((node) => node.nodeType === AutomationNodeType.ACTION)
+      .slice(0, MAX_ACTIONS_PER_EXECUTION);
+
+    let failures = 0;
+    const events: AutomationEvent[] = [];
+
+    for (const node of actions) {
+      const outcome: ActionOutcome =
+        node.subtype === AutomationAction.CREATE_TASK
+          ? await this.createTask(
+              (node.configuration ?? {}) as Record<string, unknown>,
+              null,
+              rule,
+              event,
+              new Date(started),
+            ).catch((error: unknown): ActionOutcome => ({
+              succeeded: false,
+              message: error instanceof Error ? error.message : 'Action failed.',
+            }))
+          : {
+              succeeded: false,
+              message: 'This step needs a task, and this run had none in scope.',
+            };
+
+      if (!outcome.succeeded) failures += 1;
+      events.push(...(outcome.events ?? []));
+
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: outcome.succeeded,
+          message: outcome.message?.slice(0, 500) ?? null,
+          beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
+          afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    const status =
+      failures === 0
+        ? AutomationExecutionStatus.COMPLETED
+        : failures === actions.length
+          ? AutomationExecutionStatus.FAILED
+          : AutomationExecutionStatus.PARTIALLY_FAILED;
+
+    await this.finish(executionId, status, started, {});
+    await this.bumpRule(rule.id, status, failures > 0);
+
+    if (actions.length > failures) {
+      await this.relay.toProject(rule.projectId, ServerEvent.WORK_ITEM_UPDATED, {
+        workspaceId: rule.workspaceId,
+        projectId: rule.projectId,
+        occurredAt: new Date().toISOString(),
+        source: 'automation',
+      });
+    }
+
+    return { ran: true, events, webhooks: [], emails: [] };
+  }
+
   /**
    * Which actions this event should run, and what stopped it if none.
    *
@@ -825,6 +1137,18 @@ export class AutomationRunnerService {
       case 'completedAt':
         return task.completedAt?.toISOString() ?? null;
 
+      // Facts counted with the task — see `TaskFacts`.
+      case 'HAS_ATTACHMENT':
+        return (task.facts?.attachments ?? 0) > 0;
+      case 'HAS_COMMENT':
+        return (task.facts?.comments ?? 0) > 0;
+      case 'NO_LONGER_BLOCKED':
+        return (task.facts?.openBlockers ?? 0) === 0;
+      case 'TASK_TYPE':
+        return task.kind;
+      case 'APPROVAL_STATUS':
+        return task.approvalStatus;
+
       default:
         return event.after?.[field];
     }
@@ -833,7 +1157,7 @@ export class AutomationRunnerService {
   private async runAction(
     node: AutomationNode,
     task: EvaluableTask,
-    rule: { id: string; workspaceId: string; projectId: string },
+    rule: RunnableRule,
     event: AutomationEvent,
     /* When this execution began, so every action in one run agrees. */
     at: Date,
@@ -957,6 +1281,24 @@ export class AutomationRunnerService {
         }
 
         const before = task.sectionId;
+
+        // A rule in a project the task is linked into moves it on that board.
+        if (task.projectId && task.projectId !== rule.projectId) {
+          await this.prisma.taskProject.update({
+            where: { taskId_projectId: { taskId: task.id, projectId: rule.projectId } },
+            data: {
+              sectionId,
+              position: await endOfSection(
+                this.prisma,
+                rule.workspaceId,
+                rule.projectId,
+                sectionId,
+              ),
+            },
+          });
+          return { succeeded: true, before, after: sectionId };
+        }
+
         const events = await this.updateTask(task, { sectionId }, rule, event);
         return { succeeded: true, before, after: sectionId, events };
       }
@@ -965,8 +1307,53 @@ export class AutomationRunnerService {
         const projectId = String(config['projectId'] ?? '');
         const requestedSectionId = String(config['targetSectionId'] ?? '');
 
+        // "Add task to another project": it stays where it is, and shows there too.
+        if (config['mode'] === 'ADD') {
+          return this.addToProject(task, rule, event, projectId, requestedSectionId);
+        }
+
         if (projectId === task.projectId) {
           return { succeeded: false, message: 'The task is already in that project.' };
+        }
+
+        /*
+         * A rule in a project the task is linked into moves it out of that
+         * project and into the other — its link moves, its home stays. Into a
+         * project it is already in, the link simply goes.
+         */
+        if (task.projectId && task.projectId !== rule.projectId) {
+          const target = await this.prisma.project.findFirst({
+            where: { id: projectId, workspaceId: rule.workspaceId, archivedAt: null },
+            select: { id: true, sections: { orderBy: { position: 'asc' }, select: { id: true } } },
+          });
+          if (!target) {
+            return { succeeded: false, message: 'That project is no longer in this workspace.' };
+          }
+          await this.prisma.taskProject.deleteMany({
+            where: { taskId: task.id, projectId: rule.projectId },
+          });
+          const alreadyThere = await this.prisma.taskProject.findUnique({
+            where: { taskId_projectId: { taskId: task.id, projectId } },
+          });
+          const linkSection =
+            (requestedSectionId
+              ? target.sections.find((row) => row.id === requestedSectionId)?.id
+              : target.sections[0]?.id) ?? null;
+          if (!alreadyThere) {
+            await this.prisma.taskProject.create({
+              data: {
+                taskId: task.id,
+                projectId,
+                sectionId: linkSection,
+                position: await endOfSection(this.prisma, rule.workspaceId, projectId, linkSection),
+              },
+            });
+          }
+          return {
+            succeeded: true,
+            before: { projectId: rule.projectId, sectionId: task.sectionId },
+            after: { projectId, sectionId: linkSection },
+          };
         }
 
         // Re-checked at execution time, as a section is: the project may have
@@ -1045,6 +1432,8 @@ export class AutomationRunnerService {
             data: { projectId: project.id, sectionId },
           });
         }
+        // Its new home may have been one of its other projects: not twice.
+        await dropLinkToHome(this.prisma, task.id, project.id);
 
         return { succeeded: true, before, after: { projectId: project.id, sectionId }, events };
       }
@@ -1131,8 +1520,63 @@ export class AutomationRunnerService {
         return { succeeded: true, before, after: minutes, events };
       }
 
+      case AutomationAction.SEND_EMAIL: {
+        const values = await this.textValues(task, rule, event, at);
+        const subject = renderAutomationText(String(config['subject'] ?? ''), values)
+          .trim()
+          .slice(0, AUTOMATION_EMAIL_SUBJECT_MAX);
+        if (!subject) return { succeeded: false, message: 'The email has no subject.' };
+        const body = renderAutomationText(String(config['body'] ?? ''), values).trim();
+
+        const who = emailRecipientsOf(config);
+        if (who.length === 0) return { succeeded: false, message: 'Nobody is chosen to email.' };
+
+        const ids = new Set<string>();
+        if (who.includes(AutomationEmailRecipient.ASSIGNEE) && task.assigneeId) {
+          ids.add(task.assigneeId);
+        }
+        if (who.includes(AutomationEmailRecipient.CREATOR)) ids.add(task.createdById);
+        if (who.includes(AutomationEmailRecipient.COLLABORATORS)) {
+          const followers = await this.prisma.follower.findMany({
+            where: { taskId: task.id },
+            select: { userId: true },
+          });
+          for (const follower of followers) ids.add(follower.userId);
+        }
+
+        // Only people still in the workspace hear from it.
+        const members = await this.prisma.workspaceMember.findMany({
+          where: { workspaceId: rule.workspaceId, userId: { in: [...ids] } },
+          select: { user: { select: { email: true } } },
+          take: MAX_EMAIL_RECIPIENTS,
+        });
+        if (members.length === 0) {
+          return {
+            succeeded: true,
+            message: 'Nobody to email: the task has none of those people.',
+          };
+        }
+
+        return {
+          succeeded: true,
+          message: `Queued an email to ${members.length} ${members.length === 1 ? 'person' : 'people'}`,
+          after: { recipients: members.length },
+          emails: members.map((member) => ({
+            to: member.user.email,
+            subject,
+            body,
+            taskId: task.id,
+            taskTitle: task.title,
+            ruleName: rule.name,
+          })),
+        };
+      }
+
       case AutomationAction.ADD_COMMENT: {
-        const body = String(config['body'] ?? '').trim();
+        const body = renderAutomationText(
+          String(config['body'] ?? ''),
+          await this.textValues(task, rule, event, at),
+        ).trim();
         if (!body) return { succeeded: false, message: 'The comment is empty.' };
 
         // Authored by whoever caused the trigger, because a comment needs an
@@ -1174,6 +1618,8 @@ export class AutomationRunnerService {
         if (entries.length === 0) {
           return { succeeded: false, message: 'The subtasks have no titles.' };
         }
+        // Titles may name the task the rule acted on — "Inspect {{task.name}}".
+        const values = await this.textValues(task, rule, event, at);
 
         /*
          * Membership is re-checked at execution time, as ASSIGN_USER's is —
@@ -1225,7 +1671,9 @@ export class AutomationRunnerService {
               projectId: task.projectId,
               sectionId: task.sectionId,
               parentTaskId: task.id,
-              title: entry.title,
+              title:
+                renderAutomationText(entry.title, values).trim().slice(0, TASK_TITLE_MAX_LENGTH) ||
+                entry.title,
               assigneeId,
               // A day, not a moment — the shape every date column holds, and
               // what SET_DUE_DATE writes. `dueAt` stays null: all day.
@@ -1277,6 +1725,206 @@ export class AutomationRunnerService {
             : {}),
           events,
         };
+      }
+
+      case AutomationAction.SET_COMPLETION: {
+        // Absent means "complete" — the commoner half, and the form's default.
+        const complete = config['completed'] !== false;
+
+        if ((task.completedAt !== null) === complete) {
+          return {
+            succeeded: true,
+            message: complete ? 'The task was already complete.' : 'The task was already open.',
+          };
+        }
+
+        const statusId = await this.completionStatus(rule.workspaceId, task.projectId, complete);
+        const before = task.completedAt !== null;
+        const completion = await completionData(this.prisma, statusId, task.completedAt);
+        const events = await this.updateTask(
+          task,
+          { ...statusData(statusId), ...completion },
+          rule,
+          event,
+        );
+
+        return { succeeded: true, before, after: complete, events };
+      }
+
+      case AutomationAction.REMOVE_FROM_PROJECT: {
+        if (!task.projectId) {
+          return { succeeded: true, message: 'The task was not in a project.' };
+        }
+
+        const before = { projectId: task.projectId, sectionId: task.sectionId };
+
+        // A rule in a project the task is linked into takes it off that board
+        // only; its home and its other projects keep it.
+        if (task.projectId !== rule.projectId) {
+          await this.prisma.taskProject.deleteMany({
+            where: { taskId: task.id, projectId: rule.projectId },
+          });
+          return {
+            succeeded: true,
+            before: { projectId: rule.projectId, sectionId: task.sectionId },
+            after: { projectId: null, sectionId: null },
+          };
+        }
+
+        // Leaving its home while in other projects: the one it joined first
+        // becomes its home, subtasks and all.
+        if ((await this.prisma.taskProject.count({ where: { taskId: task.id } })) > 0) {
+          const placement = await leaveHome(this.prisma, task.id);
+          return { succeeded: true, before, after: placement };
+        }
+
+        /*
+         * No events. A removal raises a "moved" event in the project the task
+         * just left, and a rule there answering every move by moving the task
+         * into a section would put a sectioned task back with no project — so
+         * a task leaving is the end of this project's interest in it.
+         */
+        await this.updateTask(task, { projectId: null, sectionId: null }, rule, event);
+
+        // Its subtasks in this project leave with it, as they follow a move.
+        await this.prisma.task.updateMany({
+          where: { parentTaskId: task.id, projectId: before.projectId },
+          data: { projectId: null, sectionId: null },
+        });
+
+        return { succeeded: true, before, after: { projectId: null, sectionId: null } };
+      }
+
+      case AutomationAction.CREATE_TASK:
+        return this.createTask(config, task, rule, event, at);
+
+      case AutomationAction.SET_TASK_TYPE: {
+        const kind = config['kind'];
+        if (!(TASK_KINDS as readonly unknown[]).includes(kind)) {
+          return { succeeded: false, message: 'No task type was chosen.' };
+        }
+        const next = kind as TaskKind;
+        const before = task.kind;
+        // Converting is all it does: an approval starts pending, anything
+        // else carries no decision.
+        const events = await this.updateTask(
+          task,
+          {
+            kind: next,
+            approvalStatus: next === 'APPROVAL' ? (task.approvalStatus ?? 'PENDING') : null,
+          },
+          rule,
+          event,
+        );
+        return { succeeded: true, before, after: next, events };
+      }
+
+      case AutomationAction.ADD_REMOVE_COLLABORATORS: {
+        const people = (key: string): string[] =>
+          Array.isArray(config[key])
+            ? [
+                ...new Set(
+                  (config[key] as unknown[]).filter(
+                    (value): value is string => typeof value === 'string' && value !== '',
+                  ),
+                ),
+              ]
+            : [];
+
+        const add = people('add');
+        // Somebody named on both sides is added: the narrower instruction wins.
+        const remove = people('remove').filter((id) => !add.includes(id));
+
+        if (add.length === 0 && remove.length === 0) {
+          return { succeeded: false, message: 'Nobody was chosen to add or remove.' };
+        }
+
+        // Re-checked now, as an assignment is: the rule may be months old.
+        const members = add.length
+          ? await this.prisma.workspaceMember.findMany({
+              where: { workspaceId: rule.workspaceId, userId: { in: add } },
+              select: { userId: true },
+            })
+          : [];
+        const addable = members.map((member) => member.userId);
+
+        const already = new Set(
+          (
+            await this.prisma.follower.findMany({
+              where: { taskId: task.id, userId: { in: addable } },
+              select: { userId: true },
+            })
+          ).map((row) => row.userId),
+        );
+        const added = addable.filter((userId) => !already.has(userId));
+
+        if (added.length) {
+          await this.prisma.follower.createMany({
+            data: added.map((userId) => ({
+              workspaceId: rule.workspaceId,
+              userId,
+              taskId: task.id,
+              ticketId: null,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        const removed = remove.length
+          ? (
+              await this.prisma.follower.deleteMany({
+                where: { taskId: task.id, userId: { in: remove } },
+              })
+            ).count
+          : 0;
+
+        const departed = add.length - addable.length;
+
+        return {
+          succeeded: true,
+          after: { added, removed },
+          ...(departed > 0
+            ? {
+                message: `${departed} ${departed === 1 ? 'person is' : 'people are'} no longer in this workspace and ${departed === 1 ? 'was' : 'were'} not added.`,
+              }
+            : {}),
+          // Each new collaborator is an arrival a rule can answer.
+          events: added.map((userId) =>
+            this.follow(rule, event, AutomationTrigger.COLLABORATOR_ADDED, task.id, undefined, {
+              userId,
+            }),
+          ),
+        };
+      }
+
+      case AutomationAction.SET_TASK_NAME: {
+        const title = renderAutomationText(
+          String(config['text'] ?? ''),
+          await this.textValues(task, rule, event, at),
+        )
+          .trim()
+          .slice(0, TASK_TITLE_MAX_LENGTH);
+
+        // A task with no name is not one anybody can find again.
+        if (!title) return { succeeded: false, message: 'The new name came out empty.' };
+
+        const before = task.title;
+        const events = await this.updateTask(task, { title }, rule, event);
+        return { succeeded: true, before, after: title, events };
+      }
+
+      case AutomationAction.SET_TASK_DESCRIPTION: {
+        const text = renderAutomationText(
+          String(config['text'] ?? ''),
+          await this.textValues(task, rule, event, at),
+        ).trim();
+
+        // Stored as the editor stores it — escaped, one paragraph per line —
+        // and an empty result clears the description rather than writing <p></p>.
+        const description = text ? plainTextToHtml(text) : null;
+        const before = task.description;
+        const events = await this.updateTask(task, { description }, rule, event);
+        return { succeeded: true, before, after: text.slice(0, 100), events };
       }
 
       case AutomationAction.SET_CUSTOM_FIELD: {
@@ -1418,6 +2066,12 @@ export class AutomationRunnerService {
 
     await this.recordStories(before, updated, rule, event);
 
+    // A rule completing a repeating task makes its next occurrence, as a
+    // person completing it would.
+    if (before.completedAt === null && updated.completedAt !== null) {
+      await spawnNextOccurrence(this.prisma, task.id, event.actorId ?? null);
+    }
+
     /*
      * An assignee follows the task, whether a person or a rule assigned them.
      * Written through Prisma like every other write here — this module stays
@@ -1467,6 +2121,10 @@ export class AutomationRunnerService {
       if (before.completedAt === null && updated.completedAt !== null) {
         triggers.push(AutomationTrigger.TASK_COMPLETED);
       }
+      if (changed.includes('kind')) triggers.push(AutomationTrigger.TASK_TYPE_CHANGED);
+      if (changed.includes('approvalStatus') && updated.approvalStatus) {
+        triggers.push(AutomationTrigger.APPROVAL_STATUS_CHANGED);
+      }
       // The fields a rule can watch on their own, raised for a rule's write
       // exactly as for a person's — see `TasksService.update`.
       triggers.push(...fieldChangeTriggers(changed));
@@ -1485,6 +2143,284 @@ export class AutomationRunnerService {
         updated.projectId ?? undefined,
       ),
     );
+  }
+
+  /**
+   * "Add task to another project" — multi-homing from a rule. The task keeps
+   * its home and its place here, and gains a place in the other project: the
+   * section chosen, or that project's first. Already there is nothing to do,
+   * and says so rather than failing, so a rule that runs twice stays quiet.
+   */
+  private async addToProject(
+    task: EvaluableTask,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    projectId: string,
+    requestedSectionId: string,
+  ): Promise<ActionOutcome> {
+    const target = await this.prisma.project.findFirst({
+      where: { id: projectId, workspaceId: rule.workspaceId, archivedAt: null },
+      select: { id: true, sections: { orderBy: { position: 'asc' }, select: { id: true } } },
+    });
+    if (!target) {
+      return { succeeded: false, message: 'That project is no longer in this workspace.' };
+    }
+    const linked = await this.prisma.taskProject.findUnique({
+      where: { taskId_projectId: { taskId: task.id, projectId } },
+      select: { taskId: true },
+    });
+    if (task.projectId === projectId || linked) {
+      return { succeeded: true, message: 'The task is already in that project.' };
+    }
+
+    const sectionId =
+      (requestedSectionId
+        ? target.sections.find((row) => row.id === requestedSectionId)?.id
+        : target.sections[0]?.id) ?? null;
+    if (requestedSectionId && !sectionId) {
+      return { succeeded: false, message: 'That section is no longer in the chosen project.' };
+    }
+
+    await this.prisma.taskProject.create({
+      data: {
+        taskId: task.id,
+        projectId,
+        sectionId,
+        addedById: event.actorId ?? null,
+        position: await endOfSection(this.prisma, rule.workspaceId, projectId, sectionId),
+      },
+    });
+    return { succeeded: true, before: null, after: { projectId, sectionId } };
+  }
+
+  /**
+   * "Create a task…" — with or without a task the rule is acting on.
+   *
+   * Lands in this project, in the chosen section or the first one, last in its
+   * column as a task added there by hand would be. The name and description can
+   * use variables, which name the task the rule acted on when there is one.
+   * Credited to whoever set the rule off, then the rule's author, then the
+   * workspace owner: a task needs a creator, and a rule is not a person.
+   */
+  private async createTask(
+    config: Record<string, unknown>,
+    source: EvaluableTask | null,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    at: Date,
+  ): Promise<ActionOutcome> {
+    const values = await this.textValues(source, rule, event, at);
+    const title = renderAutomationText(String(config['title'] ?? ''), values)
+      .trim()
+      .slice(0, TASK_TITLE_MAX_LENGTH);
+
+    if (!title) return { succeeded: false, message: 'The new task has no name.' };
+
+    const project = await this.prisma.project.findFirst({
+      where: { id: rule.projectId, archivedAt: null },
+      select: { id: true, sections: { orderBy: { position: 'asc' }, select: { id: true } } },
+    });
+    if (!project) return { succeeded: false, message: 'This project is archived.' };
+
+    const requested = typeof config['sectionId'] === 'string' ? config['sectionId'] : '';
+    const section = requested
+      ? project.sections.find((row) => row.id === requested)
+      : project.sections[0];
+
+    if (requested && !section) {
+      return { succeeded: false, message: 'That section is no longer in this project.' };
+    }
+
+    const sectionId = section?.id ?? null;
+    const notes: string[] = [];
+
+    let assigneeId: string | null = null;
+    if (typeof config['assigneeId'] === 'string' && config['assigneeId'] !== '') {
+      const member = await this.prisma.workspaceMember.findFirst({
+        where: { workspaceId: rule.workspaceId, userId: config['assigneeId'] },
+        select: { userId: true },
+      });
+      if (member) assigneeId = member.userId;
+      else notes.push('The assignee is no longer in this workspace, so the task is unassigned.');
+    }
+
+    const days = config['dueInDays'];
+    const dueDate =
+      typeof days === 'number' && Number.isInteger(days) && days >= 0
+        ? toCalendarDate(new Date(at.getTime() + days * 86_400_000))
+        : null;
+
+    const describedAs =
+      typeof config['description'] === 'string'
+        ? renderAutomationText(config['description'], values).trim()
+        : '';
+
+    const createdById =
+      event.actorId ?? source?.createdById ?? rule.createdById ?? (await this.ownerOf(rule));
+    if (!createdById) {
+      return { succeeded: false, message: 'Nobody could be credited with the new task.' };
+    }
+
+    const siblings = await this.prisma.task.findMany({
+      where: {
+        workspaceId: rule.workspaceId,
+        archivedAt: null,
+        parentTaskId: null,
+        ...(sectionId ? { sectionId } : { sectionId: null, projectId: project.id }),
+      },
+      orderBy: { position: 'asc' },
+      select: { id: true, position: true },
+    });
+
+    const created = await this.prisma.task.create({
+      data: {
+        workspaceId: rule.workspaceId,
+        projectId: project.id,
+        sectionId,
+        title,
+        description: describedAs ? plainTextToHtml(describedAs) : null,
+        assigneeId,
+        dueDate,
+        position: appendPosition(siblings),
+        createdById,
+      },
+    });
+
+    if (assigneeId) {
+      await this.prisma.follower.createMany({
+        data: [
+          { workspaceId: rule.workspaceId, userId: assigneeId, taskId: created.id, ticketId: null },
+        ],
+        skipDuplicates: true,
+      });
+    }
+
+    return {
+      succeeded: true,
+      after: created.id,
+      ...(notes.length ? { message: notes.join(' ') } : {}),
+      // A new task in this project, so the rules that greet one hear of it.
+      events: [
+        this.follow(
+          rule,
+          event,
+          AutomationTrigger.TASK_CREATED,
+          created.id,
+          undefined,
+          {
+            title: created.title,
+            sectionId: created.sectionId,
+            assigneeId: created.assigneeId,
+            dueDate: created.dueDate?.toISOString() ?? null,
+          },
+          project.id,
+        ),
+      ],
+    };
+  }
+
+  /** The workspace's owner, for a rule nobody can be credited with. */
+  private async ownerOf(rule: RunnableRule): Promise<string | null> {
+    const owner = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId: rule.workspaceId, role: WorkspaceRole.OWNER },
+      orderBy: { createdAt: 'asc' },
+      select: { userId: true },
+    });
+    return owner?.userId ?? null;
+  }
+
+  /**
+   * The status that completes or reopens a task in its project.
+   *
+   * The project's own statuses when it has them, the workspace's otherwise, as
+   * the board resolves them: the first COMPLETED one to finish a task, and the
+   * first not-started — or failing that, active — one to reopen it. With no
+   * definitions at all, the legacy Done and To do.
+   */
+  private async completionStatus(
+    workspaceId: string,
+    projectId: string | null,
+    complete: boolean,
+  ): Promise<string> {
+    const select = { id: true, category: true } as const;
+    const own = projectId
+      ? await this.prisma.statusDefinition.findMany({
+          where: { workspaceId, projectId, isArchived: false },
+          orderBy: { position: 'asc' },
+          select,
+        })
+      : [];
+    const set =
+      own.length > 0
+        ? own
+        : await this.prisma.statusDefinition.findMany({
+            where: { workspaceId, projectId: null, isArchived: false },
+            orderBy: { position: 'asc' },
+            select,
+          });
+
+    const wanted = complete
+      ? set.find((row) => row.category === StatusCategory.COMPLETED)
+      : (set.find((row) => row.category === StatusCategory.NOT_STARTED) ??
+        set.find((row) => row.category === StatusCategory.ACTIVE));
+
+    return wanted?.id ?? (complete ? TaskStatus.DONE : TaskStatus.TODO);
+  }
+
+  /**
+   * What the variables in a rule's text stand for, on this run.
+   *
+   * Names are looked up now rather than stored, so a renamed assignee reads as
+   * they are called today. Dates print as people read them; an absent one is
+   * empty rather than the placeholder.
+   */
+  private async textValues(
+    task: EvaluableTask | null,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    at: Date,
+  ): Promise<Partial<Record<AutomationTextVariable, string>>> {
+    const names = await this.peopleNames(
+      [task?.assigneeId, event.actorId].filter((id): id is string => Boolean(id)),
+    );
+    const project = await this.prisma.project.findUnique({
+      where: { id: rule.projectId },
+      select: { name: true },
+    });
+
+    /*
+     * "Today" is somebody's today: the zone a clock rule was set in, else the
+     * browser of whoever pressed "Run rule", else their profile's, else UTC. A
+     * run at 3am in Manila is already tomorrow there, and the comment should
+     * say so.
+     */
+    const ruleZone = (rule.triggerConfig as Record<string, unknown> | null)?.['timezone'];
+    const configured = isTimeZone(ruleZone) ? ruleZone : event.after?.['timezone'];
+    const actorZone = event.actorId
+      ? (
+          await this.prisma.user.findUnique({
+            where: { id: event.actorId },
+            select: { timezone: true },
+          })
+        )?.timezone
+      : undefined;
+    const zone = isTimeZone(configured) ? configured : isTimeZone(actorZone) ? actorZone : 'UTC';
+    const today = new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: zone,
+    }).format(at);
+
+    return {
+      'task.name': task?.title ?? '',
+      'task.assignee': task?.assigneeId ? (names.get(task.assigneeId) ?? '') : '',
+      'task.due_date': task?.dueDate ? DAY_FORMAT.format(task.dueDate) : '',
+      'task.start_date': task?.startDate ? DAY_FORMAT.format(task.startDate) : '',
+      'project.name': project?.name ?? '',
+      triggered_by: event.actorId ? (names.get(event.actorId) ?? '') : '',
+      today,
+    };
   }
 
   /**

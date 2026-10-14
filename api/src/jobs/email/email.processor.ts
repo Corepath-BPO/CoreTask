@@ -10,6 +10,7 @@ import {
   QueueName,
   type EmailJobData,
   type InvitationEmailJobData,
+  type MessageEmailJobData,
   type WelcomeEmailJobData,
 } from '../queue-names';
 
@@ -56,6 +57,11 @@ export class EmailProcessor extends WorkerHost {
             webUrl: this.config.http.webUrl,
           }),
         );
+        return;
+      }
+
+      case EmailJob.MESSAGE: {
+        await this.email.send(job.data as MessageEmailJobData);
         return;
       }
       default:

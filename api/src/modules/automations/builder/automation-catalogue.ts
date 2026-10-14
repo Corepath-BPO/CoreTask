@@ -158,6 +158,12 @@ export const READABLE_TASK_FIELDS: readonly string[] = [
   'estimatedMinutes',
   'createdAt',
   'completedAt',
+  // Facts the runner counts when it loads the task — see `TaskFacts`.
+  'HAS_ATTACHMENT',
+  'HAS_COMMENT',
+  'NO_LONGER_BLOCKED',
+  'TASK_TYPE',
+  'APPROVAL_STATUS',
 ];
 
 const READABLE = new Set(READABLE_TASK_FIELDS);
@@ -192,6 +198,11 @@ export const CONDITION_FIELD_KINDS = {
   estimatedMinutes: ConditionValueKind.NUMBER,
   createdAt: ConditionValueKind.DATE,
   completedAt: ConditionValueKind.DATE,
+  HAS_ATTACHMENT: ConditionValueKind.BOOLEAN,
+  HAS_COMMENT: ConditionValueKind.BOOLEAN,
+  NO_LONGER_BLOCKED: ConditionValueKind.BOOLEAN,
+  TASK_TYPE: ConditionValueKind.ENUM,
+  APPROVAL_STATUS: ConditionValueKind.ENUM,
 } as const satisfies Record<string, ConditionValueKind>;
 
 /** The kind for a field key off the wire, which may be anything at all. */
@@ -371,24 +382,21 @@ const FORM_OPERATOR: Record<TriggerConfigForm, ConditionOperator | null> = {
 };
 
 /**
- * The forms `AutomationRunnerService.triggerMatches` can honour.
+ * The forms `AutomationRunnerService.triggerMatches` can honour — all four.
  *
- * It reads a single `sectionId` from the trigger's configuration and compares it
- * for equality — which covers "any move" (nothing configured, so every event
- * matches) and "moved into this one". The negated and any-of forms need a
- * configuration shape it does not read, and the danger is specific rather than
- * theoretical: a rule saved as "section is not Done" would still be matched by
- * the equality branch and fire on exactly the events it was written to exclude.
- * Offering it disabled is the difference between a missing feature and a rule
- * that does the opposite of what it says.
+ * It reads the stored `form` before the section: a rule saved as "section is
+ * not Done" must never fall through to the equality test and fire on exactly
+ * the moves it was written to exclude. Kept as a list so a fifth form starts
+ * out unavailable until the runner reads it.
  */
 const RUNNABLE_TRIGGER_FORMS: readonly TriggerConfigForm[] = [
   TRIGGER_CONFIG_FORM.SECTION_CHANGED,
   TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO,
+  TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_NOT,
+  TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_ANY_OF,
 ];
 
-const TRIGGER_FORM_REASON =
-  'The engine matches one section for equality; it cannot yet negate that test or match a list.';
+const TRIGGER_FORM_REASON = 'The engine cannot match a move this way yet.';
 
 /**
  * The order the trigger picker reads its groups in — Asana's order, with the
@@ -434,6 +442,19 @@ const TRIGGER_PICKER_LABEL: Record<AutomationTrigger, string> = {
   CUSTOM_FIELD_CHANGED: 'A custom field is changed',
   TICKET_CREATED: 'Ticket is reported',
   TICKET_STATUS_CHANGED: 'Ticket is changed…',
+  RUN_MANUALLY: 'Rule is run manually',
+  SCHEDULED_TIME: 'Scheduled time occurs…',
+  DUE_DATE_APPROACHING: 'Due date is approaching',
+  TASK_OVERDUE: 'Task is overdue',
+  START_DATE_APPROACHING: 'Start date is approaching',
+  START_DATE_PASSED: 'Start date has passed',
+  TASK_NO_LONGER_BLOCKED: 'Task is no longer blocked',
+  ATTACHMENT_ADDED: 'Attachment is added',
+  COLLABORATOR_ADDED: 'Collaborator is added',
+  TASK_TYPE_CHANGED: 'Task type is changed',
+  APPROVAL_STATUS_CHANGED: 'Approval status is changed',
+  CUSTOM_DATE_APPROACHING: 'A date field is approaching',
+  CUSTOM_DATE_PASSED: 'A date field is overdue',
 };
 
 /**
@@ -445,9 +466,25 @@ const TRIGGER_PICKER_LABEL: Record<AutomationTrigger, string> = {
  */
 const TRIGGER_PICKER_DESCRIPTION: Partial<Record<AutomationTrigger, string>> = {
   TASK_CREATED:
-    'Fires when a task is created in this project. Moving one in from elsewhere raises no event yet.',
+    'Fires when a task is created in this project, or added to it from another project.',
   TASK_COMPLETED:
     'Fires when the task itself is completed, or when the last of its open subtasks is.',
+  RUN_MANUALLY: 'Appears under Run rule in a task’s “…” menu, for anyone who can edit the project.',
+  SCHEDULED_TIME:
+    'Runs on a schedule, on the tasks you choose — or on none, to create new ones each time.',
+  DUE_DATE_APPROACHING: 'Fires the morning a set number of days before a task is due.',
+  TASK_OVERDUE: 'Fires once the due date has passed — at the due time, when the task has one.',
+  START_DATE_APPROACHING: 'Fires the morning a set number of days before a task starts.',
+  START_DATE_PASSED: 'Fires the morning the start date arrives.',
+  TASK_NO_LONGER_BLOCKED:
+    'Fires when the last unfinished task blocking it is completed or the dependency is removed.',
+  COLLABORATOR_ADDED: 'Fires when somebody new starts following the task.',
+  TASK_TYPE_CHANGED: 'Fires when a task is converted to a milestone, an approval, or back.',
+  CUSTOM_DATE_APPROACHING:
+    'Fires the morning a set number of days before the date in a custom date field.',
+  CUSTOM_DATE_PASSED: 'Fires once the day in a custom date field is over.',
+  APPROVAL_STATUS_CHANGED:
+    'Fires when an approval is approved, rejected, or sent back for changes.',
 };
 
 /**
@@ -465,127 +502,38 @@ interface PlannedTriggerSpec {
   reason: string;
 }
 
-const NOTHING_WATCHES_THE_CLOCK =
-  'Every trigger fires from an event on a task; nothing watches the clock, so a date drawing near or passing raises no event.';
-
-const PLANNED_TRIGGER_SPECS: readonly PlannedTriggerSpec[] = [
-  {
-    subtype: 'RUN_MANUALLY',
-    label: 'Rule is run manually',
-    category: TRIGGER_GROUP.UNGROUPED,
-    reason:
-      'There is no way to fire a rule by hand yet; every rule waits for an event from its project.',
-  },
-  {
-    subtype: 'SCHEDULED_TIME',
-    label: 'Scheduled time occurs…',
-    category: TRIGGER_GROUP.UNGROUPED,
-    reason: NOTHING_WATCHES_THE_CLOCK,
-  },
-  {
-    subtype: 'TASK_TYPE_CHANGED',
-    label: 'Task type is changed',
-    category: TRIGGER_GROUP.FIELD_CHANGED,
-    reason: 'A task and a ticket are separate records here, so a task carries no type to change.',
-  },
-  {
-    subtype: 'DUE_DATE_APPROACHING',
-    label: 'Due date is approaching',
-    category: TRIGGER_GROUP.DUE_DATE,
-    reason: NOTHING_WATCHES_THE_CLOCK,
-  },
-  {
-    subtype: 'TASK_OVERDUE',
-    label: 'Task is overdue',
-    category: TRIGGER_GROUP.DUE_DATE,
-    reason: NOTHING_WATCHES_THE_CLOCK,
-  },
-  {
-    subtype: 'START_DATE_APPROACHING',
-    label: 'Start date is approaching',
-    category: TRIGGER_GROUP.START_DATE,
-    reason: NOTHING_WATCHES_THE_CLOCK,
-  },
-  {
-    subtype: 'START_DATE_PASSED',
-    label: 'Start date has passed',
-    category: TRIGGER_GROUP.START_DATE,
-    reason: NOTHING_WATCHES_THE_CLOCK,
-  },
-  {
-    subtype: 'APPROVAL_STATUS_CHANGED',
-    label: 'Approval status is changed',
-    category: TRIGGER_GROUP.STATUS_CHANGED,
-    reason: NO_APPROVALS_REASON,
-  },
-  {
-    subtype: 'TASK_NO_LONGER_BLOCKED',
-    label: 'Task is no longer blocked',
-    category: TRIGGER_GROUP.STATUS_CHANGED,
-    reason:
-      'Nothing blocks one task on another here — only a BLOCKED status — so there is no event for a task coming unblocked.',
-  },
-  {
-    subtype: 'ATTACHMENT_ADDED',
-    label: 'Attachment is added',
-    category: TRIGGER_GROUP.ADDED_TO_TASK,
-    reason: 'Adding an attachment does not raise an automation event yet.',
-  },
-  {
-    subtype: 'COLLABORATOR_ADDED',
-    label: 'Collaborator is added',
-    category: TRIGGER_GROUP.ADDED_TO_TASK,
-    reason:
-      'A task has one assignee here rather than a collaborator list, so there is nobody to add that could fire this.',
-  },
-];
-
-/** The key a generated per-field *date* trigger row carries. Never a valid node
-    subtype — these rows are all disabled — but unique, so the client can key
-    and icon them; its icon map splits on the first colon. */
-export function customFieldTriggerKey(fieldId: string, kind: 'APPROACHING' | 'OVERDUE'): string {
-  return `customFieldTrigger:${fieldId}:${kind}`;
-}
+const PLANNED_TRIGGER_SPECS: readonly PlannedTriggerSpec[] = [];
 
 /**
  * Asana's per-field trigger rows, generated from the project's own fields.
  *
- * "[Field] is changed" is real: it is `CUSTOM_FIELD_CHANGED` with the field
- * pre-filled — the same shape the generated `SET_CUSTOM_FIELD` action rows use —
- * and the runner narrows on that `fieldId`. The date variants stay greyed:
- * they would need something watching the clock, and nothing does.
+ * Each is a real trigger with the field pre-filled — the same shape the
+ * generated `SET_CUSTOM_FIELD` action rows use. "[Field] is changed" is
+ * `CUSTOM_FIELD_CHANGED`, which the runner narrows on that `fieldId`; a date
+ * field's "is approaching" and "is overdue" are the clock's two custom-date
+ * triggers, which read that field's value.
  */
 function customFieldTriggerRows(fields: readonly CatalogueCustomField[]): AutomationTriggerEntry[] {
   return settable(fields).flatMap((field) => {
-    const dateRow = (kind: 'APPROACHING' | 'OVERDUE', label: string): AutomationTriggerEntry => ({
-      subtype: customFieldTriggerKey(field.id, kind),
+    const row = (subtype: AutomationTrigger, label: string): AutomationTriggerEntry => ({
+      subtype,
       label,
       description: '',
       category: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
-      available: false,
-      reason: NOTHING_WATCHES_THE_CLOCK,
+      available: true,
+      reason: null,
       configForms: [],
       fieldId: field.id,
       fieldName: field.name,
     });
 
     return [
-      {
-        subtype: AutomationTrigger.CUSTOM_FIELD_CHANGED,
-        label: `${field.name} is changed`,
-        description: '',
-        category: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
-        available: true,
-        reason: null,
-        configForms: [],
-        fieldId: field.id,
-        fieldName: field.name,
-      },
+      row(AutomationTrigger.CUSTOM_FIELD_CHANGED, `${field.name} is changed`),
       // Only a date can approach or pass.
       ...(field.type === 'DATE'
         ? [
-            dateRow('APPROACHING', `${field.name} is approaching`),
-            dateRow('OVERDUE', `${field.name} is overdue`),
+            row(AutomationTrigger.CUSTOM_DATE_APPROACHING, `${field.name} is approaching`),
+            row(AutomationTrigger.CUSTOM_DATE_PASSED, `${field.name} is overdue`),
           ]
         : []),
     ];
@@ -608,6 +556,8 @@ function customFieldTriggerRows(fields: readonly CatalogueCustomField[]): Automa
  * appears exactly once so a new trigger cannot quietly fall out of this list.
  */
 const REAL_TRIGGER_ORDER: readonly AutomationTrigger[] = [
+  AutomationTrigger.RUN_MANUALLY,
+  AutomationTrigger.SCHEDULED_TIME,
   AutomationTrigger.TASK_MOVED_TO_SECTION,
   AutomationTrigger.TASK_CREATED,
   AutomationTrigger.TICKET_CREATED,
@@ -618,12 +568,23 @@ const REAL_TRIGGER_ORDER: readonly AutomationTrigger[] = [
   AutomationTrigger.TASK_DESCRIPTION_CHANGED,
   AutomationTrigger.TASK_ESTIMATE_CHANGED,
   AutomationTrigger.TASK_DUE_DATE_CHANGED,
+  AutomationTrigger.DUE_DATE_APPROACHING,
+  AutomationTrigger.TASK_OVERDUE,
   AutomationTrigger.TASK_START_DATE_CHANGED,
+  AutomationTrigger.START_DATE_APPROACHING,
+  AutomationTrigger.START_DATE_PASSED,
+  AutomationTrigger.TASK_TYPE_CHANGED,
   AutomationTrigger.TASK_STATUS_CHANGED,
+  AutomationTrigger.APPROVAL_STATUS_CHANGED,
   AutomationTrigger.TICKET_STATUS_CHANGED,
   AutomationTrigger.TASK_COMPLETED,
+  AutomationTrigger.TASK_NO_LONGER_BLOCKED,
   AutomationTrigger.CUSTOM_FIELD_CHANGED,
+  AutomationTrigger.CUSTOM_DATE_APPROACHING,
+  AutomationTrigger.CUSTOM_DATE_PASSED,
   AutomationTrigger.COMMENT_ADDED,
+  AutomationTrigger.ATTACHMENT_ADDED,
+  AutomationTrigger.COLLABORATOR_ADDED,
 ];
 
 export function triggerCatalogue(
@@ -712,6 +673,19 @@ function triggerCategory(trigger: AutomationTrigger): string {
     TICKET_STATUS_CHANGED: TRIGGER_GROUP.STATUS_CHANGED,
     CUSTOM_FIELD_CHANGED: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
     COMMENT_ADDED: TRIGGER_GROUP.ADDED_TO_TASK,
+    RUN_MANUALLY: TRIGGER_GROUP.UNGROUPED,
+    SCHEDULED_TIME: TRIGGER_GROUP.UNGROUPED,
+    DUE_DATE_APPROACHING: TRIGGER_GROUP.DUE_DATE,
+    TASK_OVERDUE: TRIGGER_GROUP.DUE_DATE,
+    START_DATE_APPROACHING: TRIGGER_GROUP.START_DATE,
+    START_DATE_PASSED: TRIGGER_GROUP.START_DATE,
+    TASK_NO_LONGER_BLOCKED: TRIGGER_GROUP.STATUS_CHANGED,
+    ATTACHMENT_ADDED: TRIGGER_GROUP.ADDED_TO_TASK,
+    COLLABORATOR_ADDED: TRIGGER_GROUP.ADDED_TO_TASK,
+    TASK_TYPE_CHANGED: TRIGGER_GROUP.FIELD_CHANGED,
+    APPROVAL_STATUS_CHANGED: TRIGGER_GROUP.STATUS_CHANGED,
+    CUSTOM_DATE_APPROACHING: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
+    CUSTOM_DATE_PASSED: TRIGGER_GROUP.CUSTOM_FIELD_CHANGED,
   };
 
   return byTrigger[trigger];
@@ -864,7 +838,7 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Task type is…',
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: 'A task and a ticket are separate records here, so a task carries no type to compare.',
+    description: 'Task, milestone or approval.',
   },
   {
     subtype: 'completed',
@@ -892,21 +866,14 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Approval status is…',
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: NO_APPROVALS_REASON,
+    description: 'Empty for anything that is not an approval.',
   },
   {
     subtype: 'NO_LONGER_BLOCKED',
     label: 'Task is no longer blocked',
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.CHECKBOX,
-    /*
-     * Two things missing at once, and both matter. There are no blocking
-     * relationships between tasks — only a `BLOCKED` status — and a condition
-     * tests what is true now rather than what changed, so even with them this
-     * would need a trigger rather than a check.
-     */
-    reason:
-      'Nothing blocks one task on another here, and a condition tests what is true now rather than what just changed.',
+    description: 'Holds when no unfinished task is blocking it.',
   },
 
   // Task details
@@ -924,14 +891,12 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Task has an attachment',
     category: CONDITION_CATEGORY.TASK_HAS,
     valueType: CONDITION_VALUE_TYPE.CHECKBOX,
-    reason: TASK_ALONE_REASON,
   },
   {
     subtype: 'HAS_COMMENT',
     label: 'Task has a comment',
     category: CONDITION_CATEGORY.TASK_HAS,
     valueType: CONDITION_VALUE_TYPE.CHECKBOX,
-    reason: TASK_ALONE_REASON,
   },
 
   // Create your own
@@ -1070,8 +1035,8 @@ interface ActionSpec {
   description?: string;
 }
 
-const NEEDS_VARIABLES_REASON =
-  'Text-setting actions wait on variables — one that can only write a constant would give every task it touches the same words.';
+const VARIABLES_DESCRIPTION =
+  'Can name the task, its assignee, dates and project with variables like {{task.name}}.';
 
 /**
  * The hand-written action rows, in catalogue order.
@@ -1097,16 +1062,16 @@ const ACTION_SPECS: readonly ActionSpec[] = [
      * What becomes of what the task carries is decided in the runner, and the
      * description says the half somebody building the rule needs: the task
      * lands in a section of the chosen project and keeps its field values.
-     * Only a move — a task lives in one project here, so there is no "add".
+     * "Add" (`mode: 'ADD'`) keeps it here as well — multi-homing.
      */
     description:
-      'The task keeps its fields and lands in the chosen section, or the project’s first one.',
+      'Move the task, or add it there too; it lands in the chosen section, or the project’s first one.',
   },
   {
-    subtype: 'REMOVE_FROM_PROJECT',
+    subtype: AutomationAction.REMOVE_FROM_PROJECT,
     label: 'Remove task from the project',
     category: ACTION_CATEGORY.MOVE_TASK,
-    reason: 'No action detaches a task from its project.',
+    description: 'The task leaves the project but keeps its assignee, so it stays in My Tasks.',
   },
 
   // Change status
@@ -1117,17 +1082,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     reason: 'Coming later.',
   },
   {
-    subtype: 'SET_COMPLETION',
+    subtype: AutomationAction.SET_COMPLETION,
     label: 'Change completion status to…',
     category: ACTION_CATEGORY.CHANGE_STATUS,
     /*
-     * Not a missing action so much as a different model. Completion is derived
-     * here: `UPDATE_STATUS` stamps `completedAt` when the status becomes Done
-     * and there is no flag to set on its own — and nothing clears it, so the
-     * "not complete" half would not work even if the flag were exposed.
+     * Completion follows the status here, so this moves the task to the
+     * project's own Done status — or back to its first open one — and the
+     * status change stamps or clears `completedAt` as any edit would.
      */
-    reason:
-      'Completion follows the status here: setting the status to Done marks the task complete, and there is no separate flag to set or clear.',
+    description: 'Moves the task to the project’s Done status, or back to its first open one.',
   },
   {
     subtype: 'SET_TICKET',
@@ -1158,16 +1121,16 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'Takes a number of days from now rather than a fixed date.',
   },
   {
-    subtype: 'SET_TASK_NAME',
+    subtype: AutomationAction.SET_TASK_NAME,
     label: 'Set task name to',
     category: ACTION_CATEGORY.CHANGE_FIELD,
-    reason: NEEDS_VARIABLES_REASON,
+    description: VARIABLES_DESCRIPTION,
   },
   {
-    subtype: 'SET_TASK_DESCRIPTION',
+    subtype: AutomationAction.SET_TASK_DESCRIPTION,
     label: 'Set task description to',
     category: ACTION_CATEGORY.CHANGE_FIELD,
-    reason: NEEDS_VARIABLES_REASON,
+    description: VARIABLES_DESCRIPTION,
   },
   {
     subtype: AutomationAction.UNASSIGN_USER,
@@ -1204,11 +1167,11 @@ const ACTION_SPECS: readonly ActionSpec[] = [
 
   // Create new
   {
-    subtype: 'CREATE_TASK',
+    subtype: AutomationAction.CREATE_TASK,
     label: 'Create a task…',
     category: ACTION_CATEGORY.CREATE_NEW,
-    reason:
-      'The engine can create a subtask of the task it is acting on, but not a task beside it.',
+    description:
+      'A new task in this project, with a name that can use variables, a section, an assignee and a due date.',
   },
   {
     subtype: AutomationAction.CREATE_SUBTASK,
@@ -1233,10 +1196,10 @@ const ACTION_SPECS: readonly ActionSpec[] = [
       'A project is not a heavier task in this data model, so there is nothing to convert to.',
   },
   {
-    subtype: 'SET_TASK_TYPE',
+    subtype: AutomationAction.SET_TASK_TYPE,
     label: 'Set task type to',
     category: ACTION_CATEGORY.CONVERT,
-    reason: 'A task and a ticket are separate records here; a task has no type to set.',
+    description: 'Converts to a task, a milestone or an approval — an approval starts pending.',
   },
 
   // Add to task
@@ -1249,6 +1212,13 @@ const ACTION_SPECS: readonly ActionSpec[] = [
 
   // Send to another tool
   {
+    subtype: AutomationAction.SEND_EMAIL,
+    label: 'Send an email…',
+    category: ACTION_CATEGORY.EXTERNAL,
+    description:
+      'Emails the assignee, collaborators or creator, with a link to the task. Variables fill in the words.',
+  },
+  {
     subtype: AutomationAction.SEND_WEBHOOK,
     label: 'Send a webhook…',
     category: ACTION_CATEGORY.EXTERNAL,
@@ -1256,10 +1226,10 @@ const ACTION_SPECS: readonly ActionSpec[] = [
       'POSTs the task as JSON to a webhook endpoint from Settings (signed), or to a URL you enter.',
   },
   {
-    subtype: 'ADD_REMOVE_COLLABORATORS',
+    subtype: AutomationAction.ADD_REMOVE_COLLABORATORS,
     label: 'Add or remove collaborators',
     category: ACTION_CATEGORY.ADD_TO_TASK,
-    reason: 'A task has an assignee here, and no collaborator list to add anyone to.',
+    description: 'Collaborators follow the task and hear about its comments and changes.',
   },
   {
     subtype: AutomationAction.SEND_IN_APP_NOTIFICATION,

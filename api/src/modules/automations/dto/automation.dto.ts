@@ -1,8 +1,13 @@
-import { AUTOMATION_NODE_TYPES, AUTOMATION_TRIGGERS } from '@coretask/contracts';
+import {
+  AUTOMATION_NODE_TYPES,
+  AUTOMATION_TRIGGERS,
+  MAX_MANUAL_RUN_TASKS,
+} from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -10,6 +15,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -152,4 +158,26 @@ export class UpdateRuleDto {
   @ValidateNested({ each: true })
   @Type(() => AutomationNodeDto)
   nodes?: AutomationNodeDto[];
+}
+
+export class RunRuleDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: `The tasks to run the rule on, at most ${MAX_MANUAL_RUN_TASKS}.`,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_MANUAL_RUN_TASKS)
+  @IsUUID('all', { each: true })
+  taskIds!: string[];
+
+  @ApiPropertyOptional({
+    example: 'America/Chicago',
+    description: 'The runner’s own timezone, for dates the rule writes. Ignored if unknown.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  timezone?: string;
 }

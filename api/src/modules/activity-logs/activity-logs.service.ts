@@ -215,6 +215,39 @@ export class ActivityLogsService {
   }
 
   /**
+   * A project's whole history, newest first, paged by id — the project's
+   * Activity tab. Every line recorded against the project or anything in it
+   * (tasks, tickets, comments, files), filtered by the same visibility rule as
+   * the workspace feed, so a private project's lines reach only its members.
+   */
+  async listForProject(
+    workspaceId: string,
+    actor: ActorContext,
+    projectId: string,
+    query: { before?: string | undefined; limit?: number | undefined } = {},
+  ): Promise<ItemActivityPage> {
+    const limit = Math.min(query.limit ?? ITEM_ACTIVITY_PAGE_LIMIT, ITEM_ACTIVITY_PAGE_LIMIT);
+
+    const rows = await this.prisma.activityLog.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        AND: [this.access.scopedWhere(actor)],
+        ...(query.before ? { id: { lt: query.before } } : {}),
+      },
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+      include: { actor: { select: ACTOR_SELECT } },
+    });
+
+    const page = rows.slice(0, limit);
+    return {
+      items: page.map((entry) => this.toEntry(entry)),
+      nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
    * One item's stories, newest first, paged by id.
    *
    * Ids are UUID v7 and therefore time-ordered, so `before` is a cursor that

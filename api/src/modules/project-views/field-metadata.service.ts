@@ -1,3 +1,4 @@
+import type { ColorToken } from '@coretask/contracts';
 import type { CustomFieldType } from '@coretask/contracts';
 import type { ProjectFieldMetadata } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
@@ -24,7 +25,7 @@ export class FieldMetadataService {
   ) {}
 
   async forProject(workspaceId: string, projectId: string): Promise<ProjectFieldMetadata> {
-    const [customFields, statuses, priorities, sections, members] = await Promise.all([
+    const [customFields, statuses, priorities, sections, members, tags] = await Promise.all([
       this.fields.list(workspaceId, projectId),
       this.definitions.listStatuses(workspaceId, projectId),
       this.definitions.listPriorities(workspaceId),
@@ -37,6 +38,11 @@ export class FieldMetadataService {
         where: { workspaceId, user: { isServiceAccount: false } },
         select: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
         orderBy: { user: { name: 'asc' } },
+      }),
+      this.prisma.tag.findMany({
+        where: { workspaceId },
+        orderBy: { nameKey: 'asc' },
+        select: { id: true, name: true, color: true },
       }),
     ]);
 
@@ -56,6 +62,7 @@ export class FieldMetadataService {
       })),
       sections,
       members: members.map((member) => member.user),
+      tags: tags.map((tag) => ({ ...tag, color: tag.color as ColorToken })),
     };
   }
 

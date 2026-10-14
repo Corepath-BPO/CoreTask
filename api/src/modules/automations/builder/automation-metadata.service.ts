@@ -6,6 +6,10 @@ import {
   TASK_STATUSES,
   WorkspaceRole,
   hasAtLeastRole,
+  APPROVAL_STATUSES,
+  APPROVAL_STATUS_LABEL,
+  TASK_KINDS,
+  TASK_KIND_LABEL,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -353,6 +357,36 @@ export class AutomationMetadataService {
       },
       { field: 'createdAt', label: 'Created', valueKind: CONDITION_FIELD_KINDS.createdAt },
       { field: 'completedAt', label: 'Completed on', valueKind: CONDITION_FIELD_KINDS.completedAt },
+      {
+        field: 'TASK_TYPE',
+        label: 'Task type',
+        valueKind: CONDITION_FIELD_KINDS.TASK_TYPE,
+        options: TASK_KINDS.map((value) => ({ value, label: TASK_KIND_LABEL[value] })),
+      },
+      {
+        field: 'APPROVAL_STATUS',
+        label: 'Approval status',
+        valueKind: CONDITION_FIELD_KINDS.APPROVAL_STATUS,
+        options: APPROVAL_STATUSES.map((value) => ({
+          value,
+          label: APPROVAL_STATUS_LABEL[value],
+        })),
+      },
+      {
+        field: 'HAS_ATTACHMENT',
+        label: 'Has an attachment',
+        valueKind: CONDITION_FIELD_KINDS.HAS_ATTACHMENT,
+      },
+      {
+        field: 'HAS_COMMENT',
+        label: 'Has a comment',
+        valueKind: CONDITION_FIELD_KINDS.HAS_COMMENT,
+      },
+      {
+        field: 'NO_LONGER_BLOCKED',
+        label: 'No longer blocked',
+        valueKind: CONDITION_FIELD_KINDS.NO_LONGER_BLOCKED,
+      },
     ];
   }
 }

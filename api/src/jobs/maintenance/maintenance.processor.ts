@@ -3,6 +3,7 @@ import { Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Queue, type Job } from 'bullmq';
 
 import { AttachmentSweeperService } from '../../modules/attachments/attachment-sweeper.service';
+import { AutomationClockService } from '../../modules/automations/automation-clock.service';
 import { WebhookDeliveryService } from '../../modules/webhooks/webhook-delivery.service';
 import { MaintenanceJob, QueueName } from '../queue-names';
 
@@ -10,6 +11,11 @@ import { MaintenanceJob, QueueName } from '../queue-names';
 const SWEEP_INTERVAL_MS = 60 * 60_000;
 /** Delivery records age out by the day, so a daily purge keeps up with them. */
 const PURGE_INTERVAL_MS = 24 * 60 * 60_000;
+/**
+ * Scheduled rules are set to the minute, so the clock looks once a minute.
+ * Each look is a handful of indexed queries per live timed rule.
+ */
+const AUTOMATION_CLOCK_INTERVAL_MS = 60_000;
 
 /**
  * Periodic housekeeping the request path should not be doing.
@@ -26,6 +32,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
   constructor(
     private readonly sweeper: AttachmentSweeperService,
     private readonly webhookDeliveries: WebhookDeliveryService,
+    private readonly automationClock: AutomationClockService,
     @InjectQueue(QueueName.MAINTENANCE) private readonly queue: Queue,
   ) {
     super();
@@ -34,6 +41,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
   async onApplicationBootstrap(): Promise<void> {
     await this.schedule(MaintenanceJob.SWEEP_ABANDONED_UPLOADS, SWEEP_INTERVAL_MS);
     await this.schedule(MaintenanceJob.PURGE_WEBHOOK_DELIVERIES, PURGE_INTERVAL_MS);
+    await this.schedule(MaintenanceJob.AUTOMATION_CLOCK, AUTOMATION_CLOCK_INTERVAL_MS);
   }
 
   async process(job: Job): Promise<unknown> {
@@ -42,6 +50,8 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
         return this.sweeper.sweepAbandonedUploads();
       case MaintenanceJob.PURGE_WEBHOOK_DELIVERIES:
         return this.webhookDeliveries.purgeExpired();
+      case MaintenanceJob.AUTOMATION_CLOCK:
+        return this.automationClock.tick();
       default:
         this.logger.warn({ name: job.name }, 'Unknown maintenance job');
         return { skipped: true };

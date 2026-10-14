@@ -5,6 +5,7 @@ import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { AutomationEventsModule } from '../automations/automation-events.module';
 import { FollowersModule } from '../followers/followers.module';
 import { ProjectAccessModule } from '../project-access/project-access.module';
+import { TaskEmailUpdatesModule } from '../project-email/task-email-updates.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
@@ -28,6 +29,7 @@ import { CommentsService } from './comments.service';
     ProjectAccessModule,
     FollowersModule,
     AutomationEventsModule,
+    TaskEmailUpdatesModule,
   ],
   controllers: [TaskCommentsController, TicketCommentsController, CommentsController],
   providers: [CommentsService],

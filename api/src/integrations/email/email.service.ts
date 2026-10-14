@@ -11,6 +11,8 @@ export interface EmailMessage {
   subject: string;
   text: string;
   html?: string;
+  /** Where a reply goes — a task's reply address, for update emails. */
+  replyTo?: string;
 }
 
 @Injectable()

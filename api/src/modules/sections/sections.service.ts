@@ -231,9 +231,14 @@ export class SectionsService {
         where: { sectionId },
         data: { sectionId: fallback?.id ?? null },
       });
+      // Tasks linked into this project from elsewhere go the same way.
+      const linked = await tx.taskProject.updateMany({
+        where: { sectionId },
+        data: { sectionId: fallback?.id ?? null },
+      });
 
       await tx.section.delete({ where: { id: sectionId } });
-      return count;
+      return count + linked.count;
     });
 
     await this.activity.record({

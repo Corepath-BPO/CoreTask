@@ -20,6 +20,17 @@ export class TaskUserDto {
   isServiceAccount?: boolean;
 }
 
+export class TagRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Urgent' })
+  name!: string;
+
+  @ApiProperty({ example: 'red', description: 'A colour token.' })
+  color!: string;
+}
+
 export class TaskDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -113,6 +124,9 @@ export class TaskDto {
   @ApiProperty({ example: 1, description: 'Confirmed uploads only.' })
   attachmentCount!: number;
 
+  @ApiProperty({ type: () => [TagRefDto], description: 'Its tags, alphabetical.' })
+  tags!: TagRefDto[];
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
@@ -154,6 +168,13 @@ export class TaskDetailDto extends TaskDto {
 
   @ApiProperty({ type: TaskUserDto, nullable: true })
   createdBy!: TaskUserDto | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Set by "Mark as duplicate": the task this one repeats, as `{ id, title }`.',
+    example: null,
+  })
+  duplicateOf!: { id: string; title: string } | null;
 }
 
 export class TaskListSummaryDto {

@@ -1,4 +1,11 @@
-import { ActivityAction, ServerEvent, WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
+import {
+  ActivityAction,
+  ActivityEntity,
+  AutomationTrigger,
+  ServerEvent,
+  WorkspaceRole,
+  hasAtLeastRole,
+} from '@coretask/contracts';
 import type { Follower } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 
@@ -7,6 +14,7 @@ import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
 import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { ItemLink, ItemRef } from './item-ref';
@@ -42,6 +50,7 @@ export class FollowersService {
     private readonly activity: ActivityLogsService,
     private readonly access: ProjectAccessService,
     private readonly broadcast: ProjectBroadcastService,
+    private readonly automation: AutomationEventPublisher,
   ) {}
 
   /**
@@ -129,6 +138,21 @@ export class FollowersService {
           : `Added ${users.map((user) => user.label).join(', ')} to ${ref.label}`,
         metadata: { users, self },
       });
+
+      // "Collaborator is added", once per person, for a task in a project.
+      if (ref.entity === ActivityEntity.TASK && ref.projectId) {
+        for (const userId of added) {
+          await this.automation.publish({
+            workspaceId: ref.workspaceId,
+            projectId: ref.projectId,
+            trigger: AutomationTrigger.COLLABORATOR_ADDED,
+            entityType: 'TASK',
+            entityId: ref.entityId,
+            actorId,
+            after: { userId },
+          });
+        }
+      }
     }
 
     return this.list(ref.workspaceId, ref.link);

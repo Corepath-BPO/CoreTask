@@ -7,8 +7,12 @@ import {
   type AutomationEvent,
 } from '../../modules/automations/automation-event.publisher';
 import { AutomationRunnerService } from '../../modules/automations/automation-runner.service';
+import { AppConfigService } from '../../config/app-config.service';
+import { EmailQueue } from '../email/email.queue';
 import { QueueName } from '../queue-names';
 import { WebhookQueue } from '../webhook/webhook.queue';
+
+import { composeRuleEmail } from './rule-email';
 
 /**
  * Drains automation events.
@@ -26,6 +30,8 @@ export class AutomationProcessor extends WorkerHost {
     private readonly runner: AutomationRunnerService,
     private readonly publisher: AutomationEventPublisher,
     private readonly webhooks: WebhookQueue,
+    private readonly emails: EmailQueue,
+    private readonly config: AppConfigService,
   ) {
     super();
   }
@@ -59,6 +65,12 @@ export class AutomationProcessor extends WorkerHost {
       await this.webhooks.enqueueRuleSend(request);
     }
 
+    // And for "Send an email": composed with the task's link, then queued.
+    const webUrl = (this.config.http.webUrl.split(',')[0] ?? '').trim();
+    for (const request of result.emails) {
+      await this.emails.enqueueMessage(composeRuleEmail(request, webUrl));
+    }
+
     if (result.executed > 0) {
       this.logger.log(
         {
@@ -69,6 +81,7 @@ export class AutomationProcessor extends WorkerHost {
           skipped: result.skipped,
           published: result.events.length,
           webhooks: result.webhooks.length,
+          emails: result.emails.length,
         },
         'Automation rules executed',
       );
@@ -81,6 +94,7 @@ export class AutomationProcessor extends WorkerHost {
       skipped: result.skipped,
       published: result.events.length,
       webhooks: result.webhooks.length,
+      emails: result.emails.length,
     };
   }
 }
