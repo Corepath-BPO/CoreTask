@@ -15,6 +15,7 @@ import {
   AUTOMATION_DELAY_UNIT_LABEL,
   AutomationDelayUnit,
   delayProblem,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
 import { ChevronDown, X } from 'lucide-react';
@@ -35,6 +36,7 @@ import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
+import { AiActionFields, AiCheckFields } from './ai-step-fields';
 import {
   canonicalOperator,
   operatorOptionLabel,
@@ -126,6 +128,13 @@ export function NodeConfigFields({
 
   /* A branch holds the comparison that chooses its arm, so it is configured
      exactly as a condition is — one decision, one node. */
+  if (
+    (node.type === 'CONDITION' || node.type === 'BRANCH') &&
+    node.configuration['field'] === AI_CHECK_FIELD
+  ) {
+    return <AiCheckFields configuration={node.configuration} onChange={onChange} />;
+  }
+
   if (node.type === 'CONDITION' || node.type === 'BRANCH') {
     return (
       <ConditionFields configuration={node.configuration} metadata={metadata} onChange={onChange} />
@@ -852,6 +861,11 @@ function ActionFields({
 
     case 'SEND_EMAIL':
       return <SendEmailFields configuration={configuration} onChange={onChange} />;
+
+    case 'AI_ACTION':
+      return (
+        <AiActionFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
 
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;

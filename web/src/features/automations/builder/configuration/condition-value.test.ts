@@ -114,3 +114,11 @@ describe('choosing a condition from the catalogue', () => {
     expect(conditionFromCatalogueEntry({ subtype: 'status' })).toEqual({ field: 'status' });
   });
 });
+
+describe('the AI check from the catalogue', () => {
+  it('writes the field and leaves the question to be asked, with no comparison', () => {
+    expect(
+      conditionFromCatalogueEntry({ subtype: 'ai.check', valueType: CONDITION_VALUE_TYPE.TEXT }),
+    ).toEqual({ field: 'ai.check' });
+  });
+});

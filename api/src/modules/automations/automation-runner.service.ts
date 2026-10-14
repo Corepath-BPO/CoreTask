@@ -46,6 +46,7 @@ import {
   isTicketConditionField,
   delayMs,
   describeDelay,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -63,6 +64,7 @@ import { appendPosition } from '../../common/utils/position.util';
 import { plainTextToHtml } from '../../common/utils/rich-text.util';
 import { toCalendarDate } from '../../common/utils/schedule.util';
 import { PrismaService } from '../../database/prisma.service';
+import { AiUnavailableError } from '../../integrations/ai/ai-client';
 import { RealtimeRelayPublisher } from '../../websocket/realtime-relay.publisher';
 import { diffItemStories, snapshotFromTask } from '../activity-logs/item-stories';
 import { toValueDto } from '../custom-fields/custom-field-value.mapper';
@@ -71,6 +73,7 @@ import { labelValue } from '../custom-fields/lib/value-labels';
 import { completionData, priorityData, readActionId, statusData } from './action-config';
 import type { RuleEmailRequest, RuleWebhookRequest } from '../../jobs/queue-names';
 
+import { AutomationAiService } from './automation-ai.service';
 import type { AutomationEvent } from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
@@ -190,6 +193,14 @@ interface TaskContext {
   live: EvaluableTask;
 }
 
+/** What one "Check with AI" answered in a run, or why it could not. */
+interface AiCheckRecord {
+  node: AutomationNode;
+  holds: boolean;
+  reason?: string;
+  error?: string;
+}
+
 /**
  * Evaluates and runs automation rules.
  *
@@ -204,6 +215,8 @@ export class AutomationRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly relay: RealtimeRelayPublisher,
+    /** The AI steps. Absent, as in a test that builds the runner by hand, they fail with a reason. */
+    private readonly ai?: AutomationAiService,
   ) {}
 
   /**
@@ -644,18 +657,34 @@ export class AutomationRunnerService {
     // Conditions are all-or-nothing: a rule whose conditions do not hold has
     // not failed, it simply does not apply. Recorded as SKIPPED with a reason
     // so the history distinguishes "did not match" from "went wrong".
-    const plan = this.plan(
+    const checks: AiCheckRecord[] = [];
+    const plan = await this.plan(
       rule.nodes,
-      (node) => this.conditionHolds(node, asFound, event),
+      (node) => this.holdsAsked(node, asFound, event, rule, checks),
       event.resumeFromNodeId,
     );
+    await this.recordAiChecks(execution.id, checks);
 
     if (plan.skippedBy) {
+      const stopping = checks.find((check) => check.node.id === plan.stoppedBy?.id);
+
+      // An AI check that could not be asked has not answered no: the rule went
+      // wrong rather than not applying, and the history should say which.
+      if (stopping?.error) {
+        await this.finish(execution.id, AutomationExecutionStatus.FAILED, started, {
+          error: `The AI check could not run: ${stopping.error}`,
+        });
+        await this.bumpRule(rule.id, AutomationExecutionStatus.FAILED, true);
+        return { ran: false, events: [], webhooks: [], emails: [] };
+      }
+
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
         skippedReason:
           plan.skippedBy === 'the rule changed while it was waiting'
             ? 'The rule changed while this run was waiting.'
-            : `Condition not met: ${plan.skippedBy}.`,
+            : stopping
+              ? `AI answered no: ${stopping.reason || 'no reason given'}`.slice(0, 500)
+              : `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
       return { ran: false, events: [], webhooks: [], emails: [] };
@@ -880,22 +909,37 @@ export class AutomationRunnerService {
    * judged on the event it was given, not on what a sibling rule on the same
    * event has since written. See `TaskContext`.
    */
-  private plan(
+  private async plan(
     nodes: AutomationNode[],
-    holds: (node: AutomationNode) => boolean,
+    /*
+     * Asynchronous because "Check with AI" asks a model. Only the conditions
+     * the walk reaches are asked — a row below the one that matched, or an
+     * arm not taken, costs nothing.
+     */
+    holds: (node: AutomationNode) => boolean | Promise<boolean>,
     /** A Wait step to pick up after, when the clock resumes a run. */
     resumeFrom?: string | null,
-  ): { actions: AutomationNode[]; delays: AutomationNode[]; skippedBy: string | null } {
+  ): Promise<{
+    actions: AutomationNode[];
+    delays: AutomationNode[];
+    skippedBy: string | null;
+    /** The condition that stopped the run, when one did. */
+    stoppedBy?: AutomationNode;
+  }> {
     const isTree = nodes.some((node) => node.parentNodeId !== null);
 
     if (!isTree) {
       // Every condition, again on a resumed run: the task may have changed
       // while the run waited.
-      const unmet = nodes
-        .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
-        .find((node) => !holds(node));
+      let unmet: AutomationNode | undefined;
+      for (const node of nodes.filter((row) => row.nodeType === AutomationNodeType.CONDITION)) {
+        if (!(await holds(node))) {
+          unmet = node;
+          break;
+        }
+      }
 
-      if (unmet) return { actions: [], delays: [], skippedBy: unmet.subtype };
+      if (unmet) return { actions: [], delays: [], skippedBy: unmet.subtype, stoppedBy: unmet };
 
       // In order, up to the next Wait step — or from just after the one a
       // resumed run waited at.
@@ -933,6 +977,7 @@ export class AutomationRunnerService {
     const actions: AutomationNode[] = [];
     const delays: AutomationNode[] = [];
     let skippedBy: string | null = null;
+    let stoppedBy: AutomationNode | undefined;
 
     const childrenOf = (parentId: string, arm: string | null) =>
       nodes
@@ -951,7 +996,12 @@ export class AutomationRunnerService {
      * condition further down still governs what follows it, and a rule that
      * checks two things in sequence must go on doing both.
      */
-    const walk = (nodeId: string, arm: string | null, depth: number, rows = false): void => {
+    const walk = async (
+      nodeId: string,
+      arm: string | null,
+      depth: number,
+      rows = false,
+    ): Promise<void> => {
       if (depth > 50) return;
 
       // Which is to say: a row has already claimed this event. Ordering is by
@@ -964,27 +1014,28 @@ export class AutomationRunnerService {
 
           // A condition governs what follows it, not the whole rule. Its
           // siblings on another path are unaffected.
-          if (!holds(node)) {
+          if (!(await holds(node))) {
             skippedBy ??= node.subtype;
+            stoppedBy ??= node;
             continue;
           }
 
           if (rows) matched = true;
 
-          walk(node.id, null, depth + 1);
+          await walk(node.id, null, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.BRANCH) {
-          const branchHolds = holds(node);
+          const branchHolds = await holds(node);
 
-          walk(node.id, branchHolds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          await walk(node.id, branchHolds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.ACTION) {
           actions.push(node);
-          walk(node.id, null, depth + 1);
+          await walk(node.id, null, depth + 1);
         }
 
         // A Wait step: what follows it runs later, when the clock resumes the
@@ -993,17 +1044,72 @@ export class AutomationRunnerService {
       }
     };
 
-    if (resumeFrom) walk(resumeFrom, null, 0);
-    else walk(trigger.id, null, 0, true);
+    if (resumeFrom) await walk(resumeFrom, null, 0);
+    else await walk(trigger.id, null, 0, true);
 
     // "Nothing ran" is only a skip when something stopped it. A rule whose
     // branch legitimately led nowhere has run and done nothing — and one that
     // reached a Wait step has made progress.
+    const stopped = actions.length === 0 && delays.length === 0;
     return {
       actions,
       delays,
-      skippedBy: actions.length === 0 && delays.length === 0 ? skippedBy : null,
+      skippedBy: stopped ? skippedBy : null,
+      ...(stopped && stoppedBy ? { stoppedBy } : {}),
     };
+  }
+
+  /**
+   * Whether a condition holds, asking the model when it is "Check with AI".
+   *
+   * Every other condition is `conditionHolds`, judged on the task as the event
+   * found it. An AI check reads the task as it is now — the model is handed a
+   * fresh read — and what it answered goes into `checks` for the log.
+   */
+  private async holdsAsked(
+    node: AutomationNode,
+    task: EvaluableTask,
+    event: AutomationEvent,
+    rule: RunnableRule,
+    checks: AiCheckRecord[],
+  ): Promise<boolean> {
+    const config = (node.configuration ?? {}) as Record<string, unknown>;
+    if (config['field'] !== AI_CHECK_FIELD) return this.conditionHolds(node, task, event);
+
+    try {
+      if (!this.ai?.available) throw new AiUnavailableError();
+      const answer = await this.ai.check(task.id, rule, String(config['question'] ?? ''));
+      checks.push({ node, holds: answer.holds, reason: answer.reason });
+      return answer.holds;
+    } catch (error) {
+      checks.push({
+        node,
+        holds: false,
+        error: error instanceof Error ? error.message : 'The AI check failed.',
+      });
+      return false;
+    }
+  }
+
+  /** One log row per AI check: what it answered and why, or why it could not. */
+  private async recordAiChecks(executionId: string, checks: AiCheckRecord[]): Promise<void> {
+    for (const check of checks) {
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: check.node.id,
+          nodeType: check.node.nodeType,
+          subtype: check.node.subtype,
+          succeeded: !check.error,
+          message: (check.error
+            ? `The AI check could not run: ${check.error}`
+            : `AI answered ${check.holds ? 'yes' : 'no'}: ${check.reason || 'no reason given'}`
+          ).slice(0, 500),
+          beforeValue: null as unknown as Prisma.InputJsonValue,
+          afterValue: (check.error ? null : { holds: check.holds }) as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 
   private conditionHolds(
@@ -1256,6 +1362,71 @@ export class AutomationRunnerService {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
     switch (node.subtype) {
+      /*
+       * "Use AI…": the model chooses changes from what the step allows, and
+       * each runs here as the action it stands for — the same checks, history
+       * and follow-up events as if the rule's author had added it by hand.
+       */
+      case AutomationAction.AI_ACTION: {
+        if (!this.ai?.available) {
+          return { succeeded: false, message: 'AI isn’t set up on this server.' };
+        }
+
+        const decision = await this.ai.decide(task.id, rule, config, at);
+        const done: string[] = [];
+        const failed: string[] = [];
+        const before: unknown[] = [];
+        const after: unknown[] = [];
+        const events: AutomationEvent[] = [];
+        const webhooks: RuleWebhookRequest[] = [];
+        const emails: RuleEmailRequest[] = [];
+
+        for (const change of decision.changes) {
+          const outcome = await this.runAction(
+            {
+              ...node,
+              subtype: change.subtype,
+              configuration: change.configuration as Prisma.JsonObject,
+            },
+            task,
+            rule,
+            event,
+            at,
+          ).catch((error: unknown): ActionOutcome => ({
+            succeeded: false,
+            message: error instanceof Error ? error.message : 'Action failed.',
+          }));
+
+          if (outcome.succeeded) done.push(change.describe);
+          else failed.push(`could not ${change.describe} (${outcome.message ?? 'it failed'})`);
+          before.push({ action: change.subtype, value: outcome.before ?? null });
+          after.push({ action: change.subtype, value: outcome.after ?? null });
+          events.push(...(outcome.events ?? []));
+          webhooks.push(...(outcome.webhooks ?? []));
+          emails.push(...(outcome.emails ?? []));
+        }
+
+        const words = [
+          decision.changes.length === 0
+            ? 'AI made no changes.'
+            : `AI ${[...done, ...failed].join('; ')}.`,
+          decision.summary,
+          decision.ignored > 0
+            ? `Ignored ${decision.ignored} suggestion${decision.ignored === 1 ? '' : 's'} outside what the step allows.`
+            : '',
+        ];
+
+        return {
+          succeeded: failed.length === 0,
+          message: words.filter(Boolean).join(' '),
+          before: before.length > 0 ? before : null,
+          after: after.length > 0 ? after : null,
+          events,
+          webhooks,
+          emails,
+        };
+      }
+
       /*
        * Nothing is sent from here. The runner has no queue and no HTTP client
        * — deliberately, so a slow endpoint cannot hold a rule open mid-run —
@@ -2887,7 +3058,7 @@ export class AutomationRunnerService {
       status: ticket.status as string,
       assigneeId: ticket.assigneeId,
     };
-    const plan = this.plan(
+    const plan = await this.plan(
       rule.nodes,
       (node) => {
         const config = (node.configuration ?? {}) as Record<string, unknown>;

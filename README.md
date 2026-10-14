@@ -87,7 +87,7 @@ CoreTask/
 │   ├── src/common/           filters, guards, interceptors, decorators, DTOs, utils
 │   ├── src/database/         Prisma service
 │   ├── src/modules/          auth, users, workspaces, workspace-members, …
-│   ├── src/integrations/     email, storage, notification dispatch
+│   ├── src/integrations/     email, storage, notification dispatch, AI
 │   ├── src/jobs/             BullMQ queues and processors
 │   ├── src/websocket/        Socket.IO gateway
 │   ├── prisma/               schema, migrations, seed
@@ -560,6 +560,9 @@ pnpm compose:validate
   triage it — status, priority, assignee, section, comments, e-mail, a task
 - Rules that wait: a Wait step of minutes, hours or days, after which the
   rest of the rule runs against the task as it is by then
+- AI in rules (with an Anthropic API key): "Use AI…" makes the changes its
+  instructions call for, from a list the author ticks and the project's own
+  options, and "Check with AI" lets a yes-or-no question decide a path
 - Rules that add a task to another project as well, fill variables into the
   subtasks they create, and e-mail the people on a task
 - Goals: a tree of outcomes with status, owner, team and time period, and

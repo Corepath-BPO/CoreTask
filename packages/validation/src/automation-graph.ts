@@ -15,6 +15,8 @@ import {
   type FilterOperator,
   type AutomationNodeType as NodeType,
   type ConditionValueKind,
+  AI_CHECK_FIELD,
+  aiCheckProblem,
 } from '@coretask/contracts';
 import { z } from 'zod';
 
@@ -262,6 +264,13 @@ export function validateGraphStructure(
 
     if (typeof field !== 'string' || field.trim() === '') {
       error('Choose what this step checks.', node.id, 'field');
+      continue;
+    }
+
+    // "Check with AI" asks a question rather than comparing a value.
+    if (field === AI_CHECK_FIELD) {
+      const problem = aiCheckProblem(configuration);
+      if (problem) error(problem, node.id, 'question');
       continue;
     }
 

@@ -144,8 +144,10 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   // fallback `catalogueIcon` already applies to the action side.
   customField: glyph(SlidersHorizontal),
 
+  // "Create conditional check with AI", keyed by the field it stores.
+  'ai.check': glyph(Sparkles),
+
   /* Conditions declared but not checkable, greyed with their reason. */
-  AI_CONDITION: glyph(Sparkles),
   ADDED_BY_FORM: glyph(ClipboardList),
   ADDED_BY_EMAIL: glyph(Mail),
   TASK_TYPE: glyph(Shapes),

@@ -115,6 +115,16 @@ export const envSchema = z
     ),
 
     /*
+     * The model behind the AI steps in rules. Without a key the steps are
+     * greyed out with a reason — there is no stand-in model. The key is a
+     * secret: .env only, never a compose file or an image.
+     */
+    ANTHROPIC_API_KEY: optionalString,
+    ANTHROPIC_BASE_URL: z.string().url().default('https://api.anthropic.com'),
+    AI_MODEL: z.string().min(1).default('claude-sonnet-5-5'),
+    AI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+
+    /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
      * from the base delay: 30 s, 1 m, 2 m, 4 m, 8 m by default.
      */

@@ -29,6 +29,8 @@ import {
   TicketConditionField,
   isTicketConditionField,
   DELAY_SUBTYPE,
+  AI_CHECK_FIELD,
+  AI_UNAVAILABLE_REASON,
 } from '@coretask/contracts';
 import type { AutomationCatalogEntry } from '@coretask/types';
 
@@ -338,6 +340,8 @@ export const ACTION_CATEGORY = {
   CREATE_NEW: 'Create new',
   CONVERT: 'Convert task to…',
   ADD_TO_TASK: 'Add to task',
+  /** "Use AI…": instructions, and the changes a model may make from them. */
+  USE_AI: 'Use AI',
   /** The Wait step: what follows it runs later. */
   WAIT: 'Wait',
   /** Actions that leave CoreTask. The builder shows this group on its own tab. */
@@ -931,11 +935,13 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
 
   // Create your own
   {
-    subtype: 'AI_CONDITION',
+    // Available or not with the model behind it — see `toConditionEntry`.
+    subtype: AI_CHECK_FIELD,
     label: 'Create conditional check with AI',
     category: CONDITION_CATEGORY.CREATE_YOUR_OWN,
     valueType: CONDITION_VALUE_TYPE.TEXT,
-    reason: 'Coming later.',
+    description:
+      'Ask a yes-or-no question about the task; the rule goes on only if AI answers yes.',
   },
 ];
 
@@ -965,6 +971,8 @@ const VALUE_TYPE_BY_FIELD_TYPE: Record<string, ConditionValueType> = {
  */
 export function conditionCatalogue(
   fields: readonly CatalogueCustomField[],
+  /** Whether a model is configured, which the AI check needs. */
+  ai = false,
 ): AutomationConditionEntry[] {
   const generated: AutomationConditionEntry[] = settable(fields).map((field) => ({
     ...toConditionEntry({
@@ -995,7 +1003,9 @@ export function conditionCatalogue(
     }
 
     entries.push(
-      ...CONDITION_SPECS.filter((spec) => spec.category === category).map(toConditionEntry),
+      ...CONDITION_SPECS.filter((spec) => spec.category === category).map((spec) =>
+        toConditionEntry(spec, ai),
+      ),
     );
   }
 
@@ -1013,7 +1023,7 @@ export function customFieldKey(fieldId: string): string {
   return `customField:${fieldId}`;
 }
 
-function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
+function toConditionEntry(spec: ConditionSpec, ai = false): AutomationConditionEntry {
   /*
    * Three answers, most specific first.
    *
@@ -1030,13 +1040,18 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
   // A ticket's fields are read by the ticket half of the runner, not `readField`.
   const reason =
     spec.reason ??
-    (isTicketConditionField(spec.subtype)
-      ? null
-      : !runnerCanReadField(spec.subtype)
-        ? UNREADABLE_FIELD_REASON
-        : !runnerCanCompare(spec.subtype, spec.valueType)
-          ? UNCOMPARABLE_FIELD_REASON
-          : null);
+    // An AI check needs nothing from the field readers, only a model.
+    (spec.subtype === AI_CHECK_FIELD
+      ? ai
+        ? null
+        : AI_UNAVAILABLE_REASON
+      : isTicketConditionField(spec.subtype)
+        ? null
+        : !runnerCanReadField(spec.subtype)
+          ? UNREADABLE_FIELD_REASON
+          : !runnerCanCompare(spec.subtype, spec.valueType)
+            ? UNCOMPARABLE_FIELD_REASON
+            : null);
 
   return {
     subtype: spec.subtype,
@@ -1106,6 +1121,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     label: 'Remove task from the project',
     category: ACTION_CATEGORY.MOVE_TASK,
     description: 'The task leaves the project but keeps its assignee, so it stays in My Tasks.',
+  },
+
+  // Use AI
+  {
+    subtype: AutomationAction.AI_ACTION,
+    label: 'Use AI…',
+    category: ACTION_CATEGORY.USE_AI,
+    description:
+      'Write instructions; AI reads the task and makes the changes you allow, choosing from this project’s own options.',
   },
 
   // Change status
@@ -1293,7 +1317,11 @@ const ACTION_SPECS: readonly ActionSpec[] = [
 const NOT_IMPLEMENTED_REASON = 'This is not an action the engine can run yet.';
 
 /** The action catalogue for one project, custom fields generated in place. */
-export function actionCatalogue(fields: readonly CatalogueCustomField[]): AutomationCatalogEntry[] {
+export function actionCatalogue(
+  fields: readonly CatalogueCustomField[],
+  /** Whether a model is configured, which "Use AI…" needs. */
+  ai = false,
+): AutomationCatalogEntry[] {
   const generated: AutomationCatalogEntry[] = settable(fields).map((field) => ({
     ...toActionEntry({
       subtype: AutomationAction.SET_CUSTOM_FIELD,
@@ -1312,18 +1340,24 @@ export function actionCatalogue(fields: readonly CatalogueCustomField[]): Automa
       continue;
     }
 
-    entries.push(...ACTION_SPECS.filter((spec) => spec.category === category).map(toActionEntry));
+    entries.push(
+      ...ACTION_SPECS.filter((spec) => spec.category === category).map((spec) =>
+        toActionEntry(spec, ai),
+      ),
+    );
   }
 
   return entries;
 }
 
-function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
+function toActionEntry(spec: ActionSpec, ai = false): AutomationCatalogEntry {
   // The executable list is the whole answer. A row cannot claim to work by
   // being written optimistically, and publishing validates against the same
   // list, so nothing can be offered here and refused there.
   // The Wait step is a step of its own, not an action, and the runner takes it.
-  const available = runnerCanPerform(spec.subtype) || spec.subtype === DELAY_SUBTYPE;
+  // "Use AI…" runs when there is a model to run it, and publishing asks the same.
+  const aiStep = spec.subtype === AutomationAction.AI_ACTION;
+  const available = aiStep ? ai : runnerCanPerform(spec.subtype) || spec.subtype === DELAY_SUBTYPE;
 
   return {
     subtype: spec.subtype,
@@ -1331,7 +1365,11 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
     description: spec.description ?? '',
     category: spec.category,
     available,
-    reason: available ? null : (spec.reason ?? NOT_IMPLEMENTED_REASON),
+    reason: available
+      ? null
+      : aiStep
+        ? AI_UNAVAILABLE_REASON
+        : (spec.reason ?? NOT_IMPLEMENTED_REASON),
     subjects: TICKET_ONLY_ACTIONS.includes(spec.subtype)
       ? ['TICKET']
       : TICKET_RULE_ACTIONS.includes(spec.subtype) || spec.subtype === DELAY_SUBTYPE
@@ -1353,12 +1391,15 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
  * branch's arms in `plan`, and stops at a Wait step there for the clock to
  * resume — so neither can change without this line being read.
  */
-export function capabilities(): AutomationCapabilities {
+export function capabilities(
+  /** Whether a model is configured; the AI steps run only with one. */
+  ai = false,
+): AutomationCapabilities {
   return {
     branching: true,
     delays: true,
     externalActions: runnerCanPerform('SEND_EMAIL') || runnerCanPerform('SEND_WEBHOOK'),
-    ai: runnerCanPerform('AI_ACTION'),
+    ai: ai && runnerCanPerform(AutomationAction.AI_ACTION),
     conditionsOnCustomFields: runnerCanReadField(customFieldKey('any')),
     actionsOnCustomFields: runnerCanPerform(AutomationAction.SET_CUSTOM_FIELD),
     maxActionsPerExecution: MAX_ACTIONS_PER_EXECUTION,

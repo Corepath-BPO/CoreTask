@@ -228,9 +228,20 @@ into a mail tool covers the need until rules can send mail themselves.
 
 ## AI entries
 
-`AI_ACTION` is in `PLANNED_ACTIONS`. The condition catalogue's "Create your own
-(AI)" entry is in the references and feature-flagged off. There is no model
-behind either, and a fake one is worse than a gap.
+`AI_ACTION` ("Use AI…") and the condition field `ai.check` ("Create conditional
+check with AI") run against Anthropic's Messages API through
+`api/src/integrations/ai/`. Both are available exactly when
+`ANTHROPIC_API_KEY` is set — the catalogue, the metadata's `capabilities.ai`
+and the validator all read `AppConfigService.ai.enabled` — and greyed with
+`AI_UNAVAILABLE_REASON` otherwise. There is still no stand-in model.
+
+`AutomationAiService` turns a step into one tool-use request. "Use AI…" is
+offered one tool per ticked permission, each choice an enum of this project's
+ids; the calls that come back are mapped to ordinary actions (`ASSIGN_USER`,
+`UPDATE_PRIORITY`, `SET_CUSTOM_FIELD`…) and run by `runAction`, at most
+`AI_MAX_CHANGES` and one of each. The AI check forces an `answer` tool with
+`holds` and `reason`. `plan` is asynchronous so that only reached checks are
+asked. "Draft an update with AI…" stays planned.
 
 ## Summary of the eleven that run
 
