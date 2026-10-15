@@ -36,7 +36,7 @@ import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
-import { AiActionFields, AiCheckFields } from './ai-step-fields';
+import { AiActionFields, AiDraftUpdateFields, AiCheckFields } from './ai-step-fields';
 import {
   canonicalOperator,
   operatorOptionLabel,
@@ -866,6 +866,9 @@ function ActionFields({
       return (
         <AiActionFields configuration={configuration} metadata={metadata} onChange={onChange} />
       );
+
+    case 'AI_DRAFT_UPDATE':
+      return <AiDraftUpdateFields configuration={configuration} onChange={onChange} />;
 
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;

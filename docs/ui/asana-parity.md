@@ -102,8 +102,15 @@ every row the engine can run is enabled.
     answers with row numbers, so it can leave a subtask out but never write
     one; the log says how many it kept and why. Keeping none is a quiet
     success. The card reads "AI picks from N".
+  - **Draft an update with AI…** drafts the project's status update from its
+    own numbers and recent work — what was finished this week, what is late,
+    what is due next — with optional instructions for what to cover. It is
+    never posted by the rule: the project's owner is told a draft is waiting,
+    and the header shows **Review AI draft**, which opens the status composer
+    on its words with **Discard draft** beside them. A newer draft replaces an
+    older one, and posting any update clears it. It also runs on a schedule
+    with no tasks ("every Friday, draft the update").
   - Task rules only. Task text is treated as data, never as instructions.
-- Still greyed, with a reason: "Draft an update with AI…".
 
 ## Project templates and duplicates
 

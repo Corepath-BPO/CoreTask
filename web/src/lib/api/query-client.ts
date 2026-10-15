@@ -226,6 +226,8 @@ export const queryKeys = {
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'messages'] as const,
     files: (workspaceId: string, projectId: string) =>
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'files'] as const,
+    statusDraft: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'status-draft'] as const,
   },
   search: {
     /** Term and kinds are part of the key — each is a different answer. */

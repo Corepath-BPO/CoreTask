@@ -241,7 +241,17 @@ ids; the calls that come back are mapped to ordinary actions (`ASSIGN_USER`,
 `UPDATE_PRIORITY`, `SET_CUSTOM_FIELD`…) and run by `runAction`, at most
 `AI_MAX_CHANGES` and one of each. The AI check forces an `answer` tool with
 `holds` and `reason`. `plan` is asynchronous so that only reached checks are
-asked. "Draft an update with AI…" stays planned.
+asked. "Let AI decide the number of subtasks" forces a `choose` tool that
+answers with row numbers of the step's own list, so the model can leave a
+subtask out but never word one.
+
+"Draft an update with AI…" (`AI_DRAFT_UPDATE`) forces a `draft` tool over a
+plain-text card of the project — its counts, what was finished in the last
+seven days, what is overdue and due next, and the last update. The answer is
+stored as the project's one `ProjectStatusDraft` (a newer one replaces it) and
+the project's owner, else the last poster, else the rule's author is told; it
+is never posted by the rule. It runs in task rules and in a schedule with no
+tasks, where it is the one action besides "Create a task".
 
 ## Summary of the eleven that run
 

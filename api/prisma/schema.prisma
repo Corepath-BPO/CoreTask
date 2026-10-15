@@ -702,6 +702,7 @@ model Project {
   team             Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
   members          ProjectMember[]
   invitations      WorkspaceInvitation[]
+  statusDraft      ProjectStatusDraft?
   stars            ProjectStar[]
   statusUpdates    ProjectStatusUpdate[]
   portfolios       PortfolioProject[]
@@ -1135,6 +1136,27 @@ model ProjectStatusUpdate {
 
   @@index([projectId, createdAt])
   @@map("project_status_updates")
+}
+
+/// A status update a rule's "Draft an update with AI…" step wrote, waiting
+/// for a person to review and post it. One per project: a newer draft
+/// replaces it, and posting any update clears it — the project has a fresher
+/// word on itself by then.
+model ProjectStatusDraft {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
+  projectId   String             @unique @db.Uuid
+  ruleId      String?            @db.Uuid
+  status      ProjectStatusValue
+  title       String             @db.VarChar(200)
+  summary     String?
+  nextSteps   String?
+  createdAt   DateTime           @default(now())
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rule    AutomationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@map("project_status_drafts")
 }
 
 /// A package of a project's workflow — Customize › Bundles. Its sections and
@@ -2256,6 +2278,7 @@ model AutomationRule {
   createdBy         User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   nodes             AutomationNode[]
   executions        AutomationExecution[]
+  statusDrafts      ProjectStatusDraft[]
   delayedRuns       AutomationDelayedRun[]
   webhookDeliveries WebhookDelivery[]
   versions          AutomationRuleVersion[] @relation("RuleVersions")

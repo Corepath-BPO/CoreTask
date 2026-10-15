@@ -153,6 +153,12 @@ export const AutomationAction = {
   SET_TICKET_PRIORITY: 'SET_TICKET_PRIORITY',
   /** "Use AI…": a model makes the changes the step allows — see automation-ai.ts. */
   AI_ACTION: 'AI_ACTION',
+  /**
+   * "Draft an update with AI…": a status update for the project, written by a
+   * model and left as a draft for a person to review and post. Never posted
+   * by the rule. Runs in a rule with no tasks too — "every Friday, draft".
+   */
+  AI_DRAFT_UPDATE: 'AI_DRAFT_UPDATE',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -185,6 +191,7 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SET_TICKET_STATUS: 'Set the ticket status',
   SET_TICKET_PRIORITY: 'Set the ticket priority',
   AI_ACTION: 'Use AI',
+  AI_DRAFT_UPDATE: 'Draft an update with AI',
 };
 
 /**

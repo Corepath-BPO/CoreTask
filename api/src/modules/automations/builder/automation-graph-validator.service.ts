@@ -34,6 +34,7 @@ import {
   delayProblem,
   AI_CHECK_FIELD,
   aiDecidesSubtasks,
+  aiDraftUpdateProblem,
   AI_FIELD_TYPES,
   AI_UNAVAILABLE_REASON,
   aiActionProblem,
@@ -409,12 +410,13 @@ export class AutomationGraphValidatorService {
         }
         if (
           node.type === AutomationNodeType.ACTION &&
-          node.subtype !== AutomationAction.CREATE_TASK
+          node.subtype !== AutomationAction.CREATE_TASK &&
+          node.subtype !== AutomationAction.AI_DRAFT_UPDATE
         ) {
           error(
             node.id,
             null,
-            'This rule runs on no tasks, so it can only create new ones. Choose tasks for it to run on.',
+            'This rule runs on no tasks, so it can only create new ones or draft an update. Choose tasks for it to run on.',
           );
         }
       }
@@ -492,6 +494,13 @@ export class AutomationGraphValidatorService {
             error(node.id, 'kind', 'Choose the type to convert to.');
           }
           break;
+        // "Draft an update with AI…": a model, and instructions that fit.
+        case AutomationAction.AI_DRAFT_UPDATE: {
+          if (!this.config.ai.enabled) error(node.id, 'subtype', AI_UNAVAILABLE_REASON);
+          const problem = aiDraftUpdateProblem(config);
+          if (problem) error(node.id, 'instructions', problem);
+          break;
+        }
         // "Use AI…": instructions, at least one thing it may change, and a model.
         case AutomationAction.AI_ACTION: {
           if (!this.config.ai.enabled) error(node.id, 'subtype', AI_UNAVAILABLE_REASON);

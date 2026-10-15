@@ -1140,10 +1140,11 @@ const ACTION_SPECS: readonly ActionSpec[] = [
 
   // Change status
   {
-    subtype: 'AI_DRAFT_UPDATE',
+    subtype: AutomationAction.AI_DRAFT_UPDATE,
     label: 'Draft an update with AI…',
     category: ACTION_CATEGORY.CHANGE_STATUS,
-    reason: 'Coming later.',
+    description:
+      'AI drafts the project’s status update from its own numbers and recent work, for its owner to review and post. Works on a schedule with no tasks.',
   },
   {
     subtype: AutomationAction.SET_COMPLETION,
@@ -1362,7 +1363,9 @@ function toActionEntry(spec: ActionSpec, ai = false): AutomationCatalogEntry {
   // list, so nothing can be offered here and refused there.
   // The Wait step is a step of its own, not an action, and the runner takes it.
   // "Use AI…" runs when there is a model to run it, and publishing asks the same.
-  const aiStep = spec.subtype === AutomationAction.AI_ACTION;
+  const aiStep =
+    spec.subtype === AutomationAction.AI_ACTION ||
+    spec.subtype === AutomationAction.AI_DRAFT_UPDATE;
   const available = aiStep ? ai : runnerCanPerform(spec.subtype) || spec.subtype === DELAY_SUBTYPE;
 
   return {

@@ -13,6 +13,7 @@ import type {
   StatusRequestResult,
   ProjectFile,
   ProjectMessage,
+  ProjectStatusDraft,
   ProjectStatusUpdate,
   UpdateAuthor,
 } from '@coretask/types';
@@ -42,6 +43,28 @@ type StatusRow = Prisma.ProjectStatusUpdateGetPayload<{ include: { author: typeo
 
 const toAuthor = (user: UpdateAuthor | null): UpdateAuthor | null =>
   user ? { id: user.id, name: user.name, avatarUrl: user.avatarUrl } : null;
+
+function toStatusDraft(row: {
+  id: string;
+  projectId: string;
+  status: ProjectStatusDraft['status'];
+  title: string;
+  summary: string | null;
+  nextSteps: string | null;
+  createdAt: Date;
+  rule: { id: string; name: string } | null;
+}): ProjectStatusDraft {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    status: row.status,
+    title: row.title,
+    summary: row.summary,
+    nextSteps: row.nextSteps,
+    rule: row.rule,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
 
 function toStatusUpdate(row: StatusRow): ProjectStatusUpdate {
   return {
@@ -143,18 +166,23 @@ export class ProjectUpdatesService {
   ): Promise<ProjectStatusUpdate> {
     const project = await this.requireEditor(workspaceId, projectId, actor);
 
-    const row = await this.prisma.projectStatusUpdate.create({
-      data: {
-        workspaceId,
-        projectId,
-        authorId: actor.userId,
-        status: payload.status,
-        title: payload.title.trim(),
-        summary: payload.summary?.trim() || null,
-        nextSteps: payload.nextSteps?.trim() || null,
-      },
-      include: { author: authorSelect },
-    });
+    const [row] = await this.prisma.$transaction([
+      this.prisma.projectStatusUpdate.create({
+        data: {
+          workspaceId,
+          projectId,
+          authorId: actor.userId,
+          status: payload.status,
+          title: payload.title.trim(),
+          summary: payload.summary?.trim() || null,
+          nextSteps: payload.nextSteps?.trim() || null,
+        },
+        include: { author: authorSelect },
+      }),
+      // A draft waiting from a rule's AI step is spent: whether this post took
+      // its words or not, the project has a fresher word on itself now.
+      this.prisma.projectStatusDraft.deleteMany({ where: { projectId } }),
+    ]);
 
     const label = PROJECT_STATUS_LABEL[payload.status];
     await this.activity.record({
@@ -194,6 +222,34 @@ export class ProjectUpdatesService {
       );
 
     return toStatusUpdate(row);
+  }
+
+  /**
+   * The update a rule's "Draft an update with AI…" step left for review, or
+   * null. Only for those who could post it: a draft is not the project's
+   * status, and a reader would take it for one.
+   */
+  async getStatusDraft(
+    workspaceId: string,
+    projectId: string,
+    actor: ActorContext,
+  ): Promise<ProjectStatusDraft | null> {
+    await this.requireEditor(workspaceId, projectId, actor);
+    const row = await this.prisma.projectStatusDraft.findUnique({
+      where: { projectId },
+      include: { rule: { select: { id: true, name: true } } },
+    });
+    return row ? toStatusDraft(row) : null;
+  }
+
+  /** Throws the draft away without posting it. */
+  async discardStatusDraft(
+    workspaceId: string,
+    projectId: string,
+    actor: ActorContext,
+  ): Promise<void> {
+    await this.requireEditor(workspaceId, projectId, actor);
+    await this.prisma.projectStatusDraft.deleteMany({ where: { projectId } });
   }
 
   /**

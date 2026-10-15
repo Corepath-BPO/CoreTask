@@ -233,6 +233,9 @@ export const ApiRoutes = {
     /** Ask the project's owner for a status update. */
     requestStatus: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/status-updates/request`,
+    /** The update a rule's AI step drafted, waiting to be reviewed and posted. */
+    statusDraft: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-draft`,
     messages: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/messages`,
     message: (workspaceId: string, projectId: string, messageId: string) =>

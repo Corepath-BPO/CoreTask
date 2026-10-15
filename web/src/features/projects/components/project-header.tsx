@@ -14,6 +14,7 @@ import {
   List,
   LogOut,
   Pencil,
+  Sparkles,
   Ticket,
   UserPlus,
   Users,
@@ -61,6 +62,8 @@ interface ProjectHeaderProps {
   onExportCsv?: () => void;
   /** Ask the project's owner for a status update; left out for the owner. */
   onRequestStatus?: () => void;
+  /** Open the update a rule's AI step drafted; present only while one waits. */
+  onReviewDraft?: () => void;
 }
 
 /**
@@ -92,6 +95,7 @@ export function ProjectHeader({
   onSyncCalendar,
   onExportCsv,
   onRequestStatus,
+  onReviewDraft,
 }: ProjectHeaderProps) {
   const archived = project.archivedAt !== null;
   const TileIcon = project.defaultWorkItemType === WorkItemType.TICKET ? Ticket : List;
@@ -212,6 +216,13 @@ export function ProjectHeader({
             </Button>
           }
         />
+
+        {onReviewDraft && (
+          <Button variant="outline" size="sm" onClick={onReviewDraft}>
+            <Sparkles className="text-primary-strong" />
+            Review AI draft
+          </Button>
+        )}
 
         {archived && <Badge variant="muted">Archived</Badge>}
 
