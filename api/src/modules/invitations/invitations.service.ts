@@ -7,8 +7,10 @@ import {
   INVITATION_TOKEN_BYTES,
   MAX_PENDING_INVITATIONS,
   NotificationType,
+  ProjectMemberRole,
   WorkspaceRole,
   canGrantRole,
+  hasAtLeastRole,
 } from '@coretask/contracts';
 import type {
   AcceptInvitationResult,
@@ -29,7 +31,14 @@ import type { CreateInvitationDto } from './dto/invitation.dto';
 const invitationInclude = {
   invitedBy: { select: { id: true, name: true, email: true, avatarUrl: true } },
   team: { select: { id: true, name: true, color: true } },
+  project: { select: { id: true, name: true } },
 } satisfies Prisma.WorkspaceInvitationInclude;
+
+/** Where an invitation from a project's Share dialog lands the person. */
+interface ProjectPlacement {
+  projectId: string;
+  projectRole: ProjectMemberRole;
+}
 
 type InvitationWithInviter = Prisma.WorkspaceInvitationGetPayload<{
   include: typeof invitationInclude;
@@ -58,6 +67,7 @@ export class InvitationsService {
     actorId: string,
     actorRole: WorkspaceRole,
     dto: CreateInvitationDto,
+    placement: ProjectPlacement | null = null,
   ): Promise<WorkspaceInvitation> {
     const email = dto.email.trim().toLowerCase();
 
@@ -86,6 +96,8 @@ export class InvitationsService {
         tokenHash: hashToken(token),
         invitedById: actorId,
         teamId: dto.teamId ?? null,
+        projectId: placement?.projectId ?? null,
+        projectRole: placement?.projectRole ?? null,
         expiresAt,
       },
       update: {
@@ -95,6 +107,8 @@ export class InvitationsService {
         // Re-inviting replaces the team outright, including clearing it: the
         // new offer is the whole intent, not a patch on the previous one.
         teamId: dto.teamId ?? null,
+        projectId: placement?.projectId ?? null,
+        projectRole: placement?.projectRole ?? null,
         expiresAt,
         // Reinstates an offer that was revoked or already taken up, which is
         // what makes re-inviting a removed member work.
@@ -116,6 +130,7 @@ export class InvitationsService {
       invitedByName: invitation.invitedBy?.name ?? 'A teammate',
       role: dto.role,
       teamName: invitation.team?.name ?? null,
+      projectName: invitation.project?.name ?? null,
       expiresAt: expiresAt.toISOString(),
     });
 
@@ -132,6 +147,88 @@ export class InvitationsService {
     this.logger.log({ workspaceId, email, role: dto.role }, 'Invitation sent');
 
     return toInvitationDto(invitation);
+  }
+
+  /**
+   * Asana's "invite by e-mail" in a project's Share dialog: someone outside
+   * the workspace, invited straight into one project.
+   *
+   * Only a workspace admin may do it, as on the Members page. A project admin
+   * who is not one could otherwise bring anyone into the workspace, and a
+   * workspace guest still reads every public project.
+   *
+   * They join the workspace as a member, or as a guest when the project role is
+   * VIEWER, which is all a viewer acts as anyway. An address that already holds
+   * a live invitation keeps that invitation's team and any higher role: adding
+   * a project must not quietly demote an admin-to-be.
+   */
+  async inviteToProject(
+    workspaceId: string,
+    projectId: string,
+    actorId: string,
+    input: { email: string; role: ProjectMemberRole },
+  ): Promise<WorkspaceInvitation> {
+    const email = input.email.trim().toLowerCase();
+
+    const actor = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: actorId } },
+      select: { role: true },
+    });
+    if (!actor || !hasAtLeastRole(actor.role, WorkspaceRole.ADMIN)) {
+      throw AppException.forbidden(
+        'FORBIDDEN',
+        'Only a workspace admin can invite someone new. Ask one, or add someone already in the workspace.',
+      );
+    }
+
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { workspaceId, user: { email } },
+      select: { id: true },
+    });
+    if (member) {
+      throw AppException.conflict(
+        'RESOURCE_CONFLICT',
+        'That person is already in the workspace. Add them from the list instead.',
+      );
+    }
+
+    let role: WorkspaceRole =
+      input.role === ProjectMemberRole.VIEWER ? WorkspaceRole.GUEST : WorkspaceRole.MEMBER;
+    let teamId: string | null = null;
+
+    const live = await this.prisma.workspaceInvitation.findFirst({
+      where: {
+        workspaceId,
+        email,
+        acceptedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { role: true, teamId: true },
+    });
+    if (live) {
+      if (hasAtLeastRole(live.role, role)) role = live.role;
+      teamId = live.teamId;
+    }
+
+    return this.invite(
+      workspaceId,
+      actorId,
+      actor.role,
+      { email, role, teamId },
+      { projectId, projectRole: input.role },
+    );
+  }
+
+  /** The invitations still waiting that would land someone in this project. */
+  async listForProject(workspaceId: string, projectId: string): Promise<WorkspaceInvitation[]> {
+    const invitations = await this.prisma.workspaceInvitation.findMany({
+      where: { workspaceId, projectId, acceptedAt: null, revokedAt: null },
+      include: invitationInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return invitations.map(toInvitationDto);
   }
 
   async list(workspaceId: string): Promise<WorkspaceInvitation[]> {
@@ -203,6 +300,12 @@ export class InvitationsService {
           select: { name: true },
         })
       : null;
+    const project = invitation.projectId
+      ? await this.prisma.project.findUnique({
+          where: { id: invitation.projectId },
+          select: { name: true },
+        })
+      : null;
 
     return {
       workspaceName: workspace.name,
@@ -210,6 +313,7 @@ export class InvitationsService {
       role: invitation.role,
       invitedByName: invitedBy?.name ?? null,
       teamName: team?.name ?? null,
+      projectName: project?.name ?? null,
       expiresAt: invitation.expiresAt.toISOString(),
     };
   }
@@ -280,6 +384,35 @@ export class InvitationsService {
         }
       }
 
+      /*
+       * The project, from a Share dialog, joins in the same transaction for
+       * the team's reason. Re-read like the team: it may have been deleted or
+       * moved since. Someone already on the roster keeps their role, as when
+       * a project admin adds them.
+       */
+      let joinedProjectId: string | null = null;
+      if (invitation.projectId && invitation.projectRole) {
+        const project = await tx.project.findFirst({
+          where: { id: invitation.projectId, workspaceId: invitation.workspaceId },
+          select: { id: true },
+        });
+
+        if (project) {
+          await tx.projectMember.upsert({
+            where: { projectId_userId: { projectId: project.id, userId } },
+            create: {
+              projectId: project.id,
+              workspaceId: invitation.workspaceId,
+              userId,
+              role: invitation.projectRole,
+              addedById: invitation.invitedById,
+            },
+            update: {},
+          });
+          joinedProjectId = project.id;
+        }
+      }
+
       // Marked used inside the same transaction as the membership, so a crash
       // cannot leave a consumed token that granted nothing — or a membership
       // whose invitation is still live.
@@ -295,10 +428,11 @@ export class InvitationsService {
         data: { emailVerifiedAt: new Date() },
       });
 
-      return tx.workspace.findUniqueOrThrow({
+      const joined = await tx.workspace.findUniqueOrThrow({
         where: { id: invitation.workspaceId },
         select: { id: true, slug: true, name: true },
       });
+      return { ...joined, projectId: joinedProjectId };
     });
 
     await this.activity.record({
@@ -333,6 +467,7 @@ export class InvitationsService {
       workspaceId: workspace.id,
       workspaceSlug: workspace.slug,
       role: invitation.role,
+      projectId: workspace.projectId,
     };
   }
 
@@ -433,6 +568,10 @@ function toInvitationDto(invitation: InvitationWithInviter): WorkspaceInvitation
     role: invitation.role,
     invitedBy: invitation.invitedBy,
     team: invitation.team,
+    project:
+      invitation.project && invitation.projectRole
+        ? { ...invitation.project, role: invitation.projectRole }
+        : null,
     expiresAt: invitation.expiresAt.toISOString(),
     expired: invitation.expiresAt.getTime() <= Date.now(),
     createdAt: invitation.createdAt.toISOString(),

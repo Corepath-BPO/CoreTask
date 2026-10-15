@@ -100,6 +100,8 @@ export interface InvitationEmailJobData {
   role: string;
   /** Null when the invitation names no team. */
   teamName: string | null;
+  /** The project it lands them in, from a Share dialog; null otherwise. */
+  projectName: string | null;
   expiresAt: string;
 }
 

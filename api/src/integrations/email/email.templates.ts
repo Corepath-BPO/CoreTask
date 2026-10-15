@@ -64,6 +64,8 @@ export function invitationEmail(params: {
   invitedByName: string;
   role: string;
   teamName?: string | null;
+  /** From a project's Share dialog: the project they will land in. */
+  projectName?: string | null;
   expiresAt: string;
   webUrl: string;
 }): EmailMessage {
@@ -75,6 +77,29 @@ export function invitationEmail(params: {
   // part of what is being offered, and somebody deciding whether to accept
   // should not have to click through to find out.
   const onTeam = params.teamName ? ` on the ${params.teamName} team` : '';
+
+  if (params.projectName) {
+    return {
+      to: params.to,
+      subject: `${params.invitedByName} invited you to ${params.projectName} on CoreTask`,
+      text: [
+        `${params.invitedByName} has invited you to the "${params.projectName}" project in the "${params.workspaceName}" workspace on CoreTask.`,
+        '',
+        'Accept the invitation:',
+        link,
+        '',
+        `This link expires on ${expires}. If you were not expecting it, you can ignore this e-mail.`,
+        '',
+        '— The CoreTask team',
+      ].join('\n'),
+      html: [
+        `<p>${escapeHtml(params.invitedByName)} has invited you to the <strong>${escapeHtml(params.projectName)}</strong> project in the <strong>${escapeHtml(params.workspaceName)}</strong> workspace on CoreTask.</p>`,
+        `<p><a href="${escapeHtml(link)}">Accept the invitation</a></p>`,
+        `<p>This link expires on ${escapeHtml(expires)}. If you were not expecting it, you can ignore this e-mail.</p>`,
+        '<p>— The CoreTask team</p>',
+      ].join(''),
+    };
+  }
 
   return {
     to: params.to,

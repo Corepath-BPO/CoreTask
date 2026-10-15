@@ -630,32 +630,39 @@ model WorkspaceMember {
 /// row rather than stacking up offers, which also makes "resend" and "change the
 /// role before they accept" the same operation.
 model WorkspaceInvitation {
-  id          String        @id @default(uuid(7)) @db.Uuid
-  workspaceId String        @db.Uuid
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
   /// Lower-cased on write so the unique constraint is case-insensitive.
-  email       String        @db.VarChar(254)
-  role        WorkspaceRole @default(MEMBER)
-  tokenHash   String        @unique
-  invitedById String?       @db.Uuid
+  email       String             @db.VarChar(254)
+  role        WorkspaceRole      @default(MEMBER)
+  tokenHash   String             @unique
+  invitedById String?            @db.Uuid
   /// Team to join on acceptance. Optional — most invitations name no team.
   /// `SetNull` on purpose: deleting a team must not invalidate a live
   /// invitation, because the workspace membership is the part that matters and
   /// the team was only ever a convenience.
-  teamId      String?       @db.Uuid
+  teamId      String?            @db.Uuid
+  /// Project to join on acceptance, from a project's Share dialog, with the
+  /// role to hold there. `SetNull` for the team's reason: a deleted project
+  /// still leaves the workspace invitation worth accepting.
+  projectId   String?            @db.Uuid
+  projectRole ProjectMemberRole?
   expiresAt   DateTime
   acceptedAt  DateTime?
   revokedAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invitedBy User?     @relation("InvitationSentBy", fields: [invitedById], references: [id], onDelete: SetNull)
   team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, email])
   @@index([email])
   @@index([workspaceId, acceptedAt])
   @@index([teamId])
+  @@index([projectId])
   @@map("workspace_invitations")
 }
 
@@ -694,6 +701,7 @@ model Project {
   lead             User?                 @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
   team             Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
   members          ProjectMember[]
+  invitations      WorkspaceInvitation[]
   stars            ProjectStar[]
   statusUpdates    ProjectStatusUpdate[]
   portfolios       PortfolioProject[]

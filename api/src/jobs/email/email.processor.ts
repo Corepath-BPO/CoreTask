@@ -61,6 +61,8 @@ export class EmailProcessor extends WorkerHost {
             invitedByName: data.invitedByName,
             role: data.role,
             teamName: data.teamName,
+            // Absent on a job queued before projects could be named.
+            projectName: data.projectName ?? null,
             expiresAt: data.expiresAt,
             webUrl: this.config.http.webUrl,
           }),

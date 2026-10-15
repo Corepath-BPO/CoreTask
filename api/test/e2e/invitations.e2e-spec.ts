@@ -291,14 +291,15 @@ describe('Invitations (e2e)', () => {
       /*
        * An exhaustive list, so widening the preview has to be a deliberate edit
        * here rather than something that slips out with a new field on the model.
-       * `teamName` is the only addition since: a name, on the same footing as
-       * the role — material to deciding whether to accept, and saying nothing
-       * about the workspace's people.
+       * `teamName` and `projectName` are the only additions since: names, on
+       * the same footing as the role — material to deciding whether to
+       * accept, and saying nothing about the workspace's people.
        */
       expect(Object.keys(response.body.data).sort()).toEqual([
         'email',
         'expiresAt',
         'invitedByName',
+        'projectName',
         'role',
         'teamName',
         'workspaceName',

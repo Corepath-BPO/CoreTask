@@ -215,6 +215,11 @@ function InvitationRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        {invitation.project && (
+          <Badge variant="outline" title={`Joins the ${invitation.project.name} project`}>
+            {invitation.project.name}
+          </Badge>
+        )}
         {invitation.team && (
           <Badge variant="outline" className="gap-1">
             <span

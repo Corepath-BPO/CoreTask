@@ -260,6 +260,9 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/projects/${projectId}/join`,
     leave: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/leave`,
+    /** Invitations by e-mail that join the workspace and land in this project. */
+    invitations: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/invitations`,
   },
   /**
    * Workspace-scoped rather than nested under a project: a task may have no

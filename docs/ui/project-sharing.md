@@ -20,7 +20,7 @@ in [project-members.md](../api/project-members.md).
 | Share dialog: add people                                | the same — a workspace-member picker plus a role for the additions | built     |
 | Share dialog: privacy ("Private to members")            | `sharing/project-visibility-select.tsx`, confirmed before private  | built     |
 | Share dialog: copy project link                         | the same                                                           | built     |
-| Share dialog: invite by e-mail                          | —                                                                  | not built |
+| Share dialog: invite by e-mail                          | the same — type an address that is not in the workspace            | built     |
 | Share dialog: manage notifications                      | —                                                                  | not built |
 | Commenter role                                          | —                                                                  | not built |
 | Browse list: Members filter                             | `projects-page.tsx` — Anyone / I'm a member / Private to members   | built     |
@@ -31,10 +31,14 @@ in [project-members.md](../api/project-members.md).
 
 ### What "not built" means for each
 
-**Invite by e-mail.** A workspace invitation cannot carry a project today, so a
-field here would either invite to the workspace and forget the project or
-pretend to do something it does not. The dialog links to Members instead, which
-is where an invitation actually goes.
+**Invite by e-mail.** Typing an address that belongs to nobody in the
+workspace offers _Invite …_ in the Add people picker, at the role chosen beside
+it. The invitation is a workspace invitation that also names the project; the
+e-mail and the accept page say which project, and accepting opens it. Waiting
+invitations are listed under **Invited**, with a × to revoke. Only workspace
+admins may invite someone new, as on Members; a project admin who is not one
+sees the option greyed with that reason, and the hint under the picker says to
+ask one.
 
 **Manage notifications.** There is no per-project notification setting to
 manage. The row is left out rather than shown disabled, because a disabled
