@@ -292,8 +292,26 @@ export const AUTOMATION_TEMPLATE_REFERENCE_KIND_LABEL: Record<
  */
 export const MAX_AUTOMATION_DEPTH = 5;
 
-/** How many actions one execution may perform. */
+/**
+ * How many actions one execution may perform.
+ *
+ * Publishing refuses a rule that could reach more in one go, and a run that
+ * still gets here — a rule written before the check — runs the first this many
+ * and logs every step after them as not run, rather than dropping them quietly.
+ */
 export const MAX_ACTIONS_PER_EXECUTION = 25;
+
+/**
+ * How many actions one chain of rules may perform between them.
+ *
+ * A chain is everything descended from one event: the rules it set off, the
+ * rules their changes set off, and so on. `MAX_AUTOMATION_DEPTH` bounds how
+ * deep that goes and `MAX_ACTIONS_PER_EXECUTION` how much one run does, and
+ * neither bounds the total — five hops of twenty-five actions each is 125
+ * writes from one click, within both. This does. Steps past it are logged as
+ * not run, and a run with none left is skipped with the reason.
+ */
+export const MAX_ACTIONS_PER_CHAIN = 100;
 
 /** The most subtasks one CREATE_SUBTASK action creates per run. */
 export const MAX_SUBTASKS_PER_ACTION = 20;

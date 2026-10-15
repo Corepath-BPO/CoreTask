@@ -1,4 +1,9 @@
-import { AutomationNodeType, BranchKey, ConditionValueKind } from '@coretask/contracts';
+import {
+  AutomationNodeType,
+  BranchKey,
+  ConditionValueKind,
+  MAX_ACTIONS_PER_EXECUTION,
+} from '@coretask/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -494,5 +499,58 @@ describe('the direct comparisons', () => {
         'n-1',
       ),
     ).toEqual([]);
+  });
+});
+
+describe('the action cap', () => {
+  // A chain of `count` actions under the trigger, each following the last.
+  const chain = (count: number, from = 'trigger-1', prefix = 'a'): Node[] =>
+    Array.from({ length: count }, (_, index) =>
+      node({ id: `${prefix}-${index}`, parentId: index === 0 ? from : `${prefix}-${index - 1}` }),
+    );
+
+  it('accepts as many actions in a row as one run performs', () => {
+    expect(messages([trigger(), ...chain(MAX_ACTIONS_PER_EXECUTION)])).not.toContainEqual(
+      expect.stringContaining('at most'),
+    );
+  });
+
+  it('refuses one more, naming the first step that would not run', () => {
+    const issues = validateGraphStructure(
+      [trigger(), ...chain(MAX_ACTIONS_PER_EXECUTION + 2)],
+      'A rule',
+    ).filter((issue) => issue.message.includes('at most'));
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ level: 'ERROR', nodeId: `a-${MAX_ACTIONS_PER_EXECUTION}` });
+  });
+
+  it('counts again after a Wait step, which starts a run of its own', () => {
+    const first = chain(20);
+    const wait = node({
+      id: 'wait',
+      type: AutomationNodeType.DELAY,
+      subtype: 'WAIT',
+      parentId: 'a-19',
+    });
+    const second = chain(20, 'wait', 'b');
+
+    expect(messages([trigger(), ...first, wait, ...second])).not.toContainEqual(
+      expect.stringContaining('at most'),
+    );
+  });
+
+  it('counts each branch on its own, since only one of them runs', () => {
+    const row = (id: string) =>
+      node({
+        id,
+        type: AutomationNodeType.CONDITION,
+        subtype: 'FIELD_COMPARISON',
+        configuration: { field: 'status', operator: 'IS', value: 'TODO' },
+      });
+
+    expect(
+      messages([trigger(), row('r1'), ...chain(20, 'r1', 'x'), row('r2'), ...chain(20, 'r2', 'y')]),
+    ).not.toContainEqual(expect.stringContaining('at most'));
   });
 });

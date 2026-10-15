@@ -23,7 +23,11 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
-import { AutomationEventPublisher, type AutomationEvent } from './automation-event.publisher';
+import {
+  AutomationEventPublisher,
+  derivedEventId,
+  type AutomationEvent,
+} from './automation-event.publisher';
 
 /**
  * How late a scheduled run may start and still be worth running.
@@ -116,7 +120,9 @@ export class AutomationClockService {
       const event = asRecord(run.event) as unknown as AutomationEvent;
       await this.publisher.publish({
         ...event,
-        eventId: randomUUID(),
+        // Named after the waiting row, so this resumption is one job and one
+        // run however often it is published.
+        eventId: derivedEventId(run.id, 'resume'),
         ruleId: run.ruleId,
         resumeFromNodeId: run.nodeId,
       });

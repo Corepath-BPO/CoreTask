@@ -5,6 +5,7 @@ import {
   BranchKey,
   GraphIssueLevel,
   isFallbackBranch,
+  MAX_ACTIONS_PER_EXECUTION,
   DIRECT_OPERATOR_VALUE_KIND,
   isDirectOperator,
   OPERATORS_BY_VALUE_KIND,
@@ -319,8 +320,65 @@ export function validateGraphStructure(
   for (const issue of detectCycles(nodes)) issues.push(issue);
   for (const issue of validateBranches(nodes)) issues.push(issue);
   for (const issue of validateFallback(nodes)) issues.push(issue);
+  for (const issue of validateActionRuns(nodes)) issues.push(issue);
 
   return issues;
+}
+
+/**
+ * More actions in a row than one run performs.
+ *
+ * The runner does at most `MAX_ACTIONS_PER_EXECUTION` in one run and logs the
+ * rest as not run, so a path longer than that publishes a rule that can never
+ * do what it says. A Wait step starts the count again — what follows it runs
+ * later, as a run of its own.
+ *
+ * Counted along each path from the trigger, which is every shape the builder
+ * draws: a branch's actions are one chain. A step with two children of its
+ * own — only an API can write one — runs both, and the runner's log is the
+ * backstop for that rather than this.
+ */
+function validateActionRuns(nodes: readonly ValidatableNode[]): GraphIssue[] {
+  const over = new Set<string>();
+  const step = (node: ValidatableNode, count: number): number => {
+    if (node.type === AutomationNodeType.DELAY) return 0;
+    if (node.type !== AutomationNodeType.ACTION) return count;
+    // The first one past the cap on this path is the one the message is about.
+    if (count === MAX_ACTIONS_PER_EXECUTION) over.add(node.id);
+    return count + 1;
+  };
+
+  const byOrder = (a: ValidatableNode, b: ValidatableNode) => (a.order ?? 0) - (b.order ?? 0);
+
+  if (!nodes.some((node) => node.parentId !== null)) {
+    // A rule from before the canvas: every step, in order, is one path.
+    let count = 0;
+    for (const node of [...nodes].sort(byOrder)) count = step(node, count);
+  } else {
+    const children = new Map<string, ValidatableNode[]>();
+    for (const node of nodes) {
+      if (node.parentId === null) continue;
+      children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
+    }
+
+    // Depth-limited, as every walk of a stored graph is: a cycle is reported
+    // above, and must not hang this one.
+    const walk = (id: string, count: number, depth: number): void => {
+      if (depth > 100) return;
+      for (const child of children.get(id) ?? []) walk(child.id, step(child, count), depth + 1);
+    };
+
+    for (const root of nodes.filter((node) => node.parentId === null)) {
+      walk(root.id, step(root, 0), 0);
+    }
+  }
+
+  return [...over].map((nodeId) => ({
+    level: GraphIssueLevel.ERROR,
+    nodeId,
+    path: null,
+    message: `A rule does at most ${MAX_ACTIONS_PER_EXECUTION} actions in one run, and this is one more. Move some of them into another rule.`,
+  }));
 }
 
 /**

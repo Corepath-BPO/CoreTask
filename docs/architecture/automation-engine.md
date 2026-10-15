@@ -131,7 +131,7 @@ saved. The server never sees a starter as such.
 
 ## Loop protection
 
-Three independent mechanisms, because each catches what the others miss.
+Several independent mechanisms, because each catches what the others miss.
 
 **1. A rule never reacts to its own write.** `BLOCK_SELF_RETRIGGER`, matched on
 `event.causedByRuleId`. This is the commonest loop by far — a rule that sets a
@@ -146,10 +146,17 @@ is a queue consuming itself.
 **3. Correlation id.** Every execution descended from one original user action
 shares it, which makes a loop traceable end to end rather than merely suspected.
 
-Plus `MAX_ACTIONS_PER_EXECUTION` (25) as a backstop on a single runaway rule.
+**4. Action caps.** `MAX_ACTIONS_PER_EXECUTION` (25) per run, refused at
+publish for a path that long and logged step by step when a run reaches it
+anyway; `MAX_ACTIONS_PER_CHAIN` (100) across every run descended from one event,
+counted by `chainId`.
 
-A stopped chain writes a `SKIPPED` execution with a reason. A silent halt would
-be indistinguishable from a rule that never matched.
+**5. One run per rule per event.** A queue retry finds the run it already made
+(`idempotencyKey`) and hands back what that run raised instead of acting twice.
+
+A stopped chain writes a `SKIPPED` execution with a reason, and a step a cap
+cut off writes a "Not run" log row. A silent halt would be indistinguishable
+from a rule that never matched. See [loop protection](./automation-loop-protection.md).
 
 ## Subtask roll-up
 
@@ -167,7 +174,7 @@ complete by this. The event carries `allSubtasksCompleted: true`, and the
 | Status             | Meaning                                        |
 | ------------------ | ---------------------------------------------- |
 | `COMPLETED`        | every action succeeded                         |
-| `PARTIALLY_FAILED` | some actions failed; the log says which        |
+| `PARTIALLY_FAILED` | some actions failed, or a cap cut some off     |
 | `FAILED`           | every action failed                            |
 | `SKIPPED`          | conditions did not hold, or a guard stopped it |
 
@@ -207,13 +214,8 @@ detail already lives in `AutomationExecutionLog` for anyone debugging.
 
 ## Known limitations
 
-- **Branches and delays are modelled but not executed.** `AutomationNodeType`
-  includes `BRANCH` and `DELAY`; the runner ignores both. Publishing a rule
-  containing one will succeed and the node will be skipped.
-- **Ticket triggers are declared but not wired.** `TICKET_CREATED` and
-  `TICKET_STATUS_CHANGED` are in the contract; `TicketsService` does not publish.
-- **Actions listed in `PLANNED_ACTIONS`** (email, webhook, delay, and the rest)
-  have contracts only. The builder shows them disabled and the runner refuses
-  them loudly rather than reporting success.
+- **Actions listed in `PLANNED_ACTIONS`** have contracts only. The builder shows
+  them disabled with the reason and the runner refuses them loudly rather than
+  reporting success.
 - **No per-rule execution lock.** Two events for the same task arriving together
   can interleave. Concurrency is set to 2 to narrow the window, not close it.

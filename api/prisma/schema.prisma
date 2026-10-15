@@ -2530,37 +2530,50 @@ model AutomationClockFiring {
 
 /// One run of one rule.
 model AutomationExecution {
-  id            String                    @id @default(uuid(7)) @db.Uuid
-  workspaceId   String                    @db.Uuid
-  projectId     String                    @db.Uuid
-  ruleId        String                    @db.Uuid
-  status        AutomationExecutionStatus @default(RUNNING)
-  triggerType   String                    @db.VarChar(60)
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                    @db.Uuid
+  projectId      String                    @db.Uuid
+  ruleId         String                    @db.Uuid
+  status         AutomationExecutionStatus @default(RUNNING)
+  triggerType    String                    @db.VarChar(60)
   /// What the run was about — usually a task.
-  entityType    String?                   @db.VarChar(40)
-  entityId      String?                   @db.Uuid
+  entityType     String?                   @db.VarChar(40)
+  entityId       String?                   @db.Uuid
   /// Who or what caused the triggering change. Null when a rule caused it.
-  actorId       String?                   @db.Uuid
+  actorId        String?                   @db.Uuid
   /// Shared by every execution descended from one original user action, which
   /// is what makes a loop detectable rather than merely suspected.
-  correlationId String                    @db.Uuid
+  correlationId  String                    @db.Uuid
+  /// The event this chain of rules started from. Narrower than the correlation
+  /// id, which a manual or scheduled run shares across every task in the batch:
+  /// the per-chain action cap counts within this, so a batch of fifty tasks is
+  /// fifty chains rather than one long one.
+  chainId        String?                   @db.Uuid
+  /// The event this run answered, plus the Wait step it resumed after, if any.
+  /// Unique per rule, so a queue retry of the same event finds the run it
+  /// already made instead of making the same changes twice.
+  idempotencyKey String?                   @db.VarChar(120)
+  /// How many action steps this run performed — what the chain cap sums.
+  actionsRun     Int                       @default(0)
   /// How many rules deep this is. The original action is 0.
-  depth         Int                       @default(0)
+  depth          Int                       @default(0)
   /// Set when conditions did not match, so a no-op is distinguishable from a
   /// failure in the history.
-  skippedReason String?                   @db.VarChar(200)
-  error         String?
-  durationMs    Int?
-  startedAt     DateTime                  @default(now())
-  finishedAt    DateTime?
+  skippedReason  String?                   @db.VarChar(200)
+  error          String?
+  durationMs     Int?
+  startedAt      DateTime                  @default(now())
+  finishedAt     DateTime?
 
   workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   rule      AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
   logs      AutomationExecutionLog[]
 
+  @@unique([ruleId, idempotencyKey])
   @@index([ruleId, startedAt])
   @@index([projectId, status])
   @@index([correlationId])
+  @@index([chainId])
   @@map("automation_executions")
 }
 
@@ -2579,6 +2592,10 @@ model AutomationExecutionLog {
   message     String?  @db.VarChar(500)
   beforeValue Json?
   afterValue  Json?
+  /// What this step asked to be sent once the run was over — the events its
+  /// write amounts to, webhooks, e-mails. Kept so a queue retry that finds the
+  /// run already made can send them again rather than losing the chain.
+  followUps   Json?
   createdAt   DateTime @default(now())
 
   execution AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { webhookEventTypeFor, type AutomationTrigger } from '@coretask/contracts';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -43,6 +43,15 @@ export interface AutomationEvent {
   after?: Record<string, unknown>;
   /** Shared by every hop descended from one original action. */
   correlationId: string;
+  /**
+   * The id of the event this chain started from, inherited by every hop.
+   *
+   * Narrower than `correlationId`, which a manual or scheduled run shares
+   * across every task in its batch — so a batch of fifty is fifty chains, and
+   * the per-chain action cap counts within one. Absent only on an event queued
+   * before chains were tracked; `chainOf` reads such an event as its own chain.
+   */
+  chainId?: string;
   /** 0 for a user action; incremented per rule hop. */
   depth: number;
   /** Set when a rule caused this, so it will not react to its own write. */
@@ -81,17 +90,28 @@ export class AutomationEventPublisher {
       depth?: number;
     },
   ): Promise<void> {
+    const eventId = event.eventId ?? randomUUID();
     const payload: AutomationEvent = {
       ...event,
-      eventId: event.eventId ?? randomUUID(),
+      eventId,
       // A fresh id means a user action; an inherited one means this is a
       // continuation, and that is what makes a loop traceable end to end.
       correlationId: event.correlationId ?? randomUUID(),
+      // An event nothing came before starts its own chain.
+      chainId: event.chainId ?? eventId,
       depth: event.depth ?? 0,
     };
 
     try {
       await this.queue.add(AutomationJob.EVENT, payload, {
+        /*
+         * One job per occurrence. The same event published twice — a retried
+         * request, a processor republishing what a retried run had already
+         * raised — is the same job, and BullMQ drops the second while the
+         * first is still held (an hour once done, a day once failed). After
+         * that the runner's own idempotency key answers it the same way.
+         */
+        jobId: automationJobId(payload),
         attempts: 3,
         backoff: { type: 'exponential', delay: 2_000 },
         removeOnComplete: { age: 3_600, count: 500 },
@@ -119,4 +139,53 @@ export class AutomationEventPublisher {
       await this.webhooks.enqueueFanOut(payload);
     }
   }
+}
+
+/** The chain an event belongs to. See `AutomationEvent.chainId`. */
+export function chainOf(event: Pick<AutomationEvent, 'eventId' | 'chainId'>): string {
+  return event.chainId ?? event.eventId;
+}
+
+/**
+ * What one rule's run on one event is known by.
+ *
+ * The event, and the Wait step a resumed run picks up after: a resumption is
+ * the same event happening later, and keyed on the event alone it would be
+ * taken for the run it continues.
+ */
+export function runKey(event: Pick<AutomationEvent, 'eventId' | 'resumeFromNodeId'>): string {
+  return event.resumeFromNodeId ? `${event.eventId}/${event.resumeFromNodeId}` : event.eventId;
+}
+
+/**
+ * The queue's id for an event's job. BullMQ refuses a `:` in a custom id, and
+ * a resumed run needs its own job for the reason it needs its own run key.
+ */
+export function automationJobId(event: Pick<AutomationEvent, 'eventId' | 'resumeFromNodeId'>) {
+  return `event-${runKey(event).replace('/', '-from-')}`;
+}
+
+/**
+ * An event id worked out from another, so raising "the same" event twice
+ * names it the same way.
+ *
+ * For the events the engine raises on a run's behalf rather than a rule's
+ * action — a parent's checklist completing, a task coming unblocked. A random
+ * id there would make a retried run raise a second, different event for the
+ * one occurrence; derived, the queue and the runner both see the repeat for
+ * what it is. Shaped as a UUID because every column that stores an event id
+ * is one.
+ */
+export function derivedEventId(source: string, purpose: string): string {
+  const hex = createHash('sha256').update(`${source}:${purpose}`).digest('hex');
+  // Version 5's nibble and the RFC 4122 variant, so it reads as a name-based UUID.
+  const variant = ((parseInt(hex.charAt(16), 16) & 0x3) | 0x8).toString(16);
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `5${hex.slice(13, 16)}`,
+    `${variant}${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join('-');
 }
