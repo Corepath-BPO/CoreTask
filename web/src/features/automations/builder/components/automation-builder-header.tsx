@@ -9,10 +9,11 @@ import { cn } from '@/lib/utils';
 
 import { AutomationValidationIssues } from './automation-validation-issues';
 
-/** What the header says about the last write, where a Save button used to be. */
-export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+/** What the header says about the last write. */
+export type SaveState = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
 
 const SAVE_LABEL: Record<Exclude<SaveState, 'idle'>, string> = {
+  unsaved: 'Unsaved changes',
   saving: 'Saving…',
   saved: 'Saved',
   error: 'Unable to save',
@@ -49,6 +50,7 @@ export function AutomationBuilderHeader({
   save,
   saving,
   canSave,
+  autosaves,
   onSave,
   issues,
   onFocusIssue,
@@ -73,6 +75,11 @@ export function AutomationBuilderHeader({
   save: SaveState;
   saving: boolean;
   canSave: boolean;
+  /**
+   * True for a rule that is not running, which the page saves on its own a
+   * moment after each edit. Its Save button only shows when a save failed.
+   */
+  autosaves: boolean;
   onSave: () => void;
   issues: AutomationGraphIssue[];
   onFocusIssue: (nodeId: string) => void;
@@ -134,17 +141,26 @@ export function AutomationBuilderHeader({
       <div className="flex shrink-0 items-center gap-2">
         <SaveIndicator state={save} />
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          loading={saving}
-          disabled={!canSave || saving}
-          onClick={onSave}
-        >
-          <Save className="size-4" aria-hidden="true" />
-          Save draft
-        </Button>
+        {/* An active rule's steps are its live steps, so its button says what
+            saving does; a rule that autosaves only needs one to retry. */}
+        {(!autosaves || save === 'error') && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer"
+            loading={saving}
+            disabled={!canSave || saving}
+            onClick={onSave}
+            title={
+              status === 'ACTIVE'
+                ? 'This rule is running: saving applies the change to the next task it acts on.'
+                : undefined
+            }
+          >
+            <Save className="size-4" aria-hidden="true" />
+            {status === 'ACTIVE' ? 'Save changes' : 'Save draft'}
+          </Button>
+        )}
 
         {/* The rule's own settings — what it is called, what it is for, and
             whether other rules may set it off. */}

@@ -1,9 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AutomationBuilderHeader } from './automation-builder-header';
+import { AutomationBuilderHeader, type SaveState } from './automation-builder-header';
 
-function renderHeader(canSave = true, canSaveToLibrary = true, canBrowseLibrary = true) {
+function renderHeader(
+  canSave = true,
+  canSaveToLibrary = true,
+  canBrowseLibrary = true,
+  {
+    autosaves = false,
+    status = 'DRAFT',
+    save = 'idle',
+  }: { autosaves?: boolean; status?: string; save?: SaveState } = {},
+) {
   const onSave = vi.fn();
   const onSaveToLibrary = vi.fn();
   const onBrowseLibrary = vi.fn();
@@ -11,14 +20,15 @@ function renderHeader(canSave = true, canSaveToLibrary = true, canBrowseLibrary 
   render(
     <AutomationBuilderHeader
       projectName="Platform"
-      status="DRAFT"
+      status={status}
       name="Assign incoming work"
       onNameChange={vi.fn()}
       settingsOpen={false}
       onToggleSettings={vi.fn()}
-      save="idle"
+      save={save}
       saving={false}
       canSave={canSave}
+      autosaves={autosaves}
       onSave={onSave}
       issues={[]}
       onFocusIssue={vi.fn()}
@@ -71,5 +81,24 @@ describe('AutomationBuilderHeader', () => {
     renderHeader(false);
 
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  });
+
+  it('drops the button for a rule that saves itself, until a save fails', () => {
+    renderHeader(true, true, true, { autosaves: true, save: 'saved' });
+    expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Saved');
+
+    renderHeader(true, true, true, { autosaves: true, save: 'error' });
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+  });
+
+  it('says that saving a running rule applies the change', () => {
+    renderHeader(true, true, true, { status: 'ACTIVE', save: 'unsaved' });
+
+    expect(screen.getByRole('button', { name: 'Save changes' })).toHaveAttribute(
+      'title',
+      expect.stringMatching(/running/),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 });

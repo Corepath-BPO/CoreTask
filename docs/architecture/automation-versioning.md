@@ -136,12 +136,13 @@ comparing a save counter with a version number.
 - Writing version rows. Nothing creates an `AutomationRuleVersion`.
 - Publish pointing at a version rather than flipping a status.
 - The runner reading `publishedVersion`.
-- Debounced draft saving. The builder saves through `PATCH :ruleId`, which
-  replaces the live definition.
+- Debounced saving of an **active** rule. The builder saves through
+  `PATCH :ruleId`, which replaces the live definition, so it autosaves only a
+  rule nothing runs (draft, paused, never published) and leaves an active one
+  to an explicit **Save changes** that says it applies at once.
 - Any endpoint for version history, or for reverting to a previous version.
 - A version id on `AutomationExecution`, without which an old run cannot be
   matched to the definition that produced it.
-- The autosave indicator in the builder header that milestone 4 calls for.
 
 ## Related
 
