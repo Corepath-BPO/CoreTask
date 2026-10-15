@@ -11,6 +11,7 @@ import {
   APPROVAL_STATUS_LABEL,
   TASK_KIND_LABEL,
   approvalCompletes,
+  type StoryRef,
 } from '@coretask/contracts';
 import type {
   Task,
@@ -513,6 +514,7 @@ export class TasksService {
     const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
     await this.assertAssigneeCanSee(workspaceId, existing.projectId, dto.assigneeId);
+    await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const data: Prisma.TaskUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
@@ -549,6 +551,9 @@ export class TasksService {
     if (due.at !== undefined) data.dueAt = due.at;
     if (dto.assigneeId !== undefined) {
       data.assignee = dto.assigneeId ? { connect: { id: dto.assigneeId } } : { disconnect: true };
+    }
+    if (dto.teamId !== undefined) {
+      data.team = dto.teamId ? { connect: { id: dto.teamId } } : { disconnect: true };
     }
 
     if (dto.status !== undefined) {
@@ -605,8 +610,14 @@ export class TasksService {
      * cannot describe — the estimate, say — still leaves the plain line.
      */
     const stories = diffItemStories(
-      snapshotFromTask(existing, await this.refsFor(existing.assigneeId, updated.assignee)),
-      snapshotFromTask(updated, { assignee: this.assigneeRef(updated.assignee) }),
+      snapshotFromTask(existing, {
+        ...(await this.refsFor(existing.assigneeId, updated.assignee)),
+        team: await this.teamRef(existing.teamId, updated.team),
+      }),
+      snapshotFromTask(updated, {
+        assignee: this.assigneeRef(updated.assignee),
+        team: updated.team ? { id: updated.team.id, label: updated.team.name } : null,
+      }),
       'task',
     );
     const context = {
@@ -1375,6 +1386,40 @@ export class TasksService {
     return {
       assignee: user ? this.assigneeRef(user) : { id: previousAssigneeId, label: 'Someone' },
     };
+  }
+
+  /** A team as a story names it — the one just loaded when it is the same team. */
+  private async teamRef(
+    teamId: string | null,
+    current: { id: string; name: string } | null,
+  ): Promise<StoryRef | null> {
+    if (!teamId) return null;
+    if (current?.id === teamId) return { id: current.id, label: current.name };
+
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true, name: true },
+    });
+    return { id: teamId, label: team?.name ?? 'a team that was removed' };
+  }
+
+  /**
+   * A team of this workspace, or nothing. An id from another workspace is
+   * refused as missing, not as forbidden — the same as every other lookup.
+   */
+  private async assertTeamInWorkspace(
+    workspaceId: string,
+    teamId: string | null | undefined,
+  ): Promise<void> {
+    if (!teamId) return;
+
+    const team = await this.prisma.team.findFirst({
+      where: { id: teamId, workspaceId },
+      select: { id: true },
+    });
+    if (!team) {
+      throw AppException.badRequest('BAD_REQUEST', 'That team is not in this workspace.');
+    }
   }
 
   private async assertAssigneeIsMember(

@@ -188,6 +188,12 @@ export interface AutomationMetadata {
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
   /**
+   * The workspace's teams, for the step that makes one responsible for the
+   * task. Optional only so a client built before teams were offered keeps
+   * reading the response.
+   */
+  teams?: { id: string; name: string; color: string }[];
+  /**
    * The project's own fields, with the values each one offers.
    *
    * `options` is declared here because the endpoint has always returned it and

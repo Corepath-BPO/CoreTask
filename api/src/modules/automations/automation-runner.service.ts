@@ -50,6 +50,9 @@ import {
   describeDelay,
   AI_CHECK_FIELD,
   evaluateCondition,
+  CHECKLIST_NAME_MAX,
+  MAX_CHECKLISTS_PER_TASK,
+  checklistOf,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -1830,6 +1833,95 @@ export class AutomationRunnerService {
         return { succeeded: true, before, after: null, events };
       }
 
+      /*
+       * The team responsible for the task — or none, for "clear the team".
+       *
+       * Re-checked as an assignee is: a team chosen months ago may have been
+       * deleted since, and a team id from another workspace is not one this
+       * rule can hand the task to. Written through `updateTask`, so it raises
+       * TASK_UPDATED and records the change in the task's history like any
+       * other field a rule sets.
+       */
+      case AutomationAction.ASSIGN_TEAM: {
+        const teamId = typeof config['teamId'] === 'string' ? config['teamId'] : '';
+
+        if (teamId !== '') {
+          const team = await this.prisma.team.findFirst({
+            where: { id: teamId, workspaceId: rule.workspaceId },
+            select: { id: true },
+          });
+          if (!team) {
+            return { succeeded: false, message: 'That team is no longer in this workspace.' };
+          }
+        } else if (config['clear'] !== true) {
+          return { succeeded: false, message: 'This step has no team to assign.' };
+        }
+
+        const before = task.teamId;
+        const events = await this.updateTask(
+          task,
+          { teamId: teamId === '' ? null : teamId },
+          rule,
+          event,
+        );
+        return { succeeded: true, before, after: teamId === '' ? null : teamId, events };
+      }
+
+      /*
+       * A named checklist, added to the task with its items unticked.
+       *
+       * The name is text with variables, as a comment's body is; the items are
+       * the step's own lines. A task holds a bounded number of checklists, and
+       * a rule that has already added one to it adds another — a rule firing
+       * twice is a rule configured to, and the log says what it did each time.
+       */
+      case AutomationAction.CREATE_CHECKLIST: {
+        const { name: template, items } = checklistOf(config);
+        const name = renderAutomationText(template, await this.textValues(task, rule, event, at))
+          .trim()
+          .slice(0, CHECKLIST_NAME_MAX);
+
+        if (!name) return { succeeded: false, message: 'The checklist’s name came out empty.' };
+        if (items.length === 0) {
+          return { succeeded: false, message: 'This step has no items to add.' };
+        }
+
+        const existing = await this.prisma.taskChecklist.aggregate({
+          where: { taskId: task.id },
+          _count: { _all: true },
+          _max: { position: true },
+        });
+        if (existing._count._all >= MAX_CHECKLISTS_PER_TASK) {
+          return {
+            succeeded: false,
+            message: `The task already has ${MAX_CHECKLISTS_PER_TASK} checklists, which is as many as one holds.`,
+          };
+        }
+
+        const checklist = await this.prisma.taskChecklist.create({
+          data: {
+            workspaceId: rule.workspaceId,
+            taskId: task.id,
+            name,
+            position: (existing._max.position ?? 0) + POSITION_STEP,
+            createdById: event.actorId ?? null,
+            items: {
+              create: items.map((title, index) => ({
+                title,
+                position: (index + 1) * POSITION_STEP,
+              })),
+            },
+          },
+          select: { id: true },
+        });
+
+        return {
+          succeeded: true,
+          message: `Added the checklist “${name}” with ${items.length} item${items.length === 1 ? '' : 's'}`,
+          after: { checklistId: checklist.id, name, items: items.length },
+        };
+      }
+
       case AutomationAction.MOVE_TO_SECTION: {
         const sectionId = String(config['sectionId'] ?? '');
         const section = await this.prisma.section.findFirst({
@@ -3266,8 +3358,9 @@ export class AutomationRunnerService {
   ): Promise<void> {
     const ids = [before.assigneeId, updated.assigneeId].filter((id): id is string => !!id);
     const sectionIds = [before.sectionId, updated.sectionId].filter((id): id is string => !!id);
+    const teamIds = [before.teamId, updated.teamId].filter((id): id is string => !!id);
 
-    const [users, sections] = await Promise.all([
+    const [users, sections, teams] = await Promise.all([
       ids.length > 0
         ? this.prisma.user.findMany({
             where: { id: { in: ids } },
@@ -3277,6 +3370,12 @@ export class AutomationRunnerService {
       sectionIds.length > 0
         ? this.prisma.section.findMany({
             where: { id: { in: sectionIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      teamIds.length > 0
+        ? this.prisma.team.findMany({
+            where: { id: { in: teamIds } },
             select: { id: true, name: true },
           })
         : Promise.resolve([]),
@@ -3290,15 +3389,22 @@ export class AutomationRunnerService {
       const section = sections.find((row) => row.id === id);
       return section ? { id: section.id, label: section.name } : null;
     };
+    const teamRef = (id: string | null) => {
+      if (!id) return null;
+      const team = teams.find((row) => row.id === id);
+      return { id, label: team?.name ?? 'a team that was removed' };
+    };
 
     const stories = diffItemStories(
       snapshotFromTask(before, {
         assignee: userRef(before.assigneeId),
         section: sectionRef(before.sectionId),
+        team: teamRef(before.teamId),
       }),
       snapshotFromTask(updated, {
         assignee: userRef(updated.assigneeId),
         section: sectionRef(updated.sectionId),
+        team: teamRef(updated.teamId),
       }),
       'task',
     );

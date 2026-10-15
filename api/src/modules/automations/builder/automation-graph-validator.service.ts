@@ -33,6 +33,7 @@ import {
   isTicketConditionField,
   delayProblem,
   AI_CHECK_FIELD,
+  checklistOf,
   conditionLeaves,
   joinConditionPath,
   aiDecidesSubtasks,
@@ -253,6 +254,17 @@ export class AutomationGraphValidatorService {
             nodeId: node.id,
             path: 'subtype',
             message: `“${node.subtype}” is not an action the engine can run.`,
+          });
+        } else if (
+          node.subtype === AutomationAction.CREATE_CHECKLIST &&
+          checklistOf(node.configuration).items.length === 0
+        ) {
+          // A checklist with nothing on it would publish and fail every run.
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'items',
+            message: 'Give the checklist at least one item.',
           });
         } else if (node.subtype === AutomationAction.CREATE_SUBTASK) {
           // A subtask step with nothing to create would publish cleanly and
@@ -545,6 +557,7 @@ export class AutomationGraphValidatorService {
     const targetProjectIds = new Set<string>();
     const targetSectionIds = new Set<string>();
     const webhookEndpointIds = new Set<string>();
+    const teamIds = new Set<string>();
 
     const read = (value: unknown): string | null =>
       typeof value === 'string' && value !== '' ? value : null;
@@ -581,6 +594,12 @@ export class AutomationGraphValidatorService {
       // left is harmless, so only the additions are references.
       if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
         for (const id of peopleIn(config['add'])) userIds.add(id);
+      }
+
+      // A team step hands the task to a team of this workspace, not another's.
+      if (node.subtype === AutomationAction.ASSIGN_TEAM) {
+        const teamId = read(config['teamId']);
+        if (teamId) teamIds.add(teamId);
       }
 
       // A webhook step names a workspace endpoint; a rule may not send to
@@ -643,6 +662,7 @@ export class AutomationGraphValidatorService {
       targetProjects,
       targetSections,
       webhookEndpoints,
+      teams,
     ] = await Promise.all([
       sectionIds.size
         ? this.prisma.section.findMany({
@@ -710,7 +730,14 @@ export class AutomationGraphValidatorService {
             select: { id: true, enabled: true },
           })
         : [],
+      teamIds.size
+        ? this.prisma.team.findMany({
+            where: { id: { in: [...teamIds] }, workspaceId },
+            select: { id: true },
+          })
+        : [],
     ]);
+    const liveTeams = new Set(teams.map((row) => row.id));
 
     const liveEndpoints = new Map(webhookEndpoints.map((row) => [row.id, row.enabled]));
     const liveTargetProjects = new Set(targetProjects.map((row) => row.id));
@@ -774,6 +801,18 @@ export class AutomationGraphValidatorService {
           path: 'userId',
           message: 'That person is no longer a member of this workspace.',
         });
+      }
+
+      if (node.subtype === AutomationAction.ASSIGN_TEAM) {
+        const teamId = read(config['teamId']);
+        if (teamId && !liveTeams.has(teamId)) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'teamId',
+            message: 'That team is no longer in this workspace.',
+          });
+        }
       }
 
       if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
@@ -1001,6 +1040,7 @@ export class AutomationGraphValidatorService {
         'SET_START_DATE',
         'CLEAR_START_DATE',
         'SET_ESTIMATE',
+        'ASSIGN_TEAM',
       ],
       TASK_DUE_DATE_CHANGED: ['SET_DUE_DATE', 'CLEAR_DUE_DATE'],
       TASK_START_DATE_CHANGED: ['SET_START_DATE', 'CLEAR_START_DATE'],

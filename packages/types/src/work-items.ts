@@ -183,6 +183,9 @@ export interface Task {
   approvalStatus: ApprovalStatus | null;
   assigneeId: string | null;
   assignee: UserRef | null;
+  /** The team responsible for the task, beside the person assigned to it. */
+  teamId: string | null;
+  team: ProjectTeamRef | null;
   createdById: string;
   subtaskCount: number;
   completedSubtaskCount: number;
@@ -252,6 +255,8 @@ export interface UpdateTaskPayload {
   status?: TaskStatus;
   priority?: TaskPriority;
   assigneeId?: string | null;
+  /** The team responsible for the task; null clears it. */
+  teamId?: string | null;
   startDate?: string | null;
   startAt?: string | null;
   dueDate?: string | null;
@@ -407,4 +412,43 @@ export interface CreateCommentPayload {
 
 export interface UpdateCommentPayload {
   body: string;
+}
+
+/** One line of a task's checklist. */
+export interface TaskChecklistItem {
+  id: string;
+  title: string;
+  position: number;
+  completed: boolean;
+  completedAt: string | null;
+  completedBy: { id: string; name: string } | null;
+}
+
+/** A named list of things to tick off, on one task. */
+export interface TaskChecklist {
+  id: string;
+  taskId: string;
+  name: string;
+  position: number;
+  items: TaskChecklistItem[];
+  createdBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+export interface CreateChecklistPayload {
+  name: string;
+  /** Items to start it with, in order. */
+  items?: string[];
+}
+
+export interface UpdateChecklistPayload {
+  name?: string;
+  /** Where it sits among the task's checklists: lower comes first. */
+  position?: number;
+}
+
+export interface UpdateChecklistItemPayload {
+  title?: string;
+  completed?: boolean;
+  position?: number;
 }

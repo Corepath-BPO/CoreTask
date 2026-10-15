@@ -54,6 +54,7 @@ import {
   ManualTriggerFields,
   ScheduleTriggerFields,
 } from './timed-trigger-fields';
+import { ChecklistFields, TeamFields } from './team-and-checklist-fields';
 import { SubtaskListFields } from './subtask-list-fields';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
@@ -589,6 +590,12 @@ function ActionFields({
       return (
         <SubtaskListFields configuration={configuration} metadata={metadata} onChange={onChange} />
       );
+
+    case 'ASSIGN_TEAM':
+      return <TeamFields configuration={configuration} metadata={metadata} onChange={onChange} />;
+
+    case 'CREATE_CHECKLIST':
+      return <ChecklistFields configuration={configuration} onChange={onChange} />;
 
     case 'SEND_WEBHOOK':
       return (

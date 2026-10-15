@@ -29,6 +29,7 @@ import {
   aiActionProblem,
   aiDraftUpdateProblem,
   aiCheckProblem,
+  checklistOf,
   conditionGroupProblems,
   conditionLeaves,
   groupMatch,
@@ -559,6 +560,35 @@ function actionSummary(
   };
 
   switch (subtype) {
+    case 'ASSIGN_TEAM': {
+      if (config['clear'] === true) return [{ text: 'Clear the team' }];
+      const teamId = config['teamId'];
+      if (typeof teamId !== 'string' || teamId === '')
+        return [{ text: 'Assign a team — choose one' }];
+      const team =
+        metadata?.teams?.find((entry) => entry.id === teamId)?.name ?? 'a team that was removed';
+      return [{ text: 'Assign team' }, { text: team, chip: true }];
+    }
+
+    case 'CREATE_CHECKLIST': {
+      // The name, and how many items: a card listing them would be a paragraph.
+      const { name, items } = checklistOf(config);
+      if (!name) return [{ text: 'Add a checklist — name it' }];
+      return [
+        { text: 'Add checklist' },
+        { text: name, chip: true },
+        { text: '·' },
+        {
+          text:
+            items.length === 0
+              ? 'no items yet'
+              : `${items.length} item${items.length === 1 ? '' : 's'}`,
+          chip: true,
+          ...(items.length === 0 ? { placeholder: true } : {}),
+        },
+      ];
+    }
+
     case 'ASSIGN_USER': {
       const who = person(config['userId']);
       return who
@@ -890,6 +920,12 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
   switch (node.subtype) {
     case 'ASSIGN_USER':
       return !has('userId');
+    case 'ASSIGN_TEAM':
+      return !has('teamId') && config['clear'] !== true;
+    case 'CREATE_CHECKLIST': {
+      const checklist = checklistOf(config);
+      return checklist.name === '' || checklist.items.length === 0;
+    }
     case 'MOVE_TO_SECTION':
       return !has('sectionId');
     // The section is optional — the project's first stands in — so the

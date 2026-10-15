@@ -25,6 +25,7 @@ const USER_SELECT = {
  */
 export const taskInclude = {
   assignee: { select: USER_SELECT },
+  team: { select: { id: true, name: true, color: true } },
   tags: taskTagsInclude,
   _count: {
     select: {
@@ -90,6 +91,8 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     approvalStatus: task.approvalStatus,
     assigneeId: task.assigneeId,
     assignee: task.assignee,
+    teamId: task.teamId,
+    team: task.team,
     createdById: task.createdById,
     subtaskCount: task._count.subtasks,
     completedSubtaskCount,

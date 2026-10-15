@@ -214,8 +214,10 @@ detail already lives in `AutomationExecutionLog` for anyone debugging.
 
 ## Known limitations
 
-- **Actions listed in `PLANNED_ACTIONS`** have contracts only. The builder shows
-  them disabled with the reason and the runner refuses them loudly rather than
-  reporting success.
+- **Catalogue rows the engine cannot run** — convert to project, create
+  approvals — are shown disabled with their reason. `PLANNED_ACTIONS` is empty;
+  publishing refuses any subtype outside `AUTOMATION_ACTIONS`, and the runner
+  fails loudly on one rather than reporting success. See
+  [the action catalogue](./automation-action-catalog.md).
 - **No per-rule execution lock.** Two events for the same task arriving together
   can interleave. Concurrency is set to 2 to narrow the window, not close it.

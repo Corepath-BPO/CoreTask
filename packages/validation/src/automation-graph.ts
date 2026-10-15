@@ -446,6 +446,10 @@ const ACTION_REQUIREMENTS: Readonly<
     path: 'endpointId',
     message: 'Choose a webhook endpoint or enter a URL.',
   },
+  // A team, or the explicit choice to clear it.
+  ASSIGN_TEAM: { keys: ['teamId', 'clear'], path: 'teamId', message: 'Choose a team.' },
+  // The items are counted by the server, as a subtask step's titles are.
+  CREATE_CHECKLIST: { keys: ['name'], path: 'name', message: 'Name the checklist.' },
 };
 
 /**
@@ -463,7 +467,10 @@ export function missingActionSetting(
 
   const present = requirement.keys.some((key) => {
     const value = configuration[key];
-    return typeof value === 'string' ? value.trim() !== '' : value !== undefined && value !== null;
+    // A flag set to false has not been chosen — "clear the team: no" is no answer.
+    return typeof value === 'string'
+      ? value.trim() !== ''
+      : value !== undefined && value !== null && value !== false;
   });
 
   return present ? null : { path: requirement.path, message: requirement.message };

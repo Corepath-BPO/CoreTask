@@ -19,6 +19,8 @@ export const StoryField = {
   ASSIGNEE: 'assignee',
   DUE_DATE: 'dueDate',
   START_DATE: 'startDate',
+  /** The team responsible for a task. */
+  TEAM: 'team',
 } as const;
 export type StoryField = (typeof StoryField)[keyof typeof StoryField];
 

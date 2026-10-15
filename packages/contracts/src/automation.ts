@@ -159,6 +159,10 @@ export const AutomationAction = {
    * by the rule. Runs in a rule with no tasks too — "every Friday, draft".
    */
   AI_DRAFT_UPDATE: 'AI_DRAFT_UPDATE',
+  /** A named checklist of items to tick off, added to the task. */
+  CREATE_CHECKLIST: 'CREATE_CHECKLIST',
+  /** Makes a team of the workspace responsible for the task, or clears it. */
+  ASSIGN_TEAM: 'ASSIGN_TEAM',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -192,6 +196,8 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SET_TICKET_PRIORITY: 'Set the ticket priority',
   AI_ACTION: 'Use AI',
   AI_DRAFT_UPDATE: 'Draft an update with AI',
+  CREATE_CHECKLIST: 'Add a checklist',
+  ASSIGN_TEAM: 'Assign a team',
 };
 
 /**
@@ -243,9 +249,47 @@ export function emailRecipientsOf(
  *
  * Named here so the builder can grey them out honestly rather than omitting
  * them and leaving someone to wonder, and so adding one later is a change in
- * one place.
+ * one place. Empty since checklists and teams were built.
  */
-export const PLANNED_ACTIONS = ['CREATE_CHECKLIST', 'ASSIGN_TEAM'] as const;
+export const PLANNED_ACTIONS: readonly string[] = [];
+
+// ---------------------------------------------------------------------------
+// Checklists
+// ---------------------------------------------------------------------------
+
+/** How many checklists one task holds. */
+export const MAX_CHECKLISTS_PER_TASK = 20;
+/** How many items one checklist holds — and one "Add a checklist" step writes. */
+export const MAX_CHECKLIST_ITEMS = 50;
+export const CHECKLIST_NAME_MAX = 200;
+export const CHECKLIST_ITEM_MAX = 500;
+
+/**
+ * The checklist an "Add a checklist" step adds: its name, and its items in
+ * order.
+ *
+ * Read the one way everywhere — the runner writing them, the validator
+ * refusing an empty step, the builder's card — so a step cannot publish with
+ * items the runner then reads as none. Blank rows are dropped rather than
+ * refused (the form keeps them while somebody types), and both the rows and
+ * their text are capped where the columns are.
+ */
+export function checklistOf(configuration: Record<string, unknown>): {
+  name: string;
+  items: string[];
+} {
+  const name = typeof configuration['name'] === 'string' ? configuration['name'].trim() : '';
+  const raw = Array.isArray(configuration['items']) ? configuration['items'] : [];
+
+  return {
+    name: name.slice(0, CHECKLIST_NAME_MAX),
+    items: raw
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => item !== '')
+      .map((item) => item.slice(0, CHECKLIST_ITEM_MAX))
+      .slice(0, MAX_CHECKLIST_ITEMS),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The rule library

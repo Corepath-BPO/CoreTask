@@ -290,14 +290,23 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies`,
     dependency: (workspaceId: string, taskId: string, dependencyId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies/${dependencyId}`,
-    /** Time logged against a task. */
     /** "Mark as duplicate": POST names the original, DELETE undoes it. */
     duplicateOf: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/duplicate-of`,
+    /** Time logged against a task. */
     timeEntries: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries`,
     timeEntry: (workspaceId: string, taskId: string, entryId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries/${entryId}`,
+    /** A task's checklists, each with its items. */
+    checklists: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists`,
+    checklist: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}`,
+    checklistItems: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items`,
+    checklistItem: (workspaceId: string, taskId: string, checklistId: string, itemId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items/${itemId}`,
     /** Multi-homing: the other projects a task is in. */
     projects: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/projects`,

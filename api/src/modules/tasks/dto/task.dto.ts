@@ -225,6 +225,16 @@ export class UpdateTaskDto {
   assigneeId?: string | null;
 
   @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'The team responsible for the task — a team of this workspace — or null.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  teamId?: string | null;
+
+  @ApiPropertyOptional({
     format: 'date-time',
     nullable: true,
     description: 'The calendar date; only the date part is kept.',

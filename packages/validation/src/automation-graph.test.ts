@@ -626,3 +626,27 @@ describe('condition groups', () => {
     ).toEqual([expect.objectContaining({ path: 'conditions.2.value' })]);
   });
 });
+
+describe('the team and checklist steps', () => {
+  const step = (subtype: string, configuration: Record<string, unknown>) =>
+    node({ id: 's-1', subtype, configuration });
+
+  it('asks a team step for a team, or for the choice to clear it', () => {
+    expect(messages([trigger(), step('ASSIGN_TEAM', {})])).toContain('Choose a team.');
+    expect(messages([trigger(), step('ASSIGN_TEAM', { clear: false })])).toContain(
+      'Choose a team.',
+    );
+    expect(messages([trigger(), step('ASSIGN_TEAM', { teamId: 'team-1' })])).not.toContain(
+      'Choose a team.',
+    );
+    expect(messages([trigger(), step('ASSIGN_TEAM', { clear: true })])).not.toContain(
+      'Choose a team.',
+    );
+  });
+
+  it('asks a checklist step for its name', () => {
+    expect(messages([trigger(), step('CREATE_CHECKLIST', { items: ['Keys'] })])).toContain(
+      'Name the checklist.',
+    );
+  });
+});
