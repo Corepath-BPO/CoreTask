@@ -51,6 +51,9 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
     projectId: item.projectId,
     sectionId: item.sectionId,
     parentTaskId: item.parentId,
+    // A row of the project's own: a ticket's subtasks are lines under it,
+    // never rows here.
+    parentTicketId: null,
     title: item.title,
     description: item.description,
 

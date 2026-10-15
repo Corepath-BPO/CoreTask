@@ -1508,6 +1508,9 @@ model Task {
   projectId            String?         @db.Uuid
   sectionId            String?         @db.Uuid
   parentTaskId         String?         @db.Uuid
+  /// A subtask of a ticket rather than of a task. In the ticket's project, in
+  /// no section, and gone with the ticket, as a task's subtasks are with it.
+  parentTicketId       String?         @db.Uuid
   title                String          @db.VarChar(500)
   description          String?
   /// Legacy enum. Still authoritative until the definition backfill is
@@ -1552,6 +1555,7 @@ model Task {
   project            Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   section            Section?                @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   parentTask         Task?                   @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  parentTicket       Ticket?                 @relation("TicketSubtasks", fields: [parentTicketId], references: [id], onDelete: Cascade)
   subtasks           Task[]                  @relation("TaskSubtasks")
   assignee           User?                   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -1583,6 +1587,7 @@ model Task {
   @@index([assigneeId, status])
   @@index([workspaceId, dueDate])
   @@index([parentTaskId])
+  @@index([parentTicketId])
   @@map("tasks")
 }
 
@@ -1663,6 +1668,7 @@ model Ticket {
   comments    Comment[]
   attachments Attachment[]
   followers   Follower[]
+  subtasks    Task[]       @relation("TicketSubtasks")
 
   @@unique([workspaceId, number])
   @@unique([workspaceId, key])

@@ -259,7 +259,11 @@ closing the pane. Each entry has a day and a note; anyone who can edit the task
 logs time, guests read it, and an entry is changed or removed by its author or
 a manager.
 
-Open: subtasks under tickets.
+**Subtasks under tickets**: a ticket's pane has the same Subtasks list as a
+task's — add one, tick it off, open it — and the List expands a ticket row to
+show them. They are tasks, in the ticket's project and in no section, so they
+are not cards of their own; each says "Subtask of KEY · title" with a link
+back, and they move with the ticket when it changes project.
 
 ## Home
 

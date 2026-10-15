@@ -392,6 +392,7 @@ export class AutomationAiService {
       workspaceId: rule.workspaceId,
       archivedAt: null,
       parentTaskId: null,
+      parentTicketId: null,
       OR: [
         { projectId: rule.projectId },
         { projectLinks: { some: { projectId: rule.projectId } } },

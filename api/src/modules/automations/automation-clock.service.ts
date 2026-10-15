@@ -216,6 +216,7 @@ export class AutomationClockService {
       where: {
         archivedAt: null,
         parentTaskId: null,
+        parentTicketId: null,
         ...(schedule.scope === ExecutionScope.ALL ? {} : { completedAt: null }),
         // The project's tasks, home or linked in; a section is the home's
         // column or the link's.

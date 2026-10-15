@@ -174,7 +174,7 @@ export class ProjectBlueprintService {
         : [],
       has(BlueprintPart.TASKS)
         ? this.prisma.task.findMany({
-            where: { projectId, parentTaskId: null, archivedAt: null },
+            where: { projectId, parentTaskId: null, parentTicketId: null, archivedAt: null },
             orderBy: [{ position: 'asc' }, { id: 'asc' }],
             take: MAX_BLUEPRINT_TASKS,
             include: {

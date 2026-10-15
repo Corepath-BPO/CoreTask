@@ -155,6 +155,8 @@ export interface Task {
   projectId: string | null;
   sectionId: string | null;
   parentTaskId: string | null;
+  /** Set on a subtask of a ticket rather than of a task. */
+  parentTicketId: string | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -204,6 +206,8 @@ export interface TaskDetail extends Task {
   createdBy: UserRef | null;
   /** Set by "Mark as duplicate": the task this one repeats. */
   duplicateOf: { id: string; title: string } | null;
+  /** The ticket this is a subtask of, for the link back to it. */
+  parentTicket: { id: string; key: string; title: string } | null;
 }
 
 /** A project a task is in besides its home, with its section there. */
@@ -224,6 +228,8 @@ export interface CreateTaskPayload {
   projectId?: string | null;
   sectionId?: string | null;
   parentTaskId?: string | null;
+  /** A subtask of this ticket instead: it joins the ticket's project, in no section. */
+  parentTicketId?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   assigneeId?: string | null;
