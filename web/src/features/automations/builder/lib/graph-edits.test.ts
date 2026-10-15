@@ -13,6 +13,8 @@ import {
   makeNodeUnder,
   NO_EDITS,
   readPlaceholderId,
+  rebaseEdits,
+  savedId,
   withDescendants,
   withPlaceholder,
   type CanvasNode,
@@ -350,5 +352,51 @@ describe('branch rows', () => {
       expect(rows.map((row) => row.id)).toEqual(['r1', copies[0]!.id, rows[2]!.id]);
       expect(rows[2]!.configuration).toEqual(FALLBACK_CONFIGURATION);
     });
+  });
+});
+
+describe('rebasing edits after a save', () => {
+  const added = node({ id: 'new-1111', parentId: 'trigger', order: 3 });
+
+  it('clears everything the save carried', () => {
+    const sent = { ...NO_EDITS, added: [added], configured: { a: { body: 'Hi' } } };
+
+    expect(rebaseEdits(sent, sent)).toEqual(NO_EDITS);
+  });
+
+  it('keeps what changed while the save was out, under the ids the save gave', () => {
+    const sentConfig = { body: 'Hi' };
+    const sent = { ...NO_EDITS, added: [added], configured: { 'new-1111': sentConfig } };
+    const later = node({ id: 'new-2222', parentId: 'new-1111', order: 4 });
+    const current = {
+      ...NO_EDITS,
+      added: [added, later],
+      configured: { 'new-1111': { body: 'Hi there' }, a: sentConfig },
+      removed: ['b'],
+    };
+
+    expect(rebaseEdits(current, sent)).toEqual({
+      ...NO_EDITS,
+      // The new step is on the server now; the one added after it is not, and
+      // follows its parent's saved id.
+      added: [{ ...later, parentId: '1111' }],
+      configured: { '1111': { body: 'Hi there' }, a: sentConfig },
+      removed: ['b'],
+    });
+  });
+
+  it('drops a setting typed before the save and keeps one typed after', () => {
+    const typed = { body: 'Done' };
+    const sent = { ...NO_EDITS, configured: { a: typed } };
+
+    expect(rebaseEdits({ ...sent }, sent).configured).toEqual({});
+    expect(rebaseEdits({ ...sent, configured: { a: { body: 'Done!' } } }, sent).configured).toEqual(
+      { a: { body: 'Done!' } },
+    );
+  });
+
+  it('names a saved step by the uuid inside its new- id', () => {
+    expect(savedId('new-1111')).toBe('1111');
+    expect(savedId('1111')).toBe('1111');
   });
 });

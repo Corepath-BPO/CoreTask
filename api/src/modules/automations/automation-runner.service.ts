@@ -58,7 +58,6 @@ import {
   StatusCategory,
   TaskStatus,
   WorkspaceRole,
-  type AutomationNode,
   type Task,
   type TaskCustomFieldValue,
 } from '@prisma/client';
@@ -89,6 +88,13 @@ import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { ticketLifecycle } from '../tickets/ticket-lifecycle';
 
 import { fieldChangeTriggers } from './task-field-triggers';
+import { readSnapshot, type SnapshotNode } from './versions/rule-snapshot';
+
+/**
+ * A step as the runner reads it: from the published version's copy of the
+ * rule, never from the rows the builder is editing.
+ */
+type AutomationNode = SnapshotNode;
 
 /** What one action attempt produced, for the log. */
 interface ActionOutcome {
@@ -200,9 +206,16 @@ interface RunnableRule {
   workspaceId: string;
   projectId: string;
   createdById: string | null;
-  /** Read for the timezone a clock rule was set in, which dates in its text use. */
+  /**
+   * The running version's trigger configuration — what the event is matched
+   * against, and the timezone a clock rule was set in, which dates in its text
+   * use.
+   */
   triggerConfig: Prisma.JsonValue;
+  /** The running version's steps. */
   nodes: AutomationNode[];
+  /** The version they came from, recorded on the run. */
+  versionId: string;
 }
 
 /** A calendar date as the text variables print it: "Oct 20, 2026". */
@@ -295,21 +308,7 @@ export class AutomationRunnerService {
       return { executed: 0, skipped: 1, events: [], webhooks: [], emails: [] };
     }
 
-    const rules = await this.prisma.automationRule.findMany({
-      where: {
-        projectId: { in: await this.ruleProjects(event) },
-        status: AutomationRuleStatus.ACTIVE,
-        triggerType: event.trigger,
-        // A run somebody asked for by name, or one the clock found due, is
-        // for that rule alone — not every rule that shares its trigger.
-        ...(event.ruleId ? { id: event.ruleId } : {}),
-      },
-      include: { nodes: { orderBy: { position: 'asc' } } },
-      // Oldest first, ids as the tie-break: two rules writing the same column
-      // on one event must resolve the same way every time, not however the
-      // table happened to be laid out.
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
+    const rules = await this.runnableRules(event);
 
     const context = rules.length > 0 ? await this.loadTask(event) : null;
 
@@ -373,6 +372,85 @@ export class AutomationRunnerService {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * The live rules this event is for, each with the version it runs.
+   *
+   * Matched on the *published* version's trigger and run from its steps — the
+   * draft somebody is editing is never read here, so a half-finished edit to a
+   * live rule cannot act on a task, and a trigger changed in the builder takes
+   * effect when it is published rather than when it is typed.
+   *
+   * A run resuming after a Wait step finishes on the version it started on,
+   * named in the event: republishing a rule while a run waits does not change
+   * what that run does next. Such a run is found by its rule alone — its
+   * trigger is the one it started with, which a later version may not share.
+   */
+  private async runnableRules(
+    event: AutomationEvent,
+  ): Promise<(RunnableRule & { allowChaining: boolean })[]> {
+    const resuming = Boolean(event.resumeFromNodeId && event.ruleId);
+
+    const rows = await this.prisma.automationRule.findMany({
+      where: {
+        projectId: { in: await this.ruleProjects(event) },
+        status: AutomationRuleStatus.ACTIVE,
+        ...(resuming ? {} : { publishedVersion: { is: { triggerType: event.trigger } } }),
+        // A run somebody asked for by name, or one the clock found due, is
+        // for that rule alone — not every rule that shares its trigger.
+        ...(event.ruleId ? { id: event.ruleId } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true,
+        projectId: true,
+        createdById: true,
+        allowChaining: true,
+        publishedVersionId: true,
+      },
+      // Oldest first, ids as the tie-break: two rules writing the same column
+      // on one event must resolve the same way every time, not however the
+      // table happened to be laid out.
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    const wanted = new Map(
+      rows.map((rule) => [rule.id, (resuming && event.resumeVersionId) || rule.publishedVersionId]),
+    );
+    const versions = await this.prisma.automationRuleVersion.findMany({
+      where: { id: { in: [...wanted.values()].filter((id): id is string => Boolean(id)) } },
+      select: { id: true, ruleId: true, triggerConfig: true, nodes: true },
+    });
+    const byId = new Map(versions.map((version) => [version.id, version]));
+
+    return rows.flatMap((rule) => {
+      const version = byId.get(wanted.get(rule.id) ?? '');
+      const nodes = version && version.ruleId === rule.id ? readSnapshot(version.nodes) : null;
+
+      // Live with nothing published is not a state publishing can leave, so a
+      // rule here was switched on some other way. It runs nothing rather than
+      // its draft, and says so where somebody looking will see it.
+      if (!version || !nodes) {
+        this.logger.warn({ ruleId: rule.id }, 'Active rule has no published version to run');
+        return [];
+      }
+
+      return [
+        {
+          id: rule.id,
+          name: rule.name,
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          createdById: rule.createdById,
+          allowChaining: rule.allowChaining,
+          triggerConfig: version.triggerConfig,
+          nodes,
+          versionId: version.id,
+        },
+      ];
+    });
+  }
 
   /**
    * Whose rules hear an event — multi-homing.
@@ -896,6 +974,7 @@ export class AutomationRunnerService {
           chainId: chainOf(event),
           idempotencyKey: key,
           depth: event.depth,
+          ruleVersionId: rule.versionId,
         },
         select: { id: true },
       });
@@ -3312,7 +3391,7 @@ export class AutomationRunnerService {
       where: {
         projectId: event.projectId,
         status: AutomationRuleStatus.ACTIVE,
-        triggerType: event.trigger,
+        publishedVersion: { is: { triggerType: event.trigger } },
       },
       select: { id: true, workspaceId: true },
     });
@@ -3761,6 +3840,7 @@ export class AutomationRunnerService {
           projectId: rule.projectId,
           ruleId: rule.id,
           nodeId: node.id,
+          ruleVersionId: rule.versionId,
           runAt,
           event: original as unknown as Prisma.InputJsonValue,
         },

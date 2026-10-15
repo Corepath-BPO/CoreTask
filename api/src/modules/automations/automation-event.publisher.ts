@@ -62,6 +62,11 @@ export interface AutomationEvent {
    * the same occurrence happening later, so it sends no webhooks.
    */
   resumeFromNodeId?: string | null;
+  /**
+   * The version a resumed run started on, and finishes on. Absent on a run
+   * that waited from before versions were kept; it takes the published one.
+   */
+  resumeVersionId?: string | null;
 }
 
 /**

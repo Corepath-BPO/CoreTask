@@ -22,6 +22,8 @@ export const automationKeys = {
     ['automations', workspaceId, projectId, 'metadata'] as const,
   executions: (workspaceId: string, projectId: string, ruleId: string) =>
     ['automations', workspaceId, projectId, ruleId, 'executions'] as const,
+  versions: (workspaceId: string, projectId: string, ruleId: string) =>
+    ['automations', workspaceId, projectId, ruleId, 'versions'] as const,
 };
 
 /** Kept for the call sites in this file. */
@@ -186,13 +188,14 @@ export interface ManualRule {
 
 const toManualRules = (rules: AutomationRule[]): ManualRule[] =>
   rules
+    // The trigger that is running decides, not one being edited in the builder.
     .filter(
       (rule) =>
         rule.status === AutomationRuleStatus.ACTIVE &&
-        rule.triggerType === AutomationTrigger.RUN_MANUALLY,
+        (rule.publishedVersion?.triggerType ?? rule.triggerType) === AutomationTrigger.RUN_MANUALLY,
     )
     .map((rule) => {
-      const label = rule.triggerConfig['label'];
+      const label = (rule.publishedVersion?.triggerConfig ?? rule.triggerConfig)['label'];
       return { id: rule.id, label: typeof label === 'string' && label.trim() ? label : rule.name };
     });
 
@@ -225,5 +228,53 @@ export function useRunRule(workspaceId: string | undefined, projectId: string | 
     onSuccess: ({ queued }, { rule }) =>
       toast.success(`Running “${rule.label}” on ${queued} task${queued === 1 ? '' : 's'}.`),
     onError: (error) => reportRuleError(error, 'Could not run that rule.'),
+  });
+}
+
+/** A rule's published versions, newest first — fetched when the history opens. */
+export function useRuleVersions(
+  workspaceId: string | undefined,
+  projectId: string,
+  ruleId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: keys.versions(workspaceId ?? '', projectId, ruleId ?? ''),
+    queryFn: () => automationsApi.versions(workspaceId as string, projectId, ruleId as string),
+    enabled: enabled && Boolean(workspaceId) && Boolean(ruleId),
+  });
+}
+
+/**
+ * Puts a version's steps back in the draft, or live with `publish`.
+ *
+ * Refreshes the rule's graph before it resolves, so a builder that awaits it
+ * draws the restored steps rather than the ones they replaced.
+ */
+export function useRevertRule(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: ({
+      ruleId,
+      versionId,
+      publish = false,
+    }: {
+      ruleId: string;
+      versionId: string;
+      version: number;
+      /** The version running now — restoring it is discarding the draft's changes. */
+      running?: boolean;
+      publish?: boolean;
+    }) => automationsApi.revert(workspaceId as string, projectId, ruleId, versionId, publish),
+    onSuccess: async (_rule, { version, running, publish }) => {
+      toast.success(
+        running
+          ? 'Unpublished changes discarded.'
+          : publish
+            ? `Version ${version} is live again.`
+            : `Version ${version} is back in the draft. Publish it to make it live.`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['automations', workspaceId, projectId] });
+    },
+    onError: (error) => reportRuleError(error, 'Could not restore that version.'),
   });
 }

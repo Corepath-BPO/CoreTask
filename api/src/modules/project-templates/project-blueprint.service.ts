@@ -368,7 +368,7 @@ export class ProjectBlueprintService {
         continue;
       }
       try {
-        await this.automations.publish(workspaceId, projectId, role, written.ruleId);
+        await this.automations.publish(workspaceId, projectId, role, written.ruleId, actor.userId);
       } catch {
         result.rulesNeedingAttention.push(snapshot.name);
       }

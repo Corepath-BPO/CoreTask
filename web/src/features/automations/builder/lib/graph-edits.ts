@@ -92,6 +92,62 @@ export const NO_EDITS: GraphEdits = {
   reparented: {},
 };
 
+/**
+ * The id a step has once saved.
+ *
+ * A step the builder adds is `new-<uuid>`, and the server stores it as the
+ * uuid — so the panel open on it, and any edit made to it while the save was
+ * out, can follow it across the save instead of naming a step that is gone.
+ */
+export function savedId(id: string): string {
+  return id.startsWith('new-') ? id.slice('new-'.length) : id;
+}
+
+/**
+ * The edits still unsaved once a save has landed.
+ *
+ * Autosave runs while somebody is typing, so a save often lands with newer
+ * edits on top of the ones it sent. Keeping everything would add the sent new
+ * steps a second time over the saved copies; dropping everything would lose
+ * the keystrokes after the snapshot. So what the save carried is taken out —
+ * an entry still equal to what was sent is now on the server — and what
+ * changed since stays, with the steps the save created called by their saved
+ * ids.
+ */
+export function rebaseEdits(current: GraphEdits, sent: GraphEdits): GraphEdits {
+  if (current === sent) return NO_EDITS;
+
+  const created = new Set(sent.added.map((node) => node.id));
+  const rename = (id: string) => (created.has(id) ? savedId(id) : id);
+  const renameParent = (id: string | null) => (id === null ? null : rename(id));
+
+  const newer = <T>(entries: Record<string, T>, before: Record<string, T>, same = sameValue) =>
+    Object.fromEntries(
+      Object.entries(entries)
+        .filter(([id, value]) => !(id in before) || !same(before[id], value))
+        .map(([id, value]) => [rename(id), value]),
+    );
+
+  return {
+    added: current.added
+      .filter((node) => !created.has(node.id))
+      .map((node) => ({ ...node, parentId: renameParent(node.parentId) })),
+    removed: current.removed.filter((id) => !sent.removed.includes(id)).map(rename),
+    configured: newer(current.configured, sent.configured, (a, b) => a === b),
+    retyped: newer(current.retyped, sent.retyped),
+    reparented: Object.fromEntries(
+      Object.entries(newer(current.reparented, sent.reparented)).map(([id, place]) => [
+        id,
+        { ...place, parentId: renameParent(place.parentId) },
+      ]),
+    ),
+  };
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function hasEdits(edits: GraphEdits): boolean {
   return (
     edits.added.length > 0 ||

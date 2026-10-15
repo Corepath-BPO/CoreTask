@@ -279,9 +279,26 @@ describe('Automation loop protection (e2e)', () => {
       const scope = await setupScope();
       // Written before the check existed, as far as the runner can tell.
       const ruleId = await createRule(scope, comments(MAX_ACTIONS_PER_EXECUTION + 2), false);
+      const nodes = await context.prisma.automationNode.findMany({ where: { ruleId } });
+      const version = await context.prisma.automationRuleVersion.create({
+        data: {
+          ruleId,
+          version: 1,
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          nodes: nodes.map((node) => ({
+            id: node.id,
+            nodeType: node.nodeType,
+            subtype: node.subtype,
+            configuration: node.configuration,
+            parentNodeId: node.parentNodeId,
+            branchKey: node.branchKey,
+            position: node.position,
+          })) as never,
+        },
+      });
       await context.prisma.automationRule.update({
         where: { id: ruleId },
-        data: { status: 'ACTIVE' },
+        data: { status: 'ACTIVE', publishedVersionId: version.id },
       });
 
       await runner.handle(moveEvent(scope));
