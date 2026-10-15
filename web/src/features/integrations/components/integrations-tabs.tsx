@@ -3,22 +3,12 @@ import { Link, useLocation } from '@tanstack/react-router';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-interface IntegrationsTab {
-  label: string;
-  segment: string;
-  /** Routed and honest about being unbuilt, rather than a fake working screen. */
-  comingSoon?: boolean;
-}
-
-const TABS: IntegrationsTab[] = [
-  { label: 'API keys', segment: 'api-keys' },
-  { label: 'Webhooks', segment: 'webhooks' },
-  { label: 'Playground', segment: 'playground' },
-];
+import { INTEGRATIONS_TABS } from '../lib/integrations-tabs';
 
 /** Links rather than local state, so the tab lives in the URL and survives a refresh. */
-export function IntegrationsTabs() {
+export function IntegrationsTabs({ canManage }: { canManage: boolean }) {
   const { pathname } = useLocation();
+  const tabs = INTEGRATIONS_TABS.filter((tab) => canManage || !tab.adminOnly);
 
   return (
     <div
@@ -26,7 +16,7 @@ export function IntegrationsTabs() {
       aria-label="Integrations"
       className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-px"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const to = `/integrations/${tab.segment}`;
         const isActive = pathname === to || pathname.startsWith(`${to}/`);
 

@@ -10,7 +10,13 @@ import { GoalsPage } from '@/features/goals/pages/goals-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
-import { IntegrationsPage } from '@/features/integrations/pages/integrations-page';
+import { ConnectedAppsPage } from '@/features/integrations/pages/connected-apps-page';
+import {
+  IntegrationsIndex,
+  IntegrationsPage,
+} from '@/features/integrations/pages/integrations-page';
+import { OAuthAppsPage } from '@/features/integrations/pages/oauth-apps-page';
+import { OAuthConsentPage } from '@/features/integrations/pages/oauth-consent-page';
 import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
 import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
@@ -302,7 +308,9 @@ const teamDetailRoute = createRoute({
 
 /**
  * Integrations is a shell with tabs, like a project: the shell owns the header
- * and the admin gate, the tabs are routes so a URL names one of them.
+ * and the admin gate for the workspace's tabs, the tabs are routes so a URL
+ * names one of them. OAuth apps and Connected apps are a person's own, open to
+ * every member.
  */
 const integrationsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -310,13 +318,11 @@ const integrationsRoute = createRoute({
   component: IntegrationsPage,
 });
 
-/** Bare `/integrations` opens the first tab. */
+/** Bare `/integrations` opens the first tab this person may use. */
 const integrationsIndexRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/',
-  beforeLoad: () => {
-    throw redirect({ to: '/integrations/api-keys' });
-  },
+  component: IntegrationsIndex,
 });
 
 const integrationsApiKeysRoute = createRoute({
@@ -335,6 +341,33 @@ const integrationsPlaygroundRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/playground',
   component: PlaygroundPage,
+});
+
+const integrationsOAuthAppsRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/oauth-apps',
+  component: OAuthAppsPage,
+});
+
+const integrationsConnectedAppsRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/connected-apps',
+  component: ConnectedAppsPage,
+});
+
+/**
+ * Where a tool sends a person to ask for access. Signed in, like the app, but
+ * outside its shell: the page is a single decision and nothing else.
+ */
+const oauthAuthorizeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/oauth/authorize',
+  component: OAuthConsentPage,
+  beforeLoad: ({ location }) => {
+    if (useAuthStore.getState().status !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } });
+    }
+  },
 });
 
 /**
@@ -678,6 +711,7 @@ const routeTree = rootRoute.addChildren([
   guestRoute.addChildren([loginRoute, registerRoute]),
   acceptInvitationRoute,
   publicFormRoute,
+  oauthAuthorizeRoute,
   protectedRoute.addChildren([
     dashboardRoute,
     projectsRoute,
@@ -720,6 +754,8 @@ const routeTree = rootRoute.addChildren([
       integrationsApiKeysRoute,
       integrationsWebhooksRoute,
       integrationsPlaygroundRoute,
+      integrationsOAuthAppsRoute,
+      integrationsConnectedAppsRoute,
     ]),
     goalsRoute,
     calendarRoute,

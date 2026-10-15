@@ -13,6 +13,7 @@ export type * from './home.js';
 export type * from './goals.js';
 export type * from './health.js';
 export type * from './integrations.js';
+export type * from './oauth.js';
 export type * from './notification-preferences.js';
 export type * from './portfolios.js';
 export type * from './project-members.js';

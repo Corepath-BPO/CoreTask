@@ -7,12 +7,19 @@ import { WorkspaceMembersModule } from '../workspace-members/workspace-members.m
 import { ProjectAppsController } from './project-apps.controller';
 import { ProjectAppsService } from './project-apps.service';
 import { WebhookDeliveryModule } from './webhook-delivery.module';
+import { WebhookSubscriptionsController } from './webhook-subscriptions.controller';
+import { WebhookSubscriptionsService } from './webhook-subscriptions.service';
 import { WebhookDeliveriesController, WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
 
 @Module({
   imports: [WorkspaceMembersModule, ActivityLogsModule, WebhookDeliveryModule, ProjectAccessModule],
-  controllers: [WebhooksController, WebhookDeliveriesController, ProjectAppsController],
-  providers: [WebhooksService, ProjectAppsService],
+  controllers: [
+    WebhooksController,
+    WebhookDeliveriesController,
+    ProjectAppsController,
+    WebhookSubscriptionsController,
+  ],
+  providers: [WebhooksService, ProjectAppsService, WebhookSubscriptionsService],
 })
 export class WebhooksModule {}

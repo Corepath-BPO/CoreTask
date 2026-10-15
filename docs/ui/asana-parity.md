@@ -175,6 +175,23 @@ place.
   webhook list marked as an app.
 - Every Customize row is built now; none is marked _Soon_.
 
+## Connecting other tools
+
+Asana's developer console and OAuth, and its webhooks API:
+
+- **Integrations › OAuth apps** registers an app: name, description, website,
+  redirect URIs; the client id and a once-shown secret. Anyone can register
+  one; it acts only for people who allow it.
+- A tool sends a person to **/oauth/authorize**. They see the app, who made
+  it, what it can do and where they will be sent, and **Allow** or **Cancel**.
+  The tool trades the code for an hour-long access token and a refresh token.
+- **Integrations › Connected apps** lists the apps a person allowed, with
+  **Disconnect**. The tab and OAuth apps are open to every member; API keys,
+  Webhooks and Playground stay with admins.
+- API keys and apps can **subscribe webhooks** to a project through the API
+  and remove them; Settings › Webhooks shows them as "Added by …".
+- See `docs/architecture/oauth-and-connectors.md` for the flow and its rules.
+
 ## Task pane
 
 Matched: assignee, dates with times, **status and priority rows**,

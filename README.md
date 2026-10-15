@@ -560,6 +560,10 @@ pnpm compose:validate
   triage it — status, priority, assignee, section, comments, e-mail, a task
 - Rules that wait: a Wait step of minutes, hours or days, after which the
   rest of the rule runs against the task as it is by then
+- Connectors: OAuth 2.0 apps (register under Integrations › OAuth apps; people
+  allow them on a consent page and disconnect them under Connected apps), and
+  webhook subscriptions an API key or app makes through the API, one project
+  at a time
 - AI in rules (with an Anthropic API key): "Use AI…" makes the changes its
   instructions call for, from a list the author ticks and the project's own
   options, and "Check with AI" lets a yes-or-no question decide a path
@@ -779,6 +783,7 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 | [Task dates, times and rich text](docs/architecture/task-dates-and-rich-text.md)             | Date/instant pairs, overdue, the picker, sanitised HTML, mentions, pictures |
 | [List selection, bulk edit and shortcuts](docs/architecture/list-selection-and-shortcuts.md) | Multi-select rules, the bulk bar and route, Tab chords                      |
 | [Comments and collaboration](docs/architecture/comments-and-collaboration.md)                | Followers, who gets told, stories in the panel, rich-text threads           |
+| [OAuth apps and webhook subscriptions](docs/architecture/oauth-and-connectors.md)            | Authorization-code flow, tokens, revocation, REST hooks for connectors      |
 | [Comments, followers and activity API](docs/api/comments-followers-activity.md)              | Threads by cursor, likes, pins, followers, an item's stories                |
 | [Project privacy and members API](docs/api/project-members.md)                               | Public/private projects, the roster and its roles, what `access` means      |
 | [Custom field system](docs/architecture/custom-field-system.md)                              | Eleven types incl. rating and formula, formats, stories, remove modes       |

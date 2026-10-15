@@ -24,6 +24,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { RuleWebhookRequest } from '../../jobs/queue-names';
 import { WebhookQueue } from '../../jobs/webhook/webhook.queue';
 import type { AutomationEvent } from '../automations/automation-event.publisher';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
 import { renderAppMessage, type AppMessageContext } from './lib/app-messages';
 import { decryptSecret, deriveKey } from './lib/secret-cipher';
@@ -32,6 +33,17 @@ import { assertResolvesToAllowedAddress } from './lib/url-policy';
 import { WebhookPayloadBuilder } from './webhook-payload.builder';
 
 type DeliveryWithEndpoint = WebhookDelivery & { endpoint: WebhookEndpoint | null };
+
+/** What fan-out needs to decide whether an endpoint may hear an event. */
+const endpointAudienceSelect = {
+  id: true,
+  url: true,
+  projectId: true,
+  apiKey: { select: { userId: true, revokedAt: true } },
+  oauthGrant: { select: { userId: true, revokedAt: true } },
+} satisfies Prisma.WebhookEndpointSelect;
+
+type EndpointAudience = Prisma.WebhookEndpointGetPayload<{ select: typeof endpointAudienceSelect }>;
 
 interface AttemptResult {
   succeeded: boolean;
@@ -58,8 +70,33 @@ export class WebhookDeliveryService {
     private readonly config: AppConfigService,
     private readonly queue: WebhookQueue,
     private readonly payloads: WebhookPayloadBuilder,
+    private readonly projectAccess: ProjectAccessService,
   ) {
     this.key = deriveKey(config.webhooks.encryptionKeyMaterial);
+  }
+
+  /**
+   * The endpoints an event may reach, of those that asked for it.
+   *
+   * An integration's subscription speaks for the person — or the API key's
+   * service account — that made it, so it hears about a project only while
+   * that owner can still open it: a project made private, or a person
+   * removed, silences it at once. One that lost its project (deleted, so the
+   * column went null) or its owner (revoked) hears nothing, rather than
+   * falling back to the whole workspace the way a null project means for an
+   * admin's endpoint.
+   */
+  private async withinReach(rows: EndpointAudience[]): Promise<{ id: string; url: string }[]> {
+    const reachable: { id: string; url: string }[] = [];
+    for (const row of rows) {
+      const owner = row.oauthGrant ?? row.apiKey;
+      if (owner) {
+        if (owner.revokedAt || !row.projectId) continue;
+        if (!(await this.projectAccess.canJoinProject(row.projectId, owner.userId))) continue;
+      }
+      reachable.push({ id: row.id, url: row.url });
+    }
+    return reachable;
   }
 
   /** One domain event → a pending delivery per endpoint that subscribed to it. */
@@ -68,18 +105,20 @@ export class WebhookDeliveryService {
       event.entityType === 'PROJECT' ? null : webhookEventTypeFor(event.trigger, event.entityType);
     if (!type) return { deliveries: 0 };
 
-    const endpoints = await this.prisma.webhookEndpoint.findMany({
-      where: {
-        workspaceId: event.workspaceId,
-        enabled: true,
-        events: { has: type },
-        OR: [
-          { projectId: null, app: null },
-          ...(event.projectId ? [{ projectId: event.projectId }] : []),
-        ],
-      },
-      select: { id: true, url: true },
-    });
+    const endpoints = await this.prisma.webhookEndpoint
+      .findMany({
+        where: {
+          workspaceId: event.workspaceId,
+          enabled: true,
+          events: { has: type },
+          OR: [
+            { projectId: null, app: null, apiKeyId: null, oauthGrantId: null },
+            ...(event.projectId ? [{ projectId: event.projectId }] : []),
+          ],
+        },
+        select: endpointAudienceSelect,
+      })
+      .then((rows) => this.withinReach(rows));
     if (endpoints.length === 0) return { deliveries: 0 };
 
     // Built once; every endpoint gets the same bytes.
@@ -129,15 +168,20 @@ export class WebhookDeliveryService {
     };
   }): Promise<{ deliveries: number }> {
     const type = WebhookEventType.PROJECT_STATUS_UPDATED;
-    const endpoints = await this.prisma.webhookEndpoint.findMany({
-      where: {
-        workspaceId: input.workspaceId,
-        enabled: true,
-        events: { has: type },
-        OR: [{ projectId: null, app: null }, { projectId: input.projectId }],
-      },
-      select: { id: true, url: true },
-    });
+    const endpoints = await this.prisma.webhookEndpoint
+      .findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          enabled: true,
+          events: { has: type },
+          OR: [
+            { projectId: null, app: null, apiKeyId: null, oauthGrantId: null },
+            { projectId: input.projectId },
+          ],
+        },
+        select: endpointAudienceSelect,
+      })
+      .then((rows) => this.withinReach(rows));
     if (endpoints.length === 0) return { deliveries: 0 };
 
     const payload: WebhookEventPayload = {

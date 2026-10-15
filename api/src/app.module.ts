@@ -30,6 +30,7 @@ import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { MyTasksModule } from './modules/my-tasks/my-tasks.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { OAuthModule } from './modules/oauth/oauth.module';
 import { ProjectViewsModule } from './modules/project-views/project-views.module';
 import { WorkItemsModule } from './modules/work-items/work-items.module';
 import { ProjectAccessModule } from './modules/project-access/project-access.module';
@@ -99,6 +100,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     // Domain
     AuthModule,
     ApiKeysModule,
+    OAuthModule,
     WebhooksModule,
     UsersModule,
     WorkspacesModule,

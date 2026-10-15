@@ -58,4 +58,6 @@ export interface IntegrationWhoAmI {
   /** The key's workspace; null for a signed-in person, who may belong to several. */
   workspace: { id: string; name: string; slug: string } | null;
   apiKey: { id: string; name: string; role: WorkspaceRole } | null;
+  /** The app an OAuth access token was issued to; null for any other credential. */
+  oauthApp: { id: string; name: string } | null;
 }
