@@ -96,9 +96,14 @@ every row the engine can run is enabled.
     goes on only on a yes; a no is logged as a skip with the model's reason,
     and a check that could not be asked fails the run instead of skipping.
     Only the rows a run reaches are asked.
+  - **Let AI decide the number of subtasks to create**, on a _Create
+    subtasks_ step: AI reads the task and keeps only the listed subtasks it
+    needs, in the list's order, each with its own assignee and date. It
+    answers with row numbers, so it can leave a subtask out but never write
+    one; the log says how many it kept and why. Keeping none is a quiet
+    success. The card reads "AI picks from N".
   - Task rules only. Task text is treated as data, never as instructions.
-- Still greyed, with reasons: "Draft an update with AI…" and "Let AI decide
-  the number of subtasks" (a Use AI… step that may create subtasks does it).
+- Still greyed, with a reason: "Draft an update with AI…".
 
 ## Project templates and duplicates
 

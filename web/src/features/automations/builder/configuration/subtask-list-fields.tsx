@@ -118,11 +118,12 @@ function dueLabel(row: SubtaskEntry): string | null {
  * empty ones everywhere the list is *read* — the card, the validator, the
  * runner. Holding a half-typed list is the form's job alone.
  *
- * The two options underneath are shown as Asana shows them and say why they
- * cannot be changed: assignees follow their tasks throughout this application,
- * and AI writes subtasks from a "Use AI…" step rather than from inside this
- * one. The convention in this panel is disabled with a reason rather than
- * quietly missing.
+ * The two options underneath are shown as Asana shows them. Assignees follow
+ * their tasks throughout this application, so the first is always on and says
+ * so. The second lets AI keep only the rows a task needs — never write one of
+ * its own — and is greyed with the server's reason when no model is set up.
+ * The convention in this panel is disabled with a reason rather than quietly
+ * missing.
  */
 export function SubtaskListFields({
   configuration,
@@ -135,6 +136,10 @@ export function SubtaskListFields({
 }) {
   const rows = readRows(configuration);
   const members = metadata?.members ?? [];
+  const aiDecides = configuration['aiDecides'] === true;
+  // The "Use AI…" entry carries whether a model is set up, and why not.
+  const aiEntry = metadata?.actions.find((entry) => entry.subtype === 'AI_ACTION');
+  const aiAvailable = aiEntry?.available === true;
   // Which row's title is being typed into. By position, as the rows are.
   const [editing, setEditing] = useState<number | null>(null);
 
@@ -228,9 +233,21 @@ export function SubtaskListFields({
             reason="Assignees follow their tasks throughout CoreTask, so this is always on."
           />
           <OptionRow
-            checked={false}
+            checked={aiDecides}
             label="Let AI decide the number of subtasks to create"
-            reason="Add a “Use AI…” step that may create subtasks to let AI choose them."
+            reason={
+              aiAvailable
+                ? 'AI reads the task and creates only the subtasks above that it needs, in this order.'
+                : (aiEntry?.reason ?? 'AI isn’t available here.')
+            }
+            // Untickable even without a model, so a rule saved with it on can
+            // be put right; tickable only with one.
+            {...(aiAvailable || aiDecides
+              ? {
+                  onChange: (next: boolean) =>
+                    onChange({ ...configuration, aiDecides: next ? true : undefined }),
+                }
+              : {})}
           />
         </div>
       </div>
@@ -631,22 +648,30 @@ function Face({ member }: { member: Member }) {
 }
 
 /** One of the step's options, shown as it is and saying why it cannot be changed. */
+/** An option under the list: fixed with a reason, or a real choice when it takes `onChange`. */
 function OptionRow({
   label,
   reason,
   checked,
+  onChange,
 }: {
   label: string;
   reason: string;
   checked: boolean;
+  onChange?: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-not-allowed items-start gap-2.5 text-sm">
+    <label
+      className={cn(
+        'flex items-start gap-2.5 text-sm',
+        onChange ? 'cursor-pointer' : 'cursor-not-allowed',
+      )}
+    >
       <input
         type="checkbox"
         checked={checked}
-        disabled
-        readOnly
+        disabled={!onChange}
+        onChange={(event) => onChange?.(event.target.checked)}
         className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
       />
       <span className="flex min-w-0 flex-col gap-0.5">

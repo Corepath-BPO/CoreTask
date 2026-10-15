@@ -33,6 +33,7 @@ import {
   isTicketConditionField,
   delayProblem,
   AI_CHECK_FIELD,
+  aiDecidesSubtasks,
   AI_FIELD_TYPES,
   AI_UNAVAILABLE_REASON,
   aiActionProblem,
@@ -257,6 +258,17 @@ export class AutomationGraphValidatorService {
               nodeId: node.id,
               path: 'configuration',
               message: 'Give this step at least one subtask title.',
+            });
+          }
+
+          // The runner asks the model which rows to keep; without one the step
+          // would fail every run, so it is refused here instead.
+          if (aiDecidesSubtasks(node.configuration) && !this.config.ai.enabled) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'configuration',
+              message: AI_UNAVAILABLE_REASON,
             });
           }
 

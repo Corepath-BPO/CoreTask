@@ -34,6 +34,12 @@ export interface AiAnswer {
   reason: string;
 }
 
+/** Which of a step's subtasks the task needs, by position in its list. */
+export interface AiSubtaskChoice {
+  keep: number[];
+  reason: string;
+}
+
 interface RuleScope {
   workspaceId: string;
   projectId: string;
@@ -211,6 +217,82 @@ export class AutomationAiService {
       holds: answer.input['holds'],
       reason: text(answer.input['reason'], SUMMARY_MAX) ?? '',
     };
+  }
+
+  /**
+   * "Let AI decide the number of subtasks to create": which rows of the step's
+   * list this task needs.
+   *
+   * The model answers with row numbers only, so it can leave rows out but
+   * never word one. Numbers outside the list, or repeated, are dropped, and
+   * the rows come back in the list's order whatever order they were named in.
+   */
+  async chooseSubtasks(
+    taskId: string,
+    rule: RuleScope,
+    titles: string[],
+    at: Date,
+  ): Promise<AiSubtaskChoice> {
+    if (!this.ai.available) throw new AiUnavailableError();
+
+    const task = await this.describeTask(taskId, rule);
+    const calls = await this.ai.call({
+      system: [
+        `You are a step in a CoreTask automation rule named “${rule.name}”. The step creates subtasks under the task below, from the numbered list its author wrote.`,
+        'Decide which of the listed subtasks this task needs, and keep only those. Keeping all of them, or none, is a correct answer when the task calls for it.',
+        'Answer with the numbers of the subtasks to create, and one short sentence saying why.',
+        UNTRUSTED,
+      ].join('\n'),
+      prompt: [
+        `<subtasks>\n${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n</subtasks>`,
+        `<task>\n${task}\n</task>`,
+        `Today is ${at.toISOString().slice(0, 10)}.`,
+      ].join('\n\n'),
+      tools: [
+        {
+          name: 'choose',
+          description: 'Name the subtasks to create, by their numbers in the list.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              keep: {
+                type: 'array',
+                items: { type: 'integer', minimum: 1, maximum: titles.length },
+                description: 'The numbers of the subtasks to create. Empty for none.',
+              },
+              reason: {
+                type: 'string',
+                maxLength: SUMMARY_MAX,
+                description: 'One short sentence explaining the choice.',
+              },
+            },
+            required: ['keep', 'reason'],
+          },
+        },
+      ],
+      require: 'choose',
+      maxTokens: 400,
+    });
+
+    const answer = calls.find((call) => call.name === 'choose');
+    if (!answer || !Array.isArray(answer.input['keep'])) {
+      throw new Error('The AI did not say which subtasks to create.');
+    }
+
+    const keep = [
+      ...new Set(
+        (answer.input['keep'] as unknown[])
+          .filter(
+            (value): value is number =>
+              Number.isInteger(value) &&
+              (value as number) >= 1 &&
+              (value as number) <= titles.length,
+          )
+          .map((value) => value - 1),
+      ),
+    ].sort((a, b) => a - b);
+
+    return { keep, reason: text(answer.input['reason'], SUMMARY_MAX) ?? '' };
   }
 
   /**

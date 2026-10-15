@@ -28,20 +28,35 @@ const metadata = {
 } as AutomationMetadata;
 
 /** The panel for a "Create subtasks" step holding these rows, and what it writes. */
-function renderSubtasks(subtasks: unknown[]) {
+function renderSubtasks(
+  subtasks: unknown[],
+  { ai = false, aiDecides = false }: { ai?: boolean; aiDecides?: boolean } = {},
+) {
   const onChange = vi.fn();
   const node = {
     id: 'n-1',
     type: 'ACTION',
     subtype: 'CREATE_SUBTASK',
-    configuration: { subtasks },
+    configuration: { subtasks, ...(aiDecides ? { aiDecides: true } : {}) },
     position: { x: 0, y: 0 },
     parentId: null,
     branchKey: null,
     order: 0,
   } as CanvasNode;
 
-  render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+  // Whether a model is set up rides on the "Use AI…" entry, as from the server.
+  const withAi = {
+    ...metadata,
+    actions: [
+      {
+        subtype: 'AI_ACTION',
+        available: ai,
+        reason: ai ? null : 'AI isn’t set up on this server yet.',
+      },
+    ],
+  } as unknown as AutomationMetadata;
+
+  render(<NodeConfigFields node={node} metadata={withAi} onChange={onChange} />);
 
   return onChange;
 }
@@ -182,6 +197,26 @@ describe('the subtask list', () => {
     expect(collaborators).toBeChecked();
     expect(collaborators).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /Let AI decide/ })).toBeDisabled();
+    expect(screen.getByText('AI isn’t set up on this server yet.')).toBeInTheDocument();
+  });
+
+  it('lets AI choose from the list when a model is set up', () => {
+    const onChange = renderSubtasks(['Review'], { ai: true });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Let AI decide/ }));
+
+    expect(onChange.mock.calls.at(-1)?.[0]).toMatchObject({ aiDecides: true });
+    expect(screen.getByText(/creates only the subtasks above that it needs/)).toBeInTheDocument();
+  });
+
+  it('can still be switched off once AI has gone away', () => {
+    const onChange = renderSubtasks(['Review'], { aiDecides: true });
+
+    const option = screen.getByRole('checkbox', { name: /Let AI decide/ });
+    expect(option).toBeEnabled();
+    fireEvent.click(option);
+
+    expect(onChange.mock.calls.at(-1)?.[0]).toMatchObject({ aiDecides: undefined });
   });
 });
 

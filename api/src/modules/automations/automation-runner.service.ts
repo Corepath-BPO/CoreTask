@@ -20,6 +20,7 @@ import {
   webhookExtraFields,
   ServerEvent,
   isCalendarDate,
+  aiDecidesSubtasks,
   subtaskEntries,
   toFilterOperator,
   isDirectOperator,
@@ -1876,12 +1877,40 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.CREATE_SUBTASK: {
-        const entries = subtaskEntries(config);
-        if (entries.length === 0) {
+        const listed = subtaskEntries(config);
+        if (listed.length === 0) {
           return { succeeded: false, message: 'The subtasks have no titles.' };
         }
         // Titles may name the task the rule acted on — "Inspect {{task.name}}".
         const values = await this.textValues(task, rule, event, at);
+
+        /*
+         * "Let AI decide the number of subtasks to create": the model keeps
+         * the rows this task needs, by number, and the rest of this case runs
+         * on those alone. It reads the titles as they will be written.
+         */
+        let entries = listed;
+        let aiNote = '';
+        if (aiDecidesSubtasks(config)) {
+          if (!this.ai?.available) {
+            return { succeeded: false, message: 'AI isn’t set up on this server.' };
+          }
+          const choice = await this.ai.chooseSubtasks(
+            task.id,
+            rule,
+            listed.map((entry) => renderAutomationText(entry.title, values).trim() || entry.title),
+            at,
+          );
+          entries = choice.keep.flatMap((index) => {
+            const entry = listed[index];
+            return entry ? [entry] : [];
+          });
+          aiNote = `AI chose ${entries.length} of ${listed.length} subtasks.${choice.reason ? ` ${choice.reason}` : ''}`;
+
+          if (entries.length === 0) {
+            return { succeeded: true, message: aiNote };
+          }
+        }
 
         /*
          * Membership is re-checked at execution time, as ASSIGN_USER's is —
@@ -1977,14 +2006,17 @@ export class AutomationRunnerService {
           );
         }
 
+        const notes = [
+          aiNote,
+          departed > 0
+            ? `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace.`
+            : '',
+        ].filter(Boolean);
+
         return {
           succeeded: true,
           after: created.join(', '),
-          ...(departed > 0
-            ? {
-                message: `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace.`,
-              }
-            : {}),
+          ...(notes.length > 0 ? { message: notes.join(' ') } : {}),
           events,
         };
       }

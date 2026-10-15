@@ -504,4 +504,80 @@ describe('AI steps in rules (e2e)', () => {
     expect(data.conditions.find((entry) => entry.subtype === 'ai.check')?.available).toBe(true);
     expect(data.capabilities.ai).toBe(true);
   });
+
+  describe('Let AI decide the number of subtasks', () => {
+    const subtasks = (titles: string[]): NodeInput => ({
+      nodeType: 'ACTION',
+      subtype: 'CREATE_SUBTASK',
+      configuration: { subtasks: titles.map((title) => ({ title })), aiDecides: true },
+    });
+    const children = (scope: Scope) =>
+      context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+        orderBy: { position: 'asc' },
+        select: { title: true },
+      });
+
+    it('creates only the rows the model kept, in the list’s order, and logs why', async () => {
+      const scope = await setupScope();
+      const id = await rule(
+        [subtasks(['Inspect the heating', 'Order parts', 'Renew {{task.name}}'])],
+        scope,
+      );
+      // Named out of order and with one repeated: neither changes what is made.
+      replies.push([
+        {
+          name: 'choose',
+          input: { keep: [3, 1, 3], reason: 'Heating is broken; no parts named.' },
+        },
+      ]);
+
+      await run(scope, id);
+
+      expect((await children(scope)).map((row) => row.title)).toEqual([
+        'Inspect the heating',
+        'Renew Renew lease for unit 4B',
+      ]);
+      // The model read the titles as they would be written.
+      expect(asked[0]?.prompt).toContain('3. Renew Renew lease for unit 4B');
+      expect(asked[0]?.prompt).toContain('Tenant says the heating is broken');
+      const log = (await execution(id)).logs[0];
+      expect(log?.succeeded).toBe(true);
+      expect(log?.message).toBe('AI chose 2 of 3 subtasks. Heating is broken; no parts named.');
+    });
+
+    it('may keep none, which is a quiet success', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating', 'Order parts'])], scope);
+      replies.push([{ name: 'choose', input: { keep: [], reason: 'Nothing to do.' } }]);
+
+      await run(scope, id);
+
+      expect(await children(scope)).toEqual([]);
+      expect((await execution(id)).logs[0]?.message).toBe(
+        'AI chose 0 of 2 subtasks. Nothing to do.',
+      );
+    });
+
+    it('drops numbers that are not on the list', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating'])], scope);
+      replies.push([{ name: 'choose', input: { keep: [0, 2, 9, 1], reason: 'Only one fits.' } }]);
+
+      await run(scope, id);
+
+      expect((await children(scope)).map((row) => row.title)).toEqual(['Inspect the heating']);
+    });
+
+    it('fails the step when the model cannot be asked, creating nothing', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating'])], scope);
+      replies.push(new Error('overloaded'));
+
+      await run(scope, id);
+
+      expect(await children(scope)).toEqual([]);
+      expect((await execution(id)).logs[0]?.succeeded).toBe(false);
+    });
+  });
 });

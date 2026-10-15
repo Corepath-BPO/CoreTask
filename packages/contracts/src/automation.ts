@@ -379,6 +379,17 @@ export function subtaskTitles(configuration: Record<string, unknown>): string[] 
   return subtaskEntries(configuration).map((entry) => entry.title);
 }
 
+/**
+ * Asana's "Let AI decide the number of subtasks to create".
+ *
+ * The step's list stays the author's: AI reads the task and keeps the rows it
+ * needs, in the list's order, with their own assignees and dates. It never
+ * writes a subtask of its own — that is what a "Use AI…" step may do.
+ */
+export function aiDecidesSubtasks(configuration: Record<string, unknown>): boolean {
+  return configuration['aiDecides'] === true;
+}
+
 /** Something wrong with a subtask row, and whether it is merely unfinished. */
 export interface SubtaskProblem {
   message: string;

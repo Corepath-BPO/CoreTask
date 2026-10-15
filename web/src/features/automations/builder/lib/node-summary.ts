@@ -14,6 +14,7 @@ import {
   isTokenValue,
   operatorNeedsValue,
   subtaskProblems,
+  aiDecidesSubtasks,
   subtaskTitles,
   toFilterOperator,
   type AutomationAction,
@@ -739,7 +740,12 @@ function actionSummary(
         ? [{ text: 'Create subtasks — add at least one' }]
         : [
             { text: 'Create subtasks' },
-            { text: `${titles.length} subtask${titles.length === 1 ? '' : 's'}`, chip: true },
+            {
+              text: aiDecidesSubtasks(config)
+                ? `AI picks from ${titles.length}`
+                : `${titles.length} subtask${titles.length === 1 ? '' : 's'}`,
+              chip: true,
+            },
           ];
     }
 
