@@ -113,7 +113,7 @@ export function RegisterPage() {
             )}
             {...register('password')}
             autoComplete="new-password"
-            placeholder="••••••••••"
+            placeholder="At least 10 characters"
             disabled={busy}
           />
         </Field>
@@ -128,7 +128,7 @@ export function RegisterPage() {
             {...fieldAria('confirmPassword', errors.confirmPassword?.message)}
             {...register('confirmPassword')}
             autoComplete="new-password"
-            placeholder="••••••••••"
+            placeholder="The same again"
             disabled={busy}
           />
         </Field>

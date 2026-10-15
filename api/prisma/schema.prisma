@@ -221,6 +221,7 @@ model User {
   createdApiKeys             ApiKey[]                 @relation("ApiKeyCreatedBy")
   createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
   oauthApps                  OAuthApp[]
+  passwordResetTokens        PasswordResetToken[]
   oauthCodes                 OAuthAuthorizationCode[]
   oauthGrants                OAuthGrant[]
   memberships                WorkspaceMember[]
@@ -2714,4 +2715,21 @@ model AutomationDelayedRun {
 
   @@index([status, runAt])
   @@map("automation_delayed_runs")
+}
+
+/// A link to set a new password: an hour, once. Only the hash is kept, and
+/// asking for a new link replaces any unused one.
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
 }

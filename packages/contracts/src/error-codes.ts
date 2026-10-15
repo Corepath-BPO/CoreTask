@@ -25,6 +25,7 @@ export const ErrorCode = {
   REFRESH_TOKEN_REUSED: 'REFRESH_TOKEN_REUSED',
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   ACCOUNT_DISABLED: 'ACCOUNT_DISABLED',
+  PASSWORD_RESET_INVALID: 'PASSWORD_RESET_INVALID',
 
   // API keys
   API_KEY_INVALID: 'API_KEY_INVALID',
@@ -91,6 +92,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   REFRESH_TOKEN_REUSED: 'The refresh token has already been used. All sessions were revoked.',
   EMAIL_ALREADY_REGISTERED: 'An account with this e-mail address already exists.',
   ACCOUNT_DISABLED: 'This account has been disabled.',
+  PASSWORD_RESET_INVALID: 'This reset link is invalid, used or expired. Ask for a new one.',
 
   API_KEY_INVALID: 'The API key is not recognised.',
   API_KEY_REVOKED: 'The API key has been revoked.',

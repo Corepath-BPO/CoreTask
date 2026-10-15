@@ -3,8 +3,10 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
 import { RootLayout } from '@/app/layouts/root-layout';
+import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
+import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { GoalsPage } from '@/features/goals/pages/goals-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
@@ -94,6 +96,12 @@ const loginRoute = createRoute({
   path: '/login',
   component: LoginPage,
   validateSearch: validateRedirect,
+});
+
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => guestRoute,
+  path: '/forgot-password',
+  component: ForgotPasswordPage,
 });
 
 const registerRoute = createRoute({
@@ -353,6 +361,17 @@ const integrationsConnectedAppsRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/connected-apps',
   component: ConnectedAppsPage,
+});
+
+/**
+ * Where a reset link lands. Off the root rather than the guest gate: someone
+ * still signed in on this device may be the one who forgot, and the guest gate
+ * would bounce them to the dashboard instead.
+ */
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/reset-password',
+  component: ResetPasswordPage,
 });
 
 /**
@@ -708,7 +727,8 @@ const settingsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  guestRoute.addChildren([loginRoute, registerRoute]),
+  guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
+  resetPasswordRoute,
   acceptInvitationRoute,
   publicFormRoute,
   oauthAuthorizeRoute,

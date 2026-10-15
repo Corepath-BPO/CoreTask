@@ -1,5 +1,6 @@
 import { REFRESH_TOKEN_COOKIE } from '@coretask/contracts';
 import type { AuthSession, AuthUser } from '@coretask/types';
+import { forgotPasswordSchema, resetPasswordSchema } from '@coretask/validation';
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -13,6 +14,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { buildClearCookieOptions, buildRefreshCookieOptions } from '../../common/utils/cookie.util';
+import { parseBody } from '../../common/utils/zod-body.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { AUTH_THROTTLE, SESSION_THROTTLE } from '../../config/throttle.config';
 
@@ -49,6 +51,37 @@ export class AuthController {
   ): Promise<AuthSession> {
     const result = await this.auth.register(dto, sessionContext(request));
     return this.completeSession(result, response);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'E-mail a link to set a new password',
+    description:
+      'Always 202, whether or not the address has an account, so the answer cannot be used to find out who does. The link works once, for an hour.',
+  })
+  @ApiErrorResponseDoc(422, 'Not an e-mail address')
+  @ApiErrorResponseDoc(429, 'Too many attempts')
+  async forgotPassword(@Body() body: unknown): Promise<{ sent: true }> {
+    const input = parseBody(forgotPasswordSchema, body, 'Enter a valid e-mail address.');
+    await this.auth.requestPasswordReset(input.email);
+    return { sent: true };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Set a new password from a reset link',
+    description: 'Signs the account out of every session. Sign in again with the new password.',
+  })
+  @ApiErrorResponseDoc(400, 'The link is invalid, used or expired')
+  @ApiErrorResponseDoc(422, 'The password does not meet the policy')
+  @ApiErrorResponseDoc(429, 'Too many attempts')
+  async resetPassword(@Body() body: unknown): Promise<void> {
+    const input = parseBody(resetPasswordSchema, body, 'The new password is invalid.');
+    await this.auth.resetPassword(input.token, input.password);
   }
 
   @Public()

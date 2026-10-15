@@ -16,6 +16,8 @@ export const ApiRoutes = {
     refresh: '/auth/refresh',
     logout: '/auth/logout',
     me: '/auth/me',
+    forgotPassword: '/auth/forgot-password',
+    resetPassword: '/auth/reset-password',
   },
   workspaces: {
     list: '/workspaces',

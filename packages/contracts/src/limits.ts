@@ -6,6 +6,9 @@
  */
 
 export const PASSWORD_MIN_LENGTH = 10;
+/** How long a "forgot password" link works, and how often one may be sent to the same account. */
+export const PASSWORD_RESET_TTL_MINUTES = 60;
+export const PASSWORD_RESET_RESEND_SECONDS = 60;
 export const PASSWORD_MAX_LENGTH = 128;
 
 export const NAME_MIN_LENGTH = 1;
