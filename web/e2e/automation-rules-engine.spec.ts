@@ -4,7 +4,8 @@ import { expect, test } from './fixtures';
 
 /**
  * The rules-engine work in the builder, in a real browser: branch rows dragged
- * into another order.
+ * into another order, condition groups, and publishing a live rule's draft as
+ * a version and restoring an older one.
  *
  * Each rule is built through the API so a test starts from a known shape, in a
  * project of this run's own.
@@ -173,5 +174,70 @@ test.describe('the rules engine in the builder', () => {
         })
         .locator('.branch-drag-handle'),
     ).toHaveCount(0);
+  });
+
+  test('asks a second question, and lets either answer', async ({ page }) => {
+    const ruleId = await createRule(`Group ${RUN}`, [
+      row('a', 1, high),
+      comment('ca', 'a', 5, 'Hot'),
+    ]);
+    await open(page, ruleId);
+
+    await page.getByRole('button', { name: /^Check if — Priority is High$/ }).click();
+    await page.getByRole('button', { name: 'Add another condition' }).click();
+
+    await page.getByLabel('Condition 2', { exact: true }).click();
+    await page.getByRole('option', { name: 'Priority is…' }).click();
+    await page.locator('#group-1-condition-value').click();
+    await page.getByRole('option', { name: 'Critical' }).click();
+
+    await page.getByLabel('Check that', { exact: true }).click();
+    await page.getByRole('option', { name: 'Any of these is true' }).click();
+
+    await expect(
+      page.getByRole('button', { name: 'Check if — Priority is High or Priority is Critical' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('group', { name: 'Conditions' }).getByText('or', { exact: true }),
+    ).toBeVisible();
+
+    // Back down to one question: the step is a plain check again.
+    await page.getByRole('button', { name: 'Remove condition 2' }).click();
+    await expect(page.getByRole('button', { name: 'Add another condition' })).toBeVisible();
+  });
+
+  test('saves a live rule as a draft, publishes it as a version, and restores the last one', async ({
+    page,
+  }) => {
+    const ruleId = await createRule(
+      `Versions ${RUN}`,
+      [row('a', 1, high), comment('ca', 'a', 5, 'Version one')],
+      true,
+    );
+    await open(page, ruleId);
+
+    const header = page.locator('header').filter({ hasText: `Versions ${RUN}` });
+    await expect(header).toContainText('v1');
+    await expect(page.getByRole('button', { name: 'Publish changes' })).toBeDisabled();
+
+    await page.getByRole('button', { name: /^Do this — Comment/ }).click();
+    await page.locator('#step-body').fill('Version two');
+
+    // Saved on its own, and said to be waiting for a publish.
+    await expect(header).toContainText('Unpublished changes');
+    await expect(header).toContainText('Saved');
+
+    await page.getByRole('button', { name: 'Publish changes' }).click();
+    await expect(header).toContainText('v2');
+    await expect(header).not.toContainText('Unpublished changes');
+
+    await page.getByRole('button', { name: 'Version history' }).click();
+    await expect(page.getByText('Version 2')).toBeVisible();
+    await page.getByRole('button', { name: 'Restore version 1' }).click();
+
+    await expect(
+      page.getByRole('button', { name: 'Do this — Comment: “Version one”' }),
+    ).toBeVisible();
+    await expect(header).toContainText('Unpublished changes');
   });
 });
