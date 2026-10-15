@@ -18,6 +18,9 @@ import {
   type ConditionValueKind,
   AI_CHECK_FIELD,
   aiCheckProblem,
+  conditionGroupProblems,
+  conditionLeaves,
+  joinConditionPath,
 } from '@coretask/contracts';
 import { z } from 'zod';
 
@@ -260,23 +263,35 @@ export function validateGraphStructure(
      */
     if (isFallbackBranch(configuration)) continue;
 
-    const field = configuration['field'];
-    const operator = configuration['operator'];
-
-    if (typeof field !== 'string' || field.trim() === '') {
-      error('Choose what this step checks.', node.id, 'field');
-      continue;
+    /*
+     * A group is checked twice over: its shape — not empty, not too deep, no
+     * AI check inside — and then every comparison in it, exactly as a step
+     * that is one comparison is checked, named by its place in the group.
+     */
+    for (const problem of conditionGroupProblems(configuration)) {
+      error(problem.message, node.id, problem.path || null);
     }
 
-    // "Check with AI" asks a question rather than comparing a value.
-    if (field === AI_CHECK_FIELD) {
-      const problem = aiCheckProblem(configuration);
-      if (problem) error(problem, node.id, 'question');
-      continue;
-    }
+    for (const leaf of conditionLeaves(configuration)) {
+      const at = (key: string) => joinConditionPath(leaf.path, key);
+      const field = leaf.configuration['field'];
+      const operator = leaf.configuration['operator'];
 
-    if (typeof operator !== 'string' || operator.trim() === '') {
-      error('Choose how to compare it.', node.id, 'operator');
+      if (typeof field !== 'string' || field.trim() === '') {
+        error('Choose what this step checks.', node.id, at('field'));
+        continue;
+      }
+
+      // "Check with AI" asks a question rather than comparing a value.
+      if (field === AI_CHECK_FIELD) {
+        const problem = aiCheckProblem(leaf.configuration);
+        if (problem) error(problem, node.id, at('question'));
+        continue;
+      }
+
+      if (typeof operator !== 'string' || operator.trim() === '') {
+        error('Choose how to compare it.', node.id, at('operator'));
+      }
     }
   }
 
@@ -609,6 +624,8 @@ export function validateCondition(
   configuration: Record<string, unknown>,
   kind: ConditionValueKind | undefined,
   nodeId: string,
+  /** Where in the step this comparison is — inside a group, its path there. */
+  at = '',
 ): GraphIssue[] {
   const issues: GraphIssue[] = [];
   const field = configuration['field'];
@@ -618,7 +635,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'field',
+      path: joinConditionPath(at, 'field'),
       message: 'Choose what to check.',
     });
     return issues;
@@ -628,7 +645,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'operator',
+      path: joinConditionPath(at, 'operator'),
       message: 'Choose how to compare it.',
     });
     return issues;
@@ -638,7 +655,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'field',
+      path: joinConditionPath(at, 'field'),
       message: 'That field is no longer available on this project.',
     });
     return issues;
@@ -648,7 +665,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'operator',
+      path: joinConditionPath(at, 'operator'),
       message: `“${operator}” cannot be used with this kind of field.`,
     });
   }
@@ -671,7 +688,7 @@ export function validateCondition(
       issues.push({
         level: GraphIssueLevel.ERROR,
         nodeId,
-        path: 'value',
+        path: joinConditionPath(at, 'value'),
         message: 'Give it something to compare against.',
       });
     }

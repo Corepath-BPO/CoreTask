@@ -3,6 +3,7 @@ import {
   FALLBACK_CONFIG_KEY,
   PLACEHOLDER_NODE_TYPE,
   defaultPosition,
+  isConditionGroup,
   isFallbackBranch,
 } from '@coretask/contracts';
 import type { AutomationNodeType } from '@coretask/contracts';
@@ -321,6 +322,9 @@ export function fallbackRow(nodes: readonly CanvasNode[]): CanvasNode | null {
  */
 export function isUnansweredRow(node: CanvasNode): boolean {
   if (node.type !== 'CONDITION' || isFallbackBranch(node.configuration)) return false;
+  // A group has been answered with more than one question; what each asks is
+  // the panel's to show, not the catalogue's.
+  if (isConditionGroup(node.configuration)) return false;
 
   const field = node.configuration['field'];
 

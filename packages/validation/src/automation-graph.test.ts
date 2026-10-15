@@ -554,3 +554,75 @@ describe('the action cap', () => {
     ).not.toContainEqual(expect.stringContaining('at most'));
   });
 });
+
+describe('condition groups', () => {
+  const group = (configuration: Record<string, unknown>) =>
+    node({
+      id: 'c-1',
+      type: AutomationNodeType.CONDITION,
+      subtype: 'FIELD_COMPARISON',
+      configuration,
+    });
+  const action = node({ id: 'a-1', parentId: 'c-1' });
+
+  it('accepts a group whose every comparison is answered', () => {
+    const issues = validateGraphStructure(
+      [
+        trigger(),
+        group({
+          match: 'ANY',
+          conditions: [
+            { field: 'status', operator: 'IS', value: 'DONE' },
+            { field: 'priority', operator: 'IS', value: 'HIGH' },
+          ],
+        }),
+        action,
+      ],
+      'A rule',
+    );
+
+    expect(issues.filter((issue) => issue.level === 'ERROR')).toEqual([]);
+  });
+
+  it('names an unanswered comparison by its place in the group', () => {
+    const issues = validateGraphStructure(
+      [
+        trigger(),
+        group({
+          match: 'ALL',
+          conditions: [
+            { field: 'status', operator: 'IS', value: 'DONE' },
+            { match: 'ANY', conditions: [{ field: 'priority' }] },
+          ],
+        }),
+        action,
+      ],
+      'A rule',
+    );
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        nodeId: 'c-1',
+        path: 'conditions.1.conditions.0.operator',
+        message: 'Choose how to compare it.',
+      }),
+    );
+  });
+
+  it('refuses an empty group', () => {
+    expect(messages([trigger(), group({ match: 'ALL', conditions: [] }), action])).toContainEqual(
+      expect.stringContaining('Add a condition to this group'),
+    );
+  });
+
+  it('prefixes a comparison’s own problems with its path', () => {
+    expect(
+      validateCondition(
+        { field: 'status', operator: 'IS' },
+        ConditionValueKind.ENUM,
+        'c-1',
+        'conditions.2',
+      ),
+    ).toEqual([expect.objectContaining({ path: 'conditions.2.value' })]);
+  });
+});

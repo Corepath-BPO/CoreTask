@@ -537,3 +537,58 @@ describe('the AI steps', () => {
     expect(isNodeIncomplete(check({ field: 'ai.check', question: 'Is it broken?' }))).toBe(false);
   });
 });
+
+describe('a condition group', () => {
+  const withSections = {
+    ...metadata,
+    conditionFields: [
+      ...metadata.conditionFields,
+      {
+        field: 'sectionId',
+        label: 'Section',
+        valueKind: 'REFERENCE' as const,
+        options: [{ value: 'sec-1', label: 'Incoming Request' }],
+      },
+    ],
+  } as AutomationMetadata;
+  const high = { field: 'priority', operator: 'IS', value: 'HIGH' };
+  const section = { field: 'sectionId', operator: 'IS', value: 'sec-1' };
+  const group = (configuration: Record<string, unknown>) =>
+    node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration });
+
+  it('reads as one sentence joined by the word its mode means', () => {
+    expect(summarise(group({ match: 'ANY', conditions: [high, section] }), withSections)).toBe(
+      'Priority is High or Section is Incoming Request',
+    );
+    expect(summarise(group({ match: 'ALL', conditions: [high, section] }), withSections)).toBe(
+      'Priority is High and Section is Incoming Request',
+    );
+  });
+
+  it('puts a group inside a group in parentheses', () => {
+    expect(
+      summarise(
+        group({ match: 'ALL', conditions: [high, { match: 'ANY', conditions: [section, high] }] }),
+        withSections,
+      ),
+    ).toBe('Priority is High and ( Section is Incoming Request or Priority is High )');
+  });
+
+  it('names the first few and counts the rest', () => {
+    const many = group({ match: 'ANY', conditions: [high, high, high, high, high] });
+
+    expect(summarise(many, withSections)).toMatch(/or 2 more$/);
+  });
+
+  it('is incomplete while any comparison in it is, and complete once all are', () => {
+    expect(isNodeIncomplete(group({ match: 'ALL', conditions: [high, {}] }))).toBe(true);
+    expect(isNodeIncomplete(group({ match: 'ALL', conditions: [] }))).toBe(true);
+    expect(isNodeIncomplete(group({ match: 'ANY', conditions: [high, section] }))).toBe(false);
+  });
+
+  it('shows an unanswered comparison as a gap, not an instruction', () => {
+    const parts = summariseParts(group({ match: 'ALL', conditions: [high, {}] }), withSections);
+
+    expect(parts.at(-1)).toEqual({ text: 'Unspecified', chip: true, placeholder: true });
+  });
+});

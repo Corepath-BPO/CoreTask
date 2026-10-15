@@ -1,5 +1,6 @@
 import {
   AutomationTemplateReferenceKind,
+  conditionLeaves,
   type AutomationTemplateReferenceKind as ReferenceKind,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
@@ -95,14 +96,18 @@ export function collectRuleReferences(
       if (id) add(AutomationTemplateReferenceKind.CUSTOM_FIELD, id);
     }
 
-    if (type === 'CONDITION') {
-      const field = config['field'];
+    // Every comparison a condition makes, grouped or not.
+    for (const leaf of type === 'CONDITION' ? conditionLeaves(config) : []) {
+      const comparison = leaf.configuration;
+      const field = comparison['field'];
       if (typeof field === 'string' && field.startsWith('customField:')) {
         add(AutomationTemplateReferenceKind.CUSTOM_FIELD, field.slice('customField:'.length));
       } else if (field === 'sectionId') {
-        for (const id of readIds(config['value'])) add(AutomationTemplateReferenceKind.SECTION, id);
+        for (const id of readIds(comparison['value'])) {
+          add(AutomationTemplateReferenceKind.SECTION, id);
+        }
       } else if (field === 'status') {
-        for (const id of readIds(config['value'])) {
+        for (const id of readIds(comparison['value'])) {
           if (!LEGACY_ENUM.test(id)) add(AutomationTemplateReferenceKind.STATUS, id);
         }
       }

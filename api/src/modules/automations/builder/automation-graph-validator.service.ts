@@ -33,6 +33,8 @@ import {
   isTicketConditionField,
   delayProblem,
   AI_CHECK_FIELD,
+  conditionLeaves,
+  joinConditionPath,
   aiDecidesSubtasks,
   aiDraftUpdateProblem,
   AI_FIELD_TYPES,
@@ -200,14 +202,18 @@ export class AutomationGraphValidatorService {
       const checks =
         node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH;
       if (!checks || isFallbackBranch(config)) continue;
-      const aboutTicket = isTicketConditionField(config['field']);
-      if (ticketRule && !aboutTicket) {
-        error(node.id, 'field', 'A ticket rule checks the ticket’s own fields.');
-      } else if (!ticketRule && aboutTicket) {
-        error(node.id, 'field', 'This checks a ticket, and this rule is about tasks.');
-      } else if (aboutTicket) {
-        const problem = ticketConditionProblem(config);
-        if (problem) error(node.id, 'field', problem);
+      // Each comparison, grouped or not, is about the rule's own subject.
+      for (const leaf of conditionLeaves(config)) {
+        const at = joinConditionPath(leaf.path, 'field');
+        const aboutTicket = isTicketConditionField(leaf.configuration['field']);
+        if (ticketRule && !aboutTicket) {
+          error(node.id, at, 'A ticket rule checks the ticket’s own fields.');
+        } else if (!ticketRule && aboutTicket) {
+          error(node.id, at, 'This checks a ticket, and this rule is about tasks.');
+        } else if (aboutTicket) {
+          const problem = ticketConditionProblem(leaf.configuration);
+          if (problem) error(node.id, at, problem);
+        }
       }
     }
     return issues;
@@ -611,8 +617,13 @@ export class AutomationGraphValidatorService {
 
       // A condition about a custom field carries the id inside its field key
       // rather than under `fieldId`; its type decides which comparisons fit.
-      const conditionFieldId = customFieldConditionId(config['field']);
-      if (conditionFieldId) fieldIds.add(conditionFieldId);
+      // In a group, every comparison may name one.
+      if (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) {
+        for (const leaf of conditionLeaves(config)) {
+          const conditionFieldId = customFieldConditionId(leaf.configuration['field']);
+          if (conditionFieldId) fieldIds.add(conditionFieldId);
+        }
+      }
 
       // So are the fields a "Use AI…" step may fill in.
       if (node.subtype === AutomationAction.AI_ACTION) {
@@ -931,27 +942,32 @@ export class AutomationGraphValidatorService {
         }
       }
 
-      if (
-        node.type === AutomationNodeType.CONDITION &&
-        !isFallbackBranch(config) &&
-        !isTicketConditionField(config['field']) &&
-        // Asks a question rather than comparing a field; checked in `checkSettings`.
-        config['field'] !== AI_CHECK_FIELD
-      ) {
+      for (const leaf of node.type === AutomationNodeType.CONDITION
+        ? conditionLeaves(config)
+        : []) {
+        const field = leaf.configuration['field'];
+        if (
+          isTicketConditionField(field) ||
+          // Asks a question rather than comparing a field; checked in `checkSettings`.
+          field === AI_CHECK_FIELD
+        ) {
+          continue;
+        }
+
         /*
          * A generated key's kind comes from the field's own type — and from
          * the *live* field, so a condition about a deleted one falls to
          * `undefined` and the shared check refuses it as no longer available,
          * which is exactly what happened to it.
          */
-        const conditionFieldId = customFieldConditionId(config['field']);
+        const conditionFieldId = customFieldConditionId(field);
         const kind = conditionFieldId
           ? kindForCustomFieldType(
               liveFields.has(conditionFieldId) ? fieldType.get(conditionFieldId) : undefined,
             )
-          : conditionFieldKind(config['field']);
+          : conditionFieldKind(field);
 
-        issues.push(...validateCondition(config, kind, node.id));
+        issues.push(...validateCondition(leaf.configuration, kind, node.id, leaf.path));
       }
     }
 

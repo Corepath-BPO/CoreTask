@@ -10,7 +10,6 @@ import {
   BLOCK_SELF_RETRIGGER,
   BranchKey,
   FilterOperator,
-  isFallbackBranch,
   MAX_ACTIONS_PER_CHAIN,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
@@ -50,6 +49,7 @@ import {
   delayMs,
   describeDelay,
   AI_CHECK_FIELD,
+  evaluateCondition,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -1392,28 +1392,43 @@ export class AutomationRunnerService {
     }
   }
 
+  /**
+   * Whether a condition step holds: one comparison, or a group of them.
+   *
+   * A group is `ALL` or `ANY` of its entries, each judged the same way and a
+   * nested group by recursion — `evaluateCondition` in the contracts is the one
+   * reading of that shape, shared with the builder and the validator.
+   *
+   * The fallback row holds, always. "If all other conditions are not met" is
+   * what makes it the last row rather than a comparison of its own — it has no
+   * field and no operator, so every branch below would read it as an unknown
+   * operator and return false, and the one row somebody added to catch
+   * everything would catch nothing.
+   */
   private conditionHolds(
     node: AutomationNode,
     task: EvaluableTask,
     event: AutomationEvent,
   ): boolean {
-    const config = (node.configuration ?? {}) as {
+    return evaluateCondition(node.configuration, (comparison) =>
+      this.comparisonHolds(comparison, node.subtype, task, event),
+    );
+  }
+
+  /** One comparison. `subtype` is the field a rule from before the canvas named. */
+  private comparisonHolds(
+    configuration: Record<string, unknown>,
+    subtype: string,
+    task: EvaluableTask,
+    event: AutomationEvent,
+  ): boolean {
+    const config = configuration as {
       field?: string;
       operator?: string;
       value?: unknown;
     };
 
-    /*
-     * The fallback row holds, always.
-     *
-     * "If all other conditions are not met" is what makes it the last row
-     * rather than a comparison of its own — it has no field and no operator, so
-     * every branch below would read it as an unknown operator and return false,
-     * and the one row somebody added to catch everything would catch nothing.
-     */
-    if (isFallbackBranch(node.configuration)) return true;
-
-    const actual = this.readField(config.field ?? node.subtype, task, event);
+    const actual = this.readField(config.field ?? subtype, task, event);
     const expected = config.value;
 
     /*
@@ -3458,13 +3473,14 @@ export class AutomationRunnerService {
     };
     const plan = await this.plan(
       rule.nodes,
-      (node) => {
-        const config = (node.configuration ?? {}) as Record<string, unknown>;
-        return (
-          isFallbackBranch(node.configuration) ||
-          (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
-        );
-      },
+      (node) =>
+        // Grouped like a task's — the fallback included — with each
+        // comparison about the ticket's own fields.
+        evaluateCondition(
+          node.configuration,
+          (comparison) =>
+            isTicketConditionField(comparison['field']) && ticketConditionHolds(comparison, facts),
+        ),
       event.resumeFromNodeId,
     );
     if (plan.skippedBy) {

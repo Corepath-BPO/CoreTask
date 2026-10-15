@@ -1,35 +1,33 @@
 # Condition groups
 
-A branch is chosen by a **condition group**: an operator and an ordered list of
-conditions.
+A branch is chosen by its **Check if** step: one comparison, or a group of
+them.
 
-```prisma
-model AutomationConditionGroup {
-  branchId   String                 @unique
-  operator   ConditionGroupOperator @default(ALL)   // ALL | ANY
-  conditions AutomationCondition[]
-}
+```ts
+// one comparison
+{ field: 'priority', operator: 'IS', value: 'HIGH' }
 
-model AutomationCondition {
-  fieldKey String   // `status`, `sectionId`, `customField:<id>`
-  operator String   // EQUALS, CONTAINS, IS_EMPTY, …
-  value    Json     // scalar, or a list for the `one of` forms
-  position Int
+// a group: ALL of its entries, or ANY of them; an entry may be a group
+{
+  match: 'ALL',
+  conditions: [
+    { field: 'sectionId', operator: 'IS', value: '019f…' },
+    { match: 'ANY', conditions: [
+      { field: 'priority', operator: 'IS', value: 'HIGH' },
+      { field: 'priority', operator: 'IS', value: 'CRITICAL' },
+    ] },
+  ],
 }
 ```
 
-## Status: modelled, not evaluated
-
-The tables exist. **Nothing reads or writes them.** What runs today is
-`AutomationRunnerService.conditionHolds`, against `AutomationNode` rows, with
-`ALL` semantics only — either every flat condition holds, or the rule is
-`SKIPPED` with the first failing one named.
-
-`ANY` has no implementation. `@coretask/contracts` says so at the point it
-declares the constant:
-
-> `ALL` is what the runner does today — every condition must hold. `ANY` needs
-> runner support before the builder offers it.
+That is the configuration of one `CONDITION` node. The whole group lives on
+the one step, so the canvas still draws one card per branch and the runner
+still takes the first branch whose card holds. The shape and every reading of
+it — `isConditionGroup`, `conditionLeaves`, `mapConditionLeaves`,
+`evaluateCondition`, `conditionGroupProblems` — are in
+`@coretask/contracts` (`automation-condition-groups.ts`), because four places
+read it and must read it alike: the runner, the validator, the builder, and the
+template library.
 
 ## ALL and ANY are properties of a group, not operators between conditions
 
@@ -43,96 +41,118 @@ The second is what is stored, for three reasons.
 **Precedence has no answer in the first.** `A AND B OR C` means different things
 depending on how a reader binds it, and every reader binds it differently. A
 rule that means one thing to its author and another to the engine is worse than
-one that cannot be written.
+one that cannot be written. With groups, `A and (B or C)` is written as exactly
+that: an `ALL` group holding `A` and an `ANY` group.
 
 **A per-condition operator is undefined on the first condition.** The leading
 row has nothing to join to, so its operator column is either meaningless or a
 special case every reader has to know about. A group-level mode has no such row.
 
-**Reordering changes meaning in the first and not the second.** Conditions are
-reorderable — that is why they carry a `position`. Under a per-condition
-operator, dragging the third condition to the top silently rewrites the boolean
-expression. Under a group mode it changes nothing except the order they are read
-in, which is what somebody dragging a row expects.
+**Reordering changes meaning in the first and not the second.** Under a
+per-condition operator, moving the third condition to the top silently rewrites
+the boolean expression. Under a group mode it changes nothing except the order
+they are read in.
 
-Filter builders across the industry landed on the same answer, which is why
-`ConditionGroupOperator` and the view filters' `ConditionMatch` in
-`@coretask/contracts` agree.
+Filter builders across the industry landed on the same answer, which is why the
+group's `match` and the view filters' `ConditionMatch` in `@coretask/contracts`
+are the same constant.
 
-## Why the interface says AND and OR
+## Why the interface says "and" and "or"
 
-The stored values are `ALL` and `ANY`; the builder shows **AND** and **OR**.
+The stored values are `ALL` and `ANY`; between two entries the builder writes
+**and** or **or**, and the group's own control reads "All of these are true" /
+"Any of these is true".
 
-That is not sloppiness in either direction. `ALL` and `ANY` are the honest names
-for a mode over a set — "ALL of these must hold" is exactly what the column
-means, and "AND of these" is not English. But the control the person operates
-sits between two rows, and there the word that reads correctly is the one that
-joins them: `status is Waiting` **AND** `priority is High`.
+Storage names the property, the interface names the relationship the person is
+looking at. Storing `AND` would be storing a rendering of the value, and the
+first time the interface is reworded the database would carry the old wording
+forever.
 
-The rule is: storage names the property, the interface names the relationship
-the person is looking at. Storing `AND` would be storing a rendering of the
-value, and the first time the interface is reworded the database would carry the
-old wording forever.
+## How it runs
 
-## One group per branch, and it is flat
+`AutomationRunnerService.conditionHolds` hands the step's configuration to
+`evaluateCondition` with a function that judges one comparison
+(`comparisonHolds`, the operator switch every condition has always gone
+through). `ALL` holds when every entry does and `ANY` when at least one does,
+and a nested group is judged the same way, recursively. Ticket rules do the same
+with the ticket's own comparisons.
 
-`AutomationConditionGroup.branchId` is `@unique`, so a branch has at most one
-group. `AutomationCondition` belongs to a group and has no children.
+**An empty group holds nothing.** A question with no parts has no answer, and a
+condition nobody can evaluate blocks the rule rather than waving it through —
+the same reasoning as the unknown operator below. The validator refuses an empty
+group before it is ever published, so this is only the backstop.
 
-**There is no nesting.** No `parentGroupId`, no self-relation, no group inside a
-group. A mixed expression such as `A AND (B OR C)` cannot be stored, and this is
-worth stating plainly because the shape of the brief invites the opposite
-reading: nested mixed groups are not modelled-but-hidden, they are not modelled.
+The fallback row (`{ fallback: true }`) holds unconditionally, grouped or not.
 
-What was traded away and why:
+## The limits
 
-- **Gained.** A group is one row with a mode, and evaluating it is one pass over
-  a list. There is no recursion in the runner, no depth limit to pick, and no
-  way for a malformed group to make evaluation loop.
-- **Gained.** The canvas can render a branch's condition as one node. A nested
-  expression has no single-node rendering, so exposing nesting means designing a
-  nested editor first — which is the reference set's own answer, since none of
-  the thirteen references show one.
-- **Lost.** `A AND (B OR C)` needs two branches, or two rules.
+- **Three levels of group** (`MAX_CONDITION_GROUP_DEPTH`): a group, a group
+  inside it, and one inside that. Every walk of a stored group stops there, so a
+  malformed one cannot hang the worker.
+- **Twenty comparisons per step** (`MAX_GROUP_CONDITIONS`). Past that a rule is
+  better as branches.
+- **No AI check inside a group.** "Check with AI" asks a model; as a step of its
+  own its answer and reason are logged as that step's, and a group would bury
+  them. It stays a branch of its own.
 
-Adding nesting later is additive: a nullable `parentGroupId` on
-`automation_condition_groups`, and existing rows are roots. Nothing about the
-current shape forecloses it, which is the property that made flat acceptable as
-a first cut.
+`conditionGroupProblems` names each of these by its path inside the step —
+`conditions.1.conditions.0` — and so does every comparison's own problem
+(`validateCondition` takes the path), so the builder can say which entry is at
+fault.
+
+## The builder
+
+A plain **Check if** panel has **Add another condition**, which turns the step
+into an `ALL` group of the comparison and an empty one. A group's panel shows:
+
+- **Check that** — All of these are true / Any of these is true;
+- each comparison as a card with its field (from the condition catalogue, less
+  what the rule's subject cannot ask and the AI check), its comparison and its
+  value, and a remove button;
+- **and** / **or** between entries;
+- **Add condition** and **Add group** (a nested group asks the other way round by
+  default, because that is what nesting is for). Below the depth limit only.
+
+Removing the second-to-last comparison of the outer group makes the step a
+single comparison again. The card reads the group as a sentence —
+"Priority is High or Priority is Critical", nested groups in parentheses — and
+names the first three entries before counting the rest.
+
+## Everything else that reads conditions
+
+| Reader                                   | What it does with a group                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validateGraphStructure`                 | shape problems, then each comparison like a single one                                                                                            |
+| `AutomationGraphValidatorService`        | field kinds, custom-field references, ticket fields — per comparison                                                                              |
+| `rulesForSection` (section lightning)    | a section checked anywhere in the group, `ALL` or `ANY`                                                                                           |
+| Rule library (save and apply)            | names and translates the ids inside every comparison                                                                                              |
+| `compileDefinition` (structured → nodes) | a branch's condition group becomes one grouped step                                                                                               |
+| `convertLegacyRule` (nodes → structured) | an `ALL` group of comparisons unrolls into the branch's list; an `ANY` group or a nested one cannot be expressed there and is dropped with a note |
 
 ## What a condition compares
 
-`fieldKey` names the thing being read. The convention is a bare field name for
-task columns (`status`, `priority`, `sectionId`, `assigneeId`, `title`,
-`dueDate`, `startDate`) and a prefixed form for anything indirected —
-`customField:<id>`.
+`field` names the thing being read: a bare name for task columns (`status`,
+`priority`, `sectionId`, `assigneeId`, `title`, `dueDate`, `startDate`, …) and a
+prefixed form for anything indirected — `customField:<id>`. The prefix is what
+stops a custom field named "status" from colliding with the task's own status
+column.
 
-The prefix is what stops a custom field named "status" from colliding with the
-task's own status column. Without it, the runner would have to guess which one a
-key means, and the guess would be wrong exactly when somebody had named a field
-after a built-in one.
-
-The value's shape follows the operator, not the field: a scalar for `EQUALS`, an
-array for `IN` and `NOT_IN`, and nothing at all for `IS_EMPTY` and
-`IS_NOT_EMPTY`. `operatorTakesValue` in `@coretask/contracts` is the single
-answer to which is which, shared with the view filters so the two cannot drift.
+The value's shape follows the operator, not the field: a scalar for `IS`, an
+array for `IS_ONE_OF`, nothing at all for `IS_EMPTY`. `operatorTakesValue` in
+`@coretask/contracts` is the single answer to which is which, shared with the
+view filters so the two cannot drift.
 
 ## Operators are type-aware
 
 `OPERATORS_BY_VALUE_KIND` restricts which operators a field may be compared
-with. "Date contains High" and "Checkbox greater than 10" are combinations that
-parse, store and then never match — a rule that is broken in a way nothing
-reports.
-
-The check runs in two places on purpose. `validateCondition` in
-`@coretask/validation` runs in the browser, so the form can refuse the
-combination without a round trip per keystroke; the same function runs in
-`AutomationGraphValidatorService`, because a form is not a check and the
-endpoint accepts requests from anywhere.
+with. "Date contains High" and "Checkbox greater than 10" parse, store and then
+never match — a rule that is broken in a way nothing reports. The check runs in
+the browser (`validateCondition` in `@coretask/validation`) and again in
+`AutomationGraphValidatorService`, because a form is not a check.
 
 ## An unknown operator is false
 
-`conditionHolds` ends with:
+`comparisonHolds` ends with:
 
 ```ts
 default:
@@ -141,27 +161,17 @@ default:
   return false;
 ```
 
-This is the one place the choice between fail-open and fail-closed is not
-obvious, so it is worth naming the reasoning. A condition exists to stop the
-rule in some circumstances. If the engine cannot tell whether this is one of
-them, running the actions anyway performs writes on somebody's tasks on the
-strength of a comparison nobody made. Refusing produces a `SKIPPED` execution
-with a reason, which is visible and reversible.
+If the engine cannot tell whether a condition holds, running the actions anyway
+performs writes on somebody's tasks on the strength of a comparison nobody made.
+Refusing produces a `SKIPPED` execution with a reason, which is visible and
+reversible.
 
-## Not yet implemented
+## The structured model
 
-- `ANY`. The enum value exists; the runner has no code for it, and the builder
-  does not offer the choice.
-- Nested groups, per the section above.
-- Conditions on custom fields. `fieldKey` documents the `customField:<id>` form,
-  and `AutomationMetadataService.conditionFields` returns seven built-in fields
-  and no custom ones, so nothing can currently produce such a key.
-- The condition catalogue references 08–11 show: search, grouped entries, custom
-  fields as pills, and the AI entry.
-- `BEFORE` and `AFTER`. They are declared in `OPERATORS_BY_VALUE_KIND` for
-  `DATE` fields and accepted by validation, but `conditionHolds` has no case for
-  them — so a date comparison written with either falls to the default and
-  evaluates false. A rule using one is publishable and never matches.
+`AutomationConditionGroup` (`ALL` | `ANY`, one per branch, flat) is the
+structured definition's version of a group. It cannot nest; the node shape
+above can. Publishing a structured rule compiles its group into one grouped
+condition step, so its `ANY` runs.
 
 ## Related
 

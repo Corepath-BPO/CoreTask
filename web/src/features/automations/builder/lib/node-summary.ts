@@ -29,6 +29,11 @@ import {
   aiActionProblem,
   aiDraftUpdateProblem,
   aiCheckProblem,
+  conditionGroupProblems,
+  conditionLeaves,
+  groupMatch,
+  isConditionGroup,
+  ConditionMatch,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -267,7 +272,9 @@ export function summariseParts(
        */
       if (isFallbackBranch(config)) return [{ text: 'If all other conditions are not met' }];
 
-      const parts = conditionSummary(config, metadata);
+      const parts = isConditionGroup(config)
+        ? groupSummary(config, metadata)
+        : conditionSummary(config, metadata);
 
       /*
        * A row nobody has answered yet reads as the offer it is.
@@ -416,6 +423,56 @@ function conditionSummary(
     { text: `${label} ${verb}` },
     { text: value, chip: true, ...(option?.colorToken ? { colorToken: option.colorToken } : {}) },
   ];
+}
+
+/** How many of a group's entries a card names before it counts the rest. */
+const GROUP_ENTRIES_SHOWN = 3;
+
+/**
+ * A group, read as the sentence it is.
+ *
+ * "Status is Done or Priority is High" — each entry in its own words, joined by
+ * the word the group's mode means, and a group inside a group in parentheses,
+ * because "A and B or C" without them is the ambiguity groups exist to avoid.
+ * A long group names its first few and counts the rest: the card is a summary,
+ * and the panel beside it lists every one.
+ */
+function groupSummary(
+  config: Record<string, unknown>,
+  metadata: AutomationMetadata | undefined,
+  depth = 0,
+): SummarySegment[] {
+  const entries = Array.isArray(config['conditions'])
+    ? (config['conditions'] as Record<string, unknown>[])
+    : [];
+  if (entries.length === 0) return [{ text: 'Choose what to check' }];
+
+  const joiner = groupMatch(config) === ConditionMatch.ANY ? 'or' : 'and';
+  const shown = entries.slice(0, GROUP_ENTRIES_SHOWN);
+  const parts: SummarySegment[] = [];
+
+  shown.forEach((entry, index) => {
+    if (index > 0) parts.push({ text: joiner });
+
+    if (isConditionGroup(entry)) {
+      const inner = depth < 2 ? groupSummary(entry, metadata, depth + 1) : [{ text: '…' }];
+      parts.push({ text: '(' }, ...inner, { text: ')' });
+      return;
+    }
+
+    const summary = conditionSummary(entry, metadata);
+    // An entry still being filled in reads as a gap, not as an instruction.
+    parts.push(
+      ...(summary.length === 1 && summary[0]!.text === 'Choose what to check'
+        ? [{ text: 'Unspecified', chip: true, placeholder: true }]
+        : summary),
+    );
+  });
+
+  const rest = entries.length - shown.length;
+  if (rest > 0) parts.push({ text: `${joiner} ${rest} more` });
+
+  return parts;
 }
 
 /**
@@ -763,6 +820,29 @@ function actionSummary(
   }
 }
 
+/** Whether one comparison is missing its field, its operator or its value. */
+export function isComparisonIncomplete(config: Record<string, unknown>): boolean {
+  const has = (key: string) => typeof config[key] === 'string' && config[key] !== '';
+
+  if (!has('field') || !has('operator')) return true;
+
+  const value = config['value'];
+
+  if (!operatorNeedsValue(config['operator'] as ConditionOperator)) return false;
+
+  /*
+   * An empty list counts as unanswered.
+   *
+   * "Is one of" writes `[]` when somebody opens the picker and chooses
+   * nothing, which is not `undefined` — so the card read as complete and the
+   * rule published a comparison against no sections, matching nothing for
+   * ever without a word.
+   */
+  if (Array.isArray(value)) return value.length === 0;
+
+  return value === undefined || value === null || value === '';
+}
+
 /** Whether a node is missing something it needs, for the badge on the card. */
 export function isNodeIncomplete(node: CanvasNode): boolean {
   const config = node.configuration;
@@ -791,23 +871,15 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
     // An AI check needs its question, and no comparison.
     if (config['field'] === AI_CHECK_FIELD) return aiCheckProblem(config) !== null;
 
-    if (!has('field') || !has('operator')) return true;
+    // A group is incomplete when its shape is wrong or any comparison in it is.
+    if (isConditionGroup(config)) {
+      return (
+        conditionGroupProblems(config).length > 0 ||
+        conditionLeaves(config).some((leaf) => isComparisonIncomplete(leaf.configuration))
+      );
+    }
 
-    const value = config['value'];
-
-    if (!operatorNeedsValue(config['operator'] as ConditionOperator)) return false;
-
-    /*
-     * An empty list counts as unanswered.
-     *
-     * "Is one of" writes `[]` when somebody opens the picker and chooses
-     * nothing, which is not `undefined` — so the card read as complete and the
-     * rule published a comparison against no sections, matching nothing for
-     * ever without a word.
-     */
-    if (Array.isArray(value)) return value.length === 0;
-
-    return value === undefined || value === null || value === '';
+    return isComparisonIncomplete(config);
   }
 
   // A Wait step needs to know how long.

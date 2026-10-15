@@ -17,9 +17,9 @@ import type { SnapshotNode } from '../versions/rule-snapshot';
  *   position order, the first that holds winning — which is exactly how the
  *   runner reads the trigger's conditions;
  * - `OTHERWISE` is the fallback row, the condition marked as always holding;
- * - an `ALL` group is its conditions in sequence, each under the last, since a
- *   condition governs what follows it;
- * - a branch's actions follow its last condition, each under the one before.
+ * - a group of conditions is one condition step holding the group, `ALL` or
+ *   `ANY` as written — see `automation-condition-groups`;
+ * - a branch's actions follow its condition, each under the one before.
  *
  * Returns the problems instead of compiling what it cannot say faithfully. A
  * published rule that runs something other than what was published is the
@@ -73,24 +73,24 @@ export function compileDefinition(
         trigger,
       );
     } else {
-      const conditions = [...branch.conditionGroup.conditions].sort(
-        (a, b) => a.position - b.position,
+      const comparisons = [...branch.conditionGroup.conditions]
+        .sort((a, b) => a.position - b.position)
+        .map((condition) => ({
+          field: condition.fieldKey,
+          operator: condition.operator,
+          value: condition.value,
+        }));
+
+      // One comparison is a step of its own; more are one grouped step, which
+      // is what a condition group is in the node shape too.
+      tail = add(
+        AutomationNodeType.CONDITION,
+        'FIELD_COMPARISON',
+        comparisons.length === 1
+          ? (comparisons[0] as Record<string, unknown>)
+          : { match: branch.conditionGroup.operator, conditions: comparisons },
+        trigger,
       );
-
-      if (branch.conditionGroup.operator === 'ANY' && conditions.length > 1) {
-        problems.push('“Any of these” conditions cannot run yet; use “all of these”.');
-        continue;
-      }
-
-      tail = trigger;
-      for (const condition of conditions) {
-        tail = add(
-          AutomationNodeType.CONDITION,
-          'FIELD_COMPARISON',
-          { field: condition.fieldKey, operator: condition.operator, value: condition.value },
-          tail,
-        );
-      }
     }
 
     for (const action of [...branch.actions].sort((a, b) => a.position - b.position)) {
