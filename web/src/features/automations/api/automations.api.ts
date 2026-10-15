@@ -1,4 +1,5 @@
-import type { AutomationRuleStatus } from '@coretask/contracts';
+import { AUTOMATION_EXECUTIONS_PAGE_SIZE, type AutomationRuleStatus } from '@coretask/contracts';
+import type { PaginationMeta } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
 
@@ -123,10 +124,15 @@ export const automationsApi = {
       ...(timezone ? { timezone } : {}),
     }),
 
+  /** One page of a rule's runs, newest first. */
   executions: (
     workspaceId: string,
     projectId: string,
     ruleId: string,
-  ): Promise<AutomationExecution[]> =>
-    apiClient.get<AutomationExecution[]>(`${base(workspaceId, projectId)}/${ruleId}/executions`),
+    page = 1,
+  ): Promise<{ items: AutomationExecution[]; meta: PaginationMeta }> =>
+    apiClient.getPaginated<AutomationExecution>(
+      `${base(workspaceId, projectId)}/${ruleId}/executions`,
+      { params: { page, limit: AUTOMATION_EXECUTIONS_PAGE_SIZE } },
+    ),
 };

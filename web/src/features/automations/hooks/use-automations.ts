@@ -1,5 +1,5 @@
 import { AutomationRuleStatus, AutomationTrigger, rulesForSection } from '@coretask/contracts';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { ApiError } from '@/lib/api/api-error';
@@ -89,9 +89,13 @@ export function useRuleExecutions(
   projectId: string,
   ruleId: string | null,
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: keys.executions(workspaceId ?? '', projectId, ruleId ?? ''),
-    queryFn: () => automationsApi.executions(workspaceId as string, projectId, ruleId as string),
+    queryFn: ({ pageParam }) =>
+      automationsApi.executions(workspaceId as string, projectId, ruleId as string, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.meta.page < last.meta.totalPages ? last.meta.page + 1 : undefined,
     enabled: Boolean(workspaceId) && Boolean(ruleId),
   });
 }

@@ -159,6 +159,8 @@ export const MAX_PENDING_INVITATIONS = 200;
 export const PAGINATION_DEFAULT_PAGE = 1;
 export const PAGINATION_DEFAULT_LIMIT = 20;
 export const PAGINATION_MAX_LIMIT = 100;
+/** How many runs a rule's history shows at a time. */
+export const AUTOMATION_EXECUTIONS_PAGE_SIZE = 25;
 
 /** Header carrying the per-request correlation id, echoed on every response. */
 export const REQUEST_ID_HEADER = 'x-request-id';

@@ -28,7 +28,13 @@ import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AutomationsService } from './automations.service';
-import { AutomationNodeDto, CreateRuleDto, RunRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import {
+  AutomationNodeDto,
+  CreateRuleDto,
+  ExecutionsQueryDto,
+  RunRuleDto,
+  UpdateRuleDto,
+} from './dto/automation.dto';
 import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 /**
@@ -304,14 +310,19 @@ export class AutomationsController {
   }
 
   @Get(':ruleId/executions')
-  @ApiOperation({ summary: 'Recent runs, with per-action logs' })
+  @ApiOperation({
+    summary: 'Runs, newest first, with per-action logs',
+    description:
+      'Paged with `page` and `limit` (default 25); the page numbers and the total are in `meta`.',
+  })
   @ApiParam({ name: 'ruleId', format: 'uuid' })
   executions(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Query() query: ExecutionsQueryDto,
   ) {
-    return this.automations.executions(workspaceId, projectId, ruleId);
+    return this.automations.executions(workspaceId, projectId, ruleId, query);
   }
 
   /* ------------------------------------------------------------------------ */

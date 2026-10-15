@@ -14,7 +14,12 @@ import { randomUUID } from 'node:crypto';
 import type { AutomationRule, Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
-import type { ActorContext } from '../../common/types/api.types';
+import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
+import {
+  buildPaginationMeta,
+  toSkipTake,
+  type PageRequest,
+} from '../../common/utils/pagination.util';
 import { PrismaService } from '../../database/prisma.service';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -447,15 +452,27 @@ export class AutomationsService {
     return { deleted: true, archived: false };
   }
 
-  async executions(workspaceId: string, projectId: string, ruleId: string, limit = 25) {
+  /**
+   * A rule's runs, newest first, a page at a time. The rows stay the data;
+   * the page numbers ride in the envelope's `meta`, so a caller that read
+   * the plain list before still reads the same first page.
+   */
+  async executions(workspaceId: string, projectId: string, ruleId: string, page: PageRequest) {
     await this.requireRule(workspaceId, projectId, ruleId);
 
-    return this.prisma.automationExecution.findMany({
-      where: { ruleId },
-      include: { logs: { orderBy: { createdAt: 'asc' } } },
-      orderBy: { startedAt: 'desc' },
-      take: limit,
-    });
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.automationExecution.count({ where: { ruleId } }),
+      this.prisma.automationExecution.findMany({
+        where: { ruleId },
+        include: { logs: { orderBy: { createdAt: 'asc' } } },
+        // The id breaks ties between runs that started in the same instant,
+        // so a row cannot appear on two pages.
+        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+        ...toSkipTake(page),
+      }),
+    ]);
+
+    return new PaginatedResult(items, buildPaginationMeta(page, total));
   }
 
   /**

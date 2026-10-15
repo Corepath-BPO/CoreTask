@@ -32,7 +32,7 @@ has tables but no endpoints; every route below reads and writes the
 | `POST`   | `/:ruleId/enable`     | manager | `status = ACTIVE`                         |
 | `POST`   | `/:ruleId/duplicate`  | manager | copy as a new draft                       |
 | `DELETE` | `/:ruleId`            | manager | archive if it has run, otherwise delete   |
-| `GET`    | `/:ruleId/executions` | member  | the last 25 runs, with per-action logs    |
+| `GET`    | `/:ruleId/executions` | member  | runs, newest first, paged, with logs      |
 
 `GET /metadata` is declared **before** `GET /:ruleId` in the controller, and has
 to stay there. Nest matches in declaration order; the other way round,
@@ -293,8 +293,13 @@ A draft has no history to lose.
 
 ## `GET /:ruleId/executions`
 
-The 25 most recent runs, newest first, each including its
-`AutomationExecutionLog` rows in the order they were written.
+Runs, newest first, each including its `AutomationExecutionLog` rows in the
+order they were written. Paged with `page` and `limit` (default 25, at most
+100); the data is the array of runs and the envelope's `meta` carries
+`{ page, limit, total, totalPages }`, so a caller that never asks for a page
+gets the same 25 it always did. Runs that started in the same instant are
+ordered by id, so none appears on two pages. **Run history** in the web app
+shows the newest 25 and loads older ones with **Show older runs**.
 
 | Status             | Meaning                                        |
 | ------------------ | ---------------------------------------------- |
@@ -310,9 +315,6 @@ wrong, and a history that conflates the two is useless for diagnosis.
 Each log row carries `succeeded`, a `message`, and `beforeValue`/`afterValue`,
 because a rule with four actions where the third failed is only diagnosable if
 each is accounted for separately.
-
-The limit is fixed at 25 in the service and is not exposed as a query
-parameter.
 
 ## The rule library
 
@@ -407,7 +409,6 @@ distinguishable "exists but forbidden" would confirm the id is real.
   or actions as resources.
 - A draft-save endpoint. `PATCH` writes the live definition.
 - Version history or revert.
-- Pagination on executions.
 - A manual "run this rule now" trigger.
 - Planned actions in the metadata response.
 

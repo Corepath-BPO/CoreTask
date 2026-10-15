@@ -1,7 +1,9 @@
 import {
+  AUTOMATION_EXECUTIONS_PAGE_SIZE,
   AUTOMATION_NODE_TYPES,
   AUTOMATION_TRIGGERS,
   MAX_MANUAL_RUN_TASKS,
+  PAGINATION_MAX_LIMIT,
 } from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
@@ -11,15 +13,20 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
+
+import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -180,4 +187,23 @@ export class RunRuleDto {
   @IsString()
   @MaxLength(64)
   timezone?: string;
+}
+
+/**
+ * A rule's run history, newest first. The shared page and limit, with the
+ * page size the history always had, so a caller that never asked for one
+ * gets the same first page as before.
+ */
+export class ExecutionsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: PAGINATION_MAX_LIMIT,
+    default: AUTOMATION_EXECUTIONS_PAGE_SIZE,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(PAGINATION_MAX_LIMIT)
+  override limit: number = AUTOMATION_EXECUTIONS_PAGE_SIZE;
 }
