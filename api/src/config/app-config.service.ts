@@ -105,19 +105,6 @@ export class AppConfigService {
     } as const;
   }
 
-  get smtp() {
-    return {
-      host: this.env.SMTP_HOST,
-      port: this.env.SMTP_PORT,
-      user: this.env.SMTP_USER,
-      password: this.env.SMTP_PASSWORD,
-      secure: this.env.SMTP_SECURE,
-      from: this.env.SMTP_FROM,
-      /** Without a host the log transport is used — see EmailService. */
-      enabled: Boolean(this.env.SMTP_HOST),
-    } as const;
-  }
-
   /**
    * Microsoft Graph mail settings.
    *

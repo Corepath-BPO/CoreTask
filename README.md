@@ -621,8 +621,8 @@ pnpm compose:validate
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
-- Real outbound e-mail through Microsoft Graph, with SMTP and a log transport as
-  the other two options — see [Outbound e-mail](docs/architecture/backend.md)
+- Real outbound e-mail through Microsoft Graph, or written to the log when Graph
+  is not configured — see [Outbound e-mail](docs/architecture/backend.md)
 
 ### Design notes
 
