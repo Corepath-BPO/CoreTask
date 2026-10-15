@@ -32,6 +32,7 @@ describe('Automations (e2e)', () => {
     // and the broadcast to open tabs is fire-and-forget by design.
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toWorkspace: async () => undefined,
     } as never);
   });
 

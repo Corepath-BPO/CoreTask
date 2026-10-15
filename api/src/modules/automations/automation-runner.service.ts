@@ -3143,6 +3143,12 @@ export class AutomationRunnerService {
           source: 'automation',
         });
       }
+      // The Tickets page lists the whole workspace and sits in no project
+      // room, so it is told too — that the list changed, and nothing else.
+      await this.relay.toWorkspace(rule.workspaceId, ServerEvent.TICKET_UPDATED, {
+        workspaceId: rule.workspaceId,
+        source: 'automation',
+      });
     }
 
     return { ran: true, events, webhooks: [], emails };

@@ -56,6 +56,7 @@ import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { TeamDetailPage } from '@/features/teams/pages/team-detail-page';
 import { TeamsPage } from '@/features/teams/pages/teams-page';
 import { TicketsPage } from '@/features/tickets/pages/tickets-page';
+import { WorkspaceLinkPage } from '@/features/workspaces/pages/workspace-link-page';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { NotFoundPage } from './not-found-page';
@@ -139,6 +140,16 @@ const protectedRoute = createRoute({
         search: { redirect: location.href },
       });
     }
+  },
+});
+
+/** A workspace's own address, `/w/<slug>`: switches to it and opens its Home. */
+const workspaceLinkRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/w/$slug',
+  component: function WorkspaceLinkRoute() {
+    const { slug } = workspaceLinkRoute.useParams();
+    return <WorkspaceLinkPage slug={slug} />;
   },
 });
 
@@ -734,6 +745,7 @@ const routeTree = rootRoute.addChildren([
   oauthAuthorizeRoute,
   protectedRoute.addChildren([
     dashboardRoute,
+    workspaceLinkRoute,
     projectsRoute,
     projectDetailRoute.addChildren([
       projectIndexRoute,

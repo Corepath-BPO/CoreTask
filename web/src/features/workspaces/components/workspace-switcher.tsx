@@ -52,7 +52,9 @@ export function WorkspaceSwitcher({ collapsed = false }: WorkspaceSwitcherProps)
                   {workspace?.name ?? 'No workspace'}
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
-                  {workspace ? `${workspace.memberCount} members` : 'Create one to begin'}
+                  {workspace
+                    ? `${workspace.memberCount} ${workspace.memberCount === 1 ? 'member' : 'members'}`
+                    : 'Create one to begin'}
                 </span>
               </span>
               <ChevronsUpDown

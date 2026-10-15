@@ -8,7 +8,12 @@ export const REALTIME_RELAY_CHANNEL = 'coretask:realtime-relay';
 /** One broadcast, as it crosses the process boundary. */
 export interface RealtimeRelayMessage {
   /** Which project room to address. */
-  projectId: string;
+  projectId?: string;
+  /**
+   * Or which workspace room — for a signal that carries nothing private, such
+   * as "the tickets list changed", to screens that are not in a project room.
+   */
+  workspaceId?: string;
   /** The socket event name, exactly as the gateway would emit it. */
   event: string;
   payload: Record<string, unknown>;
@@ -41,12 +46,30 @@ export class RealtimeRelayPublisher {
     event: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const message: RealtimeRelayMessage = { projectId, event, payload };
+    await this.publish({ projectId, event, payload });
+  }
 
+  /**
+   * To everyone in a workspace's room. Only for payloads that say *that*
+   * something changed, never what: a private project's details belong in its
+   * own room, which checks membership on join.
+   */
+  async toWorkspace(
+    workspaceId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.publish({ workspaceId, event, payload });
+  }
+
+  private async publish(message: RealtimeRelayMessage): Promise<void> {
     try {
       await this.redis.client.publish(REALTIME_RELAY_CHANNEL, JSON.stringify(message));
     } catch (error) {
-      this.logger.warn({ err: error, event }, 'Could not publish a realtime relay message');
+      this.logger.warn(
+        { err: error, event: message.event },
+        'Could not publish a realtime relay message',
+      );
     }
   }
 }

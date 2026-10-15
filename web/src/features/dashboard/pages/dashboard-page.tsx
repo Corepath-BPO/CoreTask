@@ -96,7 +96,7 @@ export function DashboardPage() {
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="h-8 gap-2 rounded-lg bg-background/45 px-3">
               <UsersRound className="size-3.5 text-primary-strong" aria-hidden="true" />
-              {workspace.memberCount} members
+              {workspace.memberCount} {workspace.memberCount === 1 ? 'member' : 'members'}
             </Badge>
             <Button variant="outline" size="sm" onClick={() => setCustomizing(true)}>
               <LayoutGrid />
