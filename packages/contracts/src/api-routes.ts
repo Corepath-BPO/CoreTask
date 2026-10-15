@@ -18,6 +18,10 @@ export const ApiRoutes = {
     me: '/auth/me',
     forgotPassword: '/auth/forgot-password',
     resetPassword: '/auth/reset-password',
+    logoutAll: '/auth/logout-all',
+    changePassword: '/auth/change-password',
+    verifyEmail: '/auth/verify-email',
+    resendVerification: '/auth/resend-verification',
   },
   workspaces: {
     list: '/workspaces',

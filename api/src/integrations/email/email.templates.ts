@@ -3,27 +3,50 @@ import type { EmailMessage } from './email.service';
 /**
  * Plain-text-first templates.
  *
- * Deliberately not a templating engine yet — there is exactly one message. When
- * the second or third arrives, this file is the seam to swap in MJML/Handlebars.
+ * Deliberately not a templating engine yet. When the messages outgrow string
+ * arrays, this file is the seam to swap in MJML/Handlebars.
  */
-export function welcomeEmail(params: { to: string; name: string; webUrl: string }): EmailMessage {
+/**
+ * "Confirm your e-mail address". Sent once on sign-up, where it is also the
+ * welcome — one message rather than two — and again whenever the person asks
+ * for a new link.
+ */
+export function emailVerificationEmail(params: {
+  to: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+  webUrl: string;
+  /** True for the message sent on sign-up. */
+  welcome: boolean;
+}): EmailMessage {
   const firstName = params.name.split(' ')[0] ?? params.name;
+  const link = `${params.webUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(params.token)}`;
+  const expires = new Date(params.expiresAt).toUTCString();
+  const opening = params.welcome
+    ? 'Your CoreTask account is ready. Confirm that this is your e-mail address:'
+    : 'Confirm that this is the e-mail address for your CoreTask account:';
 
   return {
     to: params.to,
-    subject: 'Welcome to CoreTask',
+    subject: params.welcome
+      ? 'Welcome to CoreTask — confirm your e-mail address'
+      : 'Confirm your e-mail address for CoreTask',
     text: [
       `Hi ${firstName},`,
       '',
-      'Your CoreTask account is ready. Create a workspace to start tracking work:',
-      params.webUrl,
+      opening,
+      link,
+      '',
+      `The link works once, until ${expires}. If you did not sign up, ignore this e-mail.`,
       '',
       '— The CoreTask team',
     ].join('\n'),
     html: [
       `<p>Hi ${escapeHtml(firstName)},</p>`,
-      '<p>Your CoreTask account is ready. Create a workspace to start tracking work:</p>',
-      `<p><a href="${escapeHtml(params.webUrl)}">${escapeHtml(params.webUrl)}</a></p>`,
+      `<p>${escapeHtml(opening)}</p>`,
+      `<p><a href="${escapeHtml(link)}">Confirm my e-mail address</a></p>`,
+      `<p>The link works once, until ${escapeHtml(expires)}. If you did not sign up, ignore this e-mail.</p>`,
       '<p>— The CoreTask team</p>',
     ].join(''),
   };

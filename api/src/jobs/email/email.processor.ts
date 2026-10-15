@@ -5,18 +5,18 @@ import type { Job } from 'bullmq';
 import { AppConfigService } from '../../config/app-config.service';
 import { EmailService } from '../../integrations/email/email.service';
 import {
+  emailVerificationEmail,
   invitationEmail,
   passwordResetEmail,
-  welcomeEmail,
 } from '../../integrations/email/email.templates';
 import {
   EmailJob,
   QueueName,
   type EmailJobData,
+  type EmailVerificationJobData,
   type InvitationEmailJobData,
   type MessageEmailJobData,
   type PasswordResetEmailJobData,
-  type WelcomeEmailJobData,
 } from '../queue-names';
 
 /**
@@ -36,13 +36,16 @@ export class EmailProcessor extends WorkerHost {
 
   async process(job: Job<EmailJobData>): Promise<void> {
     switch (job.name) {
-      case EmailJob.WELCOME: {
-        const data = job.data as WelcomeEmailJobData;
+      case EmailJob.EMAIL_VERIFICATION: {
+        const data = job.data as EmailVerificationJobData;
         await this.email.send(
-          welcomeEmail({
+          emailVerificationEmail({
             to: data.email,
             name: data.name,
+            token: data.token,
+            expiresAt: data.expiresAt,
             webUrl: this.config.http.webUrl,
+            welcome: data.welcome,
           }),
         );
         return;

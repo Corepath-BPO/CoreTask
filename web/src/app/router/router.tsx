@@ -7,6 +7,7 @@ import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
 import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page';
+import { VerifyEmailPage } from '@/features/auth/pages/verify-email-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { GoalsPage } from '@/features/goals/pages/goals-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
@@ -386,6 +387,16 @@ const resetPasswordRoute = createRoute({
 });
 
 /**
+ * Where a confirmation link lands. Off the root too: it works signed in or
+ * not, since the link may be opened on another device.
+ */
+const verifyEmailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/verify-email',
+  component: VerifyEmailPage,
+});
+
+/**
  * Where a tool sends a person to ask for access. Signed in, like the app, but
  * outside its shell: the page is a single decision and nothing else.
  */
@@ -740,6 +751,7 @@ const settingsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
   resetPasswordRoute,
+  verifyEmailRoute,
   acceptInvitationRoute,
   publicFormRoute,
   oauthAuthorizeRoute,

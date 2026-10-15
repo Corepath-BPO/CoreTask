@@ -288,6 +288,13 @@ export class InvitationsService {
         data: { acceptedAt: new Date() },
       });
 
+      // The link went to this address and the accounts match, so the address
+      // is proven: no separate confirmation e-mail needed.
+      await tx.user.updateMany({
+        where: { id: userId, emailVerifiedAt: null },
+        data: { emailVerifiedAt: new Date() },
+      });
+
       return tx.workspace.findUniqueOrThrow({
         where: { id: invitation.workspaceId },
         select: { id: true, slug: true, name: true },

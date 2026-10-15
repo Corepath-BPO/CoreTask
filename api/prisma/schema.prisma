@@ -222,6 +222,7 @@ model User {
   createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
   oauthApps                  OAuthApp[]
   passwordResetTokens        PasswordResetToken[]
+  emailVerificationTokens    EmailVerificationToken[]
   oauthCodes                 OAuthAuthorizationCode[]
   oauthGrants                OAuthGrant[]
   memberships                WorkspaceMember[]
@@ -2732,4 +2733,22 @@ model PasswordResetToken {
 
   @@index([userId, createdAt])
   @@map("password_reset_tokens")
+}
+
+/// A "confirm your e-mail address" link. Bound to the address it was sent to,
+/// so a link mailed before an address change cannot vouch for the new one.
+model EmailVerificationToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  email     String    @db.VarChar(254)
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("email_verification_tokens")
 }

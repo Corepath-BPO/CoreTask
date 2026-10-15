@@ -1,7 +1,17 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { PASSWORD_RESET_RESEND_SECONDS, PASSWORD_RESET_TTL_MINUTES } from '@coretask/contracts';
-import type { AuthSession, AuthUser } from '@coretask/types';
+import {
+  EMAIL_VERIFICATION_RESEND_SECONDS,
+  EMAIL_VERIFICATION_TTL_HOURS,
+  PASSWORD_RESET_RESEND_SECONDS,
+  PASSWORD_RESET_TTL_MINUTES,
+} from '@coretask/contracts';
+import type {
+  AuthSession,
+  AuthUser,
+  ResendVerificationResult,
+  VerifyEmailResult,
+} from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 
 import { AppException } from '../../common/exceptions/app.exception';
@@ -43,12 +53,13 @@ export class AuthService {
 
     const issued = await this.tokens.issueSession(user, context);
 
-    // Fire-and-forget: a mail outage must not fail the registration.
-    await this.emailQueue.enqueueWelcome({
-      email: user.email,
-      name: user.name,
-      userId: user.id,
-    });
+    // The confirmation link is also the welcome. A failure here must not fail
+    // the registration: the account exists, and a new link is one click away.
+    try {
+      await this.sendEmailVerification(user, { welcome: true });
+    } catch (error) {
+      this.logger.error({ err: error, userId: user.id }, 'Could not send the e-mail confirmation');
+    }
 
     this.logger.log({ userId: user.id }, 'User registered');
 
@@ -132,6 +143,11 @@ export class AuthService {
       this.prisma.passwordResetToken.deleteMany({
         where: { userId: row.user.id, id: { not: row.id } },
       }),
+      // The link was mailed to the address, so using it proves the address.
+      this.prisma.user.updateMany({
+        where: { id: row.user.id, emailVerifiedAt: null },
+        data: { emailVerifiedAt: new Date() },
+      }),
     ]);
     await this.tokens.revokeAllForUser(row.user.id);
     this.logger.log({ userId: row.user.id }, 'Password reset');
@@ -179,10 +195,7 @@ export class AuthService {
     return this.toAuthResult(UsersService.toAuthUser(user), rotated);
   }
 
-  /**
-   * Ends the current session only. `TokenService.revokeAllForUser` is already
-   * in place for the eventual "sign out everywhere" control.
-   */
+  /** Ends the current session only; `logoutEverywhere` ends the rest. */
   async logout(presentedToken: string | undefined): Promise<void> {
     if (!presentedToken) return;
 
@@ -194,8 +207,148 @@ export class AuthService {
     }
   }
 
+  /**
+   * "Sign out everywhere": every session the account has, this one included.
+   * Access tokens already handed out still run to their 15-minute expiry, but
+   * none of them can be refreshed.
+   */
+  async logoutEverywhere(userId: string): Promise<number> {
+    const revoked = await this.tokens.revokeAllForUser(userId);
+    this.logger.log({ userId, revoked }, 'Signed out everywhere');
+    return revoked;
+  }
+
+  /**
+   * Changes the password from inside a session. Every *other* session is
+   * signed out, so whoever else may know the old password loses their way in,
+   * while the one that made the change stays signed in.
+   *
+   * A wrong current password is a 400, not a 401: the session is fine, and a
+   * 401 would send the client off to refresh it.
+   */
+  async changePassword(
+    userId: string,
+    sessionId: string | null,
+    input: { currentPassword: string; newPassword: string },
+  ): Promise<void> {
+    const user = await this.users.requireById(userId);
+
+    if (!(await this.passwords.verify(user.passwordHash, input.currentPassword))) {
+      throw AppException.badRequest('CURRENT_PASSWORD_INCORRECT');
+    }
+
+    const passwordHash = await this.passwords.hash(input.newPassword);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+      // A reset link asked for before the change would undo it.
+      this.prisma.passwordResetToken.deleteMany({ where: { userId, usedAt: null } }),
+    ]);
+    const revoked = await this.tokens.revokeAllForUser(
+      userId,
+      sessionId ? { exceptSessionId: sessionId } : {},
+    );
+    this.logger.log({ userId, revoked }, 'Password changed');
+  }
+
+  /**
+   * Sends a new "confirm your e-mail address" link to a signed-in person.
+   *
+   * Nothing is sent when the address is already confirmed, or when a link went
+   * out less than a minute ago; the answer says which, so the page can.
+   */
+  async resendEmailVerification(userId: string): Promise<ResendVerificationResult> {
+    const user = await this.users.requireById(userId);
+    if (user.emailVerifiedAt) return { sent: false, emailVerified: true };
+
+    const recent = await this.prisma.emailVerificationToken.findFirst({
+      where: {
+        userId,
+        createdAt: { gt: new Date(Date.now() - EMAIL_VERIFICATION_RESEND_SECONDS * 1_000) },
+      },
+      select: { id: true },
+    });
+    if (recent) return { sent: false, emailVerified: false };
+
+    await this.sendEmailVerification(user, { welcome: false });
+    return { sent: true, emailVerified: false };
+  }
+
+  /**
+   * Confirms an address from a link. Public, because the link may be opened
+   * on a device that is not signed in. It works once, and only for the
+   * address it was sent to.
+   */
+  async verifyEmail(token: string): Promise<VerifyEmailResult> {
+    const row = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash: hashResetToken(token) },
+      select: {
+        id: true,
+        email: true,
+        usedAt: true,
+        expiresAt: true,
+        user: { select: { id: true, email: true, isActive: true } },
+      },
+    });
+    if (
+      !row ||
+      row.usedAt ||
+      row.expiresAt.getTime() <= Date.now() ||
+      !row.user.isActive ||
+      row.user.email !== row.email
+    ) {
+      throw AppException.badRequest('EMAIL_VERIFICATION_INVALID');
+    }
+
+    const claimed = await this.prisma.emailVerificationToken.updateMany({
+      where: { id: row.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (claimed.count === 0) throw AppException.badRequest('EMAIL_VERIFICATION_INVALID');
+
+    await this.prisma.$transaction([
+      this.prisma.user.updateMany({
+        where: { id: row.user.id, emailVerifiedAt: null },
+        data: { emailVerifiedAt: new Date() },
+      }),
+      this.prisma.emailVerificationToken.deleteMany({
+        where: { userId: row.user.id, id: { not: row.id } },
+      }),
+    ]);
+    this.logger.log({ userId: row.user.id }, 'E-mail address confirmed');
+    return { email: row.email };
+  }
+
   async me(userId: string): Promise<AuthUser> {
     return UsersService.toAuthUser(await this.users.requireById(userId));
+  }
+
+  /** Writes a new link, replacing any unused one, and queues the e-mail. */
+  private async sendEmailVerification(
+    user: { id: string; email: string; name: string },
+    options: { welcome: boolean },
+  ): Promise<void> {
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_HOURS * 3_600_000);
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
+      this.prisma.emailVerificationToken.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          tokenHash: hashResetToken(token),
+          expiresAt,
+        },
+      }),
+    ]);
+
+    await this.emailQueue.enqueueEmailVerification({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      token,
+      expiresAt: expiresAt.toISOString(),
+      welcome: options.welcome,
+    });
   }
 
   private toAuthResult(
@@ -219,7 +372,10 @@ export class AuthService {
   }
 }
 
-/** SHA-256, as for refresh tokens: the token carries 256 bits, so a slow KDF adds nothing. */
+/**
+ * SHA-256, as for refresh tokens: the token carries 256 bits, so a slow KDF adds
+ * nothing. Used for reset and e-mail confirmation links alike.
+ */
 function hashResetToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }

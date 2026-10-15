@@ -119,14 +119,20 @@ export class TokenService {
   }
 
   /**
-   * Revokes every session for a user.
-   *
-   * Not wired to an endpoint yet; `POST /auth/logout-all` is a controller method
-   * away, and password-reset flows will call this directly.
+   * Revokes every session for a user — "sign out everywhere", and a password
+   * reset — or every session but one, which is how changing a password keeps
+   * the device it was changed on signed in.
    */
-  async revokeAllForUser(userId: string): Promise<number> {
+  async revokeAllForUser(
+    userId: string,
+    options: { exceptSessionId?: string } = {},
+  ): Promise<number> {
     const { count } = await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
+      where: {
+        userId,
+        revokedAt: null,
+        ...(options.exceptSessionId ? { sessionId: { not: options.exceptSessionId } } : {}),
+      },
       data: { revokedAt: new Date() },
     });
     return count;

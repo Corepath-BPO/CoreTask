@@ -348,6 +348,25 @@ describe('Invitations (e2e)', () => {
       expect(membership?.invitedById).toBe(scope.owner.userId);
     });
 
+    it('confirms the address, since the link was mailed to it', async () => {
+      const scope = await setupScope();
+      const email = uniqueEmail();
+      const invitation = await invite(scope, email, WorkspaceRole.MEMBER);
+      const token = await setToken(invitation.id, 'verify-token');
+      const invitee = await registerUser('Invitee', email);
+
+      await request(server())
+        .post(url(`/invitations/${token}/accept`))
+        .set('Authorization', `Bearer ${invitee.token}`)
+        .expect(200);
+
+      const me = await request(server())
+        .get(url('/auth/me'))
+        .set('Authorization', `Bearer ${invitee.token}`)
+        .expect(200);
+      expect(me.body.data.emailVerified).toBe(true);
+    });
+
     /**
      * Without this, forwarding the e-mail hands the workspace to whoever opens
      * it, and the invitation stops being a statement about *who* was invited.
