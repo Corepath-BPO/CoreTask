@@ -59,9 +59,13 @@ entries doing one thing is how somebody picks the wrong one. Neither carries the
 descriptive subtitle reference 07 shows.
 
 **13.** The ellipsis menu on the card's right and the hover-revealed add control
-exist. The drag handle on the left of the junction dot does not, and there is no
-branch reordering to attach it to. The bottom connector exists as a hidden
-handle; nothing draws a control at it.
+exist, and so does the drag handle: hovering a branch row reveals a grip left of
+its card, and dragging it moves the row — its actions with it — to the nearest
+line among the other rows. The fallback has no handle and nothing can be dropped
+below it. The same move is **Move up** / **Move down** in the card's menu, for
+anybody not using a pointer. A move is an edit to the rows' order, saved with
+the rest (`moveBranchRow` in `graph-edits.ts`). The bottom connector exists
+as a hidden handle; nothing draws a control at it.
 
 ## Visual acceptance criteria
 
@@ -212,7 +216,6 @@ noticing the section was deleted.
 - The condition catalogue (references 08–11), including the AI entry shown
   disabled.
 - The `Otherwise` branch node as a first-class node (reference 12).
-- The drag handle and branch reordering (reference 13).
 - Tabs in the catalogue, and the `External actions` tab.
 - Per-custom-field entries in either catalogue.
 - Any rendering of the structured branch model — the canvas still projects the

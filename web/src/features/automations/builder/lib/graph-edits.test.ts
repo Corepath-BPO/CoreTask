@@ -11,6 +11,7 @@ import {
   makeBranchRow,
   makeNode,
   makeNodeUnder,
+  moveBranchRow,
   NO_EDITS,
   readPlaceholderId,
   rebaseEdits,
@@ -398,5 +399,60 @@ describe('rebasing edits after a save', () => {
   it('names a saved step by the uuid inside its new- id', () => {
     expect(savedId('new-1111')).toBe('1111');
     expect(savedId('1111')).toBe('1111');
+  });
+});
+
+describe('reordering branch rows', () => {
+  const trigger = node({
+    id: 't',
+    type: 'TRIGGER',
+    subtype: 'TASK_CREATED',
+    parentId: null,
+    order: 0,
+  });
+  const row = (
+    id: string,
+    order: number,
+    configuration: Record<string, unknown> = { field: 'status' },
+  ) =>
+    node({
+      id,
+      type: 'CONDITION',
+      subtype: 'FIELD_COMPARISON',
+      parentId: 't',
+      order,
+      configuration,
+    });
+  const rows = [
+    trigger,
+    row('a', 1),
+    row('b', 2),
+    row('c', 2.5),
+    row('otherwise', 3, FALLBACK_CONFIGURATION),
+  ];
+
+  const sequence = (reordered: Record<string, number>) =>
+    branchRows(applyEdits(rows, { ...NO_EDITS, reordered })).map((entry) => entry.id);
+
+  it('moves a row up, dealing the same order values out again', () => {
+    const reordered = moveBranchRow(rows, 'c', 0);
+
+    expect(sequence(reordered)).toEqual(['c', 'a', 'b', 'otherwise']);
+    // The rows' own values, redistributed: nothing outside them moves.
+    expect(reordered).toEqual({ c: 1, a: 2, b: 2.5 });
+  });
+
+  it('moves a row down', () => {
+    expect(sequence(moveBranchRow(rows, 'a', 2))).toEqual(['b', 'c', 'a', 'otherwise']);
+  });
+
+  it('never puts a row below the fallback, which runs when nothing above held', () => {
+    expect(sequence(moveBranchRow(rows, 'a', 10))).toEqual(['b', 'c', 'a', 'otherwise']);
+    expect(moveBranchRow(rows, 'otherwise', 0)).toEqual({});
+  });
+
+  it('changes nothing for a move to where the row already is', () => {
+    expect(moveBranchRow(rows, 'b', 1)).toEqual({});
+    expect(hasEdits({ ...NO_EDITS, reordered: moveBranchRow(rows, 'b', 1) })).toBe(false);
   });
 });

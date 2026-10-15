@@ -1,3 +1,4 @@
+import { GRAPH_LAYOUT } from '@coretask/contracts';
 import type { AutomationGraphEdge, AutomationMetadata } from '@coretask/types';
 import {
   Background,
@@ -9,7 +10,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
@@ -17,7 +18,13 @@ import { useTheme } from '@/stores/theme.store';
 
 import { AutomationEdge } from '../nodes/automation-edge';
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
-import { branchRows, fallbackRow, isUnansweredRow, type CanvasNode } from '../lib/graph-edits';
+import {
+  branchRows,
+  fallbackRow,
+  isUnansweredRow,
+  withDescendants,
+  type CanvasNode,
+} from '../lib/graph-edits';
 import { layoutGraph } from '../lib/layout';
 import { isNodeIncomplete, nodeHeading, summarise, summariseParts } from '../lib/node-summary';
 
@@ -47,6 +54,8 @@ interface Props {
   onChangeTrigger: () => void;
   /** Remove a step, or a whole branch when the step is one. */
   onDeleteNode: (nodeId: string) => void;
+  /** Put a branch row at another place among the rows, counted from the top. */
+  onMoveRow: (rowId: string, toIndex: number) => void;
 }
 
 /**
@@ -81,6 +90,7 @@ function Canvas({
   onDuplicateNode,
   onDeleteNode,
   onChangeTrigger,
+  onMoveRow,
 }: Props) {
   // React Flow draws its own zoom controls; told the theme, they match it.
   const { resolvedTheme } = useTheme();
@@ -126,6 +136,43 @@ function Canvas({
   const fallbackId = useMemo(() => fallbackRow(graph.nodes)?.id ?? null, [graph.nodes]);
 
   /*
+   * The rows that can be put in another order: every one but the fallback,
+   * which runs when nothing above it held and so is always last. One row has
+   * nowhere to go.
+   */
+  const movableRows = useMemo(
+    () => rows.filter((row) => row.id !== fallbackId),
+    [rows, fallbackId],
+  );
+
+  /*
+   * A row being dragged, and how far it has moved.
+   *
+   * The canvas owns no positions — they are derived from the rule — so a drag
+   * is held here as an offset over the layout until it is dropped, and the
+   * drop becomes an edit to the rule's order. The row's actions move with it:
+   * a question dragged away from its answers would be a different rule for as
+   * long as the drag lasted.
+   */
+  const [drag, setDrag] = useState<{ id: string; dy: number } | null>(null);
+  const dragged = useMemo(
+    () => (drag ? new Set(withDescendants(graph.nodes, drag.id)) : null),
+    [drag, graph.nodes],
+  );
+
+  /**
+   * Where among the movable rows a row dropped at this height lands: the
+   * nearest line. A row passes another once it is more than halfway to the
+   * next line, so dropping it mostly over a row takes that row's place rather
+   * than needing to be pushed past its top edge.
+   */
+  const dropIndex = (rowId: string, y: number) =>
+    movableRows.filter(
+      (row) =>
+        row.id !== rowId && (placement.get(row.id)?.y ?? 0) + GRAPH_LAYOUT.BRANCH_GAP / 2 < y,
+    ).length;
+
+  /*
    * The one connection that carries the "Add branch" pill.
    *
    * Every branch hangs off the trigger, so every one of those connections looks
@@ -154,11 +201,17 @@ function Canvas({
     () =>
       graph.nodes.map((node) => {
         const place = { alternative: alternatives.has(node.id) };
+        const laidOut = placement.get(node.id) ?? node.position;
+        const rowIndex = movableRows.findIndex((row) => row.id === node.id);
+        const movable = rowIndex >= 0 && movableRows.length > 1;
 
         return {
           id: node.id,
           type: 'automation',
-          position: placement.get(node.id) ?? node.position,
+          // Down or up by the drag, never sideways: a row's place is its line.
+          position:
+            drag && dragged?.has(node.id) ? { x: laidOut.x, y: laidOut.y + drag.dy } : laidOut,
+          ...(movable ? { draggable: true, dragHandle: '.branch-drag-handle' } : {}),
           selected: node.id === selectedId,
           data: {
             category: node.type,
@@ -171,6 +224,15 @@ function Canvas({
             label: summarise(node, metadata, place),
             invalid: isNodeIncomplete(node),
             onOpen: () => onOpenNode(node.id),
+            ...(movable
+              ? {
+                  draggable: true,
+                  ...(rowIndex > 0 ? { onMoveUp: () => onMoveRow(node.id, rowIndex - 1) } : {}),
+                  ...(rowIndex < movableRows.length - 1
+                    ? { onMoveDown: () => onMoveRow(node.id, rowIndex + 1) }
+                    : {}),
+                }
+              : {}),
             /*
              * Only where nothing follows yet.
              *
@@ -244,6 +306,10 @@ function Canvas({
       onDuplicateNode,
       onDeleteNode,
       onChangeTrigger,
+      onMoveRow,
+      movableRows,
+      drag,
+      dragged,
     ],
   );
 
@@ -374,6 +440,20 @@ function Canvas({
          * than a property of it, which also means it can never be saved wrong.
          */
         nodesDraggable={false}
+        /*
+         * …except a branch row, by its handle. Moving a row changes nothing
+         * about what follows what — only which question is asked first — so
+         * it is the one drag that draws a rule that exists. Dropped, it is an
+         * edit to the rows' order, and the layout puts it on its new line.
+         */
+        onNodeDrag={(_event, node) => {
+          const from = placement.get(node.id);
+          if (from) setDrag({ id: node.id, dy: node.position.y - from.y });
+        }}
+        onNodeDragStop={(_event, node) => {
+          setDrag(null);
+          onMoveRow(node.id, dropIndex(node.id, node.position.y));
+        }}
         edgesFocusable={false}
         onNodeClick={(_event, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}

@@ -65,6 +65,7 @@ import {
   makeBranchRow,
   makeDefaultNodes,
   makeNodeUnder,
+  moveBranchRow,
   NO_EDITS,
   readPlaceholderId,
   rebaseEdits,
@@ -431,6 +432,24 @@ export function AutomationBuilderPage({
         ? { kind: 'closed' }
         : previous,
     );
+  };
+
+  /**
+   * A branch row put somewhere else among the rows.
+   *
+   * The rows are tried top to bottom and the first that holds wins, so this
+   * changes which question is asked first — and nothing else: each row keeps
+   * its own actions. Held as an edit to the rows' order and saved with the
+   * rest, so a live rule takes the new order when it is published.
+   */
+  const moveRow = (rowId: string, toIndex: number) => {
+    const reordered = moveBranchRow(realNodes, rowId, toIndex);
+    if (Object.keys(reordered).length === 0) return;
+
+    setEdits((previous) => ({
+      ...previous,
+      reordered: { ...previous.reordered, ...reordered },
+    }));
   };
 
   /**
@@ -1226,6 +1245,7 @@ export function AutomationBuilderPage({
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
           onInsertStep={insertStepAfter}
+          onMoveRow={moveRow}
         />
 
         {/*

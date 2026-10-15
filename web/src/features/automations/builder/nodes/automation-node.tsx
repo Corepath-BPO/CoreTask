@@ -2,11 +2,14 @@ import type { AutomationNodeType } from '@coretask/contracts';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Clock,
   Copy,
   CornerDownRight,
   GitBranch,
+  GripVertical,
   ListFilter,
   MoreHorizontal,
   Plus,
@@ -78,6 +81,14 @@ export interface AutomationNodeData extends Record<string, unknown> {
    * as a piece, or its actions come back as things that run every time.
    */
   onRemove?: () => void;
+  /**
+   * A branch row that can be dragged to another place among the rows. The
+   * handle only — the card itself still opens on a click.
+   */
+  draggable?: boolean;
+  /** The keyboard's way to do the same: one place up or down. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
 const ICON: Record<string, LucideIcon> = {
@@ -147,7 +158,26 @@ export function AutomationNode({ data, selected }: NodeProps) {
      * never be the one that fired.
      */
     // `nodrag nopan` so a click on a menu is not read as a gesture on the canvas.
-    <div className="nodrag nopan group relative">
+    // A draggable row leaves `nodrag` off: React Flow refuses to start a drag
+    // inside one, and the row's handle is what starts it.
+    <div className={cn('nopan group relative', !node.draggable && 'nodrag')}>
+      {/*
+        Reference 13's handle, left of the card. Pointer-only, and said so: the
+        same move is in the card's menu for anybody not using a mouse.
+      */}
+      {node.draggable && (
+        <span
+          aria-hidden="true"
+          title="Drag to reorder"
+          className={cn(
+            'branch-drag-handle absolute -left-7 top-[14px] flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-opacity active:cursor-grabbing',
+            'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100',
+          )}
+        >
+          <GripVertical className="size-4" />
+        </span>
+      )}
+
       <button
         type="button"
         onClick={node.onOpen}
@@ -280,7 +310,11 @@ export function AutomationNode({ data, selected }: NodeProps) {
         deleting it — three acts for one intention. Here it is where the step
         is, which is where somebody already is when they decide.
       */}
-      {(node.onDuplicate || node.onDelete || node.onChangeTrigger) && (
+      {(node.onDuplicate ||
+        node.onDelete ||
+        node.onChangeTrigger ||
+        node.onMoveUp ||
+        node.onMoveDown) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -304,6 +338,18 @@ export function AutomationNode({ data, selected }: NodeProps) {
               <DropdownMenuItem className="cursor-pointer" onSelect={node.onChangeTrigger}>
                 <Zap className="size-4" aria-hidden="true" />
                 Change trigger
+              </DropdownMenuItem>
+            )}
+            {node.onMoveUp && (
+              <DropdownMenuItem className="cursor-pointer" onSelect={node.onMoveUp}>
+                <ArrowUp className="size-4" aria-hidden="true" />
+                Move up
+              </DropdownMenuItem>
+            )}
+            {node.onMoveDown && (
+              <DropdownMenuItem className="cursor-pointer" onSelect={node.onMoveDown}>
+                <ArrowDown className="size-4" aria-hidden="true" />
+                Move down
               </DropdownMenuItem>
             )}
             {node.onDuplicate && (
