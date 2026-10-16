@@ -4,8 +4,9 @@ import { expect, test } from './fixtures';
 
 /**
  * The rules-engine work in the builder, in a real browser: branch rows dragged
- * into another order, condition groups, and publishing a live rule's draft as
- * a version and restoring an older one.
+ * into another order, condition groups, publishing a live rule's draft as a
+ * version and restoring an older one, and the team and checklist steps — with
+ * the task panel fields they write.
  *
  * Each rule is built through the API so a test starts from a known shape, in a
  * project of this run's own.
@@ -131,8 +132,30 @@ test.describe('the rules engine in the builder', () => {
         .locator('.react-flow__node', { has: page.getByRole('button', { name }) })
         .locator('.branch-drag-handle');
 
-    const from = await handleOf(/^Otherwise if — Priority is High$/).boundingBox();
-    const to = await handleOf(/^Check if — Priority is High$/).boundingBox();
+    /*
+     * Where both handles are once they stop moving. The canvas opens with a
+     * 200ms animated fit, and a box read during it puts the press beside the
+     * handle — on the pane, which pans instead of dragging the row.
+     */
+    const settled = async () => {
+      const read = () =>
+        Promise.all([
+          handleOf(/^Otherwise if — Priority is High$/).boundingBox(),
+          handleOf(/^Check if — Priority is High$/).boundingBox(),
+        ]);
+      let last = JSON.stringify(await read());
+      await expect
+        .poll(async () => {
+          const now = JSON.stringify(await read());
+          const still = now === last;
+          last = now;
+          return still;
+        })
+        .toBe(true);
+      return read();
+    };
+
+    const [from, to] = await settled();
     expect(from && to).toBeTruthy();
 
     await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
@@ -239,5 +262,97 @@ test.describe('the rules engine in the builder', () => {
       page.getByRole('button', { name: 'Do this — Comment: “Version one”' }),
     ).toBeVisible();
     await expect(header).toContainText('Unpublished changes');
+  });
+
+  const createTeam = async (name: string) => {
+    const created = await api.request.post(`/api/v1/workspaces/${api.workspaceId}/teams`, {
+      headers: api.headers,
+      data: { name },
+    });
+    expect(created.ok(), `could not create the team: ${created.status()}`).toBe(true);
+    return (await created.json()).data.id as string;
+  };
+
+  test('sets up a team step and a checklist step', async ({ page }) => {
+    const team = `Upkeep ${RUN}`;
+    const teamId = await createTeam(team);
+    const ruleId = await createRule(`Move-in ${RUN}`, [
+      {
+        id: 'a',
+        nodeType: 'ACTION',
+        subtype: 'ASSIGN_TEAM',
+        configuration: { teamId },
+        parentId: 't',
+        order: 1,
+      },
+      {
+        id: 'b',
+        nodeType: 'ACTION',
+        subtype: 'CREATE_CHECKLIST',
+        configuration: { name: 'Inspection', items: ['Keys handed over', 'Meter readings taken'] },
+        parentId: 'a',
+        order: 2,
+      },
+    ]);
+    await open(page, ruleId);
+
+    await expect(page.getByRole('button', { name: `Do this — Assign team ${team}` })).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Do this — Add checklist Inspection · 2 items' })
+      .click();
+
+    // One item a line; a blank line is not an item.
+    await page
+      .getByLabel('Items', { exact: true })
+      .fill(['Keys handed over', 'Meter readings taken', '', 'Smoke alarms tested'].join('\n'));
+    await expect(
+      page.getByRole('button', { name: 'Do this — Add checklist Inspection · 3 items' }),
+    ).toBeVisible();
+
+    // On a phone the settings cover the canvas; put them away to reach the next card.
+    await page.getByRole('button', { name: 'Close settings' }).click();
+    await page.getByRole('button', { name: `Do this — Assign team ${team}` }).click();
+    await page.getByLabel('Team', { exact: true }).click();
+    await page.getByRole('option', { name: 'No team — clear it' }).click();
+    await expect(page.getByRole('button', { name: 'Do this — Clear the team' })).toBeVisible();
+  });
+
+  test('ticks a checklist and sets the team in the task panel', async ({ page }) => {
+    const team = `Leasing ${RUN}`;
+    await createTeam(team);
+    const tasks = `/api/v1/workspaces/${api.workspaceId}/tasks`;
+    const created = await api.request.post(tasks, {
+      headers: api.headers,
+      data: { title: `Unit 4B ${RUN}`, projectId: api.projectId },
+    });
+    expect(created.ok(), `could not create the task: ${created.status()}`).toBe(true);
+    const taskId = (await created.json()).data.id as string;
+    const listed = await api.request.post(`${tasks}/${taskId}/checklists`, {
+      headers: api.headers,
+      data: { name: 'Inspection', items: ['Keys handed over', 'Meter readings taken'] },
+    });
+    expect(listed.ok(), `could not add the checklist: ${listed.status()}`).toBe(true);
+
+    await page.goto(`/projects/${api.projectId}/list?task=${taskId}`);
+    const checklists = page.getByRole('region', { name: 'Checklists' });
+    await expect(checklists.getByText('0/2')).toBeVisible();
+
+    await checklists.getByRole('checkbox', { name: 'Keys handed over' }).click();
+    await expect(checklists.getByText('1/2')).toBeVisible();
+
+    await checklists.getByRole('button', { name: 'Add an item' }).click();
+    await page.getByRole('textbox', { name: 'New item for "Inspection"' }).fill('Lease signed');
+    await page.keyboard.press('Enter');
+    await expect(checklists.getByText('1/3')).toBeVisible();
+
+    await page.getByRole('combobox', { name: 'Team' }).click();
+    await page.getByRole('option', { name: team }).click();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
+
+    // All of it is the task's, not the page's.
+    await page.reload();
+    await expect(checklists.getByRole('checkbox', { name: 'Keys handed over' })).toBeChecked();
+    await expect(checklists.getByText('Lease signed')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
   });
 });
