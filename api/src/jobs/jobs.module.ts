@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Global, Module } from '@nestjs/common';
 
+import { AppConfigService } from '../config/app-config.service';
 import { RedisService } from '../redis/redis.service';
 
 import { EmailQueue } from './email/email.queue';
@@ -16,9 +17,10 @@ import { WebhookQueue } from './webhook/webhook.queue';
 @Module({
   imports: [
     BullModule.forRootAsync({
-      inject: [RedisService],
-      useFactory: (redis: RedisService) => ({
+      inject: [RedisService, AppConfigService],
+      useFactory: (redis: RedisService, config: AppConfigService) => ({
         connection: redis.connectionOptions(),
+        prefix: config.queues.prefix,
         defaultJobOptions: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2_000 },

@@ -64,6 +64,10 @@ export class AppConfigService {
     } as const;
   }
 
+  get queues() {
+    return { prefix: this.env.QUEUE_PREFIX } as const;
+  }
+
   get jwt() {
     return {
       accessSecret: this.env.JWT_ACCESS_SECRET,

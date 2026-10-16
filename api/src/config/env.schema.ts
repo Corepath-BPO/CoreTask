@@ -49,6 +49,12 @@ export const envSchema = z
     REDIS_PORT: port.default(6379),
     REDIS_PASSWORD: optionalString,
     REDIS_DB: z.coerce.number().int().min(0).max(15).default(0),
+    // BullMQ's own default. The API and the worker must share it: the API
+    // queues jobs under it and the worker takes them from there.
+    QUEUE_PREFIX: z
+      .string()
+      .regex(/^[\w-]+$/, 'letters, digits, "_" and "-" only')
+      .default('bull'),
 
     JWT_ACCESS_SECRET: secret,
     JWT_REFRESH_SECRET: secret,

@@ -6,7 +6,9 @@ import type { Config } from 'jest';
  *   pnpm infra                 (starts the containers)
  *   pnpm --filter @coretask/api test:e2e
  *
- * Runs against the `coretask_e2e` schema, so development data is never touched.
+ * Runs against this checkout's own `coretask_e2e_…` schema and queue prefix
+ * (see e2e/test-database.ts), so development data is never touched and runs
+ * from two worktrees at once cannot reach each other's.
  */
 const config: Config = {
   rootDir: '..',
