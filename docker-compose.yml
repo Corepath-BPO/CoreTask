@@ -152,6 +152,11 @@ services:
       # Email to a project: both or neither. Empty leaves the addresses unshown.
       INBOUND_EMAIL_DOMAIN: ${INBOUND_EMAIL_DOMAIN:-}
       INBOUND_EMAIL_SECRET: ${INBOUND_EMAIL_SECRET:-}
+      # The AI steps in rules: an empty key leaves them greyed out with a reason.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-30000}
     networks: [coretask]
 
   # ---------------------------------------------------------------------------
@@ -196,6 +201,11 @@ services:
       MAIL_CONNECTION_TIMEOUT_MS: ${MAIL_CONNECTION_TIMEOUT_MS:-15000}
       INBOUND_EMAIL_DOMAIN: ${INBOUND_EMAIL_DOMAIN:-}
       INBOUND_EMAIL_SECRET: ${INBOUND_EMAIL_SECRET:-}
+      # The AI steps in rules: an empty key leaves them greyed out with a reason.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-30000}
       # Migrations are the API container's job; two processes racing
       # `migrate deploy` on start would deadlock on the advisory lock.
       RUN_MIGRATIONS: "false"
