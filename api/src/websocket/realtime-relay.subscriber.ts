@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 
 import { RedisService } from '../redis/redis.service';
 
+import { ProjectBroadcastService } from './project-broadcast.service';
 import { REALTIME_RELAY_CHANNEL, type RealtimeRelayMessage } from './realtime-relay.publisher';
 import { RealtimeGateway } from './realtime.gateway';
 
@@ -22,6 +23,7 @@ export class RealtimeRelaySubscriber implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly redis: RedisService,
     private readonly gateway: RealtimeGateway,
+    private readonly broadcast: ProjectBroadcastService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -54,7 +56,16 @@ export class RealtimeRelaySubscriber implements OnModuleInit, OnModuleDestroy {
 
     if (typeof message?.event !== 'string') return;
 
-    if (typeof message.projectId === 'string') {
+    if (typeof message.audienceOf === 'string' && typeof message.workspaceId === 'string') {
+      // Picks the workspace room or the members' own rooms by the project's
+      // privacy, exactly as a person's own edit is broadcast. Never throws.
+      void this.broadcast.emit(
+        message.workspaceId,
+        message.audienceOf,
+        message.event,
+        message.payload ?? {},
+      );
+    } else if (typeof message.projectId === 'string') {
       this.gateway.emitToProject(message.projectId, message.event, message.payload ?? {});
     } else if (typeof message.workspaceId === 'string') {
       this.gateway.emitToWorkspace(message.workspaceId, message.event, message.payload ?? {});

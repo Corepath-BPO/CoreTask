@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { toast } from 'sonner';
 
 import { useProjectAccessRealtime } from '@/features/projects/hooks/use-project-access-realtime';
+import { useAutomationRealtime } from '@/features/work-items/hooks/use-automation-realtime';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { getAccessToken } from '@/lib/api/client';
 import { queryClient } from '@/lib/api/query-client';
@@ -129,6 +130,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   // Being added to or removed from a private project, or a privacy flip: the
   // caches and, when a tab is on the project, the page itself.
   useProjectAccessRealtime(isAuthenticated ? workspaceId : undefined);
+
+  // A rule's change to a task, on whatever screen the task is open.
+  useAutomationRealtime(isAuthenticated ? workspaceId : undefined);
 
   /*
    * Room membership follows the workspace switcher — and every reconnect.

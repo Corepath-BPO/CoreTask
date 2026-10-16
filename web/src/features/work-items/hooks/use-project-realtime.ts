@@ -27,24 +27,28 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
     const socket = getSocket();
     if (!socket || !workspaceId || !projectId) return;
 
-    const refresh = () => {
-      /*
-       * Invalidated, not patched.
-       *
-       * The payload carries the item, and writing it straight into the cache
-       * would be faster — but the List and Board also show counts, section
-       * rollups and a progress bar derived from the whole set, and none of
-       * those can be recomputed from one row. Refetching is the honest answer
-       * to "something over there changed".
-       */
+    /*
+     * Invalidated, not patched.
+     *
+     * The payload carries the item, and writing it straight into the cache
+     * would be faster — but the List and Board also show counts, section
+     * rollups and a progress bar derived from the whole set, and none of
+     * those can be recomputed from one row. Refetching is the honest answer
+     * to "something over there changed".
+     */
+    const refreshProject = () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.workItems.all(workspaceId, projectId),
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.projectViews.all(workspaceId, projectId),
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all(workspaceId) });
+    };
+
+    const refresh = () => {
+      refreshProject();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) });
     };
 
     /*
@@ -81,15 +85,16 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
       if (payload.projectId !== projectId) return;
       if (isOwnChange(payload.correlationId)) return;
 
-      refresh();
-
-      // A rule may have commented, added collaborators or written history —
-      // none of which the rows carry — so an open task pane hears of it too.
+      // A rule's change reaches every screen, not just this one, and
+      // `useAutomationRealtime` refreshes the task, its comments, collaborators
+      // and history wherever it is open. Doing it here as well would fetch the
+      // open panel twice.
       if (payload.source === 'automation') {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.comments.all(workspaceId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.followers.all(workspaceId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.activity.all(workspaceId) });
+        refreshProject();
+        return;
       }
+
+      refresh();
     };
 
     /*
