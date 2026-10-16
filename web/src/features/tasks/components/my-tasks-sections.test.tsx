@@ -1,8 +1,9 @@
 import type { Task } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { MyTasksSections } from './my-tasks-sections';
 
@@ -63,7 +64,7 @@ beforeEach(() => {
 
 describe('MyTasksSections', () => {
   it('draws the same sections as Board columns, with cards in them', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSections('board');
 
     const board = screen.getByLabelText('My tasks board');

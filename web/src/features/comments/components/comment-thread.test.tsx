@@ -2,11 +2,11 @@ import { WorkspaceRole } from '@coretask/contracts';
 import type { Comment } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useAuthStore } from '@/stores/auth.store';
+import { setupUser } from '@/test/test-utils';
 
 import { useCommentDraftStore } from '../stores/comment-draft.store';
 
@@ -234,7 +234,7 @@ describe('CommentThread', () => {
   });
 
   it('posts a comment and clears the box', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     create.mockResolvedValue(comment({ body: 'Posted' }));
 
     renderThread();
@@ -251,7 +251,7 @@ describe('CommentThread', () => {
 
   /** Losing what someone typed because the request failed is unforgivable. */
   it('keeps the draft when posting fails', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     create.mockRejectedValue(new Error('offline'));
 
     renderThread();
@@ -266,7 +266,7 @@ describe('CommentThread', () => {
   });
 
   it('will not post whitespace', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
 
     renderThread();
     await waitFor(() => expect(screen.getByLabelText(/write a comment/i)).toBeInTheDocument());
@@ -382,7 +382,7 @@ describe('CommentThread', () => {
   });
 
   it('edits in place and sends only the new body', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     list.mockResolvedValue({
       items: [comment()],
       meta: {
@@ -411,7 +411,7 @@ describe('CommentThread', () => {
   });
 
   it('does not call the API when an edit changes nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     list.mockResolvedValue({
       items: [comment()],
       meta: {
@@ -436,7 +436,7 @@ describe('CommentThread', () => {
   });
 
   it('abandons an edit without sending it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     list.mockResolvedValue({
       items: [comment()],
       meta: {

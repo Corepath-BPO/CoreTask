@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,6 +6,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { setupUser } from '@/test/test-utils';
 
 import { sectionLink } from '../lib/section-link';
 import { SectionLinkItems } from './section-link-items';
@@ -15,8 +15,8 @@ const PROJECT = '0198c9a1-2b3c-7d4e-89ab-0123456789ab';
 const SECTION = '0198c9a1-2b3c-7d4e-89ab-0123456789cd';
 
 function renderMenu() {
-  const user = userEvent.setup();
-  // `userEvent.setup()` installs its own clipboard; the spy has to come after.
+  const user = setupUser();
+  // `setupUser()` installs its own clipboard; the spy has to come after.
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
 

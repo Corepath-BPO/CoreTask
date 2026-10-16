@@ -1,9 +1,8 @@
 import { WorkItemType } from '@coretask/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders } from '@/test/test-utils';
+import { renderWithProviders, setupUser } from '@/test/test-utils';
 
 import { ProjectWorkItemCreateButton } from './project-work-item-create-button';
 
@@ -82,11 +81,14 @@ describe('the menu', () => {
    *
    * Radix opens the menu on `pointerdown`, and a synthetic click never fires
    * one — the menu simply never appeared. `userEvent` dispatches the real
-   * pointer sequence, which is also what a person's mouse does.
+   * pointer sequence, which is also what a person's mouse does. It hands that
+   * user back, for the clicks inside the menu.
    */
   const openMenu = async () => {
-    await userEvent.click(screen.getByRole('button', { name: /choose what to add/i }));
+    const user = setupUser();
+    await user.click(screen.getByRole('button', { name: /choose what to add/i }));
     await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+    return user;
   };
 
   it('offers every creatable type, and marks the default', async () => {
@@ -100,9 +102,9 @@ describe('the menu', () => {
 
   it('creates the chosen type rather than the default', async () => {
     render({ defaultType: 'TASK' });
-    await openMenu();
+    const user = await openMenu();
 
-    await userEvent.click(screen.getByRole('menuitem', { name: /ticket/i }));
+    await user.click(screen.getByRole('menuitem', { name: /ticket/i }));
 
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith('TICKET', context));
   });
@@ -124,18 +126,18 @@ describe('the menu', () => {
 
   it('does not create anything when a disabled type is clicked', async () => {
     render();
-    await openMenu();
+    const user = await openMenu();
 
-    await userEvent.click(screen.getByRole('menuitem', { name: /milestone/i }));
+    await user.click(screen.getByRole('menuitem', { name: /milestone/i }));
 
     expect(onCreate).not.toHaveBeenCalled();
   });
 
   it('offers Section, separately from the item types', async () => {
     render();
-    await openMenu();
+    const user = await openMenu();
 
-    await userEvent.click(screen.getByRole('menuitem', { name: /^section$/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^section$/i }));
 
     await waitFor(() => expect(onCreateSection).toHaveBeenCalled());
   });
@@ -149,13 +151,14 @@ describe('the menu', () => {
   });
 
   it('omits Section entirely when no handler is given', async () => {
+    const user = setupUser();
     // The Board's column header has no use for it; passing nothing should not
     // render a menu entry that does nothing.
     renderWithProviders(
       <ProjectWorkItemCreateButton defaultType="TASK" context={context} onCreate={onCreate} />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /choose what to add/i }));
+    await user.click(screen.getByRole('button', { name: /choose what to add/i }));
     await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 
     expect(screen.queryByRole('menuitem', { name: /^section$/i })).not.toBeInTheDocument();

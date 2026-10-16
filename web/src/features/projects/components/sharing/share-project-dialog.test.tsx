@@ -2,7 +2,7 @@ import { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/c
 import type { ProjectMember, ProjectSummary } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, within } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, within } from '@/test/test-utils';
 
 import { resolveProjectAccess } from '../../lib/project-access';
 
@@ -140,7 +140,7 @@ describe('ShareProjectDialog', () => {
 
   it('removes somebody else and reports who', async () => {
     await open();
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(
       screen.getByRole('button', { name: 'Remove Maya Okafor from Leadership Planning' }),
@@ -188,7 +188,7 @@ describe('ShareProjectDialog', () => {
       },
       WorkspaceRole.ADMIN,
     );
-    const user = userEvent.setup();
+    const user = setupUser();
 
     expect(screen.queryByRole('button', { name: 'Add people' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: /role for/i })).not.toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('ShareProjectDialog', () => {
         canManage: true,
       },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(screen.getByRole('button', { name: /leave project/i }));
     expect(leaveMutate).not.toHaveBeenCalled();

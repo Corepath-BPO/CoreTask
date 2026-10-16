@@ -1,7 +1,7 @@
 import type { ProjectSummary } from '@coretask/types';
 import { describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser } from '@/test/test-utils';
 
 import { ProjectCard } from './project-card';
 
@@ -94,7 +94,7 @@ describe('ProjectCard', () => {
   });
 
   it('offers Archive for an active project and Restore for an archived one', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onToggleArchive } = await renderCard();
 
     await user.click(screen.getByRole('button', { name: /actions for platform foundation/i }));
@@ -114,7 +114,7 @@ describe('ProjectCard', () => {
   });
 
   it('shows only Edit when the caller cannot archive', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderCard({}, { canArchive: false });
 
     await user.click(screen.getByRole('button', { name: /actions for platform foundation/i }));

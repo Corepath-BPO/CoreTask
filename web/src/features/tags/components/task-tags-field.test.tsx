@@ -1,8 +1,9 @@
 import type { Tag, TagRef } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { TaskTagsField } from './task-tags-field';
 
@@ -40,7 +41,7 @@ beforeEach(() => {
 
 describe('TaskTagsField', () => {
   it('shows the task’s tags and takes one off', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderField([{ id: 'g-1', name: 'Urgent', color: 'red' }]);
 
     expect(screen.getByText('Urgent')).toBeInTheDocument();
@@ -49,7 +50,7 @@ describe('TaskTagsField', () => {
   });
 
   it('adds a tag the workspace has, leaving out the ones already on', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderField([{ id: 'g-1', name: 'Urgent', color: 'red' }]);
 
     await user.click(screen.getByRole('button', { name: 'Add a tag' }));
@@ -59,7 +60,7 @@ describe('TaskTagsField', () => {
   });
 
   it('makes a tag from a new name, but not from one that exists', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderField([]);
 
     await user.click(screen.getByRole('button', { name: 'Add a tag' }));

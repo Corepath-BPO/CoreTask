@@ -1,8 +1,9 @@
 import type { ProjectEmailSettings } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { CustomizeEmailsSection } from './customize-emails-section';
 
@@ -75,7 +76,7 @@ beforeEach(() => {
 
 describe('CustomizeEmailsSection', () => {
   it('shows the address to copy, and Asana’s two checkboxes', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     expect(screen.getByLabelText('Project email address')).toHaveValue(
@@ -94,7 +95,7 @@ describe('CustomizeEmailsSection', () => {
   });
 
   it('lists what arrived, why mail was turned away, and opens the task it made', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     expect(screen.getByText('2 received')).toBeInTheDocument();
@@ -110,7 +111,7 @@ describe('CustomizeEmailsSection', () => {
   });
 
   it('asks before giving the project a new address', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     await user.click(screen.getByRole('button', { name: 'Get a new address' }));

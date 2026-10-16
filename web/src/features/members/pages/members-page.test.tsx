@@ -1,10 +1,10 @@
 import { WorkspaceRole } from '@coretask/contracts';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthStore } from '@/stores/auth.store';
+import { setupUser } from '@/test/test-utils';
 
 import { MembersPage } from './members-page';
 
@@ -157,7 +157,7 @@ describe('MembersPage', () => {
   });
 
   it('sends an invitation and closes the dialog', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     createInvitation.mockResolvedValue(invitation());
     renderPage();
 
@@ -173,7 +173,7 @@ describe('MembersPage', () => {
   });
 
   it('rejects a malformed address before sending anything', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /invite/i }));
@@ -186,7 +186,7 @@ describe('MembersPage', () => {
 
   /** The picker must not offer what the API would refuse. */
   it('never offers Owner in the role picker', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /invite/i }));
@@ -198,7 +198,7 @@ describe('MembersPage', () => {
   });
 
   it('revokes an invitation', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     listInvitations.mockResolvedValue([invitation()]);
     revokeInvitation.mockResolvedValue(undefined);
     renderPage();
@@ -233,7 +233,7 @@ describe('MembersPage', () => {
     });
 
     it('changes a role through the picker', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       updateRole.mockResolvedValue({
         id: 'm2',
         workspaceId: WORKSPACE,
@@ -252,7 +252,7 @@ describe('MembersPage', () => {
 
     /** Removing someone is destructive and silent afterwards; it gets a prompt. */
     it('asks before removing, and says what else it will do', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       removeMember.mockResolvedValue({ removed: true, tasksUnassigned: 2, ticketsUnassigned: 0 });
 
       renderPage();
@@ -267,7 +267,7 @@ describe('MembersPage', () => {
     });
 
     it('lets the prompt be dismissed without removing anyone', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
 
       renderPage();
       await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
@@ -278,7 +278,7 @@ describe('MembersPage', () => {
     });
 
     it('offers ownership transfer only to the owner', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
 
       renderPage();
       await user.click(await screen.findByRole('button', { name: /actions for jonas feld/i }));
@@ -286,7 +286,7 @@ describe('MembersPage', () => {
     });
 
     it('does not offer ownership transfer to an admin', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       activeRole = WorkspaceRole.ADMIN;
 
       renderPage();
@@ -297,7 +297,7 @@ describe('MembersPage', () => {
     });
 
     it('transfers ownership after confirming', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       transferOwnership.mockResolvedValue({
         id: 'm2',
         workspaceId: WORKSPACE,

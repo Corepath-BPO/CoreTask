@@ -1,7 +1,8 @@
 import type { AutomationMetadata } from '@coretask/types';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
@@ -83,10 +84,11 @@ describe('the subtask list', () => {
   });
 
   it('assigns a row to somebody without touching the rows around it', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks(['Review', 'Sign off']);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 2 assignee' }));
-    await userEvent.click(await screen.findByRole('option', { name: /Jonas Feld/ }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 2 assignee' }));
+    await user.click(await screen.findByRole('option', { name: /Jonas Feld/ }));
 
     expect(written(onChange)).toEqual([
       { title: 'Review' },
@@ -95,10 +97,11 @@ describe('the subtask list', () => {
   });
 
   it('takes the assignee off a row again, leaving the rest of it', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks([{ title: 'Review', assigneeId: 'u-1', dueInDays: 2 }]);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 1 assignee' }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Unassigned' }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 assignee' }));
+    await user.click(await screen.findByRole('option', { name: 'Unassigned' }));
 
     // Gone rather than present-and-undefined, so the row reads as unassigned
     // wherever it is read next.
@@ -106,18 +109,20 @@ describe('the subtask list', () => {
   });
 
   it('dates a row a number of days after the rule runs', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks(['Review']);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
-    await userEvent.click(await screen.findByRole('radio', { name: 'Days after the rule runs' }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
+    await user.click(await screen.findByRole('radio', { name: 'Days after the rule runs' }));
 
     expect(written(onChange)).toEqual([{ title: 'Review', dueInDays: 1 }]);
   });
 
   it('counts those days as whole days, none below zero', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks([{ title: 'Review', dueInDays: 1 }]);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
     const days = await screen.findByRole('spinbutton', {
       name: 'Subtask 1 days after the rule runs',
     });
@@ -130,10 +135,11 @@ describe('the subtask list', () => {
   });
 
   it('keeps a row on "a specific date" while the day is still being chosen', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks(['Review']);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
-    await userEvent.click(await screen.findByRole('radio', { name: 'A specific date' }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
+    await user.click(await screen.findByRole('radio', { name: 'A specific date' }));
 
     // An empty date rather than none: which key the row holds is what keeps
     // the calendar showing until a day is picked — see `dueModeOf`.
@@ -141,10 +147,11 @@ describe('the subtask list', () => {
   });
 
   it('stores the day picked from the calendar', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks([{ title: 'Review', dueDate: '2030-01-10' }]);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
-    await userEvent.click(await screen.findByRole('button', { name: /January 15, 2030/ }));
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
+    await user.click(await screen.findByRole('button', { name: /January 15, 2030/ }));
 
     expect(written(onChange)).toEqual([{ title: 'Review', dueDate: '2030-01-15' }]);
   });
@@ -167,10 +174,11 @@ describe('the subtask list', () => {
   });
 
   it('adds a variable to the end of a title', async () => {
+    const user = setupUser();
     const onChange = renderSubtasks(['Inspect']);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add a variable to subtask 1' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Task name' }));
+    await user.click(screen.getByRole('button', { name: 'Add a variable to subtask 1' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Task name' }));
 
     expect(written(onChange)[0]).toMatchObject({ title: 'Inspect {{task.name}}' });
   });
@@ -289,10 +297,11 @@ describe('moving a task to another project', () => {
   });
 
   it('writes the project and clears any section chosen under the last one', async () => {
+    const user = setupUser();
     const onChange = renderMove({ projectId: 'p-3', targetSectionId: 's-99' });
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Choose a project' }));
-    await userEvent.click(await screen.findByRole('option', { name: /Renewals/ }));
+    await user.click(screen.getByRole('combobox', { name: 'Choose a project' }));
+    await user.click(await screen.findByRole('option', { name: /Renewals/ }));
 
     expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2', targetSectionId: undefined });
   });
@@ -307,32 +316,31 @@ describe('moving a task to another project', () => {
   });
 
   it('switches between moving the task and adding it there too', async () => {
+    const user = setupUser();
     const onChange = renderMove({ projectId: 'p-2' });
 
-    await userEvent.click(screen.getByLabelText('Choose an option'));
-    await userEvent.click(
-      await screen.findByRole('option', { name: /Add task to another project/ }),
-    );
+    await user.click(screen.getByLabelText('Choose an option'));
+    await user.click(await screen.findByRole('option', { name: /Add task to another project/ }));
     expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2', mode: 'ADD' });
   });
 
   it('drops the add back to a move', async () => {
+    const user = setupUser();
     const onChange = renderMove({ projectId: 'p-2', mode: 'ADD' });
 
     expect(screen.getByLabelText('Choose an option')).toHaveTextContent(
       'Add task to another project',
     );
-    await userEvent.click(screen.getByLabelText('Choose an option'));
-    await userEvent.click(
-      await screen.findByRole('option', { name: /Move task to another project/ }),
-    );
+    await user.click(screen.getByLabelText('Choose an option'));
+    await user.click(await screen.findByRole('option', { name: /Move task to another project/ }));
     expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2' });
   });
 
   it('clears the project from the field itself', async () => {
+    const user = setupUser();
     const onChange = renderMove({ projectId: 'p-2', targetSectionId: 's-22' });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear project' }));
+    await user.click(screen.getByRole('button', { name: 'Clear project' }));
 
     expect(onChange).toHaveBeenLastCalledWith({ projectId: undefined, targetSectionId: undefined });
   });
@@ -340,9 +348,10 @@ describe('moving a task to another project', () => {
 
 describe('sending a webhook', () => {
   it('offers the workspace endpoints and an ad-hoc URL, greying a disabled endpoint', async () => {
+    const user = setupUser();
     renderAction('SEND_WEBHOOK', {});
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Send to' }));
+    await user.click(screen.getByRole('combobox', { name: 'Send to' }));
     expect(await screen.findByRole('option', { name: /n8n/ })).toBeEnabled();
     expect(screen.getByRole('option', { name: /Paused hook/ })).toHaveAttribute(
       'aria-disabled',
@@ -352,15 +361,17 @@ describe('sending a webhook', () => {
   });
 
   it('writes the endpoint and clears any URL, so a step never names both', async () => {
+    const user = setupUser();
     const onChange = renderAction('SEND_WEBHOOK', { url: 'https://old.example.com/hook' });
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Send to' }));
-    await userEvent.click(await screen.findByRole('option', { name: /n8n/ }));
+    await user.click(screen.getByRole('combobox', { name: 'Send to' }));
+    await user.click(await screen.findByRole('option', { name: /n8n/ }));
 
     expect(onChange).toHaveBeenLastCalledWith({ endpointId: 'wh-1', url: '' });
   });
 
   it('shows the URL field for an ad-hoc address and flags a bad one without losing it', async () => {
+    const user = setupUser();
     const onChange = renderAction('SEND_WEBHOOK', { url: 'not a url' });
 
     const input = screen.getByRole('textbox', { name: 'URL' });
@@ -369,11 +380,12 @@ describe('sending a webhook', () => {
 
     // The harness never feeds the change back, so the controlled input keeps
     // its value and a keystroke lands on the end of it.
-    await userEvent.type(input, 'h');
+    await user.type(input, 'h');
     expect(onChange).toHaveBeenLastCalledWith({ endpointId: '', url: 'not a urlh' });
   });
 
   it('edits extra fields as rows and stores them as such', async () => {
+    const user = setupUser();
     const onChange = renderAction('SEND_WEBHOOK', {
       endpointId: 'wh-1',
       extraFields: [{ key: 'flow', value: 'renewals' }],
@@ -381,7 +393,7 @@ describe('sending a webhook', () => {
 
     expect(screen.getByRole('textbox', { name: 'Field 1 name' })).toHaveValue('flow');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    await user.click(screen.getByRole('button', { name: 'Add field' }));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         extraFields: [
@@ -391,7 +403,7 @@ describe('sending a webhook', () => {
       }),
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove field 1' }));
+    await user.click(screen.getByRole('button', { name: 'Remove field 1' }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ extraFields: [] }));
   });
 });
@@ -414,10 +426,11 @@ describe('sending an email', () => {
   }
 
   it('chooses who hears from the people on the task', async () => {
+    const user = setupUser();
     const onChange = renderEmail({ recipients: ['ASSIGNEE'], subject: 'Hi' });
 
     expect(screen.getByRole('checkbox', { name: 'The assignee' })).toBeChecked();
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Collaborators' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Collaborators' }));
     expect(onChange).toHaveBeenLastCalledWith({
       recipients: ['ASSIGNEE', 'COLLABORATORS'],
       subject: 'Hi',

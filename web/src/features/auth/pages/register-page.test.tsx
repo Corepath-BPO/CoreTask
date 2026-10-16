@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor } from '@/test/test-utils';
 
 import { RegisterPage } from './register-page';
 
@@ -25,7 +25,7 @@ const VALID = {
 
 async function fillAndSubmit(overrides: Partial<typeof VALID> = {}) {
   const values = { ...VALID, ...overrides };
-  const user = userEvent.setup();
+  const user = setupUser();
 
   await user.type(screen.getByLabelText(/full name/i), values.name);
   const email = screen.getByLabelText(/work email/i);

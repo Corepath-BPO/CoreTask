@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { MarkDuplicateDialog } from './mark-duplicate-dialog';
 
@@ -33,7 +34,7 @@ beforeEach(() => mark.mockReset());
 
 describe('MarkDuplicateDialog', () => {
   it('finds the original, leaves this task out, and marks it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <QueryClientProvider client={new QueryClient()}>
         <MarkDuplicateDialog workspaceId="ws-1" taskId="t-1" onOpenChange={vi.fn()} />

@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { KeyResourcesCard, MilestonesCard, ProjectPortfoliosCard } from './overview-cards';
 
@@ -56,7 +57,7 @@ beforeEach(() => {
 
 describe('Overview cards', () => {
   it('lists key resources as links, and lets an editor add and remove them', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     wrap(<KeyResourcesCard workspaceId="ws-1" projectId="p-1" canEdit />);
 
     expect(screen.getByRole('link', { name: 'Brief' })).toHaveAttribute(
@@ -75,7 +76,7 @@ describe('Overview cards', () => {
   });
 
   it('shows milestones soonest first, undated last, and opens one', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onOpenTask = vi.fn();
     wrap(<MilestonesCard workspaceId="ws-1" projectId="p-1" onOpenTask={onOpenTask} />);
 

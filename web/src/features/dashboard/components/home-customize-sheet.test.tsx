@@ -1,7 +1,8 @@
 import type { HomeWidget } from '@coretask/contracts';
 import { act, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { HomeCustomizeSheet } from './home-customize-sheet';
 import { NotepadWidget } from './home-widgets';
@@ -23,7 +24,7 @@ const renderSheet = (widgets: HomeWidget[]) => {
 
 describe('HomeCustomizeSheet', () => {
   it('moves, hides and adds widgets, and resets', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onChange, onReset } = renderSheet(['TASK_OVERVIEW', 'ASSIGNED', 'UPCOMING']);
 
     await user.click(screen.getByRole('button', { name: 'Move Assigned to you up' }));
@@ -48,7 +49,7 @@ describe('NotepadWidget', () => {
   it('saves after a pause in typing, and once more on leaving the box', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = setupUser({ advanceTimers: vi.advanceTimersByTime });
       const onSave = vi.fn();
       render(<NotepadWidget notepad="" onSave={onSave} />);
 

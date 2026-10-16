@@ -1,10 +1,9 @@
 import { WorkspaceRole } from '@coretask/contracts';
 import { screen, waitFor } from '@testing-library/react';
-import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { env } from '@/app/config/env';
-import { renderWithProviders } from '@/test/test-utils';
+import { paste, renderWithProviders, setupUser } from '@/test/test-utils';
 
 import { PlaygroundPage } from './playground-page';
 
@@ -64,14 +63,6 @@ function sentRequest(): {
  * on the full page, and under that load it still took up to 5.2 seconds, so
  * those two get a 15-second timeout sized for a journey, not a single check.
  */
-const setupUser = () => userEvent.setup({ delay: null });
-
-/** Puts the whole text into a field at once, as pasting does. */
-async function paste(user: UserEvent, field: HTMLElement, text: string) {
-  await user.click(field);
-  await user.paste(text);
-}
-
 describe('PlaygroundPage', () => {
   beforeEach(() => {
     fetchMock.mockReset();

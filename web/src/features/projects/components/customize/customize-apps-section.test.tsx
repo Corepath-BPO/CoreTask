@@ -1,8 +1,9 @@
 import type { ProjectAppConnection } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { paste, setupUser } from '@/test/test-utils';
 
 import { CustomizeAppsSection } from './customize-apps-section';
 
@@ -51,14 +52,6 @@ const renderSection = (canEdit = true) =>
  * What is left still took up to 4.3 seconds under that load, so connecting
  * Slack gets a 15-second timeout sized for a journey, not a single check.
  */
-const setupUser = () => userEvent.setup({ delay: null });
-
-/** Puts the whole text into a field at once, as pasting a webhook URL does. */
-async function paste(user: UserEvent, field: HTMLElement, text: string) {
-  await user.click(field);
-  await user.paste(text);
-}
-
 beforeEach(() => {
   for (const mock of [connect, update, test, disconnect]) mock.mockReset();
   apps = [];

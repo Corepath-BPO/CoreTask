@@ -2,7 +2,7 @@ import { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/c
 import type { ProjectSummary } from '@coretask/types';
 import { describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser } from '@/test/test-utils';
 
 import { resolveProjectAccess } from '../lib/project-access';
 
@@ -88,7 +88,7 @@ describe('ProjectHeader', () => {
 
   it('offers Share to a member and opens it from the avatar stack too', async () => {
     const handlers = await renderHeader();
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(screen.getByRole('button', { name: /^share$/i }));
     await user.click(screen.getByRole('button', { name: '2 members. Open sharing' }));
@@ -110,7 +110,7 @@ describe('ProjectHeader', () => {
       },
       WorkspaceRole.MEMBER,
     );
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(screen.getByRole('button', { name: /^join$/i }));
     expect(handlers.onJoin).toHaveBeenCalledTimes(1);
@@ -148,7 +148,7 @@ describe('ProjectHeader', () => {
       },
       WorkspaceRole.MANAGER,
     );
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(screen.getByRole('button', { name: /actions for leadership planning/i }));
     expect(screen.getByRole('menuitem', { name: /leave project/i })).toBeInTheDocument();

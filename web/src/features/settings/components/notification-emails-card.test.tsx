@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { NotificationEmailsCard } from './notification-emails-card';
 
@@ -19,7 +20,7 @@ beforeEach(() => save.mockReset());
 
 describe('NotificationEmailsCard', () => {
   it('shows what is emailed, and to where, and saves each change', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <QueryClientProvider client={new QueryClient()}>
         <NotificationEmailsCard workspaceId="ws-1" />

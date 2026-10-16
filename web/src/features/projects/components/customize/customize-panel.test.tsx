@@ -3,7 +3,7 @@ import type { ProjectFieldMetadata } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AutomationRule } from '@/features/automations/api/automations.api';
-import { renderWithRouter, screen, userEvent } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser } from '@/test/test-utils';
 
 import { CustomizePanel } from './customize-panel';
 
@@ -201,7 +201,7 @@ describe('CustomizePanel', () => {
   });
 
   it('closes from the header button and from Escape', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onClose, result } = renderPanel();
     await result;
 
@@ -219,7 +219,7 @@ describe('CustomizePanel', () => {
   });
 
   it('opens the Fields section and comes back', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderPanel().result;
 
     await user.click(screen.getByRole('button', { name: /^Fields/ }));
@@ -234,7 +234,7 @@ describe('CustomizePanel', () => {
   });
 
   it('opens a feature from the Add menu', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderPanel().result;
 
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -244,7 +244,7 @@ describe('CustomizePanel', () => {
   });
 
   it('opens the Rules section listing every rule', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderPanel().result;
 
     await user.click(screen.getByRole('button', { name: /Rules/ }));
