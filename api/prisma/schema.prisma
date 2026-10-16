@@ -224,6 +224,8 @@ model User {
   passwordResetTokens        PasswordResetToken[]
   oauthCodes                 OAuthAuthorizationCode[]
   oauthGrants                OAuthGrant[]
+  slackInstallations         SlackInstallation[]
+  slackLinks                 SlackUserLink[]
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -476,6 +478,11 @@ model WebhookEndpoint {
   apiKeyId            String?                @db.Uuid
   /// Subscribed through the API by an OAuth app — gone when it is disconnected.
   oauthGrantId        String?                @db.Uuid
+  /// A Slack app posting through the installed CoreTask bot rather than an
+  /// incoming webhook: the channel, and its name as it was when chosen. Such
+  /// a post carries buttons, which a webhook's cannot.
+  slackChannelId      String?                @db.VarChar(32)
+  slackChannelName    String?                @db.VarChar(120)
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -560,6 +567,7 @@ model Workspace {
   apiKeys                 ApiKey[]
   webhookEndpoints        WebhookEndpoint[]
   webhookDeliveries       WebhookDelivery[]
+  slackInstallation       SlackInstallation?
   teams                   Team[]
   projects                Project[]
   projectMembers          ProjectMember[]
@@ -2732,4 +2740,46 @@ model PasswordResetToken {
 
   @@index([userId, createdAt])
   @@map("password_reset_tokens")
+}
+
+/// The CoreTask Slack app installed in a Slack workspace, for one CoreTask
+/// workspace: one each way, so a slash command always knows where it is.
+model SlackInstallation {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  workspaceId   String   @unique @db.Uuid
+  /// Slack's team id (`T…`).
+  teamId        String   @unique @db.VarChar(32)
+  teamName      String   @db.VarChar(200)
+  /// The app's bot user there (`U…`), so its own posts can be told apart.
+  botUserId     String   @db.VarChar(32)
+  /// `xoxb-…`, encrypted like a webhook signing secret.
+  botToken      String
+  scopes        String[]
+  installedById String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installedBy User?           @relation(fields: [installedById], references: [id], onDelete: SetNull)
+  links       SlackUserLink[]
+
+  @@map("slack_installations")
+}
+
+/// A Slack user who has said which CoreTask person they are. What they do
+/// from Slack is done as that person, with that person's access.
+model SlackUserLink {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  installationId String   @db.Uuid
+  slackUserId    String   @db.VarChar(32)
+  userId         String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  installation SlackInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([installationId, slackUserId])
+  @@unique([installationId, userId])
+  @@index([userId])
+  @@map("slack_user_links")
 }

@@ -53,7 +53,7 @@ export function IntegrationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Integrations"
-        description={`API keys, webhooks, OAuth apps and a playground for the tools that work with ${workspace.name}.`}
+        description={`API keys, webhooks, OAuth apps, Slack and a playground for the tools that work with ${workspace.name}.`}
       />
 
       <div className="border-b border-border">
@@ -63,7 +63,7 @@ export function IntegrationsPage() {
         <EmptyState
           icon={ShieldAlert}
           title="Workspace admins only"
-          description="Ask a workspace admin to manage API keys and webhooks. Your own OAuth apps and connected apps are in the other tabs."
+          description="Ask a workspace admin to manage API keys and webhooks. Your own OAuth apps, connected apps and Slack link are in the other tabs."
         />
       ) : (
         <Outlet />

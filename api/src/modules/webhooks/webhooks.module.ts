@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { SlackClientModule } from '../../integrations/slack/slack.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 import { ProjectAccessModule } from '../project-access/project-access.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
@@ -13,7 +14,13 @@ import { WebhookDeliveriesController, WebhooksController } from './webhooks.cont
 import { WebhooksService } from './webhooks.service';
 
 @Module({
-  imports: [WorkspaceMembersModule, ActivityLogsModule, WebhookDeliveryModule, ProjectAccessModule],
+  imports: [
+    WorkspaceMembersModule,
+    ActivityLogsModule,
+    WebhookDeliveryModule,
+    ProjectAccessModule,
+    SlackClientModule,
+  ],
   controllers: [
     WebhooksController,
     WebhookDeliveriesController,

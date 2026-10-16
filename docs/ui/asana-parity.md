@@ -172,7 +172,16 @@ place.
   the URL must be the tool's own webhook address. Underneath, an app is a
   webhook endpoint scoped to the project, so it retries, keeps a delivery log,
   switches itself off after repeated failures, and appears in the admin's
-  webhook list marked as an app.
+  webhook list marked as an app. With the CoreTask Slack app connected
+  (Integrations › Slack), **Add Slack** offers **As the CoreTask app** and a
+  channel picker instead of a URL: the bot posts there itself, with **Mark
+  complete**, **Assign to me** and **Open in CoreTask** under each task.
+- **Slack, two-way** (Integrations › Slack): an admin's **Add to Slack**; each
+  person links their Slack account once; `/coretask <task name>` and the
+  **Create a CoreTask task** message shortcut open a form (project, assignee,
+  due date, description) that makes the task as that person; buttons on the
+  app's posts act on the task and redraw the post. See
+  [docs/integrations/slack.md](../integrations/slack.md).
 - Every Customize row is built now; none is marked _Soon_.
 
 ## Connecting other tools

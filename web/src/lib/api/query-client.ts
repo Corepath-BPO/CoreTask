@@ -44,6 +44,11 @@ export const queryKeys = {
   /** A person's own: the apps they registered, and the apps they connected. */
   oauthApps: ['oauth-apps'] as const,
   connectedApps: ['connected-apps'] as const,
+  slack: {
+    all: (workspaceId: string) => ['slack', workspaceId] as const,
+    status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
+    channels: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'channels'] as const,
+  },
   webhooks: {
     all: (workspaceId: string) => ['webhooks', workspaceId] as const,
     list: (workspaceId: string) => [...queryKeys.webhooks.all(workspaceId), 'list'] as const,

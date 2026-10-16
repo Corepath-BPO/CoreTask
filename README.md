@@ -612,6 +612,9 @@ pnpm compose:validate
   creator, collaborators — as a link, with saved searches in the sidebar
 - Apps: a project's updates posted to Slack, Microsoft Teams, Google Chat or
   Discord, as each tool's own messages
+- Two-way Slack: `/coretask` and a message shortcut make tasks as the linked
+  person, and the app's channel posts carry buttons to complete or take a
+  task — see [Slack](docs/integrations/slack.md)
 - Email to a project: an address per project whose mail becomes tasks, with
   comments sent back to the people on the email and their replies kept as
   comments

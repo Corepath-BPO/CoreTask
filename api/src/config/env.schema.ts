@@ -117,6 +117,21 @@ export const envSchema = z
     AI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
 
     /*
+     * The CoreTask Slack app (docs/integrations/slack.md): a workspace admin
+     * installs it, then people create tasks from Slack and act on the ones
+     * CoreTask posts. The three come from the app's Basic Information page,
+     * all or none; without them Integrations › Slack says what is missing.
+     * Secrets: .env only. The two addresses exist so tests can stand in for
+     * Slack, and nothing else should change them.
+     */
+    SLACK_CLIENT_ID: optionalString,
+    SLACK_CLIENT_SECRET: optionalString,
+    SLACK_SIGNING_SECRET: optionalString,
+    SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
+    SLACK_AUTHORIZE_URL: z.string().url().default('https://slack.com/oauth/v2/authorize'),
+    SLACK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
+
+    /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
      * from the base delay: 30 s, 1 m, 2 m, 4 m, 8 m by default.
      */
@@ -161,6 +176,20 @@ export const envSchema = z
           code: 'custom',
           path: [key],
           message: 'Required when any other Microsoft Graph mail setting is present.',
+        });
+      }
+    }
+
+    // Same reasoning as Graph: half a Slack app installs, then fails every
+    // request it signs, which is worse than saying so at boot.
+    const slackKeys = ['SLACK_CLIENT_ID', 'SLACK_CLIENT_SECRET', 'SLACK_SIGNING_SECRET'] as const;
+    const slackProvided = slackKeys.filter((key) => env[key]);
+    if (slackProvided.length > 0 && slackProvided.length < slackKeys.length) {
+      for (const key of slackKeys.filter((candidate) => !env[candidate])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Required when any other Slack app setting is present.',
         });
       }
     }

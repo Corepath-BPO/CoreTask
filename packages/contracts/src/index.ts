@@ -21,6 +21,7 @@ export * from './my-tasks.js';
 export * from './notification-emails.js';
 export * from './project-roles.js';
 export * from './project-apps.js';
+export * from './slack.js';
 export * from './project-email.js';
 export * from './project-templates.js';
 export * from './project-updates.js';

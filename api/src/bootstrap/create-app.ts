@@ -28,6 +28,9 @@ export async function createApp(): Promise<INestApplication> {
     bufferLogs: true,
     // The filter below owns error rendering.
     abortOnError: false,
+    // Kept beside the parsed body: Slack signs the bytes it sent, and a body
+    // parsed and encoded again would not match.
+    rawBody: true,
   });
 
   app.useLogger(app.get(Logger));
