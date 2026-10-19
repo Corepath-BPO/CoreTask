@@ -1,3 +1,4 @@
+import type { TagRef } from './tags.js';
 import type {
   TaskPriority,
   TaskStatus,
@@ -6,6 +7,8 @@ import type {
   TicketStatus,
   TicketType,
   WorkItemType,
+  TaskKind,
+  ApprovalStatus,
 } from '@coretask/contracts';
 
 import type { UserRef } from './work-items.js';
@@ -23,6 +26,13 @@ import type { SetCustomFieldValuePayload, ViewFilterCondition, ViewSort } from '
  * `details`. That split is what lets the List render a grid without caring what
  * backs each row, while a ticket keeps its key, severity and reporter.
  */
+/** One project a task is in besides its home. */
+export interface WorkItemMembership {
+  projectId: string;
+  sectionId: string | null;
+  position: number;
+}
+
 export interface ProjectWorkItem {
   id: string;
   type: WorkItemType;
@@ -34,6 +44,14 @@ export interface ProjectWorkItem {
   description: string | null;
   /** Fractional; only comparable within one section. */
   position: number;
+  /**
+   * Multi-homing. A task listed in one of its other projects reports that
+   * project as `projectId`, with the section and position it has there; its
+   * home is here. Absent when the row is read in its home, and for tickets.
+   */
+  homeProjectId?: string;
+  /** The other projects a task is in, each with its own section and position. */
+  memberships?: WorkItemMembership[];
 
   /**
    * Resolved for display rather than passed through raw.
@@ -71,6 +89,9 @@ export interface ProjectWorkItem {
 
   details: WorkItemDetails;
 
+  /** A task's tags, alphabetical; a ticket has none. */
+  tags: TagRef[];
+
   createdById: string;
   createdBy: UserRef | null;
   createdAt: string;
@@ -105,6 +126,9 @@ export type WorkItemDetails = TaskDetails | TicketDetails;
 export interface TaskDetails {
   kind: 'TASK';
   estimatedMinutes: number | null;
+  /** A plain task, a milestone or an approval — the row's icon says which. */
+  taskKind: TaskKind;
+  approvalStatus: ApprovalStatus | null;
   /**
    * The legacy enums, alongside the resolved `status`/`priority` above.
    *

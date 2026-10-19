@@ -59,12 +59,16 @@ export const MaintenanceJob = {
   SWEEP_ABANDONED_UPLOADS: 'sweep-abandoned-uploads',
   /** Drops webhook delivery records older than `WEBHOOK_DELIVERY_RETENTION_DAYS`. */
   PURGE_WEBHOOK_DELIVERIES: 'purge-webhook-deliveries',
+  /** Fires the time-driven automation triggers that have come due. */
+  AUTOMATION_CLOCK: 'automation-clock',
 } as const;
 export type MaintenanceJob = (typeof MaintenanceJob)[keyof typeof MaintenanceJob];
 
 export const EmailJob = {
   WELCOME: 'welcome',
   INVITATION: 'invitation',
+  /** A message already written by the API — a task's update to its email thread. */
+  MESSAGE: 'message',
 } as const;
 export type EmailJob = (typeof EmailJob)[keyof typeof EmailJob];
 
@@ -90,4 +94,27 @@ export interface InvitationEmailJobData {
   expiresAt: string;
 }
 
-export type EmailJobData = WelcomeEmailJobData | InvitationEmailJobData;
+/**
+ * What a "Send an email" action asks for: one message to one person, written
+ * by the rule. Composed with the task's link and queued by the automation
+ * processor once the run is over, as webhooks are.
+ */
+export interface RuleEmailRequest {
+  to: string;
+  subject: string;
+  /** The rule's words, variables filled in. Plain text. */
+  body: string;
+  taskId: string;
+  taskTitle: string;
+  ruleName: string;
+}
+
+export interface MessageEmailJobData {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  replyTo?: string;
+}
+
+export type EmailJobData = WelcomeEmailJobData | InvitationEmailJobData | MessageEmailJobData;

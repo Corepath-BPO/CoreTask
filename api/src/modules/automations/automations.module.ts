@@ -4,6 +4,7 @@ import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
+import { AutomationEventsModule } from './automation-events.module';
 import { AutomationsController } from './automations.controller';
 import { AutomationsService } from './automations.service';
 import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
@@ -13,7 +14,7 @@ import { AutomationTemplatesService } from './library/automation-templates.servi
 import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 @Module({
-  imports: [WorkspaceMembersModule, ProjectAccessModule, ProjectsModule],
+  imports: [WorkspaceMembersModule, ProjectAccessModule, ProjectsModule, AutomationEventsModule],
   controllers: [AutomationsController, AutomationTemplatesController],
   providers: [
     AutomationsService,
@@ -22,6 +23,6 @@ import { AutomationDefinitionService } from './structured/automation-definition.
     AutomationDefinitionService,
     AutomationTemplatesService,
   ],
-  exports: [AutomationsService],
+  exports: [AutomationsService, AutomationTemplatesService],
 })
 export class AutomationsModule {}

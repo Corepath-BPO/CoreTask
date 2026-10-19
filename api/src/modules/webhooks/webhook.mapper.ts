@@ -1,4 +1,5 @@
 import type {
+  ProjectApp,
   SubscribableWebhookEvent,
   WebhookDeliveryStatus,
   WebhookEventType,
@@ -14,7 +15,9 @@ import type { Prisma } from '@prisma/client';
 
 export const endpointInclude = {
   project: { select: { id: true, name: true } },
-  createdBy: { select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } },
+  createdBy: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
 } satisfies Prisma.WebhookEndpointInclude;
 
 export type EndpointRow = Prisma.WebhookEndpointGetPayload<{ include: typeof endpointInclude }>;
@@ -28,6 +31,7 @@ export function toWebhookEndpointDto(row: EndpointRow): WebhookEndpointDto {
     url: row.url,
     events: row.events as SubscribableWebhookEvent[],
     project: row.project,
+    app: (row.app as ProjectApp | null) ?? null,
     enabled: row.enabled,
     disabledReason: row.disabledReason,
     consecutiveFailures: row.consecutiveFailures,

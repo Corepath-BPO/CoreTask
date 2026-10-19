@@ -13,11 +13,18 @@ interface ProjectTab {
 /** Bare labels, as Asana draws its project tabs — the words carry it. */
 const TABS: ProjectTab[] = [
   { label: 'Overview', segment: 'overview' },
+  { label: 'Note', segment: 'note' },
   { label: 'List', segment: 'list' },
   { label: 'Board', segment: 'board' },
+  { label: 'Timeline', segment: 'timeline' },
+  { label: 'Calendar', segment: 'calendar' },
+  { label: 'Dashboard', segment: 'dashboard' },
+  { label: 'Workload', segment: 'workload' },
+  { label: 'Messages', segment: 'messages' },
+  { label: 'Files', segment: 'files' },
   { label: 'Automations', segment: 'automations' },
-  { label: 'Activity', segment: 'activity', comingSoon: true },
-  { label: 'Settings', segment: 'settings', comingSoon: true },
+  { label: 'Activity', segment: 'activity' },
+  { label: 'Settings', segment: 'settings' },
 ];
 
 /**

@@ -59,6 +59,25 @@ export const AutomationTrigger = {
   CUSTOM_FIELD_CHANGED: 'CUSTOM_FIELD_CHANGED',
   TICKET_CREATED: 'TICKET_CREATED',
   TICKET_STATUS_CHANGED: 'TICKET_STATUS_CHANGED',
+  // Started by a person from a task's menu rather than by a change.
+  RUN_MANUALLY: 'RUN_MANUALLY',
+  // Started by the clock. See `automation-clock.ts` for when each one fires.
+  SCHEDULED_TIME: 'SCHEDULED_TIME',
+  DUE_DATE_APPROACHING: 'DUE_DATE_APPROACHING',
+  TASK_OVERDUE: 'TASK_OVERDUE',
+  START_DATE_APPROACHING: 'START_DATE_APPROACHING',
+  START_DATE_PASSED: 'START_DATE_PASSED',
+  /** The last unfinished task blocking this one was finished or unlinked. */
+  TASK_NO_LONGER_BLOCKED: 'TASK_NO_LONGER_BLOCKED',
+  ATTACHMENT_ADDED: 'ATTACHMENT_ADDED',
+  COLLABORATOR_ADDED: 'COLLABORATOR_ADDED',
+  /** Converted between task, milestone and approval. */
+  TASK_TYPE_CHANGED: 'TASK_TYPE_CHANGED',
+  /** An approval was approved, rejected, or sent back for changes. */
+  APPROVAL_STATUS_CHANGED: 'APPROVAL_STATUS_CHANGED',
+  /** A custom date field (the one in `fieldId`) drawing near, or passing. */
+  CUSTOM_DATE_APPROACHING: 'CUSTOM_DATE_APPROACHING',
+  CUSTOM_DATE_PASSED: 'CUSTOM_DATE_PASSED',
 } as const;
 export type AutomationTrigger = (typeof AutomationTrigger)[keyof typeof AutomationTrigger];
 export const AUTOMATION_TRIGGERS = Object.values(AutomationTrigger);
@@ -81,6 +100,19 @@ export const TRIGGER_LABEL: Record<AutomationTrigger, string> = {
   CUSTOM_FIELD_CHANGED: 'When a custom field changes',
   TICKET_CREATED: 'When a ticket is reported',
   TICKET_STATUS_CHANGED: 'When a ticket’s status changes',
+  RUN_MANUALLY: 'When the rule is run manually',
+  SCHEDULED_TIME: 'At a scheduled time',
+  DUE_DATE_APPROACHING: 'When a task’s due date is approaching',
+  TASK_OVERDUE: 'When a task becomes overdue',
+  START_DATE_APPROACHING: 'When a task’s start date is approaching',
+  START_DATE_PASSED: 'When a task’s start date arrives',
+  TASK_NO_LONGER_BLOCKED: 'When a task is no longer blocked',
+  ATTACHMENT_ADDED: 'When an attachment is added',
+  COLLABORATOR_ADDED: 'When a collaborator is added',
+  TASK_TYPE_CHANGED: 'When a task’s type changes',
+  APPROVAL_STATUS_CHANGED: 'When an approval is decided',
+  CUSTOM_DATE_APPROACHING: 'When a date field is approaching',
+  CUSTOM_DATE_PASSED: 'When a date field’s date has passed',
 };
 
 /** Actions the engine performs today. */
@@ -102,6 +134,20 @@ export const AutomationAction = {
   CREATE_SUBTASK: 'CREATE_SUBTASK',
   /** POSTs the task to a webhook endpoint from Settings, or to an ad-hoc URL. */
   SEND_WEBHOOK: 'SEND_WEBHOOK',
+  /** Complete or reopen, through the project's own Done and To do statuses. */
+  SET_COMPLETION: 'SET_COMPLETION',
+  /** Detaches the task from the project; it stays in My Tasks and search. */
+  REMOVE_FROM_PROJECT: 'REMOVE_FROM_PROJECT',
+  /** A new task in this project, beside the one the rule acted on. */
+  CREATE_TASK: 'CREATE_TASK',
+  ADD_REMOVE_COLLABORATORS: 'ADD_REMOVE_COLLABORATORS',
+  /** Text with variables — see `renderAutomationText`. */
+  SET_TASK_NAME: 'SET_TASK_NAME',
+  SET_TASK_DESCRIPTION: 'SET_TASK_DESCRIPTION',
+  /** Convert to a task, a milestone or an approval. */
+  SET_TASK_TYPE: 'SET_TASK_TYPE',
+  /** E-mails people on the task — never an address typed into the rule. */
+  SEND_EMAIL: 'SEND_EMAIL',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -123,6 +169,14 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SEND_IN_APP_NOTIFICATION: 'Send a notification',
   CREATE_SUBTASK: 'Create a subtask',
   SEND_WEBHOOK: 'Send a webhook',
+  SET_COMPLETION: 'Change completion status',
+  REMOVE_FROM_PROJECT: 'Remove from the project',
+  CREATE_TASK: 'Create a task',
+  ADD_REMOVE_COLLABORATORS: 'Add or remove collaborators',
+  SET_TASK_NAME: 'Set the task name',
+  SET_TASK_DESCRIPTION: 'Set the task description',
+  SET_TASK_TYPE: 'Set the task type',
+  SEND_EMAIL: 'Send an email',
 };
 
 /**
@@ -133,19 +187,50 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
 export const EXTERNAL_ACTION_CATEGORY = 'Send to another tool';
 
 /**
+ * Who a "Send an email" action writes to: people on the task, each a member
+ * of the workspace. Not a typed address — a rule anyone can edit must not be
+ * a way to send mail to anyone at all.
+ */
+export const AutomationEmailRecipient = {
+  ASSIGNEE: 'ASSIGNEE',
+  COLLABORATORS: 'COLLABORATORS',
+  CREATOR: 'CREATOR',
+} as const;
+export type AutomationEmailRecipient =
+  (typeof AutomationEmailRecipient)[keyof typeof AutomationEmailRecipient];
+
+export const AUTOMATION_EMAIL_RECIPIENT_LABEL: Record<AutomationEmailRecipient, string> = {
+  ASSIGNEE: 'The assignee',
+  COLLABORATORS: 'Collaborators',
+  CREATOR: 'Whoever created the task',
+};
+
+/** Most people one email step writes to, so a busy task is not a mailing list. */
+export const MAX_EMAIL_RECIPIENTS = 20;
+export const AUTOMATION_EMAIL_SUBJECT_MAX = 200;
+
+/** The recipients a step's configuration names, known ones only, each once. */
+export function emailRecipientsOf(
+  configuration: Record<string, unknown>,
+): AutomationEmailRecipient[] {
+  const raw = configuration['recipients'];
+  if (!Array.isArray(raw)) return [];
+  const known = Object.values(AutomationEmailRecipient) as string[];
+  return [
+    ...new Set(
+      raw.filter((value): value is AutomationEmailRecipient => known.includes(value as string)),
+    ),
+  ];
+}
+
+/**
  * Actions with a contract but no implementation.
  *
  * Named here so the builder can grey them out honestly rather than omitting
  * them and leaving someone to wonder, and so adding one later is a change in
  * one place.
  */
-export const PLANNED_ACTIONS = [
-  'SEND_EMAIL',
-  'DELAY',
-  'CREATE_CHECKLIST',
-  'ASSIGN_TEAM',
-  'AI_ACTION',
-] as const;
+export const PLANNED_ACTIONS = ['DELAY', 'CREATE_CHECKLIST', 'ASSIGN_TEAM', 'AI_ACTION'] as const;
 
 // ---------------------------------------------------------------------------
 // The rule library

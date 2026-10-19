@@ -85,6 +85,11 @@ describe('protected routes', () => {
         timezone: 'UTC',
         emailVerified: true,
         createdAt: new Date().toISOString(),
+        pronouns: null,
+        jobTitle: null,
+        department: null,
+        aboutMe: null,
+        outOfOffice: null,
       },
     });
 
@@ -107,6 +112,11 @@ describe('protected routes', () => {
         timezone: 'UTC',
         emailVerified: true,
         createdAt: new Date().toISOString(),
+        pronouns: null,
+        jobTitle: null,
+        department: null,
+        aboutMe: null,
+        outOfOffice: null,
       },
     });
 

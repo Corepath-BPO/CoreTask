@@ -40,6 +40,7 @@ import {
 import { conditionFromCatalogueEntry } from '../configuration/condition-value';
 import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
 import type { RuleSettings } from '../configuration/rule-settings-panel';
+import { defaultTriggerConfiguration } from '../configuration/timed-triggers';
 import {
   adoptChildren,
   applyEdits,
@@ -556,10 +557,13 @@ export function AutomationBuilderPage({
     }
 
     if (!addingAt) {
-      // "[Field] is changed" is one subtype per field only in its label; the
-      // field itself rides in the configuration, exactly as the generated
-      // action rows below carry theirs.
-      setTrigger(entry.subtype, entry.fieldId ? { fieldId: entry.fieldId } : {});
+      // "[Field] is changed" (and a date field's "is approaching") is one
+      // subtype per field only in its label; the field itself rides in the
+      // configuration, exactly as the generated action rows below carry theirs.
+      setTrigger(entry.subtype, {
+        ...defaultTriggerConfiguration(entry.subtype),
+        ...(entry.fieldId ? { fieldId: entry.fieldId } : {}),
+      });
       return;
     }
 

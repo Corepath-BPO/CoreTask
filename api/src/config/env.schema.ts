@@ -103,6 +103,18 @@ export const envSchema = z
     MAIL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
 
     /*
+     * Email to a project. Mail for `<token>@INBOUND_EMAIL_DOMAIN` is accepted by
+     * a mail provider (Postmark, SendGrid, Mailgun…) and posted to
+     * `/api/v1/inbound/email` with INBOUND_EMAIL_SECRET as the password of HTTP
+     * Basic auth, or in the `X-Inbound-Secret` header. Both or neither.
+     */
+    INBOUND_EMAIL_DOMAIN: optionalString,
+    INBOUND_EMAIL_SECRET: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.string().min(16, 'At least 16 characters.').optional(),
+    ),
+
+    /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
      * from the base delay: 30 s, 1 m, 2 m, 4 m, 8 m by default.
      */
@@ -149,6 +161,15 @@ export const envSchema = z
           message: 'Required when any other Microsoft Graph mail setting is present.',
         });
       }
+    }
+
+    if (Boolean(env.INBOUND_EMAIL_DOMAIN) !== Boolean(env.INBOUND_EMAIL_SECRET)) {
+      const missing = env.INBOUND_EMAIL_DOMAIN ? 'INBOUND_EMAIL_SECRET' : 'INBOUND_EMAIL_DOMAIN';
+      ctx.addIssue({
+        code: 'custom',
+        path: [missing],
+        message: 'Inbound email needs both a domain and a secret.',
+      });
     }
 
     if (env.NODE_ENV !== 'production') return;

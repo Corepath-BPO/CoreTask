@@ -11,12 +11,20 @@ import type { Prisma, Team as PrismaTeam } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
+import type { ActorContext } from '../../common/types/api.types';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
 
 import type { CreateTeamDto, UpdateTeamDto } from './dto/team.dto';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
+const USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  isServiceAccount: true,
+} as const;
 
 const teamInclude = {
   lead: { select: USER_SELECT },
@@ -33,6 +41,7 @@ export class TeamsService {
     private readonly prisma: PrismaService,
     private readonly members: WorkspaceMembersService,
     private readonly activity: ActivityLogsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   async list(workspaceId: string): Promise<Team[]> {
@@ -45,10 +54,19 @@ export class TeamsService {
     return teams.map(toTeamDto);
   }
 
-  async get(workspaceId: string, teamId: string): Promise<TeamDetail> {
+  async get(workspaceId: string, teamId: string, actor: ActorContext): Promise<TeamDetail> {
     const team = await this.prisma.team.findFirst({
       where: { id: teamId, workspaceId },
-      include: { ...teamInclude, members: { include: { user: { select: USER_SELECT } } } },
+      include: {
+        ...teamInclude,
+        members: { include: { user: { select: USER_SELECT } } },
+        // Only the projects the reader can open: a private one is its members' business.
+        projects: {
+          where: this.access.projectWhere(actor),
+          select: { id: true, name: true, key: true, color: true, archivedAt: true },
+          orderBy: [{ archivedAt: { sort: 'asc', nulls: 'first' } }, { name: 'asc' }],
+        },
+      },
     });
 
     if (!team) {
@@ -58,6 +76,13 @@ export class TeamsService {
     return {
       ...toTeamDto(team),
       members: team.members.map((member) => member.user),
+      projects: team.projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        key: project.key,
+        color: project.color,
+        isArchived: project.archivedAt !== null,
+      })),
     };
   }
 
@@ -212,7 +237,7 @@ export class TeamsService {
       metadata: { userId },
     });
 
-    return this.get(workspaceId, teamId);
+    return this.get(workspaceId, teamId, { userId: actorId, role: actorRole });
   }
 
   async removeMember(
@@ -245,7 +270,7 @@ export class TeamsService {
       metadata: { userId },
     });
 
-    return this.get(workspaceId, teamId);
+    return this.get(workspaceId, teamId, { userId: actorId, role: actorRole });
   }
 
   // -------------------------------------------------------------------------

@@ -148,6 +148,8 @@ export const NotificationType = {
   FIELD_CHANGED: 'FIELD_CHANGED',
   /** Someone added you to a project's members. */
   PROJECT_MEMBER_ADDED: 'PROJECT_MEMBER_ADDED',
+  /** A status update or message in a project you are on, or a reply to a message you are in. */
+  PROJECT_UPDATE: 'PROJECT_UPDATE',
 } as const;
 export type NotificationType = (typeof NotificationType)[keyof typeof NotificationType];
 export const NOTIFICATION_TYPES = Object.values(NotificationType);

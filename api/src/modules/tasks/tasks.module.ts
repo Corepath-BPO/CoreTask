@@ -9,8 +9,11 @@ import { FollowersModule } from '../followers/followers.module';
 import { ProjectAccessModule } from '../project-access/project-access.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
+import { TaskProjectsService } from './task-projects.service';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
+import { TimeEntriesController } from './time-entries.controller';
+import { TimeEntriesService } from './time-entries.service';
 
 @Module({
   imports: [
@@ -24,8 +27,8 @@ import { TasksService } from './tasks.service';
     // custom-fields module imports this one back.
     CustomFieldsModule,
   ],
-  controllers: [TasksController],
-  providers: [TasksService],
+  controllers: [TasksController, TimeEntriesController],
+  providers: [TasksService, TaskProjectsService, TimeEntriesService],
   exports: [TasksService],
 })
 export class TasksModule {}

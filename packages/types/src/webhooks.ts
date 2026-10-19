@@ -1,4 +1,5 @@
 import type {
+  ProjectApp,
   SubscribableWebhookEvent,
   WebhookDeliveryStatus,
   WebhookEventType,
@@ -25,6 +26,8 @@ export interface WebhookEndpoint {
   events: SubscribableWebhookEvent[];
   /** Null means every project in the workspace. */
   project: { id: string; name: string } | null;
+  /** The chat app it posts to (Customize › Apps); null for a plain JSON webhook. */
+  app: ProjectApp | null;
   enabled: boolean;
   /** Set when deliveries kept failing and the endpoint switched itself off. */
   disabledReason: string | null;

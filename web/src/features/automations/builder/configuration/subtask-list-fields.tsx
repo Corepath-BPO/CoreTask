@@ -1,7 +1,9 @@
 import {
+  AUTOMATION_TEXT_VARIABLES,
   MAX_SUBTASKS_PER_ACTION,
   isCalendarDate,
   subtaskEntry,
+  variableToken,
   type SubtaskEntry,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
@@ -24,15 +26,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   CalendarDays,
-  ChevronRight,
   CircleCheck,
-  Folder,
   GripVertical,
   Pencil,
   Plus,
-  Rows3,
-  SlidersHorizontal,
-  Sparkles,
   Trash2,
   UserRound,
   Zap,
@@ -348,7 +345,15 @@ function SubtaskRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5">
-        <VariableMenu noun={noun} />
+        <VariableMenu
+          noun={noun}
+          onInsert={(token) =>
+            onChange({
+              title:
+                row.title && !row.title.endsWith(' ') ? `${row.title} ${token}` : row.title + token,
+            })
+          }
+        />
         <DueDateControl nth={nth} row={row} onChange={onChange} className={dated ? '' : REVEAL} />
         <AssigneeControl nth={nth} assignee={assignee} members={members} onChange={onChange} />
         {editing ? (
@@ -389,24 +394,10 @@ function DashedGlyph({ icon: Icon }: { icon: LucideIcon }) {
 }
 
 /**
- * What a title could be built from, if it could be built.
- *
- * Offered as Asana offers it and disabled for the reason the catalogue gives
- * every text-setting action: nothing here has variables, so a title is the
- * words somebody typed. The menu exists so that "can I put the task's name in
- * here?" has an answer other than a missing button.
+ * The rule's variables, added to the end of a subtask's title — "Inspect
+ * {{task.name}}" names the task each run acts on. Filled in when it runs.
  */
-const VARIABLE_GROUPS: { label: string; icon: LucideIcon; opens?: boolean }[] = [
-  { label: 'Use AI', icon: Sparkles },
-  { label: 'Task', icon: CircleCheck, opens: true },
-  { label: 'People', icon: UserRound, opens: true },
-  { label: 'Dates', icon: CalendarDays, opens: true },
-  { label: 'Custom fields', icon: SlidersHorizontal, opens: true },
-  { label: 'Project', icon: Folder, opens: true },
-  { label: 'Section', icon: Rows3, opens: true },
-];
-
-function VariableMenu({ noun }: { noun: string }) {
+function VariableMenu({ noun, onInsert }: { noun: string; onInsert: (token: string) => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -420,16 +411,15 @@ function VariableMenu({ noun }: { noun: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuLabel className="text-muted-foreground">Add variable</DropdownMenuLabel>
-        {VARIABLE_GROUPS.map(({ label, icon: Icon, opens }) => (
-          <DropdownMenuItem key={label} disabled>
-            <Icon aria-hidden="true" />
-            {label}
-            {opens && <ChevronRight className="ml-auto" aria-hidden="true" />}
+        {AUTOMATION_TEXT_VARIABLES.map((variable) => (
+          <DropdownMenuItem
+            key={variable.key}
+            onSelect={() => onInsert(variableToken(variable.key))}
+          >
+            {variable.label}
           </DropdownMenuItem>
         ))}
-        <p className="px-2 py-1.5 text-xs italic text-muted-foreground">
-          Variables are not available yet, so a title is the words you type.
-        </p>
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">Filled in when the rule runs.</p>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -23,6 +23,33 @@ export class ActivityQueryDto {
   limit: number = ACTIVITY_FEED_LIMIT;
 }
 
+/** A project's Activity tab: everything recorded against it, newest first, by cursor. */
+export class ProjectActivityQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  projectId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'The `nextCursor` from the previous page.',
+  })
+  @IsOptional()
+  @IsUUID()
+  before?: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: ITEM_ACTIVITY_PAGE_LIMIT,
+    default: ITEM_ACTIVITY_PAGE_LIMIT,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(ITEM_ACTIVITY_PAGE_LIMIT)
+  limit: number = ITEM_ACTIVITY_PAGE_LIMIT;
+}
+
 /** The task panel's feed: one item's stories, newest first, by cursor. */
 export class ItemActivityQueryDto {
   @ApiProperty({ enum: ['TASK', 'TICKET'] })

@@ -62,6 +62,7 @@ function endpoint(overrides: Partial<WebhookEndpoint> = {}): WebhookEndpoint {
     url: 'https://n8n.example.com/webhook/coretask',
     events: ['task.created', 'task.completed'],
     project: null,
+    app: null,
     enabled: true,
     disabledReason: null,
     consecutiveFailures: 0,

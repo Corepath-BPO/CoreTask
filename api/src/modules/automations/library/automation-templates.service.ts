@@ -74,6 +74,22 @@ interface TargetField {
 
 const NO_REFERENCES: TemplateReferences = { sections: {}, statuses: {}, customFields: {} };
 
+/**
+ * A rule as the library holds it, without being saved anywhere — what a
+ * bundle keeps for each of its rules, and what `writeSnapshot` writes back.
+ */
+export interface RuleSnapshot {
+  name: string;
+  description: string | null;
+  triggerType: string;
+  triggerConfig: Record<string, unknown>;
+  nodes: TemplateNode[];
+  references: TemplateReferences;
+  allowChaining: boolean;
+  /** Whether the rule was live where it was taken from. */
+  live: boolean;
+}
+
 /** A project with nothing in it, for translating a rule into blanks. */
 const emptyTarget = (): TargetProject => ({
   sectionById: new Map(),
@@ -129,7 +145,10 @@ export class AutomationTemplatesService {
     const visible = await this.visibleSourceIds(workspaceId, actor, templates);
 
     return templates.map((template) =>
-      toResponse(template, template.sourceProjectId === null || visible.has(template.sourceProjectId)),
+      toResponse(
+        template,
+        template.sourceProjectId === null || visible.has(template.sourceProjectId),
+      ),
     );
   }
 
@@ -255,6 +274,40 @@ export class AutomationTemplatesService {
     return toResponse(template, true);
   }
 
+  /**
+   * A rule's snapshot, with the names behind its references — the same record
+   * `saveFromRule` keeps, for a caller that keeps it somewhere else.
+   */
+  async snapshotRule(
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+  ): Promise<RuleSnapshot> {
+    const rule = await this.automations.get(workspaceId, projectId, ruleId);
+    const nodes: TemplateNode[] = rule.nodes.map((node) => ({
+      id: node.id,
+      nodeType: node.nodeType,
+      subtype: node.subtype,
+      configuration: asConfiguration(node.configuration),
+      position: { x: node.positionX, y: node.positionY },
+      parentId: node.parentNodeId,
+      branchKey: node.branchKey,
+      order: node.position,
+    }));
+    const triggerConfig = asConfiguration(rule.triggerConfig);
+
+    return {
+      name: rule.name,
+      description: rule.description,
+      triggerType: rule.triggerType,
+      triggerConfig,
+      nodes,
+      references: await this.snapshotReferences(workspaceId, triggerConfig, nodes),
+      allowChaining: rule.allowChaining,
+      live: rule.status === 'ACTIVE',
+    };
+  }
+
   async update(
     workspaceId: string,
     actor: ActorContext,
@@ -327,10 +380,54 @@ export class AutomationTemplatesService {
       WorkspaceRole.MANAGER,
     );
 
-    const target = await this.loadTarget(workspaceId, dto.projectId);
-    const references = asReferences(template.references);
-    const nodes = asNodes(template.nodes);
-    let triggerConfig = asConfiguration(template.triggerConfig);
+    const written = await this.writeSnapshot(
+      workspaceId,
+      dto.projectId,
+      userId,
+      role,
+      {
+        name: template.name,
+        description: template.description,
+        triggerType: template.triggerType,
+        triggerConfig: asConfiguration(template.triggerConfig),
+        nodes: asNodes(template.nodes),
+        references: asReferences(template.references),
+        allowChaining: template.allowChaining,
+        live: false,
+      },
+      dto.sectionId,
+    );
+
+    await this.prisma.automationTemplate.update({
+      where: { id: templateId },
+      data: { useCount: { increment: 1 }, lastUsedAt: new Date() },
+    });
+
+    const rule = await this.automations.get(workspaceId, dto.projectId, written.ruleId);
+
+    return { rule, unresolved: written.unresolved };
+  }
+
+  /**
+   * Writes a snapshot into a project as a new draft.
+   *
+   * Every project-scoped id in the graph is translated: kept where the target
+   * project has the same row, matched by name where it does not, and cleared
+   * where nothing matches — each cleared choice reported in `unresolved`. The
+   * caller has already checked it may manage the target project.
+   */
+  async writeSnapshot(
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    role: WorkspaceRole,
+    snapshot: RuleSnapshot,
+    sectionId?: string | null,
+  ): Promise<{ ruleId: string; unresolved: AutomationTemplateUnresolved[] }> {
+    const target = await this.loadTarget(workspaceId, projectId);
+    const references = snapshot.references;
+    const nodes = snapshot.nodes;
+    let triggerConfig = snapshot.triggerConfig;
 
     /*
      * A section the caller named wins over the one the template remembers.
@@ -341,18 +438,18 @@ export class AutomationTemplatesService {
      * project first, because an id from anywhere else is exactly what the
      * translation below exists to keep out.
      */
-    if (dto.sectionId && template.triggerType === AutomationTrigger.TASK_MOVED_TO_SECTION) {
-      if (!target.sectionById.has(dto.sectionId)) {
+    if (sectionId && snapshot.triggerType === AutomationTrigger.TASK_MOVED_TO_SECTION) {
+      if (!target.sectionById.has(sectionId)) {
         throw AppException.notFound('RESOURCE_NOT_FOUND', 'Section not found in this project.');
       }
 
-      triggerConfig = withSection(triggerConfig, dto.sectionId);
+      triggerConfig = withSection(triggerConfig, sectionId);
     }
 
     const unresolved: AutomationTemplateUnresolved[] = [];
     const translated = nodes.map((node) => {
       const configuration =
-        node.nodeType === AutomationNodeType.TRIGGER && dto.sectionId
+        node.nodeType === AutomationNodeType.TRIGGER && sectionId
           ? withSection(node.configuration, triggerConfig['sectionId'] as string)
           : node.configuration;
 
@@ -381,37 +478,30 @@ export class AutomationTemplatesService {
       ? trigger.configuration
       : translateConfiguration(
           triggerConfig,
-          { nodeType: AutomationNodeType.TRIGGER, subtype: template.triggerType },
+          { nodeType: AutomationNodeType.TRIGGER, subtype: snapshot.triggerType },
           references,
           target,
           unresolved,
         );
 
-    const created = await this.automations.create(workspaceId, dto.projectId, userId, role, {
-      name: template.name,
-      ...(template.description ? { description: template.description } : {}),
-      triggerType: trigger?.subtype ?? template.triggerType,
+    const created = await this.automations.create(workspaceId, projectId, userId, role, {
+      name: snapshot.name,
+      ...(snapshot.description ? { description: snapshot.description } : {}),
+      triggerType: trigger?.subtype ?? snapshot.triggerType,
       triggerConfig: ruleTriggerConfig,
       nodes: translated,
     });
 
     // The create DTO does not carry chaining — it is a setting rather than a
     // step — so a template that turned it off is honoured in a second write.
-    if (!template.allowChaining) {
+    if (!snapshot.allowChaining) {
       await this.prisma.automationRule.update({
         where: { id: created.id },
         data: { allowChaining: false },
       });
     }
 
-    await this.prisma.automationTemplate.update({
-      where: { id: templateId },
-      data: { useCount: { increment: 1 }, lastUsedAt: new Date() },
-    });
-
-    const rule = await this.automations.get(workspaceId, dto.projectId, created.id);
-
-    return { rule, unresolved: dedupe(unresolved) };
+    return { ruleId: created.id, unresolved: dedupe(unresolved) };
   }
 
   // -------------------------------------------------------------------------

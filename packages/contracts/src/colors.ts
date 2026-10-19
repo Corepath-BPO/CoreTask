@@ -64,6 +64,16 @@ export const StatusCategory = {
 export type StatusCategory = (typeof StatusCategory)[keyof typeof StatusCategory];
 export const STATUS_CATEGORIES = Object.values(StatusCategory);
 
+/** How a category is named where people choose one. */
+export const STATUS_CATEGORY_LABEL: Record<StatusCategory, string> = {
+  NOT_STARTED: 'Not started',
+  ACTIVE: 'In progress',
+  BLOCKED: 'Blocked',
+  COMPLETED: 'Done',
+  CANCELLED: 'Cancelled',
+  ARCHIVED: 'Archived',
+};
+
 /** Categories that mean "no longer active work" — used for rollups. */
 export const CLOSED_STATUS_CATEGORIES: readonly StatusCategory[] = [
   StatusCategory.COMPLETED,

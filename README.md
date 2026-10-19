@@ -536,8 +536,77 @@ pnpm compose:validate
   with Asana's "All activity / Comments only" switch
 - Comment and attachment counts on list rows and board cards; image
   thumbnails and a lightbox in the attachment strip
+- Global search (Ctrl/⌘ K or `/`): tasks, tickets, projects and people, best
+  match first, narrowed by kind, with recents — private projects stay private
+- Asana's Create menu: a task from anywhere (Tab+N too), a project, a team, an
+  invitation or a workspace
+- Starred projects in the sidebar, starred from a project's header or the
+  projects list — a per-person bookmark
+- Project tabs beyond List and Board: a Timeline (Gantt bars dragged to move,
+  ends dragged to change a date), a Calendar (bars from start to due, dragged
+  to reschedule, an Unscheduled tray), a Dashboard (totals, completion, open
+  work by section and assignee, a burn-up) and the project's Activity feed
+- Task likes, and dependencies — blocked by / blocking, with a loop guard —
+  plus the pane's full-screen view, a "…" menu (duplicate, copy link, open in
+  a new tab, archive), status and priority rows, and links to subtasks
+- My Tasks in Asana's sections — Recently assigned, Do today, Do next week,
+  Do later — personal, dragged or moved by menu
+- Inbox Archive and Bookmarks, with "Archive all"
+- Profiles with pronouns, title, department and out-of-office dates, shown
+  beside a name when someone picks an assignee; My Tasks auto-sort by due date
+- Sync to calendar: a private iCalendar link for My Tasks or a project, which
+  can be reset and follows its owner's access
+- Rules that add a task to another project as well, fill variables into the
+  subtasks they create, and e-mail the people on a task
+- Goals: a tree of outcomes with status, owner, team and time period, and
+  progress set by hand, rolled up from sub-goals or connected projects, or
+  measured by a number moving from a start towards a target
+- Rules that are not edits: run by hand from a task's menu or a selection,
+  on a schedule (with Asana's execution scope), or by a due or start date
+  drawing near or passing — plus "no longer blocked", "attachment added" and
+  "collaborator added", new actions (complete or reopen, create a task, rename
+  with variables, collaborators, remove from project) and new checks
+- Project Messages (posts and replies) beside status updates kept on the
+  server, a Files tab, and repeating tasks ("Set to repeat")
+- Portfolios kept on the server — shared with the workspace, filtered by what
+  each person can open — with Dashboard, Progress, Workload (load against
+  per-person capacity, in tasks or estimated hours) and Messages tabs, and a
+  status of their own set by the owner or a manager
+- Milestones and approvals beside ordinary tasks (approve, request changes,
+  reject), follow-up tasks, and task templates with their subtasks
+- Intake forms: a public link anyone can fill in without an account, each
+  response a task in the project with the answers in its description
+- Status templates that fill the status composer, and rules on a custom date
+  field drawing near or passing
+- Bundles: one project's sections, fields, rules and task templates applied
+  to others and kept in step when the source changes
+- Report dashboards: shared charts of tasks by status, priority, assignee,
+  project or week, answered per viewer over what they can see
+- Multi-homing: a task in several projects, in its own section and place on
+  each board, visible through any of them, with each project's rules and
+  fields applying to it
+- Project templates and "Duplicate project": sections, tasks with subtasks and
+  relative dates, fields, rules and task templates, as chosen
+- Export to CSV: a project's tasks with Asana's columns and one per custom
+  field, safe to open in a spreadsheet
+- Team pages: the team's projects and people, and its own Messages
+- Project Note, Workload and Settings tabs: a shared document, open work by
+  person and week (drag a task to reassign or reschedule it), and statuses,
+  priorities and details in one place
+- Tags: workspace labels on tasks, on cards and in a List column, filtering
+  views and search, managed in Settings
+- Time tracking: time logged by hand or with a timer against a task's
+  estimate, entry by entry
+- Advanced search over tasks — words, assignee, projects, status, due date,
+  creator, collaborators — as a link, with saved searches in the sidebar
+- Apps: a project's updates posted to Slack, Microsoft Teams, Google Chat or
+  Discord, as each tool's own messages
+- Email to a project: an address per project whose mail becomes tasks, with
+  comments sent back to the people on the email and their replies kept as
+  comments
 - Read-only activity feed and a per-user notification inbox with unread counts
-- A dashboard driven entirely by live data — no fixtures anywhere in the app
+- A Home driven entirely by live data — no fixtures anywhere in the app — with
+  widgets each person shows, hides and reorders, and a private notepad
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)

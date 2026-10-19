@@ -3,6 +3,7 @@ import type { ProjectFieldMetadata } from '@coretask/types';
 
 import type { WorkItemRow } from '@/features/work-items/lib/work-item-row';
 
+import { bucketOf, dueBuckets } from './due-buckets';
 import { fieldLabel } from './view-fields';
 import { ORPHAN_GROUP_ID, groupBySection } from './group-by-section';
 
@@ -35,6 +36,7 @@ export function groupRows(
   tasks: WorkItemRow[],
   groupBy: string | null,
   metadata: ProjectFieldMetadata | undefined,
+  now: Date = new Date(),
 ): RowGroup[] {
   if (!groupBy || groupBy === SystemField.SECTION) {
     return groupBySection(tasks, metadata).map((group) => ({
@@ -84,6 +86,8 @@ export function groupRows(
       );
     case SystemField.CREATED_BY:
       return groupByPeople(tasks, groupBy, metadata, (row) => row.createdById, 'Unknown');
+    case SystemField.DUE_DATE:
+      return groupByDueDate(tasks, groupBy, now);
     default:
       // A key this build cannot group by: everything in one heading, named
       // for the field, rather than an empty view.
@@ -238,6 +242,32 @@ function groupByCustomField(
   }
   if (none.length > 0) groups.push(noneGroup(groupBy, noneLabel, none));
   return groups;
+}
+
+/**
+ * By due date, under Asana's headings from the reader's today. Every heading
+ * is drawn, empty or not, so there is somewhere to drop a row for tomorrow;
+ * the rows with no date come last.
+ */
+function groupByDueDate(tasks: WorkItemRow[], groupBy: string, now: Date): RowGroup[] {
+  const buckets = dueBuckets(now);
+  const rows = new Map<string, WorkItemRow[]>();
+  const undated: WorkItemRow[] = [];
+  for (const row of tasks) {
+    const key = bucketOf(row.dueDate, buckets);
+    if (key === null) undated.push(row);
+    else push(rows, key, row);
+  }
+  return [
+    ...buckets.map((bucket): RowGroup => ({
+      id: `${groupBy}:${bucket.key}`,
+      key: bucket.key,
+      name: bucket.name,
+      kind: 'value',
+      tasks: rows.get(bucket.key) ?? [],
+    })),
+    noneGroup(groupBy, 'No due date', undated),
+  ];
 }
 
 function noneGroup(groupBy: string, name: string, tasks: WorkItemRow[]): RowGroup {

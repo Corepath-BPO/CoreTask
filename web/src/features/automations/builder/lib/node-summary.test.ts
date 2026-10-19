@@ -91,6 +91,16 @@ describe('what a node says', () => {
     );
   });
 
+  it('reads an email step as who it goes to', () => {
+    const email = (configuration: Record<string, unknown>) =>
+      summarise(node({ subtype: 'SEND_EMAIL', configuration }), metadata);
+
+    expect(email({ recipients: ['ASSIGNEE', 'CREATOR'], subject: 'Hi' })).toBe(
+      'Email the assignee, whoever created the task',
+    );
+    expect(email({ subject: 'Hi' })).toBe('Email — choose who');
+  });
+
   it('reads a move to another project as the project, then its section', () => {
     const move = (configuration: Record<string, unknown>) =>
       summarise(node({ subtype: 'MOVE_TO_PROJECT', configuration }), metadata);
@@ -104,6 +114,9 @@ describe('what a node says', () => {
     // the same id would be a different column.
     expect(move({ projectId: 'proj-2', targetSectionId: 'sec-1' })).toBe('Move to Renewals');
     expect(move({ projectId: 'proj-gone' })).toBe('Move to a project that was removed');
+    // Adding keeps the task here as well, and says so.
+    expect(move({ projectId: 'proj-2', mode: 'ADD' })).toBe('Add to Renewals');
+    expect(move({ mode: 'ADD' })).toBe('Add — choose a project');
   });
 
   it('reads a condition as a sentence, with the option’s label', () => {
@@ -328,5 +341,126 @@ describe('the send-a-webhook step', () => {
     expect(
       isNodeIncomplete(node({ subtype: 'SEND_WEBHOOK', configuration: { endpointId: 'wh-1' } })),
     ).toBe(false);
+  });
+});
+
+describe('the triggers that are not edits, and the newer actions', () => {
+  it('reads a schedule as when and on what', () => {
+    expect(
+      summarise(
+        node({
+          type: 'TRIGGER',
+          subtype: 'SCHEDULED_TIME',
+          configuration: {
+            frequency: 'WEEKLY',
+            weekday: 5,
+            time: '16:00',
+            timezone: 'Europe/London',
+            scope: 'SECTION',
+            sectionId: 'sec-1',
+          },
+        }),
+        metadata,
+      ),
+    ).toBe('Every Friday at 16:00 (Europe/London) · Incomplete tasks in a section');
+  });
+
+  it('says how far ahead an approaching date fires, and what a manual rule is called', () => {
+    expect(
+      summarise(
+        node({ type: 'TRIGGER', subtype: 'DUE_DATE_APPROACHING', configuration: { days: 2 } }),
+        metadata,
+      ),
+    ).toBe('When a task’s due date is approaching 2 days before');
+    expect(
+      summarise(
+        node({ type: 'TRIGGER', subtype: 'START_DATE_APPROACHING', configuration: { days: 0 } }),
+        metadata,
+      ),
+    ).toBe('When a task’s start date is approaching on the day');
+    expect(
+      summarise(
+        node({
+          type: 'TRIGGER',
+          subtype: 'RUN_MANUALLY',
+          configuration: { label: 'Send to legal' },
+        }),
+        metadata,
+      ),
+    ).toBe('When run from the menu as Send to legal');
+  });
+
+  it('names the custom date field a clock trigger watches', () => {
+    const withField = {
+      ...metadata,
+      customFields: [{ id: 'cf-1', name: 'Lease ends', type: 'DATE' }],
+    } as AutomationMetadata;
+    expect(
+      summarise(
+        node({
+          type: 'TRIGGER',
+          subtype: 'CUSTOM_DATE_APPROACHING',
+          configuration: { fieldId: 'cf-1', days: 3 },
+        }),
+        withField,
+      ),
+    ).toBe('When Lease ends is approaching 3 days before');
+    expect(
+      summarise(
+        node({
+          type: 'TRIGGER',
+          subtype: 'CUSTOM_DATE_PASSED',
+          configuration: { fieldId: 'cf-1' },
+        }),
+        withField,
+      ),
+    ).toBe('When Lease ends has passed');
+    expect(
+      summarise(
+        node({ type: 'TRIGGER', subtype: 'CUSTOM_DATE_PASSED', configuration: {} }),
+        withField,
+      ),
+    ).toBe('When a date field has passed');
+  });
+
+  it('reads the newer actions as what they do', () => {
+    expect(summarise(node({ subtype: 'SET_COMPLETION', configuration: {} }), metadata)).toBe(
+      'Mark complete',
+    );
+    expect(
+      summarise(node({ subtype: 'SET_COMPLETION', configuration: { completed: false } }), metadata),
+    ).toBe('Mark incomplete');
+    expect(
+      summarise(
+        node({ subtype: 'CREATE_TASK', configuration: { title: 'Follow up: {{task.name}}' } }),
+        metadata,
+      ),
+    ).toBe('Create task “Follow up: {{task.name}}”');
+    expect(
+      summarise(
+        node({
+          subtype: 'ADD_REMOVE_COLLABORATORS',
+          configuration: { add: ['u-1'], remove: ['gone'] },
+        }),
+        metadata,
+      ),
+    ).toBe('Add Maya Okafor and remove somebody who has left');
+    expect(summarise(node({ subtype: 'SET_TASK_DESCRIPTION', configuration: {} }), metadata)).toBe(
+      'Clear the description',
+    );
+  });
+
+  it('flags the newer actions until they say what to write or whom to add', () => {
+    expect(isNodeIncomplete(node({ subtype: 'CREATE_TASK', configuration: {} }))).toBe(true);
+    expect(isNodeIncomplete(node({ subtype: 'SET_TASK_NAME', configuration: { text: 'x' } }))).toBe(
+      false,
+    );
+    expect(isNodeIncomplete(node({ subtype: 'ADD_REMOVE_COLLABORATORS', configuration: {} }))).toBe(
+      true,
+    );
+    // Clearing is a real answer for a description.
+    expect(isNodeIncomplete(node({ subtype: 'SET_TASK_DESCRIPTION', configuration: {} }))).toBe(
+      false,
+    );
   });
 });

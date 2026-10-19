@@ -2,6 +2,7 @@ import type { NotificationFeed } from '@coretask/types';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -60,7 +61,63 @@ export class NotificationsController {
       ...(query.unreadOnly === undefined ? {} : { unreadOnly: query.unreadOnly }),
       ...(query.types ? { types: query.types } : {}),
       ...(query.cursor ? { cursor: query.cursor } : {}),
+      ...(query.view ? { view: query.view } : {}),
     });
+  }
+
+  @Post('archive')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Archive notifications',
+    description:
+      'Pass `notificationIds` for specific entries, or omit it to archive the whole inbox. Archived entries are marked read.',
+  })
+  @ApiEnvelopeResponse(MarkNotificationsReadResultDto)
+  archive(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: MarkNotificationsReadDto,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    return this.notifications.archive(userId, workspaceId, dto.notificationIds);
+  }
+
+  @Post(':notificationId/unarchive')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Move one notification back to the inbox' })
+  @ApiParam({ name: 'notificationId', format: 'uuid' })
+  @ApiEnvelopeResponse(MarkNotificationsReadResultDto)
+  unarchive(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('notificationId', ParseUUIDPipe) notificationId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    return this.notifications.unarchive(userId, workspaceId, notificationId);
+  }
+
+  @Post(':notificationId/bookmark')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bookmark a notification' })
+  @ApiParam({ name: 'notificationId', format: 'uuid' })
+  @ApiEnvelopeResponse(MarkNotificationsReadResultDto)
+  bookmark(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('notificationId', ParseUUIDPipe) notificationId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    return this.notifications.setBookmark(userId, workspaceId, notificationId, true);
+  }
+
+  @Delete(':notificationId/bookmark')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove a bookmark' })
+  @ApiParam({ name: 'notificationId', format: 'uuid' })
+  @ApiEnvelopeResponse(MarkNotificationsReadResultDto)
+  unbookmark(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('notificationId', ParseUUIDPipe) notificationId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<{ updated: number; unreadCount: number }> {
+    return this.notifications.setBookmark(userId, workspaceId, notificationId, false);
   }
 
   @Post(':notificationId/unread')

@@ -21,9 +21,11 @@ import {
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
+  Actor,
   CurrentWorkspace,
   RequireWorkspaceRole,
 } from '../../common/decorators/workspace.decorator';
+import type { ActorContext } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { TeamDetailDto, TeamDto } from './dto/team-response.dto';
@@ -64,8 +66,9 @@ export class TeamsController {
   get(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('teamId', ParseUUIDPipe) teamId: string,
+    @Actor() actor: ActorContext,
   ): Promise<TeamDetail> {
-    return this.teams.get(workspaceId, teamId);
+    return this.teams.get(workspaceId, teamId, actor);
   }
 
   @Post()

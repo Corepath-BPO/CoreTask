@@ -310,6 +310,44 @@ export function useUpdateProjectView(workspaceId: string | undefined, projectId:
  * arranges a view on a laptop expects the same arrangement on a second machine,
  * and a shared view has to look the same to everyone who opens it.
  */
+/**
+ * Rename, duplicate, make default, delete — the view picker's actions. Each
+ * refreshes the project's view list, which is what the tabs and pickers read.
+ */
+export function useManageProjectView(workspaceId: string | undefined, projectId: string) {
+  const refresh = () =>
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.projectViews.all(workspaceId as string, projectId),
+    });
+
+  const rename = useMutation({
+    mutationFn: ({ viewId, name }: { viewId: string; name: string }) =>
+      projectViewsApi.update(workspaceId as string, projectId, viewId, { name }),
+    onSuccess: refresh,
+    onError: (error) => reportError(error, 'Could not rename the view.'),
+  });
+  const duplicate = useMutation({
+    mutationFn: (viewId: string) =>
+      projectViewsApi.duplicate(workspaceId as string, projectId, viewId),
+    onSuccess: refresh,
+    onError: (error) => reportError(error, 'Could not duplicate the view.'),
+  });
+  const setDefault = useMutation({
+    mutationFn: (viewId: string) =>
+      projectViewsApi.setDefault(workspaceId as string, projectId, viewId),
+    onSuccess: refresh,
+    onError: (error) => reportError(error, 'Could not make that the default view.'),
+  });
+  const remove = useMutation({
+    mutationFn: (viewId: string) =>
+      projectViewsApi.remove(workspaceId as string, projectId, viewId),
+    onSuccess: refresh,
+    onError: (error) => reportError(error, 'Could not delete the view.'),
+  });
+
+  return { rename, duplicate, setDefault, remove };
+}
+
 export function useSaveViewSettings(workspaceId: string | undefined, projectId: string) {
   const update = useUpdateProjectView(workspaceId, projectId);
 

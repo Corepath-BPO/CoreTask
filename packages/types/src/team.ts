@@ -26,6 +26,16 @@ export interface Team {
 /** A team with its roster, for the detail view. */
 export interface TeamDetail extends Team {
   members: UserRef[];
+  /** The team's projects the reader can open, open ones first. */
+  projects: TeamProject[];
+}
+
+export interface TeamProject {
+  id: string;
+  name: string;
+  key: string;
+  color: string;
+  isArchived: boolean;
 }
 
 export interface CreateTeamPayload {

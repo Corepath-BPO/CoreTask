@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  type ProjectApp,
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
   WEBHOOK_EVENT_ID_HEADER,
@@ -24,6 +25,7 @@ import type { RuleWebhookRequest } from '../../jobs/queue-names';
 import { WebhookQueue } from '../../jobs/webhook/webhook.queue';
 import type { AutomationEvent } from '../automations/automation-event.publisher';
 
+import { renderAppMessage, type AppMessageContext } from './lib/app-messages';
 import { decryptSecret, deriveKey } from './lib/secret-cipher';
 import { signWebhook } from './lib/signature';
 import { assertResolvesToAllowedAddress } from './lib/url-policy';
@@ -62,7 +64,8 @@ export class WebhookDeliveryService {
 
   /** One domain event → a pending delivery per endpoint that subscribed to it. */
   async fanOut(event: AutomationEvent): Promise<{ deliveries: number }> {
-    const type = webhookEventTypeFor(event.trigger, event.entityType);
+    const type =
+      event.entityType === 'PROJECT' ? null : webhookEventTypeFor(event.trigger, event.entityType);
     if (!type) return { deliveries: 0 };
 
     const endpoints = await this.prisma.webhookEndpoint.findMany({
@@ -70,7 +73,10 @@ export class WebhookDeliveryService {
         workspaceId: event.workspaceId,
         enabled: true,
         events: { has: type },
-        OR: [{ projectId: null }, { projectId: event.projectId }],
+        OR: [
+          { projectId: null, app: null },
+          ...(event.projectId ? [{ projectId: event.projectId }] : []),
+        ],
       },
       select: { id: true, url: true },
     });
@@ -103,10 +109,73 @@ export class WebhookDeliveryService {
     return { deliveries: endpoints.length };
   }
 
+  /**
+   * A project's status update, to the endpoints that asked for one: the
+   * workspace's own webhooks and the project's chat apps. Not an automation
+   * event — a status is the project speaking about itself, not a task change —
+   * so it is fanned out here, by the service that posts it.
+   */
+  async fanOutStatusUpdate(input: {
+    workspaceId: string;
+    projectId: string;
+    actorId: string | null;
+    update: {
+      id: string;
+      status: string;
+      title: string;
+      summary: string | null;
+      nextSteps: string | null;
+      createdAt: string;
+    };
+  }): Promise<{ deliveries: number }> {
+    const type = WebhookEventType.PROJECT_STATUS_UPDATED;
+    const endpoints = await this.prisma.webhookEndpoint.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        enabled: true,
+        events: { has: type },
+        OR: [{ projectId: null, app: null }, { projectId: input.projectId }],
+      },
+      select: { id: true, url: true },
+    });
+    if (endpoints.length === 0) return { deliveries: 0 };
+
+    const payload: WebhookEventPayload = {
+      id: randomUUID(),
+      type,
+      createdAt: input.update.createdAt,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      actor: await this.payloads.actor(input.actorId),
+      causedByRuleId: null,
+      correlationId: null,
+      data: { statusUpdate: input.update },
+      changes: null,
+    };
+
+    for (const endpoint of endpoints) {
+      const delivery = await this.prisma.webhookDelivery.create({
+        data: {
+          workspaceId: input.workspaceId,
+          endpointId: endpoint.id,
+          eventType: type,
+          eventId: payload.id,
+          url: endpoint.url,
+          payload: payload as unknown as Prisma.InputJsonValue,
+          maxAttempts: this.config.webhooks.maxAttempts,
+        },
+        select: { id: true },
+      });
+      await this.queue.enqueueDelivery(delivery.id);
+    }
+    return { deliveries: endpoints.length };
+  }
+
   /** A `ping`, so an admin can see the shape and check the receiver answers. Returns the delivery id. */
   async createPing(
     endpoint: Pick<WebhookEndpoint, 'id' | 'workspaceId' | 'url' | 'name'>,
     actorId: string | null,
+    message = 'CoreTask can reach this endpoint. Real events look like this.',
   ): Promise<string> {
     const payload: WebhookEventPayload = {
       id: randomUUID(),
@@ -120,7 +189,7 @@ export class WebhookDeliveryService {
       data: {
         endpointId: endpoint.id,
         name: endpoint.name,
-        message: 'CoreTask can reach this endpoint. Real events look like this.',
+        message,
       },
       changes: null,
     };
@@ -251,6 +320,28 @@ export class WebhookDeliveryService {
     return { deleted: result.count };
   }
 
+  /** Names an app's message needs that the payload carries only as ids. */
+  private async appContext(
+    projectId: string | null,
+    payload: Prisma.JsonValue,
+  ): Promise<AppMessageContext> {
+    const task = (payload as { data?: { task?: { sectionId?: string | null } | null } } | null)
+      ?.data?.task;
+    const [project, section] = await Promise.all([
+      projectId
+        ? this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true } })
+        : null,
+      task?.sectionId
+        ? this.prisma.section.findUnique({ where: { id: task.sectionId }, select: { name: true } })
+        : null,
+    ]);
+    return {
+      projectName: project?.name ?? null,
+      sectionName: section?.name ?? null,
+      webUrl: this.config.http.webUrl,
+    };
+  }
+
   /**
    * One attempt. Throws when the queue should try again, `UnrecoverableError`
    * when it should not (a 404 will not fix itself), and returns quietly when
@@ -281,7 +372,15 @@ export class WebhookDeliveryService {
       return { status: 'endpoint-disabled' };
     }
 
-    const body = JSON.stringify(delivery.payload);
+    const body = delivery.endpoint?.app
+      ? JSON.stringify(
+          renderAppMessage(
+            delivery.endpoint.app as ProjectApp,
+            delivery.payload as unknown as WebhookEventPayload,
+            await this.appContext(delivery.endpoint.projectId, delivery.payload),
+          ),
+        )
+      : JSON.stringify(delivery.payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': WEBHOOK_USER_AGENT,

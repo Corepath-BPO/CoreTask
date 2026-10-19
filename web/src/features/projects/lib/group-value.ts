@@ -3,6 +3,7 @@ import type { ProjectFieldMetadata, UpdateWorkItemPayload, ViewSettings } from '
 
 import { isTicketRow, type WorkItemRow } from '@/features/work-items/lib/work-item-row';
 
+import { dropDueDate, dueDatePayload } from './due-buckets';
 import type { RowGroup } from './group-rows';
 
 /**
@@ -29,8 +30,8 @@ export type GroupValueChange =
  * What dropping a row into a group means.
  *
  * A section group is a move, as it always was. Any other group stands for a
- * value, and landing there sets it: status, priority, assignee, or the custom
- * field the view groups by. A ticket holds no custom-field values, so a drop
+ * value, and landing there sets it: status, priority, assignee, due date, or
+ * the custom field the view groups by. A ticket holds no custom-field values, so a drop
  * that would set one is refused with a reason the toast can show.
  */
 export function groupValueChange(
@@ -38,6 +39,7 @@ export function groupValueChange(
   group: RowGroup,
   row: WorkItemRow,
   metadata: ProjectFieldMetadata | undefined,
+  now: Date = new Date(),
 ): GroupValueChange | null {
   if (!groupBy || groupBy === SystemField.SECTION) {
     return group.kind === 'section' ? { kind: 'move', sectionId: group.key } : null;
@@ -74,6 +76,12 @@ export function groupValueChange(
       return { kind: 'update', payload: { assigneeIds: group.key ? [group.key] : [] } };
     case SystemField.CREATED_BY:
       return { kind: 'refused', reason: 'Who created a task cannot be changed.' };
+    case SystemField.DUE_DATE: {
+      // Today, tomorrow, Friday, next Monday — or no date at all.
+      const target = dropDueDate(group.key, now);
+      if (!target.ok) return { kind: 'refused', reason: target.reason };
+      return { kind: 'update', payload: dueDatePayload(row, target.dueDate) };
+    }
     default:
       return null;
   }

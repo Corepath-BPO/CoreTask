@@ -166,6 +166,116 @@ A 401 discards the cached token, so a rejected credential is not replayed on the
 next attempt. Sending happens on the queue, so a transient Graph failure is
 retried by BullMQ rather than failing the HTTP request that triggered it.
 
+### Notification e-mail
+
+`NotificationDispatcher` delivers every notification in-app and, when its kind
+is one the person chose in Settings › Notifications, by e-mail too: the
+notification's type maps to a group (`emailGroupOf` in contracts), the
+person's `NotificationPreference` row for the workspace lists the groups they
+want (no row means assignments and mentions), and the message is queued like
+any other — so it is suppressed in tests and for reserved domains in the same
+place. The subject carries a short body after the title ("You were assigned a
+task: Fix the gate"); every message links to the item and to the setting.
+
+### Inbound e-mail
+
+Email to a project (Customize › Emails) needs a mail provider to receive for a
+domain and post each message to `POST /api/v1/inbound/email`: Postmark's inbound
+webhook, SendGrid's Inbound Parse, a Mailgun route, or anything that can send
+`{ from, to, cc, subject, text, html, messageId, attachments: [{ filename,
+contentType, content }] }` with base64 content. Set `INBOUND_EMAIL_DOMAIN` (the
+domain whose MX points at the provider) and `INBOUND_EMAIL_SECRET`, and give the
+provider the secret as the password of HTTP Basic auth in the URL
+(`https://inbound:<secret>@api.example.com/api/v1/inbound/email`) or as an
+`X-Inbound-Secret` header. Both values or neither — the schema refuses one alone.
+
+- **Addresses.** A project's is `<token>@<domain>`, the token 20 lowercase hex
+  characters because mail systems may fold case. A task's reply address is
+  `<token>+<task id as hex>@<domain>`; mail there is a comment, and the task must
+  be in that project. **Get a new address** changes the token, so every old
+  address, reply addresses included, stops answering.
+- **Who is taken.** A sender who is a member able to edit the project acts as
+  themselves. Anyone else is refused unless the project accepts mail from
+  anyone — or, for a reply, they are on the task's thread — and their words go
+  in under the address's author (or the workspace owner), saying who sent them.
+  From can be forged, so the provider's SPF/DKIM/DMARC checks are worth enabling.
+- **Retries are safe.** Each message is recorded against the project before
+  anything is made, unique on its Message-ID, so a provider's retry — even one
+  racing the original — is answered `DUPLICATE`. A message the app turns down
+  (wrong sender, address off, task elsewhere) is recorded as rejected and
+  answered 200, because a provider retries anything else forever; only an
+  unexpected failure drops the record and answers 500 so the retry can succeed.
+- **The thread.** Members on From, To and CC become collaborators; the other
+  addresses (up to 20) are kept as the task's recipients, and every comment is
+  queued to them as `Re: <title>` with the reply address as Reply-To — except to
+  whoever wrote it by email. Files are stored as the task's attachments under
+  the usual type and size rules; any left out are named in the task.
+- **Body size.** The route reads JSON and form bodies of up to 40 MB itself
+  (mail carries its attachments inline); multipart goes through multer, and the
+  secret is checked by a guard before a multipart body is read.
+
+### Chat apps
+
+Status updates are not automation events, so `ProjectUpdatesService` fans them
+out itself (`WebhookDeliveryService.fanOutStatusUpdate`) as
+`project.status_updated`, to the project's apps and the workspace webhooks
+subscribed to it. A failure there is logged and never blocks the post.
+
+Customize › Apps connects a project to Slack, Microsoft Teams, Google Chat or
+Discord through the tool's incoming webhook. A connection is a `WebhookEndpoint`
+with `projectId` and `app` set, so it uses the same fan-out, queue, retries,
+delivery log and auto-disable as any webhook; it is listed in the admin's
+webhooks, marked as an app, and counts against a cap of ten per project rather
+than the workspace's twenty.
+
+- **Rendered at send time.** The delivery stores the ordinary event payload; the
+  worker turns it into the tool's message (`lib/app-messages.ts`) as it sends,
+  looking up the project and section names. People's words are escaped for
+  each tool so a task title cannot mention a channel: `<` in Slack, look-alike
+  angle brackets in Google Chat, and `allowed_mentions: []` in Discord.
+- **Only its project.** Fan-out matches a workspace-wide endpoint only when it
+  is not an app, so an app whose project is deleted (the column is set null)
+  goes quiet rather than hearing the whole workspace.
+- **Only the tool's address.** The URL must be https on the tool's own domain
+  (`appAcceptsUrl` in contracts) as well as pass the usual URL policy, so an
+  editor cannot use an app to send the project elsewhere.
+  `WEBHOOK_ALLOW_PRIVATE_URLS` lifts that check along with the private-address
+  one, so a local catcher can stand in for the real tool in development.
+- **Hello and test.** Connecting queues a ping with its own words ("CoreTask will
+  post updates from … here"), and **Send a test message** another, so a wrong
+  URL shows straight away on the connection's status line.
+
+### Rule e-mail
+
+"Send an email" works like "Send a webhook": the runner returns
+`RuleEmailRequest`s instead of sending anything, and the automation processor
+composes each one (`jobs/automation/rule-email.ts`: the rule's words, the task
+with its link, the rule's name) and queues it on the e-mail queue once the run
+is over. Recipients are people on the task (assignee, collaborators, creator)
+who are still workspace members, at most 20 per step. A typed address is not
+accepted, so a rule is not a way to mail arbitrary people.
+
+### Calendar links
+
+**Sync to calendar** (My Tasks, or a project's menu) gives a person a private
+address, `GET /api/v1/calendar/<token>.ics`, that Google Calendar, Outlook or
+Apple Calendar subscribes to. It answers raw `text/calendar` through `@Res()`,
+outside the JSON envelope, because a calendar app reads nothing else.
+
+- **The token is the credential.** The route is `@Public`, so the address only
+  ever reads, and it reads as its owner may see things _now_: a project they can
+  no longer open, or a workspace they have left, answers 404. Making and
+  resetting links is `@SessionOnly`, so an API key cannot mint more of them.
+  Reset replaces the token, and the old address stops working.
+- **What is on it.** Incomplete, unarchived tasks with a due date from 30 days
+  ago onwards, soonest first, capped at 1,000: My Tasks is the owner's assigned
+  tasks they can still see, and a project's calendar is its tasks, linked-in
+  ones included. A due date is an all-day event, spanning from the start date
+  when there is one. A due time is a timed event, from the start time or else
+  the half hour before. Each event links back to the task.
+- `lastFetchedAt` is written at most every five minutes, as a hint for the
+  dialog, not a log.
+
 ### Teams
 
 A team groups people; it does not authorise them. `WorkspaceMember.role` still

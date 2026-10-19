@@ -44,6 +44,8 @@ const entry = (overrides: Partial<NotificationEntry> = {}): NotificationEntry =>
   entityId: 'c-1',
   actionUrl: '/my-tasks',
   readAt: null,
+  archivedAt: null,
+  bookmarkedAt: null,
   createdAt: new Date('2026-08-04T12:00:00Z').toISOString(),
   ...overrides,
 });
@@ -97,7 +99,9 @@ describe('InboxPage', () => {
   });
 
   it('offers to undo a read entry rather than only to read it', async () => {
-    pages = [{ items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null }];
+    pages = [
+      { items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null },
+    ];
     const user = userEvent.setup();
     await render();
 
@@ -107,7 +111,9 @@ describe('InboxPage', () => {
   });
 
   it('hides "mark all read" when nothing is unread', async () => {
-    pages = [{ items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null }];
+    pages = [
+      { items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null },
+    ];
     await render();
 
     await waitFor(() => expect(screen.getByText('Ada mentioned you')).toBeInTheDocument());
@@ -133,7 +139,9 @@ describe('InboxPage', () => {
   });
 
   it('does not re-mark an entry that is already read', async () => {
-    pages = [{ items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null }];
+    pages = [
+      { items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null },
+    ];
     const user = userEvent.setup();
     await render();
 
@@ -162,7 +170,11 @@ describe('InboxPage', () => {
   it('flattens every loaded page into one list', async () => {
     pages = [
       { items: [entry()], unreadCount: 2, nextCursor: 'c1' },
-      { items: [entry({ id: 'n-2', title: 'Second page item' })], unreadCount: 2, nextCursor: null },
+      {
+        items: [entry({ id: 'n-2', title: 'Second page item' })],
+        unreadCount: 2,
+        nextCursor: null,
+      },
     ];
     await render();
 

@@ -97,11 +97,30 @@ describe('TaskDatePopover', () => {
     expect(screen.queryByRole('button', { name: 'Add time' })).not.toBeInTheDocument();
   });
 
-  it('keeps recurring honest: present, disabled, and marked Soon', async () => {
+  it('offers no repeat where the item cannot repeat', async () => {
     renderPicker();
 
-    const repeat = await screen.findByRole('button', { name: /Set to repeat/ });
-    expect(repeat).toBeDisabled();
-    expect(repeat).toHaveTextContent('Soon');
+    await screen.findByRole('button', { name: /Add time/ });
+    expect(screen.queryByRole('button', { name: /Set to repeat/ })).toBeNull();
+  });
+
+  it('sets a task to repeat from the picker', async () => {
+    const onChange = vi.fn();
+    render(
+      <TaskDatePopover
+        schedule={none}
+        onSave={vi.fn()}
+        open
+        onOpenChange={() => {}}
+        repeat={{ recurrence: null, onChange }}
+      >
+        <button type="button">Due</button>
+      </TaskDatePopover>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Set to repeat/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ frequency: 'WEEKLY' }));
   });
 });

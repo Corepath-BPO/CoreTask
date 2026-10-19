@@ -1,3 +1,4 @@
+import type { TagRef } from './tags.js';
 import type {
   CreatableWorkItemType,
   ProjectStatus,
@@ -8,6 +9,9 @@ import type {
   TicketSeverity,
   TicketStatus,
   TicketType,
+  TaskRecurrence,
+  TaskKind,
+  ApprovalStatus,
 } from '@coretask/contracts';
 
 import type { PaginationMeta } from './api.js';
@@ -169,6 +173,12 @@ export interface Task {
   /** Non-null means archived. */
   archivedAt: string | null;
   estimatedMinutes: number | null;
+  /** "Set to repeat" — completing the task creates the next one. Null for a one-off. */
+  recurrence: TaskRecurrence | null;
+  /** A plain task, a milestone or an approval. */
+  kind: TaskKind;
+  /** The decision on an approval; null for every other kind. */
+  approvalStatus: ApprovalStatus | null;
   assigneeId: string | null;
   assignee: UserRef | null;
   createdById: string;
@@ -178,6 +188,8 @@ export interface Task {
   commentCount: number;
   /** Confirmed uploads only. */
   attachmentCount: number;
+  /** Its tags, alphabetical. */
+  tags: TagRef[];
   createdAt: string;
   updatedAt: string;
 }
@@ -187,7 +199,23 @@ export interface TaskDetail extends Task {
   subtasks: Task[];
   project: { id: string; name: string; key: string; color: string } | null;
   section: { id: string; name: string } | null;
+  /** Multi-homing: the projects it is in besides its home, as the reader can see them. */
+  otherProjects: TaskProjectMembership[];
   createdBy: UserRef | null;
+  /** Set by "Mark as duplicate": the task this one repeats. */
+  duplicateOf: { id: string; title: string } | null;
+}
+
+/** A project a task is in besides its home, with its section there. */
+export interface TaskProjectMembership {
+  project: { id: string; name: string; key: string; color: string };
+  section: { id: string; name: string } | null;
+}
+
+export interface AddTaskToProjectPayload {
+  projectId: string;
+  /** That project's section; its first when left out. */
+  sectionId?: string | null;
 }
 
 export interface CreateTaskPayload {
@@ -206,6 +234,8 @@ export interface CreateTaskPayload {
   /** Only meaningful with a `dueDate`; the server clears it with the date. */
   dueAt?: string | null;
   estimatedMinutes?: number | null;
+  /** A milestone or an approval rather than a plain task. */
+  kind?: TaskKind;
   /** Insert after this sibling. `null` places it first; omitted appends. */
   afterTaskId?: string | null;
 }
@@ -221,6 +251,12 @@ export interface UpdateTaskPayload {
   dueDate?: string | null;
   dueAt?: string | null;
   estimatedMinutes?: number | null;
+  /** "Set to repeat"; null stops the task repeating. */
+  recurrence?: TaskRecurrence | null;
+  /** Convert to a milestone, an approval, or back to a task. */
+  kind?: TaskKind;
+  /** Decide an approval. Only an approval takes one. */
+  approvalStatus?: ApprovalStatus;
 }
 
 export interface MoveTaskPayload {

@@ -82,6 +82,14 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
       if (isOwnChange(payload.correlationId)) return;
 
       refresh();
+
+      // A rule may have commented, added collaborators or written history —
+      // none of which the rows carry — so an open task pane hears of it too.
+      if (payload.source === 'automation') {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.comments.all(workspaceId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.followers.all(workspaceId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.activity.all(workspaceId) });
+      }
     };
 
     /*

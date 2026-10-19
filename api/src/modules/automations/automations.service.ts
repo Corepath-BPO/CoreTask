@@ -2,7 +2,9 @@ import {
   AUTOMATION_TRIGGERS,
   AutomationNodeType,
   AutomationRuleStatus,
+  AutomationTrigger,
   GraphIssueLevel,
+  isTimeZone,
   WorkspaceRole,
   hasAtLeastRole,
   rulesForSection,
@@ -12,8 +14,12 @@ import { randomUUID } from 'node:crypto';
 import type { AutomationRule, Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
+import { ProjectAccessService } from '../project-access/project-access.service';
 import { ProjectsService } from '../projects/projects.service';
+
+import { AutomationEventPublisher } from './automation-event.publisher';
 
 import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
 import type { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
@@ -43,6 +49,8 @@ export class AutomationsService {
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
     private readonly graph: AutomationGraphValidatorService,
+    private readonly access: ProjectAccessService,
+    private readonly publisher: AutomationEventPublisher,
   ) {}
 
   async list(workspaceId: string, projectId: string, sectionId?: string) {
@@ -448,6 +456,76 @@ export class AutomationsService {
       orderBy: { startedAt: 'desc' },
       take: limit,
     });
+  }
+
+  /**
+   * "Run rule" — a manual rule, on the tasks somebody picked.
+   *
+   * Anyone who can edit the project's tasks may run one, as in Asana; changing
+   * the rule stays a manager's job. Each task gets an event aimed at this rule
+   * alone, credited to the person who ran it, so the run is logged, guarded
+   * and chained exactly as one an edit sets off.
+   */
+  async runManually(
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+    actor: ActorContext,
+    taskIds: string[],
+    timezone?: string,
+  ): Promise<{ queued: number }> {
+    const rule = await this.requireRule(workspaceId, projectId, ruleId);
+
+    if (rule.triggerType !== AutomationTrigger.RUN_MANUALLY) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'This rule runs on its own trigger, not by hand.',
+      );
+    }
+    if (rule.status !== AutomationRuleStatus.ACTIVE) {
+      throw AppException.badRequest('BAD_REQUEST', 'Turn this rule on before running it.');
+    }
+
+    await this.access.assertEffectiveRole(projectId, actor, WorkspaceRole.MEMBER);
+
+    const wanted = [...new Set(taskIds)];
+    const tasks = await this.prisma.task.findMany({
+      // In this project by home or by link.
+      where: {
+        id: { in: wanted },
+        workspaceId,
+        archivedAt: null,
+        OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
+      },
+      select: { id: true },
+    });
+
+    if (tasks.length !== wanted.length) {
+      throw AppException.notFound(
+        'RESOURCE_NOT_FOUND',
+        'A task to run this rule on is not in this project.',
+      );
+    }
+
+    // One id for the batch, so the history reads it as one run.
+    const correlationId = randomUUID();
+
+    for (const task of tasks) {
+      await this.publisher.publish({
+        workspaceId,
+        projectId,
+        trigger: AutomationTrigger.RUN_MANUALLY,
+        entityType: 'TASK',
+        entityId: task.id,
+        actorId: actor.userId,
+        ruleId: rule.id,
+        correlationId,
+        // Whose "today" the rule's text means, when it writes one.
+        ...(isTimeZone(timezone) ? { after: { timezone } } : {}),
+      });
+    }
+
+    return { queued: tasks.length };
   }
 
   // -------------------------------------------------------------------------

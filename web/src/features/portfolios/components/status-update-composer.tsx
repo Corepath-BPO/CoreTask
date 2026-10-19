@@ -1,8 +1,10 @@
-import type { ProjectSummary } from '@coretask/types';
+import { PROJECT_APP_INFO, WebhookEventType } from '@coretask/contracts';
+import type { ProjectSummary, StatusTemplate } from '@coretask/types';
 import {
   ChevronDown,
   ChevronRight,
   Globe,
+  LayoutTemplate,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -27,11 +29,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn, daysUntil, formatDate, initials, percentage } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 import {
+  usePostStatusUpdate,
   useProjectStatusUpdate,
-  useStatusUpdateStore,
   type ProjectStatusUpdate,
   type ProjectStatusUpdateValue,
-} from '@/stores/status-update.store';
+} from '@/features/projects/hooks/use-project-updates';
+import { useProjectApps } from '@/features/projects/hooks/use-project-apps';
+import { useProjectMembers } from '@/features/projects/hooks/use-project-members';
+import { useStatusTemplates } from '@/features/projects/hooks/use-status-templates';
+import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { STATUS_UPDATE_OPTIONS, statusUpdateOption } from '../lib/status-updates';
 import { StatusUpdateChip } from './status-update';
@@ -56,9 +62,18 @@ export function StatusUpdateComposer({
   initialStatus,
   onClose,
 }: StatusUpdateComposerProps) {
-  const setStatus = useStatusUpdateStore((state) => state.setStatus);
+  const { workspace } = useActiveWorkspace();
+  const postUpdate = usePostStatusUpdate(workspace?.id, project.id);
+  // Everyone on the roster but the author hears about it — the server's rule.
+  const { data: members } = useProjectMembers(workspace?.id, project.id);
   const previous = useProjectStatusUpdate(project.id);
   const currentUser = useCurrentUser();
+  const recipients = (members ?? []).filter((member) => member.userId !== currentUser?.id).length;
+  const { data: templates } = useStatusTemplates(workspace?.id, project.id);
+  const { data: apps } = useProjectApps(workspace?.id, project.id);
+  const channels = (apps ?? []).filter(
+    (app) => app.enabled && app.events.includes(WebhookEventType.PROJECT_STATUS_UPDATED),
+  );
 
   const [status, setStatusValue] = useState<ProjectStatusUpdateValue>(initialStatus);
   const [title, setTitle] = useState(`${project.name} - ${formatDate(new Date())}`);
@@ -74,16 +89,36 @@ export function StatusUpdateComposer({
   const overdue =
     project.dueDate !== null && project.archivedAt === null && daysUntil(project.dueDate) < 0;
 
+  // Posted to the project, where its members are notified and everyone who
+  // opens it sees the status — not kept in this browser.
   const post = () => {
-    setStatus(project.id, status, {
-      title: title.trim() || null,
-      note: summary.trim() || null,
-      nextSteps: nextSteps.trim() || null,
-    });
-    toast.success(
-      project.lead ? `Update posted, ${project.lead.name} will be notified` : 'Update posted',
+    postUpdate.mutate(
+      {
+        status,
+        title: title.trim() || `${project.name} - ${formatDate(new Date())}`,
+        note: summary.trim() || null,
+        nextSteps: nextSteps.trim() || null,
+      },
+      {
+        onSuccess: () => {
+          toast.success('Update posted — the project’s members will be notified');
+          onClose();
+        },
+      },
     );
-    onClose();
+  };
+
+  /**
+   * A status template's starting point. Its status only when it names one,
+   * and its sections in place of whatever was typed — the template is the
+   * shape of the update, so half of an old draft under it would be noise.
+   */
+  const applyTemplate = (template: StatusTemplate) => {
+    if (template.status) {
+      setStatusValue(template.status.toLowerCase() as ProjectStatusUpdateValue);
+    }
+    setSummary(template.summary ?? '');
+    setNextSteps(template.nextSteps ?? '');
   };
 
   /** Rule-based draft over the live numbers — no model, and none needed. */
@@ -122,17 +157,44 @@ export function StatusUpdateComposer({
           </span>
           <span aria-hidden="true" className="hidden h-4 w-px bg-border md:block" />
           <span className="hidden text-xs text-muted-foreground sm:inline">
-            {project.lead ? '1 person will be notified' : 'Nobody will be notified'}
+            {recipients === 0
+              ? 'Nobody else is on this project'
+              : `${recipients} ${recipients === 1 ? 'person' : 'people'} will be notified`}
           </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <LayoutTemplate />
+                Use a template
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {templates && templates.length > 0 ? (
+                templates.map((template) => (
+                  <DropdownMenuItem key={template.id} onSelect={() => applyTemplate(template)}>
+                    <span className="truncate">{template.name}</span>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No status templates yet. Add them under Customize › Status templates.
+                </p>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => toast('Only the project owner is notified in this local build.')}
+            onClick={() =>
+              toast(
+                'Everyone on the project is notified. Add people to the project to include them.',
+              )
+            }
           >
             <Plus />
             Add recipients
           </Button>
-          <Button size="sm" onClick={post}>
+          <Button size="sm" onClick={post} disabled={postUpdate.isPending}>
             Post
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="More options" disabled>
@@ -262,11 +324,25 @@ export function StatusUpdateComposer({
 
               <div className="flex items-center gap-4">
                 <dt className="w-36 shrink-0 text-muted-foreground">Connected channel</dt>
-                <dd>
-                  <Button variant="outline" size="sm" disabled>
-                    <Slack />
-                    Connect Slack
-                  </Button>
+                {/* The project's chat apps that post status updates — Customize › Apps. */}
+                <dd className="min-w-0">
+                  {channels.length > 0 ? (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {channels.map((channel) => (
+                        <span
+                          key={channel.id}
+                          className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs"
+                        >
+                          <Slack className="size-3" aria-hidden="true" />
+                          {channel.name || PROJECT_APP_INFO[channel.app].label}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      None — connect one in Customize › Apps
+                    </span>
+                  )}
                 </dd>
               </div>
 
@@ -326,8 +402,8 @@ export function StatusUpdateComposer({
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Local build: posting stores the update in this browser. The notification is
-              simulated.
+              Posted to the project’s Messages tab, where everyone who can open the project sees it.
+              Its members are notified in their inbox.
             </p>
           </div>
         </div>

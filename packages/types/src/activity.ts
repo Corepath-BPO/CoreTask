@@ -40,8 +40,14 @@ export interface NotificationEntry {
   /** In-app path to the thing the notification is about. */
   actionUrl: string | null;
   readAt: string | null;
+  /** Set once archived — out of the inbox, still findable under Archive. */
+  archivedAt: string | null;
+  bookmarkedAt: string | null;
   createdAt: string;
 }
+
+/** Which pile of the inbox to read: Asana's Activity, Archive and Bookmarks tabs. */
+export type NotificationView = 'inbox' | 'archived' | 'bookmarked';
 
 export interface NotificationFeed {
   items: NotificationEntry[];

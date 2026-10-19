@@ -6,6 +6,11 @@ import {
   ServerEvent,
   TaskStatus,
   WorkspaceRole,
+  readRecurrence,
+  recurrenceProblems,
+  APPROVAL_STATUS_LABEL,
+  TASK_KIND_LABEL,
+  approvalCompletes,
 } from '@coretask/contracts';
 import type {
   Task,
@@ -15,7 +20,7 @@ import type {
   TaskListSummary,
 } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, type Task as PrismaTask } from '@prisma/client';
+import { ApprovalStatus, Prisma, TaskKind, type Task as PrismaTask } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
@@ -56,6 +61,8 @@ import { taskLink, taskRef } from '../followers/item-ref';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
+import { linkedProjectIds, taskSiblingsIn } from './task-projects';
+import { spawnNextOccurrence } from './task-recurrence';
 import {
   taskDetailInclude,
   taskInclude,
@@ -144,7 +151,6 @@ export class TasksService {
 
     const where: Prisma.TaskWhereInput = {
       workspaceId,
-      projectId,
       archivedAt: null,
       // Subtasks belong under their parent, not as sibling rows in a list.
       parentTaskId: null,
@@ -152,8 +158,9 @@ export class TasksService {
         ? { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }
         : {}),
       // AND rather than spreading: two conditions on the same field would
-      // otherwise overwrite each other and silently drop a filter.
-      ...(conditions.length > 0 ? { AND: conditions } : {}),
+      // otherwise overwrite each other and silently drop a filter. The
+      // project's tasks include those linked in from elsewhere.
+      AND: [{ OR: [{ projectId }, { projectLinks: { some: { projectId } } }] }, ...conditions],
     };
 
     const [total, tasks] = await Promise.all([
@@ -175,14 +182,28 @@ export class TasksService {
       this.customFieldValues(tasks.map((task) => task.id)),
     ]);
 
+    // A task linked in from another project sits in its link's section here.
+    const links = new Map(
+      (
+        await this.prisma.taskProject.findMany({
+          where: { projectId, taskId: { in: tasks.map((task) => task.id) } },
+          select: { taskId: true, sectionId: true, position: true },
+        })
+      ).map((link) => [link.taskId, link]),
+    );
+
     // Formula values last, from the stored rows just read: worked out per
     // page and never stored, so they are always right.
     const rows = await this.formulas.decorateTasks(
       projectId,
-      tasks.map((task) => ({
-        ...toTaskDto(task, completed.get(task.id) ?? 0),
-        customFieldValues: customFieldValues.get(task.id) ?? [],
-      })),
+      tasks.map((task) => {
+        const link = task.projectId === projectId ? undefined : links.get(task.id);
+        return {
+          ...toTaskDto(task, completed.get(task.id) ?? 0),
+          ...(link ? { sectionId: link.sectionId, position: link.position } : {}),
+          customFieldValues: customFieldValues.get(task.id) ?? [],
+        };
+      }),
     );
 
     return new PaginatedResult(rows, { ...buildPaginationMeta(query, total), summary });
@@ -210,8 +231,14 @@ export class TasksService {
      * return that workspace's subtasks: the guard proves the caller belongs to
      * the workspace in the URL, never that the id in the path does.
      */
+    // In this project by home or by link: a linked task's subtasks expand
+    // under it on that board too.
     const parent = await this.prisma.task.findFirst({
-      where: { id: parentTaskId, workspaceId, projectId },
+      where: {
+        id: parentTaskId,
+        workspaceId,
+        OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
+      },
       select: { id: true },
     });
 
@@ -263,7 +290,7 @@ export class TasksService {
 
   async getDetail(workspaceId: string, taskId: string, actor: ActorContext): Promise<TaskDetail> {
     const task = await this.prisma.task.findFirst({
-      where: { id: taskId, workspaceId, AND: [this.access.scopedWhere(actor)] },
+      where: { id: taskId, workspaceId, AND: [this.access.taskWhere(actor)] },
       include: taskDetailInclude,
     });
 
@@ -271,7 +298,20 @@ export class TasksService {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
     }
 
-    return toTaskDetailDto(task);
+    // The other projects, as far as the reader can see them.
+    const linkIds = task.projectLinks.map((link) => link.project.id);
+    const visible = linkIds.length
+      ? new Set(
+          (
+            await this.prisma.project.findMany({
+              where: { AND: [{ id: { in: linkIds } }, this.access.projectWhere(actor)] },
+              select: { id: true },
+            })
+          ).map((row) => row.id),
+        )
+      : new Set<string>();
+
+    return toTaskDetailDto(task, (projectId) => visible.has(projectId));
   }
 
   /**
@@ -356,6 +396,9 @@ export class TasksService {
           dueAt: due.at,
           completedAt: status === TaskStatus.DONE ? new Date() : null,
           estimatedMinutes: dto.estimatedMinutes ?? null,
+          kind: dto.kind ?? TaskKind.TASK,
+          // An approval starts out waiting for its answer.
+          approvalStatus: dto.kind === TaskKind.APPROVAL ? ApprovalStatus.PENDING : null,
         },
         include: taskInclude,
       });
@@ -437,6 +480,17 @@ export class TasksService {
     if (dto.description !== undefined) data.description = normalizeRichText(dto.description);
     if (dto.priority !== undefined) data.priority = dto.priority;
     if (dto.estimatedMinutes !== undefined) data.estimatedMinutes = dto.estimatedMinutes;
+    if (dto.recurrence !== undefined) {
+      if (dto.recurrence === null) {
+        data.recurrence = Prisma.DbNull;
+      } else {
+        const problems = recurrenceProblems(dto.recurrence);
+        if (problems.length > 0) {
+          throw AppException.badRequest('BAD_REQUEST', problems.join(' '));
+        }
+        data.recurrence = readRecurrence(dto.recurrence) as unknown as Prisma.InputJsonValue;
+      }
+    }
 
     // The date and its time move as a pair — see `resolveSchedule`.
     const start = resolveSchedule(
@@ -465,6 +519,33 @@ export class TasksService {
       if (dto.status === TaskStatus.DONE && existing.completedAt === null) {
         data.completedAt = new Date();
       } else if (dto.status !== TaskStatus.DONE && existing.completedAt !== null) {
+        data.completedAt = null;
+      }
+    }
+
+    // Converting: an approval starts out waiting for an answer, and anything
+    // that stops being an approval stops having one.
+    const kind = dto.kind ?? existing.kind;
+    if (dto.kind !== undefined && dto.kind !== existing.kind) {
+      data.kind = dto.kind;
+      data.approvalStatus = dto.kind === TaskKind.APPROVAL ? ApprovalStatus.PENDING : null;
+    }
+
+    /*
+     * Deciding an approval. The decision is the completion: approving or
+     * rejecting closes it, requesting changes reopens it — and it wins over
+     * a status sent alongside, because the decision is what somebody chose.
+     */
+    if (dto.approvalStatus !== undefined) {
+      if (kind !== TaskKind.APPROVAL) {
+        throw AppException.badRequest('BAD_REQUEST', 'Only an approval takes a decision.');
+      }
+      data.approvalStatus = dto.approvalStatus;
+      if (approvalCompletes(dto.approvalStatus)) {
+        data.status = TaskStatus.DONE;
+        if (existing.completedAt === null) data.completedAt = new Date();
+      } else {
+        data.status = TaskStatus.TODO;
         data.completedAt = null;
       }
     }
@@ -507,8 +588,37 @@ export class TasksService {
       });
     }
 
+    // The two changes the story diff does not describe, in words.
+    if (existing.kind !== updated.kind) {
+      await this.activity.record({
+        ...context,
+        action: ActivityAction.UPDATED,
+        summary: `Converted "${updated.title}" to ${TASK_KIND_LABEL[updated.kind].toLowerCase()}`,
+        metadata: { from: existing.kind, to: updated.kind },
+      });
+    }
+    if (dto.approvalStatus !== undefined && existing.approvalStatus !== updated.approvalStatus) {
+      await this.activity.record({
+        ...context,
+        action: ActivityAction.STATUS_CHANGED,
+        summary: `${APPROVAL_STATUS_LABEL[dto.approvalStatus]}: "${updated.title}"`,
+        metadata: { approvalStatus: dto.approvalStatus },
+      });
+    }
+
+    // A repeating task, just finished, makes its next occurrence.
+    if (existing.completedAt === null && updated.completedAt !== null) {
+      await spawnNextOccurrence(this.prisma, updated.id, userId);
+    }
+
     const task = await this.withSubtaskRollup(updated);
-    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_UPDATED, task);
+    void this.broadcastEverywhere(
+      workspaceId,
+      updated.id,
+      updated.projectId,
+      ServerEvent.TASK_UPDATED,
+      task,
+    );
 
     if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
       await this.followers.ensure(workspaceId, taskLink(updated.id), [updated.assigneeId]);
@@ -531,6 +641,10 @@ export class TasksService {
       }
       if (existing.completedAt === null && updated.completedAt !== null) {
         triggers.push(AutomationTrigger.TASK_COMPLETED);
+      }
+      if (existing.kind !== updated.kind) triggers.push(AutomationTrigger.TASK_TYPE_CHANGED);
+      if (existing.approvalStatus !== updated.approvalStatus && updated.approvalStatus) {
+        triggers.push(AutomationTrigger.APPROVAL_STATUS_CHANGED);
       }
       // The fields a rule can watch on their own — the same derivation the
       // list view's edits and a rule's own writes use.
@@ -589,9 +703,20 @@ export class TasksService {
 
     const section = dto.sectionId ? await this.requireSection(workspaceId, dto.sectionId) : null;
 
-    // A task cannot sit in a column that belongs to a different project.
+    // A column of another project: allowed only where the task is linked in,
+    // and then it moves the link — the task's place on that board — while
+    // its home stays where it is.
     if (section && existing.projectId && section.projectId !== existing.projectId) {
-      throw AppException.badRequest('BAD_REQUEST', 'That section belongs to a different project.');
+      const link = await this.prisma.taskProject.findUnique({
+        where: { taskId_projectId: { taskId, projectId: section.projectId } },
+      });
+      if (!link) {
+        throw AppException.badRequest(
+          'BAD_REQUEST',
+          'That section belongs to a different project.',
+        );
+      }
+      return this.moveLink(workspaceId, actor, existing, section, link.sectionId, dto.afterTaskId);
     }
 
     // A workspace-level task joining a project's column is a write into that
@@ -674,6 +799,208 @@ export class TasksService {
   }
 
   /**
+   * A move on a board the task is linked into: the link takes the section and
+   * the position among that section's cards, home and linked alike. The
+   * story, the rule trigger and the broadcast are that project's.
+   */
+  private async moveLink(
+    workspaceId: string,
+    actor: ActorContext,
+    existing: PrismaTask,
+    section: { id: string; name: string; projectId: string },
+    fromSectionId: string | null,
+    afterTaskId: string | null | undefined,
+  ): Promise<Task> {
+    const siblings = await taskSiblingsIn(this.prisma, workspaceId, section.projectId, section.id);
+    if (afterTaskId) this.assertSibling(siblings, afterTaskId);
+    const plan = planPlacement(siblings, afterTaskId, existing.id);
+    const linkedIds = new Set(siblings.filter((row) => row.linked).map((row) => row.id));
+
+    await this.prisma.$transaction(async (tx) => {
+      // A renumbering touches both kinds of card: home rows and links.
+      for (const entry of plan.rebalance) {
+        if (linkedIds.has(entry.id)) {
+          await tx.taskProject.update({
+            where: { taskId_projectId: { taskId: entry.id, projectId: section.projectId } },
+            data: { position: entry.position },
+          });
+        } else {
+          await tx.task.update({ where: { id: entry.id }, data: { position: entry.position } });
+        }
+      }
+      await tx.taskProject.update({
+        where: { taskId_projectId: { taskId: existing.id, projectId: section.projectId } },
+        data: { sectionId: section.id, position: plan.position },
+      });
+    });
+
+    if (fromSectionId !== section.id) {
+      const from = fromSectionId
+        ? await this.prisma.section.findUnique({
+            where: { id: fromSectionId },
+            select: { id: true, name: true },
+          })
+        : null;
+      await this.activity.recordStories(
+        {
+          workspaceId,
+          actorId: actor.userId,
+          entity: ActivityEntity.TASK,
+          entityId: existing.id,
+          projectId: section.projectId,
+        },
+        diffItemStories(
+          snapshotFromTask(existing, { section: from ? { id: from.id, label: from.name } : null }),
+          snapshotFromTask(existing, { section: { id: section.id, label: section.name } }),
+          'task',
+        ),
+      );
+
+      await this.automation.publish({
+        workspaceId,
+        projectId: section.projectId,
+        trigger: AutomationTrigger.TASK_MOVED_TO_SECTION,
+        entityType: 'TASK',
+        entityId: existing.id,
+        actorId: actor.userId,
+        before: { sectionId: fromSectionId },
+        after: { sectionId: section.id },
+      });
+    }
+
+    const row = await this.prisma.task.findUniqueOrThrow({
+      where: { id: existing.id },
+      include: taskInclude,
+    });
+    const task = await this.withSubtaskRollup(row);
+    // On that board the task sits in its link's column.
+    const here = { ...task, sectionId: section.id, position: plan.position };
+
+    void this.broadcast.emit(workspaceId, section.projectId, ServerEvent.TASK_MOVED, {
+      task: here,
+      fromSectionId,
+    });
+
+    return here;
+  }
+
+  /**
+   * "Mark as duplicate", as Asana has it: the task is completed and points at
+   * the one it repeats, and its collaborators join that one so nobody stops
+   * hearing about the work. The original must be a task the caller can see,
+   * and not itself a duplicate of this one.
+   */
+  async markDuplicate(
+    workspaceId: string,
+    actor: ActorContext,
+    taskId: string,
+    originalId: string,
+  ): Promise<TaskDetail> {
+    if (taskId === originalId) {
+      throw AppException.badRequest('BAD_REQUEST', 'A task cannot be a duplicate of itself.');
+    }
+    const task = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
+    const original = await this.requireTask(workspaceId, originalId, actor);
+    if (original.duplicateOfId === taskId) {
+      throw AppException.badRequest('BAD_REQUEST', 'That task is already a duplicate of this one.');
+    }
+
+    if (task.completedAt === null) {
+      await this.update(workspaceId, actor, taskId, { status: TaskStatus.DONE } as UpdateTaskDto);
+    }
+    await this.prisma.task.update({ where: { id: taskId }, data: { duplicateOfId: originalId } });
+
+    const followers = await this.prisma.follower.findMany({
+      where: { taskId },
+      select: { userId: true },
+    });
+    await this.followers.ensure(workspaceId, taskLink(originalId), [
+      ...followers.map((follower) => follower.userId),
+      task.assigneeId,
+    ]);
+
+    await this.activity.record({
+      workspaceId,
+      actorId: actor.userId,
+      action: ActivityAction.UPDATED,
+      entity: ActivityEntity.TASK,
+      entityId: taskId,
+      projectId: task.projectId,
+      summary: `Marked "${task.title}" as a duplicate of "${original.title}"`,
+      metadata: { duplicateOfId: originalId },
+    });
+    await this.announceUpdated(workspaceId, taskId);
+    return this.getDetail(workspaceId, taskId, actor);
+  }
+
+  /** Undoes "Mark as duplicate"; the task stays complete until someone reopens it. */
+  async clearDuplicate(
+    workspaceId: string,
+    actor: ActorContext,
+    taskId: string,
+  ): Promise<TaskDetail> {
+    const task = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
+    if (task.duplicateOfId !== null) {
+      await this.prisma.task.update({ where: { id: taskId }, data: { duplicateOfId: null } });
+      await this.activity.record({
+        workspaceId,
+        actorId: actor.userId,
+        action: ActivityAction.UPDATED,
+        entity: ActivityEntity.TASK,
+        entityId: taskId,
+        projectId: task.projectId,
+        summary: `"${task.title}" is no longer marked as a duplicate`,
+      });
+      await this.announceUpdated(workspaceId, taskId);
+    }
+    return this.getDetail(workspaceId, taskId, actor);
+  }
+
+  /**
+   * Tells every list, board and panel showing the task that something about
+   * it changed off the task row itself — its tags, say.
+   */
+  async announceUpdated(workspaceId: string, taskId: string): Promise<void> {
+    const row = await this.prisma.task.findUnique({ where: { id: taskId }, include: taskInclude });
+    if (!row) return;
+    const task = await this.withSubtaskRollup(row);
+    await this.broadcastEverywhere(
+      workspaceId,
+      taskId,
+      row.projectId,
+      ServerEvent.TASK_UPDATED,
+      task,
+    );
+    const occurredAt = new Date().toISOString();
+    const projectIds = [row.projectId, ...(await linkedProjectIds(this.prisma, taskId))];
+    for (const projectId of projectIds) {
+      if (!projectId) continue;
+      void this.broadcast.emit(workspaceId, projectId, ServerEvent.WORK_ITEM_UPDATED, {
+        workspaceId,
+        projectId,
+        occurredAt,
+      });
+    }
+  }
+
+  /**
+   * A task event for every project the task is in, so a board it is linked
+   * into — perhaps the only one a viewer can open — hears of the change too.
+   */
+  private async broadcastEverywhere(
+    workspaceId: string,
+    taskId: string,
+    homeProjectId: string | null,
+    event: string,
+    payload: unknown,
+  ): Promise<void> {
+    void this.broadcast.emit(workspaceId, homeProjectId, event, payload);
+    for (const projectId of await linkedProjectIds(this.prisma, taskId)) {
+      void this.broadcast.emit(workspaceId, projectId, event, payload);
+    }
+  }
+
+  /**
    * Archives rather than deletes: activity, comments and subtasks keep
    * referring to the task, and archiving is reversible.
    */
@@ -713,7 +1040,13 @@ export class TasksService {
     });
 
     const task = await this.withSubtaskRollup(updated);
-    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_ARCHIVED, task);
+    void this.broadcastEverywhere(
+      workspaceId,
+      updated.id,
+      updated.projectId,
+      ServerEvent.TASK_ARCHIVED,
+      task,
+    );
 
     return task;
   }
@@ -743,7 +1076,13 @@ export class TasksService {
     });
 
     const task = await this.withSubtaskRollup(updated);
-    void this.broadcast.emit(workspaceId, updated.projectId, ServerEvent.TASK_UPDATED, task);
+    void this.broadcastEverywhere(
+      workspaceId,
+      updated.id,
+      updated.projectId,
+      ServerEvent.TASK_UPDATED,
+      task,
+    );
 
     return task;
   }
@@ -764,11 +1103,24 @@ export class TasksService {
     return {
       workspaceId,
       // Under AND: `summarize` spreads this where and sets its own OR on top.
-      AND: [this.access.scopedWhere(actor)],
+      AND: [
+        this.access.taskWhere(actor),
+        // A project's tasks include those linked in from elsewhere.
+        ...(query.projectId
+          ? [
+              {
+                OR: [
+                  { projectId: query.projectId },
+                  { projectLinks: { some: { projectId: query.projectId } } },
+                ],
+              },
+            ]
+          : []),
+      ],
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.includeSubtasks ? {} : { parentTaskId: null }),
-      ...(query.projectId ? { projectId: query.projectId } : {}),
       ...(query.sectionId ? { sectionId: query.sectionId } : {}),
+      ...(query.kind ? { kind: query.kind } : {}),
       ...(assigneeId ? { assigneeId } : {}),
       ...(query.status?.length ? { status: { in: query.status } } : {}),
       ...(query.priority?.length ? { priority: { in: query.priority } } : {}),
@@ -901,15 +1253,17 @@ export class TasksService {
     minimumRole?: WorkspaceRole,
   ): Promise<PrismaTask> {
     const task = await this.prisma.task.findFirst({
-      where: { id: taskId, workspaceId, AND: [this.access.scopedWhere(actor)] },
+      where: { id: taskId, workspaceId, AND: [this.access.taskWhere(actor)] },
     });
 
     if (!task) {
       throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
     }
 
+    // The best role across the task's projects: an editor of any project it
+    // is in may edit it.
     if (minimumRole) {
-      await this.access.assertEffectiveRole(task.projectId, actor, minimumRole);
+      await this.access.assertEffectiveTaskRole(task, actor, minimumRole);
     }
 
     return task;

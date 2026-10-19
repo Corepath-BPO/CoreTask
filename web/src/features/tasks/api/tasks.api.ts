@@ -1,5 +1,6 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type {
+  AddTaskToProjectPayload,
   CreateTaskPayload,
   MoveTaskPayload,
   Task,
@@ -24,6 +25,8 @@ export interface TaskListParams {
   dueAfter?: string;
   includeArchived?: boolean;
   includeSubtasks?: boolean;
+  /** Only tasks of this kind — the Overview's milestones. */
+  kind?: string;
 }
 
 export const tasksApi = {
@@ -55,4 +58,30 @@ export const tasksApi = {
 
   restore: (workspaceId: string, taskId: string): Promise<Task> =>
     apiClient.post<Task>(ApiRoutes.tasks.restore(workspaceId, taskId)),
+
+  /** Multi-homing: another project the task is in. */
+  addToProject: (
+    workspaceId: string,
+    taskId: string,
+    payload: AddTaskToProjectPayload,
+  ): Promise<TaskDetail> =>
+    apiClient.post<TaskDetail>(ApiRoutes.tasks.projects(workspaceId, taskId), payload),
+
+  setProjectSection: (
+    workspaceId: string,
+    taskId: string,
+    projectId: string,
+    sectionId: string | null,
+  ): Promise<TaskDetail> =>
+    apiClient.patch<TaskDetail>(ApiRoutes.tasks.project(workspaceId, taskId, projectId), {
+      sectionId,
+    }),
+
+  /** Null when the caller can no longer see the task afterwards. */
+  removeFromProject: (
+    workspaceId: string,
+    taskId: string,
+    projectId: string,
+  ): Promise<TaskDetail | null> =>
+    apiClient.delete<TaskDetail | null>(ApiRoutes.tasks.project(workspaceId, taskId, projectId)),
 };

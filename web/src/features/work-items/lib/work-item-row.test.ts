@@ -28,7 +28,14 @@ const base = (overrides: Partial<ProjectWorkItem> = {}): ProjectWorkItem =>
     commentCount: 0,
     attachmentCount: 0,
     customFieldValues: [],
-    details: { kind: 'TASK', estimatedMinutes: null, rawStatus: 'TODO', rawPriority: 'MEDIUM' },
+    details: {
+      kind: 'TASK',
+      taskKind: 'TASK',
+      approvalStatus: null,
+      estimatedMinutes: null,
+      rawStatus: 'TODO',
+      rawPriority: 'MEDIUM',
+    },
     createdById: 'u-1',
     createdBy: null,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -80,7 +87,14 @@ describe('turning a work item into a row', () => {
     const row = toWorkItemRow(
       base({
         status: { id: '019fce6b-efa0-7f40-846a-98cb1196437f', name: 'To Do', colorToken: 'gray' },
-        details: { kind: 'TASK', estimatedMinutes: null, rawStatus: 'TODO', rawPriority: 'HIGH' },
+        details: {
+          kind: 'TASK',
+          taskKind: 'TASK',
+          approvalStatus: null,
+          estimatedMinutes: null,
+          rawStatus: 'TODO',
+          rawPriority: 'HIGH',
+        },
       }),
     );
 
@@ -166,7 +180,14 @@ describe('turning a work item into a row', () => {
     expect(
       toWorkItemRow(
         base({
-          details: { kind: 'TASK', estimatedMinutes: 90, rawStatus: 'TODO', rawPriority: 'MEDIUM' },
+          details: {
+            kind: 'TASK',
+            taskKind: 'TASK',
+            approvalStatus: null,
+            estimatedMinutes: 90,
+            rawStatus: 'TODO',
+            rawPriority: 'MEDIUM',
+          },
         }),
       ).estimatedMinutes,
     ).toBe(90);

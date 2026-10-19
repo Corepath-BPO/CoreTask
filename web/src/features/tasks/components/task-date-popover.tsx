@@ -1,3 +1,4 @@
+import { describeRecurrence, type TaskRecurrence } from '@coretask/contracts';
 import { CalendarDays, Clock, Repeat, X } from 'lucide-react';
 import { useState } from 'react';
 
@@ -15,7 +16,15 @@ import {
   type Schedule,
 } from '@/lib/utils';
 
+import { RepeatForm } from './task-repeat';
+
 type Field = 'start' | 'due';
+
+/** "Set to repeat" from the picker, where the task can repeat. */
+interface RepeatProps {
+  recurrence: TaskRecurrence | null;
+  onChange: (recurrence: TaskRecurrence | null) => void;
+}
 
 interface TaskDatePopoverProps {
   schedule: Schedule;
@@ -31,6 +40,8 @@ interface TaskDatePopoverProps {
   initialField?: Field;
   align?: 'start' | 'center' | 'end';
   side?: 'top' | 'bottom' | 'left' | 'right';
+  /** Offers "Set to repeat"; left out where a task cannot repeat (tickets, a selection). */
+  repeat?: RepeatProps;
 }
 
 /**
@@ -53,6 +64,7 @@ export function TaskDatePopover({
   initialField = 'due',
   align = 'start',
   side,
+  repeat,
 }: TaskDatePopoverProps) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -75,6 +87,7 @@ export function TaskDatePopover({
             onSave={onSave}
             dateOnly={dateOnly}
             initialField={initialField}
+            repeat={repeat}
           />
         )}
       </PopoverContent>
@@ -87,12 +100,15 @@ function DatePickerBody({
   onSave,
   dateOnly,
   initialField,
+  repeat,
 }: {
   schedule: Schedule;
   onSave: (changes: Partial<Schedule>) => void;
   dateOnly: boolean;
   initialField: Field;
+  repeat?: RepeatProps;
 }) {
+  const [repeating, setRepeating] = useState(false);
   const start = schedule.startDate ? calendarDateOf(schedule.startDate) : null;
   const due = schedule.dueDate ? calendarDateOf(schedule.dueDate) : null;
 
@@ -210,13 +226,23 @@ function DatePickerBody({
               Add time
             </MenuRow>
           )}
-          <MenuRow
-            icon={<Repeat className="size-4" />}
-            disabled
-            title="Recurring tasks are not built yet"
-          >
-            Set to repeat
-          </MenuRow>
+          {repeat &&
+            (repeating ? (
+              <div className="pt-1">
+                <RepeatForm
+                  initial={repeat.recurrence}
+                  onCancel={() => setRepeating(false)}
+                  onSave={(next) => {
+                    repeat.onChange(next);
+                    setRepeating(false);
+                  }}
+                />
+              </div>
+            ) : (
+              <MenuRow icon={<Repeat className="size-4" />} onClick={() => setRepeating(true)}>
+                {repeat.recurrence ? describeRecurrence(repeat.recurrence) : 'Set to repeat'}
+              </MenuRow>
+            ))}
         </div>
       )}
 
@@ -325,32 +351,21 @@ function MenuRow({
   icon,
   children,
   onClick,
-  disabled,
-  title,
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;
   onClick?: () => void;
-  disabled?: boolean;
-  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left text-sm enabled:cursor-pointer enabled:hover:bg-muted disabled:text-muted-foreground disabled:opacity-60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+      className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
     >
       <span className="text-muted-foreground" aria-hidden="true">
         {icon}
       </span>
       {children}
-      {disabled && (
-        <span className="ml-auto rounded bg-muted px-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Soon
-        </span>
-      )}
     </button>
   );
 }

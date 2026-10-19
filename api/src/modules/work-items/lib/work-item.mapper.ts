@@ -8,6 +8,8 @@ import {
 import type { ProjectWorkItem, UserRef, WorkItemStateRef } from '@coretask/types';
 import { TaskStatus, type Prisma } from '@prisma/client';
 
+import { taskTagsInclude, toTagRefs } from '../../tags/tag.mapper';
+
 /**
  * Turning two different records into one row.
  *
@@ -42,6 +44,7 @@ export const workItemTaskInclude = {
   statusDefinition: { select: { id: true, name: true, colorToken: true } },
   priorityDefinition: { select: { id: true, name: true, colorToken: true } },
   customFieldValues: true,
+  tags: taskTagsInclude,
   _count: {
     select: {
       subtasks: { where: { archivedAt: null } },
@@ -53,6 +56,11 @@ export const workItemTaskInclude = {
   // real: it was a hard-coded zero, and "0/3" over three finished subtasks
   // reads as a task nobody has touched.
   subtasks: { where: { archivedAt: null }, select: { status: true } },
+  // Multi-homing: the other projects it is in, with its place in each.
+  projectLinks: {
+    select: { projectId: true, sectionId: true, position: true },
+    orderBy: { addedAt: 'asc' },
+  },
 } satisfies Prisma.TaskInclude;
 
 export const workItemTicketInclude = {
@@ -124,6 +132,11 @@ export function taskToWorkItem(task: TaskRow): ProjectWorkItem {
     title: task.title,
     description: task.description,
     position: task.position,
+    memberships: task.projectLinks.map((link) => ({
+      projectId: link.projectId,
+      sectionId: link.sectionId,
+      position: link.position,
+    })),
     status: taskStatus(task),
     priority: taskPriority(task),
     // An array even though a task has one assignee. The contract allows several
@@ -152,13 +165,37 @@ export function taskToWorkItem(task: TaskRow): ProjectWorkItem {
     details: {
       kind: 'TASK',
       estimatedMinutes: task.estimatedMinutes,
+      taskKind: task.kind,
+      approvalStatus: task.approvalStatus,
       rawStatus: task.status,
       rawPriority: task.priority,
     },
     createdById: task.createdById,
+    tags: toTagRefs(task.tags),
     createdBy: userRef(task.createdBy),
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * A task as it appears in one of its projects.
+ *
+ * Read from its home it is unchanged. Read from another project it is in, it
+ * reports that project, with the section and position it has there, and keeps
+ * its home in `homeProjectId` — so a board groups it under its own column and a
+ * drag places it among that board's cards. Anything else passes through.
+ */
+export function inProject(item: ProjectWorkItem, projectId: string): ProjectWorkItem {
+  if (item.type !== WorkItemType.TASK || item.projectId === projectId) return item;
+  const membership = item.memberships?.find((entry) => entry.projectId === projectId);
+  if (!membership) return item;
+  return {
+    ...item,
+    projectId,
+    sectionId: membership.sectionId,
+    position: membership.position,
+    homeProjectId: item.projectId,
   };
 }
 
@@ -217,6 +254,7 @@ export function ticketToWorkItem(ticket: TicketRow): ProjectWorkItem {
     // Tickets record a reporter rather than a creator. Using it here keeps the
     // "who put this here" column populated instead of blank for half the rows.
     createdById: ticket.reporterId ?? '',
+    tags: [],
     createdBy: userRef(ticket.reporter),
     createdAt: ticket.createdAt.toISOString(),
     updatedAt: ticket.updatedAt.toISOString(),

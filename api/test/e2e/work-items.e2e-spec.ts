@@ -152,15 +152,26 @@ describe('Project work items (e2e)', () => {
       expect(response.body.data.details.key).toMatch(/^[A-Z]+-\d+$/);
     });
 
-    it('refuses a type that has no model behind it', async () => {
-      // The picker disables Milestone and Approval, but a disabled control is
-      // presentation. Without this the row would be written as something else
-      // wearing a label that lies about what it is.
+    it('creates a milestone and an approval as tasks of that kind', async () => {
+      // Both have a model now: a task whose kind says what it is.
       const scope = await setupScope();
 
       for (const type of ['MILESTONE', 'APPROVAL']) {
-        await create(scope, { type, title: 'Not yet' }).expect(422);
+        const response = await create(scope, { type, title: `A ${type.toLowerCase()}` }).expect(
+          201,
+        );
+        const task = await context.prisma.task.findUniqueOrThrow({
+          where: { id: response.body.data.id as string },
+        });
+        expect(task.kind).toBe(type);
       }
+    });
+
+    it('refuses a type that has no model behind it', async () => {
+      // A label the server does not know would be written as something else
+      // wearing a name that lies about what it is.
+      const scope = await setupScope();
+      await create(scope, { type: 'EPIC', title: 'Not a thing' }).expect(422);
     });
 
     it('refuses a section belonging to another project', async () => {

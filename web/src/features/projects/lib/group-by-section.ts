@@ -21,10 +21,7 @@ export interface Group {
  * a task that is invisible in the only view that lists everything is a task
  * nobody will find again.
  */
-export function groupBySection(
-  tasks: Task[],
-  metadata: ProjectFieldMetadata | undefined,
-): Group[] {
+export function groupBySection(tasks: Task[], metadata: ProjectFieldMetadata | undefined): Group[] {
   const sections = metadata?.sections ?? [];
   const bySection = new Map<string, Task[]>();
 

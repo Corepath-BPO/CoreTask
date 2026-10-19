@@ -42,6 +42,12 @@ export function choicesFor(
         value: section.id,
         label: section.name,
       }));
+    case SystemField.TAGS:
+      return (metadata?.tags ?? []).map((tag) => ({
+        value: tag.id,
+        label: tag.name,
+        colorToken: tag.color,
+      }));
     default:
       return (field.custom?.options ?? [])
         .filter((option) => !option.isArchived)

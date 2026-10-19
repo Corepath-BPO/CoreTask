@@ -14,6 +14,10 @@ import { CustomizePanel } from './customize-panel';
  */
 const fieldMetadata = vi.fn();
 const automations = vi.fn();
+const forms = vi.fn();
+const templates = vi.fn();
+const statusTemplates = vi.fn();
+const bundles = vi.fn();
 
 vi.mock('@/features/projects/hooks/use-project-views', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -25,6 +29,35 @@ vi.mock('@/features/projects/hooks/use-project-views', async (importOriginal) =>
 vi.mock('@/features/automations/hooks/use-automations', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useAutomations: (...args: unknown[]) => automations(...args),
+}));
+
+vi.mock('@/features/projects/hooks/use-forms', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useProjectForms: (...args: unknown[]) => forms(...args),
+}));
+
+vi.mock('@/features/projects/hooks/use-project-email', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useProjectEmail: () => ({ data: undefined, isLoading: false }),
+}));
+
+vi.mock('@/features/projects/hooks/use-project-apps', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useProjectApps: () => ({ data: [], isLoading: false }),
+}));
+vi.mock('@/features/projects/hooks/use-bundles', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useBundles: (...args: unknown[]) => bundles(...args),
+}));
+
+vi.mock('@/features/projects/hooks/use-status-templates', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useStatusTemplates: (...args: unknown[]) => statusTemplates(...args),
+}));
+
+vi.mock('@/features/projects/hooks/use-task-templates', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useTaskTemplates: (...args: unknown[]) => templates(...args),
 }));
 
 const field = (index: number, isArchived = false) =>
@@ -91,6 +124,19 @@ const renderPanel = (props: Partial<Parameters<typeof CustomizePanel>[0]> = {}) 
 beforeEach(() => {
   fieldMetadata.mockReturnValue({ data: metadata, isLoading: false });
   automations.mockReturnValue({ data: rules, isLoading: false });
+  forms.mockReturnValue({ data: [{ id: 'form-1' }, { id: 'form-2' }], isLoading: false });
+  templates.mockReturnValue({ data: [{ id: 'template-1' }], isLoading: false });
+  bundles.mockReturnValue({
+    data: [
+      { id: 'b-1', projects: [{ id: 'p-1', name: 'Here', appliedVersion: 1 }] },
+      { id: 'b-2', projects: [{ id: 'p-9', name: 'Elsewhere', appliedVersion: 1 }] },
+    ],
+    isLoading: false,
+  });
+  statusTemplates.mockReturnValue({
+    data: [{ id: 'st-1' }, { id: 'st-2' }, { id: 'st-3' }],
+    isLoading: false,
+  });
 });
 
 describe('CustomizePanel', () => {
@@ -120,6 +166,14 @@ describe('CustomizePanel', () => {
 
     expect(screen.getByRole('button', { name: /Rules/ })).toHaveTextContent('11');
     expect(screen.getByRole('button', { name: /^Fields/ })).toHaveTextContent('7');
+    expect(screen.getByRole('button', { name: /^Forms/ })).toHaveTextContent('2');
+    expect(screen.getByRole('button', { name: /Task types and templates/ })).toHaveTextContent('1');
+  });
+
+  it('does not ask a guest’s browser for the forms, which only editors manage', async () => {
+    await renderPanel({ role: WorkspaceRole.GUEST }).result;
+
+    expect(forms).toHaveBeenCalledWith(undefined, 'p-1');
   });
 
   it('shows no count until the data has arrived', async () => {
@@ -132,13 +186,18 @@ describe('CustomizePanel', () => {
     expect(screen.getByRole('button', { name: /^Fields/ })).not.toHaveTextContent(/\d/);
   });
 
-  it('marks the unbuilt features Soon and refuses their clicks', async () => {
+  it('has every feature built: nothing says Soon, and every row opens', async () => {
     await renderPanel().result;
 
-    expect(screen.getAllByText('Soon')).toHaveLength(6);
-    for (const label of ['Forms', 'Emails', 'Apps', 'Task types and templates', 'Bundles']) {
-      expect(screen.getByRole('button', { name: new RegExp(label) })).toBeDisabled();
-    }
+    expect(screen.queryByText('Soon')).not.toBeInTheDocument();
+    // Apps counts its connections like the other rows count theirs.
+    expect(screen.getByRole('button', { name: /^Apps/ })).toHaveTextContent('0');
+    expect(screen.getByRole('button', { name: /^Apps/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Emails/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Bundles/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Status templates/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Forms/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Task types and templates/ })).toBeEnabled();
   });
 
   it('closes from the header button and from Escape', async () => {
@@ -172,6 +231,16 @@ describe('CustomizePanel', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back to customize' }));
     expect(screen.getByRole('heading', { name: 'Customize' })).toBeInTheDocument();
+  });
+
+  it('opens a feature from the Add menu', async () => {
+    const user = userEvent.setup();
+    await renderPanel().result;
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Fields' }));
+
+    expect(screen.getByRole('heading', { name: 'Fields' })).toBeInTheDocument();
   });
 
   it('opens the Rules section listing every rule', async () => {

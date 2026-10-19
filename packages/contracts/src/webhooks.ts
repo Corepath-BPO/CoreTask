@@ -18,6 +18,8 @@ export const WebhookEventType = {
   TICKET_CREATED: 'ticket.created',
   TICKET_STATUS_CHANGED: 'ticket.status_changed',
   CUSTOM_FIELD_CHANGED: 'custom_field.changed',
+  /** A project's status update is posted. */
+  PROJECT_STATUS_UPDATED: 'project.status_updated',
   /** Sent by the "Send test event" button. Not a subscription. */
   PING: 'ping',
   /** Sent by the "Send a webhook" automation action. Not a subscription. */
@@ -38,6 +40,7 @@ export const SUBSCRIBABLE_WEBHOOK_EVENTS = [
   WebhookEventType.TICKET_CREATED,
   WebhookEventType.TICKET_STATUS_CHANGED,
   WebhookEventType.CUSTOM_FIELD_CHANGED,
+  WebhookEventType.PROJECT_STATUS_UPDATED,
 ] as const;
 export type SubscribableWebhookEvent = (typeof SUBSCRIBABLE_WEBHOOK_EVENTS)[number];
 
@@ -52,6 +55,7 @@ export const WEBHOOK_EVENT_LABEL: Record<WebhookEventType, string> = {
   'ticket.created': 'Ticket reported',
   'ticket.status_changed': 'Ticket status changed',
   'custom_field.changed': 'Custom field changed',
+  'project.status_updated': 'Project status update posted',
   ping: 'Test event',
   'automation.webhook': 'Sent by a rule',
 };
@@ -78,6 +82,7 @@ export const WEBHOOK_EVENT_GROUPS: readonly {
     events: [WebhookEventType.TICKET_CREATED, WebhookEventType.TICKET_STATUS_CHANGED],
   },
   { label: 'Custom fields', events: [WebhookEventType.CUSTOM_FIELD_CHANGED] },
+  { label: 'Projects', events: [WebhookEventType.PROJECT_STATUS_UPDATED] },
 ];
 
 export type WebhookEntityType = 'TASK' | 'TICKET' | 'COMMENT';
@@ -107,9 +112,10 @@ const TRIGGER_TO_EVENT: Partial<
 };
 
 /**
- * Triggers that deliberately raise no webhook of their own: each is a field
- * change, and `task.updated` already carries every changed field in `changes`.
- * One notification per edit is what a receiver wants, not six.
+ * Triggers that deliberately raise no webhook of their own. Most are a field
+ * change, and `task.updated` already carries every changed field in `changes`:
+ * one notification per edit is what a receiver wants, not six. The rest are
+ * explained where they are listed.
  */
 export const UNMAPPED_WEBHOOK_TRIGGERS = [
   AutomationTrigger.TASK_STATUS_CHANGED,
@@ -118,6 +124,24 @@ export const UNMAPPED_WEBHOOK_TRIGGERS = [
   AutomationTrigger.TASK_ESTIMATE_CHANGED,
   AutomationTrigger.TASK_TITLE_CHANGED,
   AutomationTrigger.TASK_DESCRIPTION_CHANGED,
+  // Not changes at all: a person pressing "Run rule", or the clock. A rule they
+  // start can send its own webhook, which is the event a receiver cares about.
+  AutomationTrigger.RUN_MANUALLY,
+  AutomationTrigger.SCHEDULED_TIME,
+  AutomationTrigger.DUE_DATE_APPROACHING,
+  AutomationTrigger.TASK_OVERDUE,
+  AutomationTrigger.START_DATE_APPROACHING,
+  AutomationTrigger.START_DATE_PASSED,
+  AutomationTrigger.CUSTOM_DATE_APPROACHING,
+  AutomationTrigger.CUSTOM_DATE_PASSED,
+  // Consequences of other events a receiver already gets — the blocker's
+  // completion, the upload, the follow.
+  AutomationTrigger.TASK_NO_LONGER_BLOCKED,
+  AutomationTrigger.ATTACHMENT_ADDED,
+  AutomationTrigger.COLLABORATOR_ADDED,
+  // Field changes in all but name; `task.updated` carries them.
+  AutomationTrigger.TASK_TYPE_CHANGED,
+  AutomationTrigger.APPROVAL_STATUS_CHANGED,
 ] as const;
 
 /**

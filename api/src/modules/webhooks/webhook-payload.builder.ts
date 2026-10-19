@@ -92,6 +92,10 @@ export class WebhookPayloadBuilder {
       }
       case 'TICKET':
         return { ticket: await this.ticket(event.workspaceId, event.entityId) };
+      // A scheduled run with nothing in scope: never mapped to a webhook event,
+      // so never fanned out — answered anyway rather than left to fall through.
+      case 'PROJECT':
+        return {};
     }
   }
 

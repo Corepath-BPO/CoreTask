@@ -14,6 +14,13 @@ interface UiState {
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
 
+  /**
+   * Create → Task, from anywhere. Held here so Tab+N can open it when no list
+   * on screen claims the chord.
+   */
+  quickAddTaskOpen: boolean;
+  setQuickAddTaskOpen: (open: boolean) => void;
+
   /** The keyboard shortcut sheet. Opened by `?` and the account menu. */
   shortcutsHelpOpen: boolean;
   setShortcutsHelpOpen: (open: boolean) => void;
@@ -38,6 +45,9 @@ export const useUiStore = create<UiState>()(
 
       commandPaletteOpen: false,
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+
+      quickAddTaskOpen: false,
+      setQuickAddTaskOpen: (quickAddTaskOpen) => set({ quickAddTaskOpen }),
 
       shortcutsHelpOpen: false,
       setShortcutsHelpOpen: (shortcutsHelpOpen) => set({ shortcutsHelpOpen }),

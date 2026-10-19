@@ -7,6 +7,7 @@ import {
   ServerEvent,
   WorkspaceRole,
   hasAtLeastRole,
+  AutomationTrigger,
 } from '@coretask/contracts';
 import type { Attachment, AttachmentDownload, PresignedUpload } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -17,6 +18,7 @@ import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
 import { StorageService } from '../../integrations/storage/storage.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
@@ -52,6 +54,7 @@ export class AttachmentsService {
     private readonly access: ProjectAccessService,
     private readonly realtime: RealtimeGateway,
     private readonly broadcast: ProjectBroadcastService,
+    private readonly automation: AutomationEventPublisher,
   ) {}
 
   /**
@@ -249,6 +252,19 @@ export class AttachmentsService {
     );
 
     await this.announceParent(ready);
+
+    // "Attachment is added" — for a task in a project, which is where rules live.
+    if (attachment.taskId && attachment.projectId) {
+      await this.automation.publish({
+        workspaceId,
+        projectId: attachment.projectId,
+        trigger: AutomationTrigger.ATTACHMENT_ADDED,
+        entityType: 'TASK',
+        entityId: attachment.taskId,
+        actorId: userId,
+        after: { attachmentId, filename: attachment.filename, mimeType: attachment.mimeType },
+      });
+    }
 
     return toAttachmentDto(ready);
   }

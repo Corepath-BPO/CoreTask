@@ -3,29 +3,38 @@ import { Link } from '@tanstack/react-router';
 import {
   ArrowUpDown,
   CalendarRange,
+  Check,
   ChevronLeft,
   ChevronRight,
   ListFilter,
   Minus,
   Plus,
-  Rows3,
   Search,
-  Settings2,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  useLatestStatusUpdates,
+  type ProjectStatusUpdateValue,
+} from '@/features/projects/hooks/use-project-updates';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatDate, initials } from '@/lib/utils';
-import { usePortfolio } from '@/stores/portfolio.store';
+import { useCurrentUser } from '@/stores/auth.store';
+import { usePortfolio } from '@/features/portfolios/hooks/use-portfolios';
 
 import { AddProjectsDialog } from '../components/add-projects-dialog';
-import { ProjectStatusUpdateChip } from '../components/status-update';
+import { ProjectStatusUpdateChip, StatusUpdateChip } from '../components/status-update';
 import { usePortfolioProjectIndex } from '../hooks/use-portfolio-projects';
 import { rollupPortfolio } from '../lib/rollup';
+import { STATUS_UPDATE_OPTIONS } from '../lib/status-updates';
 import {
   barGeometry,
   buildAxis,
@@ -33,6 +42,13 @@ import {
   daysInMonth,
   monthOffset,
 } from '../lib/timeline';
+import {
+  activeFilterCount,
+  arrangeTimeline,
+  DEFAULT_TIMELINE_VIEW,
+  TIMELINE_SORTS,
+  type TimelineView,
+} from '../lib/timeline-view';
 
 /**
  * Each zoom step swaps the axis unit, Asana-style: − / + walks from years
@@ -58,7 +74,7 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
 
-  const portfolio = usePortfolio(workspaceId, portfolioId);
+  const { portfolio } = usePortfolio(workspaceId, portfolioId);
   const { projectsById, isLoading } = usePortfolioProjectIndex(workspaceId);
 
   const [adding, setAdding] = useState(false);
@@ -76,6 +92,24 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
     () => (portfolio ? rollupPortfolio(portfolio, projectsById).projects : []),
     [portfolio, projectsById],
   );
+
+  // Search, filter and sort — the toolbar's, for this visit only.
+  const [view, setView] = useState<TimelineView>(DEFAULT_TIMELINE_VIEW);
+  const [searching, setSearching] = useState(false);
+  const { data: latest } = useLatestStatusUpdates(workspaceId);
+  const me = useCurrentUser();
+  const shown = useMemo(
+    () => arrangeTimeline(projects, view, (id) => latest?.[id]?.status ?? null, me?.id),
+    [projects, view, latest, me?.id],
+  );
+  const filters = activeFilterCount(view);
+  const toggleStatus = (status: ProjectStatusUpdateValue | 'none') =>
+    setView((current) => {
+      const statuses = new Set(current.statuses);
+      if (statuses.has(status)) statuses.delete(status);
+      else statuses.add(status);
+      return { ...current, statuses };
+    });
 
   const level = ZOOM_LEVELS[zoom] ?? ZOOM_LEVELS[1];
   const pxPerMonth = level.px;
@@ -196,31 +230,150 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
             <Plus />
           </Button>
 
-          {/* Asana's toolbar tail — visually present, honestly inert until
-              filtering and saved views exist. */}
           <span aria-hidden="true" className="mx-1 hidden h-4 w-px bg-border lg:block" />
-          <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-            <ListFilter />
-            Filter
-          </Button>
-          <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-            <ArrowUpDown />
-            Sort
-          </Button>
-          <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-            <Rows3 />
-            Group
-          </Button>
-          <Button variant="ghost" size="sm" disabled className="hidden lg:inline-flex">
-            <Settings2 />
-            Options
-          </Button>
-          <Button variant="outline" size="sm" disabled className="hidden lg:inline-flex">
-            Save view
-          </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Search timeline" disabled>
-            <Search />
-          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant={filters > 0 ? 'secondary' : 'ghost'} size="sm">
+                <ListFilter />
+                Filter
+                {filters > 0 && <span className="tabular-nums">· {filters}</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Status</p>
+                {STATUS_UPDATE_OPTIONS.map((option) => (
+                  <label key={option.value} className="flex cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={view.statuses.has(option.value)}
+                      onCheckedChange={() => toggleStatus(option.value)}
+                      aria-label={option.label}
+                    />
+                    <StatusUpdateChip status={option.value} />
+                  </label>
+                ))}
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={view.statuses.has('none')}
+                    onCheckedChange={() => toggleStatus('none')}
+                  />
+                  No update yet
+                </label>
+              </div>
+              <div className="space-y-1.5 border-t pt-2">
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={view.mine}
+                    onCheckedChange={(checked) =>
+                      setView((current) => ({ ...current, mine: checked === true }))
+                    }
+                  />
+                  Only projects I lead
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={view.datedOnly}
+                    onCheckedChange={(checked) =>
+                      setView((current) => ({ ...current, datedOnly: checked === true }))
+                    }
+                  />
+                  Only projects with dates
+                </label>
+              </div>
+              {filters > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  onClick={() =>
+                    setView((current) => ({
+                      ...current,
+                      statuses: new Set(),
+                      mine: false,
+                      datedOnly: false,
+                    }))
+                  }
+                >
+                  Clear filters
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant={view.sort === 'portfolio' ? 'ghost' : 'secondary'} size="sm">
+                <ArrowUpDown />
+                Sort
+                {view.sort !== 'portfolio' && (
+                  <span>
+                    · {TIMELINE_SORTS.find((option) => option.value === view.sort)?.label}
+                  </span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-52 p-1" role="menu" aria-label="Sort by">
+              {TIMELINE_SORTS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={view.sort === option.value}
+                  onClick={() => setView((current) => ({ ...current, sort: option.value }))}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                >
+                  <Check
+                    className={cn('size-4', view.sort !== option.value && 'invisible')}
+                    aria-hidden="true"
+                  />
+                  {option.label}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+          {searching ? (
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                autoFocus
+                value={view.search}
+                placeholder="Find a project"
+                aria-label="Search timeline"
+                className="h-8 w-44 pl-7 pr-7"
+                onChange={(event) =>
+                  setView((current) => ({ ...current, search: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setView((current) => ({ ...current, search: '' }));
+                    setSearching(false);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                aria-label="Close search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setView((current) => ({ ...current, search: '' }));
+                  setSearching(false);
+                }}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Search timeline"
+              onClick={() => setSearching(true)}
+            >
+              <Search />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -274,7 +427,7 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
               className="min-h-0 flex-1 overflow-hidden"
               onWheel={(event) => scrollRef.current?.scrollBy({ top: event.deltaY })}
             >
-              {projects.map((project) => (
+              {shown.map((project) => (
                 <div
                   key={project.id}
                   className="flex items-stretch border-b border-border/40"
@@ -420,7 +573,12 @@ export function PortfolioTimelinePage({ portfolioId }: { portfolioId: string }) 
                 </div>
               </div>
 
-              {projects.map((project) => (
+              {shown.length === 0 && (
+                <p className="px-4 py-6 text-sm text-muted-foreground">
+                  No projects match the search and filters.
+                </p>
+              )}
+              {shown.map((project) => (
                 <TimelineLane
                   key={project.id}
                   project={project}

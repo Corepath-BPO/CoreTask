@@ -2,6 +2,7 @@ import {
   AUTOMATION_VALUE_TOKEN_LABEL,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
+  isDateTrigger,
   isTokenValue,
   operatorNeedsValue,
   operatorTakesMultipleValues,
@@ -24,7 +25,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
@@ -46,8 +46,20 @@ import {
   readTriggerForm,
   readTriggerSections,
 } from './trigger-forms';
+import {
+  CollaboratorFields,
+  CompletionFields,
+  CreateTaskFields,
+  SendEmailFields,
+  VariableTextField,
+} from './extra-action-fields';
 import { RadioItem } from './radio-item';
 import { SendWebhookFields } from './send-webhook-fields';
+import {
+  DateTriggerFields,
+  ManualTriggerFields,
+  ScheduleTriggerFields,
+} from './timed-trigger-fields';
 import { SubtaskListFields } from './subtask-list-fields';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
@@ -145,6 +157,30 @@ function TriggerFields({
 }) {
   const forms = formsForTrigger(subtype, metadata);
   const form = readTriggerForm(configuration, forms);
+
+  // The triggers that are not edits each have their own few questions.
+  if (subtype === 'RUN_MANUALLY') {
+    return <ManualTriggerFields configuration={configuration} onChange={onChange} />;
+  }
+  if (subtype === 'SCHEDULED_TIME') {
+    return (
+      <ScheduleTriggerFields
+        configuration={configuration}
+        metadata={metadata}
+        onChange={onChange}
+      />
+    );
+  }
+  if (isDateTrigger(subtype)) {
+    return (
+      <DateTriggerFields
+        subtype={subtype}
+        configuration={configuration}
+        metadata={metadata}
+        onChange={onChange}
+      />
+    );
+  }
 
   // Which field to watch — or every field, which is what no fieldId stores and
   // what every rule saved before the narrowing existed still means.
@@ -717,15 +753,58 @@ function ActionFields({
 
     case 'ADD_COMMENT':
       return (
-        <Field label="Comment" htmlFor="step-body">
-          <Textarea
-            id="step-body"
-            rows={4}
-            value={read('body')}
-            onChange={(event) => set('body', event.target.value)}
-            placeholder="What should it say?"
-          />
-        </Field>
+        <VariableTextField
+          id="step-body"
+          label="Comment"
+          value={read('body')}
+          onChange={(value) => set('body', value)}
+          placeholder="What should it say?"
+          multiline
+        />
+      );
+
+    case 'SET_COMPLETION':
+      return <CompletionFields configuration={configuration} onChange={onChange} />;
+
+    case 'REMOVE_FROM_PROJECT':
+      return (
+        <p className="text-sm text-muted-foreground">
+          The task leaves this project, with its subtasks. It keeps its assignee, so it stays in
+          their My Tasks.
+        </p>
+      );
+
+    case 'CREATE_TASK':
+      return (
+        <CreateTaskFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
+    case 'ADD_REMOVE_COLLABORATORS':
+      return (
+        <CollaboratorFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
+    case 'SET_TASK_NAME':
+      return (
+        <VariableTextField
+          id="step-text"
+          label="New name"
+          value={read('text')}
+          onChange={(value) => set('text', value)}
+          placeholder="e.g. [Review] {{task.name}}"
+        />
+      );
+
+    case 'SET_TASK_DESCRIPTION':
+      return (
+        <VariableTextField
+          id="step-text"
+          label="Description"
+          value={read('text')}
+          onChange={(value) => set('text', value)}
+          hint="Replaces the description. Left empty, it clears it."
+          multiline
+        />
       );
 
     case 'CREATE_SUBTASK':
@@ -738,23 +817,25 @@ function ActionFields({
         <SendWebhookFields configuration={configuration} metadata={metadata} onChange={onChange} />
       );
 
+    case 'SEND_EMAIL':
+      return <SendEmailFields configuration={configuration} onChange={onChange} />;
+
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;
   }
 }
 
-/** The one answer "Choose an option" has. */
+/** "Choose an option": move the task there, or add it there as well. */
 const MOVE_OPTION = 'MOVE';
+const ADD_OPTION = 'ADD';
 
 /**
  * Moving a task to another project: which one, and which of its sections.
  *
  * Laid out as the same panel is in Asana — an option, a project, a section —
- * because that is the shape somebody arriving from there expects to find. The
- * option has one working answer. A task lives in one project here, so "add"
- * (the same task in two projects at once) has nothing to write; it is shown
- * disabled with that reason rather than left out, so nobody goes looking for it
- * under another name.
+ * because that is the shape somebody arriving from there expects to find.
+ * "Move" takes the task out of this project; "Add" (stored as `mode: 'ADD'`)
+ * leaves it here and puts it in the other project too, in the section chosen.
  *
  * The section list follows the chosen project, and changing the project clears
  * the section: a section id means nothing in another project, and keeping it
@@ -789,17 +870,25 @@ function MoveToProjectFields({
   return (
     <div className="space-y-4">
       <Field label="Choose an option" htmlFor="step-move-option">
-        <Select value={MOVE_OPTION}>
+        <Select
+          value={read('mode') === ADD_OPTION ? ADD_OPTION : MOVE_OPTION}
+          onValueChange={(value) => {
+            // Radix answers a reset with an empty value; that is not a choice.
+            if (!value) return;
+            const { mode: _mode, ...rest } = configuration;
+            onChange(value === ADD_OPTION ? { ...rest, mode: ADD_OPTION } : rest);
+          }}
+        >
           <SelectTrigger id="step-move-option" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <RadioItem value={MOVE_OPTION}>Move task to another project</RadioItem>
-            <RadioItem value="ADD" disabled>
+            <RadioItem value={ADD_OPTION}>
               <span className="flex flex-col">
                 <span>Add task to another project</span>
                 <span className="text-xs italic text-muted-foreground">
-                  A task lives in one project here, so it can only be moved.
+                  It stays in this project and shows in that one too.
                 </span>
               </span>
             </RadioItem>

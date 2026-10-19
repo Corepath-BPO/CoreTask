@@ -50,6 +50,7 @@ const metadata: ProjectFieldMetadata = {
   customFields: [],
   statuses: [],
   priorities: [],
+  tags: [],
   sections: [
     { id: 's-1', name: 'To do' },
     { id: 's-2', name: 'Doing' },

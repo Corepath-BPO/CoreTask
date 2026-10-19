@@ -1,9 +1,16 @@
 import {
   ACTION_LABEL,
+  AUTOMATION_EMAIL_RECIPIENT_LABEL,
+  emailRecipientsOf,
+  EXECUTION_SCOPE_LABEL,
   NODE_CATEGORY_LABEL,
   TRIGGER_LABEL,
   AUTOMATION_VALUE_TOKEN_LABEL,
+  approachingDays,
+  describeSchedule,
+  isApproachingTrigger,
   isFallbackBranch,
+  readSchedule,
   isTokenValue,
   operatorNeedsValue,
   subtaskProblems,
@@ -153,6 +160,50 @@ export function summariseParts(
       if (node.subtype === '') return [{ text: 'Choose what starts this rule' }];
 
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
+
+      // The clock's triggers say when; a manual one says what the menu calls it.
+      if (node.subtype === 'SCHEDULED_TIME') {
+        const schedule = readSchedule(config);
+        return [
+          { text: describeSchedule(schedule), chip: true },
+          { text: '·' },
+          { text: EXECUTION_SCOPE_LABEL[schedule.scope], chip: true },
+        ];
+      }
+      // A custom date trigger names its field: "When Lease ends is approaching".
+      if (node.subtype === 'CUSTOM_DATE_APPROACHING' || node.subtype === 'CUSTOM_DATE_PASSED') {
+        const field = name(metadata?.customFields, config['fieldId'], 'a date field');
+        if (node.subtype === 'CUSTOM_DATE_PASSED') {
+          return [{ text: 'When' }, { text: field, chip: true }, { text: 'has passed' }];
+        }
+        const days = approachingDays(config);
+        return [
+          { text: 'When' },
+          { text: field, chip: true },
+          { text: 'is approaching' },
+          {
+            text: days === 0 ? 'on the day' : `${days} day${days === 1 ? '' : 's'} before`,
+            chip: true,
+          },
+        ];
+      }
+      if (isApproachingTrigger(node.subtype)) {
+        const days = approachingDays(config);
+        return [
+          { text: label },
+          {
+            text: days === 0 ? 'on the day' : `${days} day${days === 1 ? '' : 's'} before`,
+            chip: true,
+          },
+        ];
+      }
+      if (
+        node.subtype === 'RUN_MANUALLY' &&
+        typeof config['label'] === 'string' &&
+        config['label']
+      ) {
+        return [{ text: 'When run from the menu as' }, { text: config['label'], chip: true }];
+      }
 
       // Narrowed to one field, the card names it; unnarrowed, the generic
       // label already says "a custom field" and there is nothing to add.
@@ -436,18 +487,20 @@ function actionSummary(
     // The project, and the section within it when one was chosen. The
     // section is looked up in *that* project's list, not this one's.
     case 'MOVE_TO_PROJECT': {
+      // "Add" keeps the task here as well; the words say which.
+      const verb = config['mode'] === 'ADD' ? 'Add' : 'Move';
       const projectId = config['projectId'];
       if (typeof projectId !== 'string' || projectId === '') {
-        return [{ text: 'Move — choose a project' }];
+        return [{ text: `${verb} — choose a project` }];
       }
 
       const project = (metadata?.projects ?? []).find((entry) => entry.id === projectId);
       if (!project)
-        return [{ text: 'Move to' }, { text: 'a project that was removed', chip: true }];
+        return [{ text: `${verb} to` }, { text: 'a project that was removed', chip: true }];
 
       const where = project.sections.find((entry) => entry.id === config['targetSectionId']);
       return [
-        { text: 'Move to' },
+        { text: `${verb} to` },
         { text: project.name, chip: true },
         ...(where ? [{ text: '›' }, { text: where.name, chip: true }] : []),
       ];
@@ -557,6 +610,13 @@ function actionSummary(
         : [{ text: 'Comment — write what it says' }];
     }
 
+    case 'SEND_EMAIL': {
+      const recipients = emailRecipientsOf(config);
+      if (recipients.length === 0) return [{ text: 'Email — choose who' }];
+      const who = recipients.map((entry) => AUTOMATION_EMAIL_RECIPIENT_LABEL[entry].toLowerCase());
+      return [{ text: 'Email' }, { text: who.join(', '), chip: true }];
+    }
+
     case 'SEND_WEBHOOK': {
       const endpointId = config['endpointId'];
       const url = config['url'];
@@ -575,6 +635,52 @@ function actionSummary(
         return [{ text: 'Send a webhook to' }, { text: hostOf(url), chip: true }];
       }
       return [{ text: 'Send a webhook — choose where' }];
+    }
+
+    case 'SET_COMPLETION':
+      return [{ text: config['completed'] === false ? 'Mark incomplete' : 'Mark complete' }];
+
+    case 'CREATE_TASK': {
+      const title = config['title'];
+      return typeof title === 'string' && title.trim() !== ''
+        ? [{ text: 'Create task' }, { text: quoted(title), chip: true }]
+        : [{ text: 'Create a task — name it' }];
+    }
+
+    case 'SET_TASK_NAME': {
+      const text = config['text'];
+      return typeof text === 'string' && text.trim() !== ''
+        ? [{ text: 'Rename to' }, { text: quoted(text), chip: true }]
+        : [{ text: 'Rename — write the new name' }];
+    }
+
+    case 'SET_TASK_DESCRIPTION': {
+      const text = config['text'];
+      return typeof text === 'string' && text.trim() !== ''
+        ? [{ text: 'Set description to' }, { text: quoted(text), chip: true }]
+        : [{ text: 'Clear the description' }];
+    }
+
+    case 'ADD_REMOVE_COLLABORATORS': {
+      const names = (key: string) =>
+        Array.isArray(config[key])
+          ? (config[key] as unknown[]).map(person).filter((name): name is string => name !== null)
+          : [];
+      const add = names('add');
+      const remove = names('remove');
+
+      if (add.length === 0 && remove.length === 0) {
+        return [{ text: 'Collaborators — choose who' }];
+      }
+      return [
+        ...(add.length ? [{ text: 'Add' }, { text: add.join(', '), chip: true }] : []),
+        ...(remove.length
+          ? [
+              { text: add.length ? 'and remove' : 'Remove' },
+              { text: remove.join(', '), chip: true },
+            ]
+          : []),
+      ];
     }
 
     case 'CREATE_SUBTASK': {
@@ -658,13 +764,28 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
     case 'SEND_WEBHOOK':
       // Either destination will do; a step naming neither has nowhere to send.
       return !has('endpointId') && !has('url');
+    case 'SEND_EMAIL':
+      return emailRecipientsOf(config).length === 0 || !has('subject');
     case 'CREATE_SUBTASK':
       // No titles, or a row still waiting for its date: a step that reads as
       // ready and would create something other than what it says.
       return subtaskTitles(config).length === 0 || subtaskProblems(config).length > 0;
+    case 'CREATE_TASK':
+      return !has('title');
+    case 'SET_TASK_NAME':
+      return !has('text');
+    case 'ADD_REMOVE_COLLABORATORS':
+      return ![config['add'], config['remove']].some(
+        (list) => Array.isArray(list) && list.length > 0,
+      );
     default:
       return false;
   }
+}
+
+/** Text on a card: quoted, and short enough to stay one line. */
+function quoted(text: string): string {
+  return `“${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”`;
 }
 
 /** The host of a URL, or the text itself while somebody is still typing it. */

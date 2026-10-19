@@ -35,6 +35,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TagChips } from '@/features/tags/components/tag-chip';
+import { useManualRules, useRunRule } from '@/features/automations/hooks/use-automations';
 import { useMoveTaskToSection } from '@/features/tasks/hooks/use-tasks';
 import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-task-drop';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
@@ -42,6 +44,7 @@ import { SHORTCUT_PRIORITY, useShortcutActions } from '@/lib/shortcuts/shortcut-
 import { calendarDateFromNow, cn, formatDate } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 
+import { useTaskTemplates, useUseTaskTemplate } from '../hooks/use-task-templates';
 import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/use-project-views';
 import { useCreateSection, useProject, useRenameSection } from '../hooks/use-projects';
 import {
@@ -156,6 +159,8 @@ interface ProjectListViewProps {
   canPersist?: boolean;
   dirty?: boolean;
   onSaveAs?: (() => void) | undefined;
+  /** The saved-view menu, drawn beside the create button. */
+  viewPicker?: React.ReactNode;
   /** The section named in the URL, if any; clicking a header selects it. */
   selectedSectionId?: string | null;
   onSelectSection?: ((sectionId: string) => void) | undefined;
@@ -182,6 +187,7 @@ export function ProjectListView({
   canPersist = true,
   dirty = false,
   onSaveAs,
+  viewPicker,
   selectedSectionId = null,
   onSelectSection,
 }: ProjectListViewProps) {
@@ -257,6 +263,12 @@ export function ProjectListView({
   const createSection = useCreateSection(workspaceId, projectId);
   const updateWorkItem = useUpdateProjectWorkItem(workspaceId, projectId);
   const bulk = useBulkUpdateWorkItems(workspaceId, projectId);
+  // Task templates, offered in the Add menu.
+  const { data: templates } = useTaskTemplates(canEdit ? workspaceId : undefined, projectId);
+  const applyTemplate = useUseTaskTemplate(workspaceId, projectId);
+  // Asana's "Run rule" on a selection: the project's live manual rules.
+  const { data: manualRules = [] } = useManualRules(canEdit ? workspaceId : undefined, projectId);
+  const runRule = useRunRule(workspaceId, projectId);
   const [addingSection, setAddingSection] = useState(false);
   /** The custom field whose edit dialog is open, by id. */
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -712,7 +724,10 @@ export function ProjectListView({
             variant="outline"
             onCreate={(type) => setComposing({ type: type as CreatableWorkItemType })}
             onCreateSection={() => setAddingSection(true)}
+            templates={templates}
+            onUseTemplate={(templateId) => applyTemplate.mutate({ templateId })}
           />
+          {viewPicker}
 
           <div className="ml-auto flex items-center gap-1">
             <ViewToolbarControls
@@ -1142,6 +1157,13 @@ export function ProjectListView({
           }
           onArchive={() => runBulk({ archived: true }, 'Archived')}
           onClear={clearSelection}
+          manualRules={manualRules}
+          onRunRule={(rule) =>
+            runRule.mutate(
+              { rule, taskIds: selectedRows.map((row) => row.id) },
+              { onSuccess: clearSelection },
+            )
+          }
         />
       )}
 
@@ -1715,6 +1737,9 @@ function Cell({
       );
     case SystemField.CREATED_AT:
       return <span className="text-xs">{formatDate(task.createdAt)}</span>;
+    case SystemField.TAGS:
+      // Read-only here: tags change in the task panel, where one can be made.
+      return task.tags?.length ? <TagChips tags={task.tags} max={2} /> : <EmptyCell />;
     case SystemField.ESTIMATE:
       return (
         <span className="text-xs tabular-nums">

@@ -101,6 +101,7 @@ describe('the system field catalog', () => {
       NUMBER: 'NUMBER',
       DATE: 'DATE',
       SINGLE_SELECT: 'ENUM',
+      MULTI_SELECT: 'ENUM',
       PEOPLE: 'PEOPLE',
     } as Record<string, string>;
     for (const field of SYSTEM_FIELD_CATALOG) {

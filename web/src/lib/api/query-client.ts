@@ -54,6 +54,8 @@ export const queryKeys = {
     list: (workspaceId: string) => [...queryKeys.teams.all(workspaceId), 'list'] as const,
     detail: (workspaceId: string, teamId: string) =>
       [...queryKeys.teams.all(workspaceId), 'detail', teamId] as const,
+    messages: (workspaceId: string, teamId: string) =>
+      [...queryKeys.teams.all(workspaceId), 'messages', teamId] as const,
   },
   projects: {
     /** Scoped by workspace so switching tenants cannot serve a stale list. */
@@ -62,9 +64,15 @@ export const queryKeys = {
       [...queryKeys.projects.all(workspaceId), 'list', filters] as const,
     detail: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'detail', projectId] as const,
+    /** The reader's own stars; under the prefix so archiving a project drops it here too. */
+    starred: (workspaceId: string) => [...queryKeys.projects.all(workspaceId), 'starred'] as const,
     /** Under the project prefix on purpose: one invalidation reaches the roster too. */
     members: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
+    note: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'note', projectId] as const,
+    resources: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'resources', projectId] as const,
   },
   tasks: {
     all: (workspaceId: string) => ['tasks', workspaceId] as const,
@@ -74,6 +82,14 @@ export const queryKeys = {
       [...queryKeys.tasks.all(workspaceId), 'board', projectId] as const,
     detail: (workspaceId: string, taskId: string) =>
       [...queryKeys.tasks.all(workspaceId), 'detail', taskId] as const,
+    likes: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'likes', taskId] as const,
+    /** Under `tasks` so any task change — completing the far end — refreshes it. */
+    dependencies: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'dependencies', taskId] as const,
+    /** Logged time; under `tasks` so an estimate change refreshes its total line. */
+    time: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'time', taskId] as const,
   },
   tickets: {
     all: (workspaceId: string) => ['tickets', workspaceId] as const,
@@ -141,5 +157,78 @@ export const queryKeys = {
   },
   notifications: {
     all: (workspaceId: string) => ['notifications', workspaceId] as const,
+  },
+  taskTemplates: {
+    list: (workspaceId: string, projectId: string) =>
+      ['task-templates', workspaceId, projectId] as const,
+  },
+  projectTemplates: {
+    all: (workspaceId: string) => ['project-templates', workspaceId] as const,
+  },
+  reports: {
+    dashboards: (workspaceId: string) => ['report-dashboards', workspaceId] as const,
+    /** Under its own prefix: a task change anywhere can stale every chart. */
+    result: (workspaceId: string, query: object) => ['report-result', workspaceId, query] as const,
+  },
+  /** The caller's own Home layout and notepad, per workspace. */
+  home: (workspaceId: string) => ['home', workspaceId] as const,
+  bundles: {
+    all: (workspaceId: string) => ['bundles', workspaceId] as const,
+  },
+  statusTemplates: {
+    list: (workspaceId: string, projectId: string) =>
+      ['status-templates', workspaceId, projectId] as const,
+  },
+  tags: {
+    all: (workspaceId: string) => ['tags', workspaceId] as const,
+  },
+  definitions: {
+    all: (workspaceId: string) => ['definitions', workspaceId] as const,
+    statuses: (workspaceId: string, projectId: string) =>
+      ['definitions', workspaceId, 'statuses', projectId] as const,
+    priorities: (workspaceId: string) => ['definitions', workspaceId, 'priorities'] as const,
+  },
+  projectApps: {
+    list: (workspaceId: string, projectId: string) =>
+      ['project-apps', workspaceId, projectId] as const,
+  },
+  projectEmail: {
+    settings: (workspaceId: string, projectId: string) =>
+      ['project-email', workspaceId, projectId] as const,
+  },
+  /** The caller's calendar link: `mine` for My Tasks, or a project's id. */
+  calendarFeed: (workspaceId: string, projectId: string | null) =>
+    ['calendar-feed', workspaceId, projectId ?? 'mine'] as const,
+  forms: {
+    list: (workspaceId: string, projectId: string) => ['forms', workspaceId, projectId] as const,
+    /** The public side, by link — no workspace in the key, there is none to the submitter. */
+    public: (token: string) => ['public-form', token] as const,
+  },
+  portfolios: {
+    all: (workspaceId: string) => ['portfolios', workspaceId] as const,
+    messages: (workspaceId: string, portfolioId: string) =>
+      ['portfolios', workspaceId, portfolioId, 'messages'] as const,
+    statusUpdates: (workspaceId: string, portfolioId: string) =>
+      ['portfolios', workspaceId, portfolioId, 'status-updates'] as const,
+  },
+  projectUpdates: {
+    all: (workspaceId: string) => ['project-updates', workspaceId] as const,
+    latestStatus: (workspaceId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), 'latest-status'] as const,
+    statusUpdates: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'status'] as const,
+    messages: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'messages'] as const,
+    files: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'files'] as const,
+  },
+  search: {
+    /** Term and kinds are part of the key — each is a different answer. */
+    results: (workspaceId: string, term: string, kinds: readonly string[]) =>
+      ['search', workspaceId, term, kinds.join(',')] as const,
+    /** An advanced search: the filters and the day they were read against. */
+    tasks: (workspaceId: string, filters: object, today: string) =>
+      ['search', workspaceId, 'tasks', filters, today] as const,
+    saved: (workspaceId: string) => ['saved-searches', workspaceId] as const,
   },
 } as const;

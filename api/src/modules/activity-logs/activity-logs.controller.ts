@@ -17,6 +17,7 @@ import {
   ActivityQueryDto,
   ItemActivityPageDto,
   ItemActivityQueryDto,
+  ProjectActivityQueryDto,
 } from './dto/activity.dto';
 
 /**
@@ -43,6 +44,25 @@ export class ActivityLogsController {
    * tenant-safe without resolving the item — and resolving it would drag the
    * task and ticket modules into a module every one of them imports.
    */
+  @Get('project')
+  @ApiOperation({
+    summary: 'One project’s activity',
+    description:
+      'Newest first, paged by cursor: every line recorded against the project or anything in it. Private projects answer only their members.',
+  })
+  @ApiEnvelopeResponse(ItemActivityPageDto)
+  @ApiErrorResponseDoc(422, 'Validation failed')
+  listForProject(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Actor() actor: ActorContext,
+    @Query() query: ProjectActivityQueryDto,
+  ): Promise<ItemActivityPage> {
+    return this.activity.listForProject(workspaceId, actor, query.projectId, {
+      before: query.before,
+      limit: query.limit,
+    });
+  }
+
   @Get('item')
   @ApiOperation({
     summary: 'One task’s or ticket’s stories',

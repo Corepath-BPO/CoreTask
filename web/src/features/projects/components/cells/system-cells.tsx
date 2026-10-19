@@ -9,7 +9,9 @@ import type { ProjectFieldMetadata, Task } from '@coretask/types';
 import {
   ChevronDown,
   ChevronRight,
+  BadgeCheck,
   CircleCheck,
+  Diamond,
   MessageSquare,
   Paperclip,
   Pencil,
@@ -22,6 +24,7 @@ import {
   TicketPriorityBadge,
   TicketStatusBadge,
 } from '@/components/data-display/status-badge';
+import { APPROVAL_TONE, kindOf, TaskKind } from '@/features/tasks/lib/task-kinds';
 import { isTicketRow } from '@/features/work-items/lib/work-item-row';
 import { PersonAvatar } from '@/components/data-display/person-avatar';
 import { Input } from '@/components/ui/input';
@@ -146,9 +149,26 @@ export function TitleCell({
         <span className="size-4 shrink-0" aria-hidden="true" />
       )}
 
-      {/* Asana's completion circle, on tasks and subtasks alike. Tickets sit
-          this out — "complete" is a different word in their vocabulary. */}
-      {!isTicketRow(task) && (
+      {/* An approval is answered in its pane, so its mark opens it and wears
+          the decision's colour rather than ticking anything off. */}
+      {!isTicketRow(task) && kindOf(task) === TaskKind.APPROVAL && (
+        <button
+          type="button"
+          onClick={onOpenTask}
+          aria-label={`Open the approval "${task.title}"`}
+          className={cn(
+            'shrink-0 cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+            APPROVAL_TONE[task.approvalStatus ?? 'PENDING'],
+          )}
+        >
+          <BadgeCheck className="size-4" aria-hidden="true" />
+        </button>
+      )}
+
+      {/* Asana's completion circle, on tasks and subtasks alike — a diamond for
+          a milestone. Tickets sit this out — "complete" is a different word in
+          their vocabulary. */}
+      {!isTicketRow(task) && kindOf(task) !== TaskKind.APPROVAL && (
         <button
           type="button"
           disabled={!canEdit}
@@ -164,7 +184,11 @@ export function TitleCell({
               : 'text-muted-foreground hover:text-success',
           )}
         >
-          <CircleCheck className="size-4" aria-hidden="true" />
+          {kindOf(task) === TaskKind.MILESTONE ? (
+            <Diamond className="size-4" aria-hidden="true" />
+          ) : (
+            <CircleCheck className="size-4" aria-hidden="true" />
+          )}
         </button>
       )}
 

@@ -39,7 +39,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, initials } from '@/lib/utils';
-import { usePortfolios, usePortfolioStore, type Portfolio } from '@/stores/portfolio.store';
+import {
+  useDeletePortfolio,
+  usePortfolios,
+  useTogglePortfolioStar,
+  type Portfolio,
+} from '@/features/portfolios/hooks/use-portfolios';
 
 import { AddProjectsDialog } from '../components/add-projects-dialog';
 import { PortfolioFormDialog } from '../components/portfolio-form-dialog';
@@ -56,8 +61,8 @@ export function PortfoliosPage() {
   const navigate = useNavigate();
 
   const portfolios = usePortfolios(workspaceId);
-  const deletePortfolio = usePortfolioStore((state) => state.deletePortfolio);
-  const toggleStarred = usePortfolioStore((state) => state.toggleStarred);
+  const deletePortfolio = useDeletePortfolio(workspaceId);
+  const toggleStarred = useTogglePortfolioStar(workspaceId);
   const { projectsById } = usePortfolioProjectIndex(workspaceId);
 
   const [tab, setTab] = useState<PortfolioTab>('recent');
@@ -71,7 +76,7 @@ export function PortfoliosPage() {
 
   const confirmDelete = () => {
     if (!workspaceId || !deleting) return;
-    deletePortfolio(workspaceId, deleting.id);
+    deletePortfolio.mutate(deleting.id);
     toast.success(`Portfolio "${deleting.name}" deleted`);
     setDeleting(null);
   };
@@ -106,7 +111,7 @@ export function PortfoliosPage() {
     const shared = {
       portfolio,
       projects: rollup.projects,
-      onToggleStar: () => toggleStarred(workspace.id, portfolio.id),
+      onToggleStar: () => toggleStarred.mutate(portfolio),
       onAddProjects: () => setAddingTo(portfolio),
       onEdit: () => setEditing(portfolio),
       onDelete: () => setDeleting(portfolio),
