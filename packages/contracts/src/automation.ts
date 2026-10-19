@@ -235,7 +235,7 @@ export function emailRecipientsOf(
  * them and leaving someone to wonder, and so adding one later is a change in
  * one place.
  */
-export const PLANNED_ACTIONS = ['DELAY', 'CREATE_CHECKLIST', 'ASSIGN_TEAM', 'AI_ACTION'] as const;
+export const PLANNED_ACTIONS = ['CREATE_CHECKLIST', 'ASSIGN_TEAM', 'AI_ACTION'] as const;
 
 // ---------------------------------------------------------------------------
 // The rule library

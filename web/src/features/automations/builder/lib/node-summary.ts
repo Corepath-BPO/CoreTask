@@ -21,6 +21,9 @@ import {
   type AutomationTrigger,
   type ConditionOperator,
   type FilterOperator,
+  delayLength,
+  delayProblem,
+  describeDelay,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -287,8 +290,12 @@ export function summariseParts(
         : parts;
     }
 
-    case 'DELAY':
-      return [{ text: 'Wait' }];
+    case 'DELAY': {
+      const length = delayLength(config);
+      return length
+        ? [{ text: 'Wait' }, { text: length, chip: true }]
+        : [{ text: describeDelay(config) }];
+    }
 
     default:
       return [{ text: 'Choose a step' }];
@@ -764,6 +771,9 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
 
     return value === undefined || value === null || value === '';
   }
+
+  // A Wait step needs to know how long.
+  if (node.type === 'DELAY') return delayProblem(config) !== null;
 
   if (node.type !== 'ACTION') return false;
 

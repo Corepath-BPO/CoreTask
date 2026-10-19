@@ -461,3 +461,52 @@ describe('ticket rules', () => {
     expect(onChange).toHaveBeenLastCalledWith({ status: 'RESOLVED' });
   });
 });
+
+describe('the Wait step', () => {
+  function renderWait(configuration: Record<string, unknown>) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type: 'DELAY',
+      subtype: 'DELAY',
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+    return onChange;
+  }
+
+  it('shows how long it waits and writes a new length back', () => {
+    const onChange = renderWait({ amount: 2, unit: 'DAYS' });
+
+    const amount = screen.getByLabelText('Wait for');
+    expect(amount).toHaveValue(2);
+    expect(screen.getByLabelText('Unit')).toHaveTextContent('Days');
+
+    fireEvent.change(amount, { target: { value: '5' } });
+    expect(onChange).toHaveBeenLastCalledWith({ amount: 5, unit: 'DAYS' });
+  });
+
+  it('changes the unit and keeps the number', async () => {
+    const onChange = renderWait({ amount: 3, unit: 'DAYS' });
+
+    await userEvent.click(screen.getByLabelText('Unit'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Hours' }));
+    expect(onChange).toHaveBeenLastCalledWith({ amount: 3, unit: 'HOURS' });
+  });
+
+  it('says what is wrong with a length it cannot wait', () => {
+    renderWait({ amount: 91, unit: 'DAYS' });
+    expect(screen.getByText('A rule waits 90 days at most.')).toBeInTheDocument();
+  });
+
+  it('clears the number when emptied, and asks for one', () => {
+    const onChange = renderWait({ amount: 2, unit: 'HOURS' });
+
+    fireEvent.change(screen.getByLabelText('Wait for'), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ amount: undefined, unit: 'HOURS' });
+  });
+});

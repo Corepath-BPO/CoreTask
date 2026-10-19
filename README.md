@@ -558,6 +558,8 @@ pnpm compose:validate
   can be reset and follows its owner's access
 - Ticket rules: when a ticket is reported or changes status, check it and
   triage it — status, priority, assignee, section, comments, e-mail, a task
+- Rules that wait: a Wait step of minutes, hours or days, after which the
+  rest of the rule runs against the task as it is by then
 - Rules that add a task to another project as well, fill variables into the
   subtasks they create, and e-mail the people on a task
 - Goals: a tree of outcomes with status, owner, team and time period, and

@@ -8,6 +8,7 @@ import {
   defaultOperatorForConditionField,
   isEvaluableOperator,
   isTicketConditionField,
+  DELAY_SUBTYPE,
 } from '@coretask/contracts';
 import type { Task } from '@prisma/client';
 
@@ -85,7 +86,8 @@ describe('the automation catalogue', () => {
   // ---------------------------------------------------------------------------
   describe('actions match what the runner implements', () => {
     it('marks an action available exactly when the engine can perform it', () => {
-      const executable = new Set<string>(AUTOMATION_ACTIONS);
+      // The Wait step is a step of its own that the runner takes, not an action.
+      const executable = new Set<string>([...AUTOMATION_ACTIONS, DELAY_SUBTYPE]);
 
       for (const action of actions) {
         expect({ subtype: action.subtype, available: action.available }).toEqual({
@@ -687,7 +689,8 @@ describe('the automation catalogue', () => {
         ai: false,
         conditionsOnCustomFields: true,
         actionsOnCustomFields: true,
-        delays: false,
+        // The runner stops at a Wait step and the clock resumes the run.
+        delays: true,
       });
     });
 

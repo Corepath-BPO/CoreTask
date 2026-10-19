@@ -47,6 +47,12 @@ export interface AutomationEvent {
   depth: number;
   /** Set when a rule caused this, so it will not react to its own write. */
   causedByRuleId?: string | null;
+  /**
+   * Set when the clock republishes a run that waited at a Wait step: the rule
+   * picks up after that step rather than from its trigger. Such an event is
+   * the same occurrence happening later, so it sends no webhooks.
+   */
+  resumeFromNodeId?: string | null;
 }
 
 /**
@@ -106,6 +112,7 @@ export class AutomationEventPublisher {
      * `causedByRuleId`, so it can ignore them if it prefers.
      */
     if (
+      !payload.resumeFromNodeId &&
       payload.entityType !== 'PROJECT' &&
       webhookEventTypeFor(payload.trigger, payload.entityType) !== null
     ) {

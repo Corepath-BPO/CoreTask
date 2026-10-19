@@ -28,6 +28,7 @@ import {
   isTicketTrigger,
   TicketConditionField,
   isTicketConditionField,
+  DELAY_SUBTYPE,
 } from '@coretask/contracts';
 import type { AutomationCatalogEntry } from '@coretask/types';
 
@@ -84,7 +85,7 @@ export interface AutomationConditionEntry extends AutomationCatalogEntry {
 export interface AutomationCapabilities {
   /** The runner walks a branch's arms and takes one. */
   branching: boolean;
-  /** Nothing waits: a DELAY node is refused at validation. */
+  /** A Wait step pauses a run until the clock resumes it. */
   delays: boolean;
   externalActions: boolean;
   ai: boolean;
@@ -337,6 +338,8 @@ export const ACTION_CATEGORY = {
   CREATE_NEW: 'Create new',
   CONVERT: 'Convert task to…',
   ADD_TO_TASK: 'Add to task',
+  /** The Wait step: what follows it runs later. */
+  WAIT: 'Wait',
   /** Actions that leave CoreTask. The builder shows this group on its own tab. */
   EXTERNAL: EXTERNAL_ACTION_CATEGORY,
 } as const;
@@ -1248,6 +1251,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'Authored by whoever caused the trigger, falling back to the task’s creator.',
   },
 
+  // Wait
+  {
+    subtype: DELAY_SUBTYPE,
+    label: 'Wait…',
+    category: ACTION_CATEGORY.WAIT,
+    description:
+      'Minutes, hours or days. What follows runs then, judged on the task as it is by that time.',
+  },
+
   // Send to another tool
   {
     subtype: AutomationAction.SEND_EMAIL,
@@ -1310,7 +1322,8 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
   // The executable list is the whole answer. A row cannot claim to work by
   // being written optimistically, and publishing validates against the same
   // list, so nothing can be offered here and refused there.
-  const available = runnerCanPerform(spec.subtype);
+  // The Wait step is a step of its own, not an action, and the runner takes it.
+  const available = runnerCanPerform(spec.subtype) || spec.subtype === DELAY_SUBTYPE;
 
   return {
     subtype: spec.subtype,
@@ -1321,7 +1334,7 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
     reason: available ? null : (spec.reason ?? NOT_IMPLEMENTED_REASON),
     subjects: TICKET_ONLY_ACTIONS.includes(spec.subtype)
       ? ['TICKET']
-      : TICKET_RULE_ACTIONS.includes(spec.subtype)
+      : TICKET_RULE_ACTIONS.includes(spec.subtype) || spec.subtype === DELAY_SUBTYPE
         ? ['TASK', 'TICKET']
         : ['TASK'],
   };
@@ -1337,13 +1350,13 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
  * Derived wherever there is something to derive from, so a capability cannot
  * claim more than the action list supports. The two that are stated rather than
  * computed are pinned by name to the code that decides them: the runner walks a
- * branch's arms in `plan`, and the validator refuses a DELAY node outright in
- * `checkSubtypes` — so neither can change without this line being read.
+ * branch's arms in `plan`, and stops at a Wait step there for the clock to
+ * resume — so neither can change without this line being read.
  */
 export function capabilities(): AutomationCapabilities {
   return {
     branching: true,
-    delays: false,
+    delays: true,
     externalActions: runnerCanPerform('SEND_EMAIL') || runnerCanPerform('SEND_WEBHOOK'),
     ai: runnerCanPerform('AI_ACTION'),
     conditionsOnCustomFields: runnerCanReadField(customFieldKey('any')),

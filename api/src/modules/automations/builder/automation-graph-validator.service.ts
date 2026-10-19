@@ -31,6 +31,7 @@ import {
   ticketConditionProblem,
   TICKET_ONLY_ACTIONS,
   isTicketConditionField,
+  delayProblem,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -272,13 +273,25 @@ export class AutomationGraphValidatorService {
        * BRANCH used to be refused for the same reason and no longer is — the
        * runner walks the tree and takes one arm. See the branching document.
        */
+      // A Wait step waits a whole number of minutes, hours or days.
       if (node.type === AutomationNodeType.DELAY) {
-        issues.push({
-          level: GraphIssueLevel.ERROR,
-          nodeId: node.id,
-          path: null,
-          message: 'This step type cannot run yet.',
-        });
+        const problem = delayProblem(node.configuration);
+        if (problem) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'amount',
+            message: problem,
+          });
+        }
+        if (!nodes.some((other) => other.parentId === node.id)) {
+          issues.push({
+            level: GraphIssueLevel.WARNING,
+            nodeId: node.id,
+            path: null,
+            message: 'Nothing follows this wait, so it waits for nothing.',
+          });
+        }
       }
     }
 
@@ -367,6 +380,13 @@ export class AutomationGraphValidatorService {
             node.id,
             null,
             'This rule runs on no tasks, so there is nothing to check. Choose tasks for it to run on, or remove the check.',
+          );
+        }
+        if (node.type === AutomationNodeType.DELAY) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so there is nothing to wait for. Choose tasks for it to run on.',
           );
         }
         if (
