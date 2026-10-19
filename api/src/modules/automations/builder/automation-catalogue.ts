@@ -352,9 +352,6 @@ export const ACTION_CATEGORY = {
 /* Triggers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Shared by a trigger and a condition greyed for the same missing feature. */
-const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
-
 /**
  * Triggers nothing publishes, and why.
  *
@@ -720,7 +717,16 @@ interface ConditionSpec {
   description?: string;
 }
 
-const FORMS_AND_EMAIL_REASON = 'Forms and inbound email are not built yet.';
+/*
+ * Forms and email to a project both create tasks, but neither leaves a mark a
+ * rule can read: a form's task does not record the form, and the inbound-mail
+ * record is not something the runner looks up. Said plainly, with what does
+ * work instead.
+ */
+const ADDED_BY_FORM_REASON =
+  'A task does not record which form created it yet, so this cannot be checked. "Task is added to this project" fires for form tasks too.';
+const ADDED_BY_EMAIL_REASON =
+  'Rules cannot tell yet that a task came in by email, so this cannot be checked. "Task is added to this project" fires for emailed tasks too.';
 /** The generic answer, for a field the runner has no case for. */
 const UNREADABLE_FIELD_REASON =
   'The engine cannot read this on a task, so the check would never match.';
@@ -751,14 +757,14 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Task is added to this project by form…',
     category: CONDITION_CATEGORY.TASK_MOVED,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: FORMS_AND_EMAIL_REASON,
+    reason: ADDED_BY_FORM_REASON,
   },
   {
     subtype: 'ADDED_BY_EMAIL',
     label: 'Task is added to this project by email…',
     category: CONDITION_CATEGORY.TASK_MOVED,
     valueType: CONDITION_VALUE_TYPE.TEXT,
-    reason: FORMS_AND_EMAIL_REASON,
+    reason: ADDED_BY_EMAIL_REASON,
   },
 
   // Task field is
@@ -1249,7 +1255,7 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     subtype: 'CREATE_APPROVALS',
     label: 'Create approvals…',
     category: ACTION_CATEGORY.CREATE_NEW,
-    reason: NO_APPROVALS_REASON,
+    reason: 'Use “Create a task…”, then “Set task type to” Approval — an approval starts pending.',
   },
 
   // Convert task to…

@@ -175,7 +175,7 @@ export class AutomationMetadataService {
          * step greys it out. The host stands in for the URL — see the type.
          */
         this.prisma.webhookEndpoint.findMany({
-          where: { workspaceId },
+          where: { workspaceId, apiKeyId: null, oauthGrantId: null },
           orderBy: { name: 'asc' },
           select: { id: true, name: true, url: true, enabled: true },
         }),

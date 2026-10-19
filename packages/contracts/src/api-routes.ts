@@ -16,6 +16,8 @@ export const ApiRoutes = {
     refresh: '/auth/refresh',
     logout: '/auth/logout',
     me: '/auth/me',
+    forgotPassword: '/auth/forgot-password',
+    resetPassword: '/auth/reset-password',
   },
   workspaces: {
     list: '/workspaces',
@@ -417,6 +419,22 @@ export const ApiRoutes = {
   },
   integration: {
     whoami: '/integration/whoami',
+  },
+  oauth: {
+    consent: '/oauth/consent',
+    authorize: '/oauth/authorize',
+    token: '/oauth/token',
+    revoke: '/oauth/revoke',
+    apps: '/users/me/oauth-apps',
+    app: (appId: string) => `/users/me/oauth-apps/${appId}`,
+    rotateSecret: (appId: string) => `/users/me/oauth-apps/${appId}/rotate-secret`,
+    connectedApps: '/users/me/connected-apps',
+    connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
+  },
+  webhookSubscriptions: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,
+    one: (workspaceId: string, subscriptionId: string) =>
+      `/workspaces/${workspaceId}/webhook-subscriptions/${subscriptionId}`,
   },
   webhooks: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,

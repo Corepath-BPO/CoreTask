@@ -72,15 +72,26 @@ export function LoginPage() {
           />
         </Field>
 
-        <Field label="Password" htmlFor="password" error={errors.password?.message} required>
-          <PasswordInput
-            {...fieldAria('password', errors.password?.message)}
-            {...register('password')}
-            autoComplete="current-password"
-            placeholder="••••••••••"
-            disabled={busy}
-          />
-        </Field>
+        <div className="space-y-2">
+          <Field label="Password" htmlFor="password" error={errors.password?.message} required>
+            {/* Words, not dots: a row of dots in an empty box reads as a password already typed. */}
+            <PasswordInput
+              {...fieldAria('password', errors.password?.message)}
+              {...register('password')}
+              autoComplete="current-password"
+              placeholder="Your password"
+              disabled={busy}
+            />
+          </Field>
+          <div className="text-right">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        </div>
 
         <Button type="submit" className="w-full" loading={busy}>
           {busy ? 'Signing in…' : 'Sign in'}

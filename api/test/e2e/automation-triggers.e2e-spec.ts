@@ -34,6 +34,7 @@ describe('Automation triggers and actions (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toWorkspace: async () => undefined,
     } as never);
     clock = new AutomationClockService(context.prisma, {
       publish: async (

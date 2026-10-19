@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { ProjectAccessModule } from '../project-access/project-access.module';
+
 import { WebhookDeliveryService } from './webhook-delivery.service';
 import { WebhookPayloadBuilder } from './webhook-payload.builder';
 
@@ -11,6 +13,7 @@ import { WebhookPayloadBuilder } from './webhook-payload.builder';
  * import it to queue a test delivery.
  */
 @Module({
+  imports: [ProjectAccessModule],
   providers: [WebhookDeliveryService, WebhookPayloadBuilder],
   exports: [WebhookDeliveryService],
 })

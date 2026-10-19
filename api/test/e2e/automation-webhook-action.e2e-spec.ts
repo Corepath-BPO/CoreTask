@@ -38,6 +38,7 @@ describe('Automation: send a webhook (e2e)', () => {
     // automations spec does, with a relay that goes nowhere.
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toWorkspace: async () => undefined,
     } as never);
     deliveries = context.app.get(WebhookDeliveryService);
 

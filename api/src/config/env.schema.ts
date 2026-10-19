@@ -80,17 +80,9 @@ export const envSchema = z
     STORAGE_FORCE_PATH_STYLE: booleanFlag(true),
     STORAGE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).default(25),
 
-    // An empty SMTP_HOST selects the development transport, which writes the
-    // rendered message to the log instead of opening a connection.
-    SMTP_HOST: optionalString,
-    SMTP_PORT: port.default(1025),
-    SMTP_USER: optionalString,
-    SMTP_PASSWORD: optionalString,
-    SMTP_SECURE: booleanFlag(false),
-    SMTP_FROM: z.string().min(1).default('CoreTask <no-reply@coretask.local>'),
-
     /*
-     * Microsoft Graph, used in preference to SMTP when all four values are set.
+     * Microsoft Graph, the e-mail transport, used when all four values are set;
+     * without them e-mail is written to the log instead.
      * Client-credentials flow against an app registration holding the
      * application permission `Mail.Send`; mail is sent as MAIL_FROM_ADDRESS,
      * which must be a real mailbox in the tenant.

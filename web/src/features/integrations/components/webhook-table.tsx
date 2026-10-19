@@ -165,6 +165,12 @@ function WebhookRow({
               {PROJECT_APP_INFO[webhook.app].label} app
             </Badge>
           )}
+          {/* Subscribed through the API by an API key or an OAuth app. */}
+          {webhook.source.kind !== 'SETTINGS' && (
+            <Badge variant="muted" className="text-[10px]">
+              Added by {webhook.source.name ?? 'an integration'}
+            </Badge>
+          )}
         </span>
       </td>
       <td className="px-3 py-3">

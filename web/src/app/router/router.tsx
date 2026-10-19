@@ -3,14 +3,22 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
 import { RootLayout } from '@/app/layouts/root-layout';
+import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
+import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { GoalsPage } from '@/features/goals/pages/goals-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
-import { IntegrationsPage } from '@/features/integrations/pages/integrations-page';
+import { ConnectedAppsPage } from '@/features/integrations/pages/connected-apps-page';
+import {
+  IntegrationsIndex,
+  IntegrationsPage,
+} from '@/features/integrations/pages/integrations-page';
+import { OAuthAppsPage } from '@/features/integrations/pages/oauth-apps-page';
+import { OAuthConsentPage } from '@/features/integrations/pages/oauth-consent-page';
 import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
 import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
@@ -48,6 +56,7 @@ import { MyTasksPage } from '@/features/tasks/pages/my-tasks-page';
 import { TeamDetailPage } from '@/features/teams/pages/team-detail-page';
 import { TeamsPage } from '@/features/teams/pages/teams-page';
 import { TicketsPage } from '@/features/tickets/pages/tickets-page';
+import { WorkspaceLinkPage } from '@/features/workspaces/pages/workspace-link-page';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { NotFoundPage } from './not-found-page';
@@ -90,6 +99,12 @@ const loginRoute = createRoute({
   validateSearch: validateRedirect,
 });
 
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => guestRoute,
+  path: '/forgot-password',
+  component: ForgotPasswordPage,
+});
+
 const registerRoute = createRoute({
   getParentRoute: () => guestRoute,
   path: '/register',
@@ -125,6 +140,16 @@ const protectedRoute = createRoute({
         search: { redirect: location.href },
       });
     }
+  },
+});
+
+/** A workspace's own address, `/w/<slug>`: switches to it and opens its Home. */
+const workspaceLinkRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/w/$slug',
+  component: function WorkspaceLinkRoute() {
+    const { slug } = workspaceLinkRoute.useParams();
+    return <WorkspaceLinkPage slug={slug} />;
   },
 });
 
@@ -302,7 +327,9 @@ const teamDetailRoute = createRoute({
 
 /**
  * Integrations is a shell with tabs, like a project: the shell owns the header
- * and the admin gate, the tabs are routes so a URL names one of them.
+ * and the admin gate for the workspace's tabs, the tabs are routes so a URL
+ * names one of them. OAuth apps and Connected apps are a person's own, open to
+ * every member.
  */
 const integrationsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -310,13 +337,11 @@ const integrationsRoute = createRoute({
   component: IntegrationsPage,
 });
 
-/** Bare `/integrations` opens the first tab. */
+/** Bare `/integrations` opens the first tab this person may use. */
 const integrationsIndexRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/',
-  beforeLoad: () => {
-    throw redirect({ to: '/integrations/api-keys' });
-  },
+  component: IntegrationsIndex,
 });
 
 const integrationsApiKeysRoute = createRoute({
@@ -335,6 +360,44 @@ const integrationsPlaygroundRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/playground',
   component: PlaygroundPage,
+});
+
+const integrationsOAuthAppsRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/oauth-apps',
+  component: OAuthAppsPage,
+});
+
+const integrationsConnectedAppsRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/connected-apps',
+  component: ConnectedAppsPage,
+});
+
+/**
+ * Where a reset link lands. Off the root rather than the guest gate: someone
+ * still signed in on this device may be the one who forgot, and the guest gate
+ * would bounce them to the dashboard instead.
+ */
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/reset-password',
+  component: ResetPasswordPage,
+});
+
+/**
+ * Where a tool sends a person to ask for access. Signed in, like the app, but
+ * outside its shell: the page is a single decision and nothing else.
+ */
+const oauthAuthorizeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/oauth/authorize',
+  component: OAuthConsentPage,
+  beforeLoad: ({ location }) => {
+    if (useAuthStore.getState().status !== 'authenticated') {
+      throw redirect({ to: '/login', search: { redirect: location.href } });
+    }
+  },
 });
 
 /**
@@ -675,11 +738,14 @@ const settingsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  guestRoute.addChildren([loginRoute, registerRoute]),
+  guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
+  resetPasswordRoute,
   acceptInvitationRoute,
   publicFormRoute,
+  oauthAuthorizeRoute,
   protectedRoute.addChildren([
     dashboardRoute,
+    workspaceLinkRoute,
     projectsRoute,
     projectDetailRoute.addChildren([
       projectIndexRoute,
@@ -720,6 +786,8 @@ const routeTree = rootRoute.addChildren([
       integrationsApiKeysRoute,
       integrationsWebhooksRoute,
       integrationsPlaygroundRoute,
+      integrationsOAuthAppsRoute,
+      integrationsConnectedAppsRoute,
     ]),
     goalsRoute,
     calendarRoute,

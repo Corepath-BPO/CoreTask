@@ -129,18 +129,17 @@ something that leaks out with the next field on the model.
 
 ### Outbound e-mail
 
-Three transports, chosen in this order by `EmailService`:
+Two transports, chosen by `EmailService`:
 
 1. **Microsoft Graph**, when the `MICROSOFT_GRAPH_*` block is configured
-2. **SMTP**, when `SMTP_HOST` is set
-3. The **log transport**, which writes the rendered message out
+2. The **log transport** otherwise, which writes the rendered message out
 
-Graph wins over SMTP deliberately. It is the explicitly-credentialed choice,
-whereas SMTP settings are easy to leave pointing at a local catcher by accident.
-The log transport is not a stub: it keeps local development free of a mail
-container while still exercising the whole
+There is no SMTP transport: CoreTask sends through Graph, and keeping a second
+real transport would be one more set of settings to leave pointing somewhere by
+accident. The log transport is not a stub: it keeps local development free of a
+mail account while still exercising the whole
 queue → processor → template → integration path, so the only untested link is
-the socket.
+the call to Graph.
 
 The Graph transport is written against `fetch` rather than
 `@microsoft/microsoft-graph-client` plus MSAL. It needs exactly two calls —

@@ -14,6 +14,7 @@ export * from './forms.js';
 export * from './home.js';
 export * from './goals.js';
 export * from './integrations.js';
+export * from './oauth.js';
 export * from './limits.js';
 export * from './mentions.js';
 export * from './my-tasks.js';

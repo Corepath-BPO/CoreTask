@@ -220,6 +220,10 @@ model User {
   apiKey                     ApiKey?
   createdApiKeys             ApiKey[]                 @relation("ApiKeyCreatedBy")
   createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
+  oauthApps                  OAuthApp[]
+  passwordResetTokens        PasswordResetToken[]
+  oauthCodes                 OAuthAuthorizationCode[]
+  oauthGrants                OAuthGrant[]
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -333,12 +337,103 @@ model ApiKey {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdBy User?     @relation("ApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy        User?             @relation("ApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  webhookEndpoints WebhookEndpoint[]
 
   @@index([workspaceId, revokedAt])
   @@map("api_keys")
+}
+
+/// An app a developer registered so other tools can act for CoreTask users
+/// (OAuth 2.0, authorization-code flow). Owned by the person who registered it.
+model OAuthApp {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  ownerId          String   @db.Uuid
+  name             String   @db.VarChar(80)
+  description      String?  @db.VarChar(500)
+  websiteUrl       String?  @db.VarChar(2048)
+  /// Matched exactly at authorization: the only places a code can be sent.
+  redirectUris     String[]
+  /// `ctc_…`, public.
+  clientId         String   @unique @db.VarChar(64)
+  /// SHA-256 hex of the `cts_…` secret.
+  clientSecretHash String   @db.VarChar(64)
+  /// `cts_` plus the first characters — for the list, never for lookup.
+  secretHint       String   @db.VarChar(16)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  owner  User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  codes  OAuthAuthorizationCode[]
+  grants OAuthGrant[]
+
+  @@index([ownerId])
+  @@map("oauth_apps")
+}
+
+/// A code handed to an app's redirect URI, good once, for a few minutes.
+model OAuthAuthorizationCode {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  appId         String    @db.Uuid
+  userId        String    @db.Uuid
+  /// SHA-256 hex of the code.
+  codeHash      String    @unique @db.VarChar(64)
+  redirectUri   String    @db.VarChar(2048)
+  scopes        String[]
+  /// PKCE (S256), when the app sent a challenge.
+  codeChallenge String?   @db.VarChar(128)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  /// The grant the code was exchanged for, so a replayed code can revoke it.
+  grantId       String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  app  OAuthApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("oauth_authorization_codes")
+}
+
+/// One person's authorization of one app. Holds the refresh token; revoking it
+/// ends every access token issued under it and the webhooks it subscribed.
+model OAuthGrant {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  appId            String    @db.Uuid
+  userId           String    @db.Uuid
+  scopes           String[]
+  /// SHA-256 hex of the `ctr_…` refresh token.
+  refreshTokenHash String    @unique @db.VarChar(64)
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  app              OAuthApp           @relation(fields: [appId], references: [id], onDelete: Cascade)
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokens     OAuthAccessToken[]
+  webhookEndpoints WebhookEndpoint[]
+
+  @@index([userId, revokedAt])
+  @@index([appId, revokedAt])
+  @@map("oauth_grants")
+}
+
+/// A `cto_…` access token: an hour, then the app refreshes.
+model OAuthAccessToken {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  grantId   String   @db.Uuid
+  /// SHA-256 hex of the token.
+  tokenHash String   @unique @db.VarChar(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  grant OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId, expiresAt])
+  @@map("oauth_access_tokens")
 }
 
 // ---------------------------------------------------------------------------
@@ -377,15 +472,23 @@ model WebhookEndpoint {
   lastDeliveryStatus  WebhookDeliveryStatus?
   lastSuccessAt       DateTime?
   createdById         String?                @db.Uuid
+  /// Subscribed through the API by this API key — gone with the key.
+  apiKeyId            String?                @db.Uuid
+  /// Subscribed through the API by an OAuth app — gone when it is disconnected.
+  oauthGrantId        String?                @db.Uuid
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project    Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdBy  User?             @relation("WebhookEndpointCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  apiKey     ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  oauthGrant OAuthGrant?       @relation(fields: [oauthGrantId], references: [id], onDelete: Cascade)
   deliveries WebhookDelivery[]
 
   @@index([workspaceId, enabled])
+  @@index([apiKeyId])
+  @@index([oauthGrantId])
   @@map("webhook_endpoints")
 }
 
@@ -2612,4 +2715,21 @@ model AutomationDelayedRun {
 
   @@index([status, runAt])
   @@map("automation_delayed_runs")
+}
+
+/// A link to set a new password: an hour, once. Only the hash is kept, and
+/// asking for a new link replaces any unused one.
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
 }

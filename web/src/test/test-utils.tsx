@@ -103,10 +103,24 @@ export async function renderWithRouter(
     component: () => <div>accept invitation</div>,
   });
 
+  // The password pages: "Forgot password?" on sign-in links to the first, and
+  // the e-mailed link lands on the second.
+  const forgotPasswordRoute = createRoute({
+    getParentRoute: () => guestRoute,
+    path: '/forgot-password',
+    component,
+  });
+  const resetPasswordRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/reset-password',
+    component,
+  });
+
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
-      guestRoute.addChildren([loginRoute, registerRoute]),
+      guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
+      resetPasswordRoute,
       projectsRoute,
       projectDetailRoute,
       acceptInvitationRoute,

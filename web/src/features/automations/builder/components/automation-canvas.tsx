@@ -13,6 +13,8 @@ import { useEffect, useMemo, useRef } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
+import { useTheme } from '@/stores/theme.store';
+
 import { AutomationEdge } from '../nodes/automation-edge';
 import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
 import { branchRows, fallbackRow, isUnansweredRow, type CanvasNode } from '../lib/graph-edits';
@@ -80,6 +82,8 @@ function Canvas({
   onDeleteNode,
   onChangeTrigger,
 }: Props) {
+  // React Flow draws its own zoom controls; told the theme, they match it.
+  const { resolvedTheme } = useTheme();
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
 
@@ -376,6 +380,7 @@ function Canvas({
         proOptions={{ hideAttribution: false }}
         minZoom={0.3}
         maxZoom={1.5}
+        colorMode={resolvedTheme}
         className="bg-background"
       >
         {/* A very faint grid: enough to say the surface pans, quiet enough that

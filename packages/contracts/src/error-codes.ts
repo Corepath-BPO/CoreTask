@@ -25,6 +25,7 @@ export const ErrorCode = {
   REFRESH_TOKEN_REUSED: 'REFRESH_TOKEN_REUSED',
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   ACCOUNT_DISABLED: 'ACCOUNT_DISABLED',
+  PASSWORD_RESET_INVALID: 'PASSWORD_RESET_INVALID',
 
   // API keys
   API_KEY_INVALID: 'API_KEY_INVALID',
@@ -33,6 +34,17 @@ export const ErrorCode = {
   API_KEY_NOT_ALLOWED: 'API_KEY_NOT_ALLOWED',
   API_KEY_ROLE_NOT_ALLOWED: 'API_KEY_ROLE_NOT_ALLOWED',
   API_KEY_LIMIT_REACHED: 'API_KEY_LIMIT_REACHED',
+
+  // OAuth apps and their tokens
+  OAUTH_TOKEN_INVALID: 'OAUTH_TOKEN_INVALID',
+  OAUTH_TOKEN_EXPIRED: 'OAUTH_TOKEN_EXPIRED',
+  OAUTH_TOKEN_NOT_ALLOWED: 'OAUTH_TOKEN_NOT_ALLOWED',
+  OAUTH_APP_LIMIT_REACHED: 'OAUTH_APP_LIMIT_REACHED',
+  OAUTH_UNKNOWN_CLIENT: 'OAUTH_UNKNOWN_CLIENT',
+  OAUTH_REDIRECT_URI_MISMATCH: 'OAUTH_REDIRECT_URI_MISMATCH',
+  OAUTH_INVALID_REQUEST: 'OAUTH_INVALID_REQUEST',
+  INTEGRATION_ONLY: 'INTEGRATION_ONLY',
+  WEBHOOK_SUBSCRIPTION_LIMIT_REACHED: 'WEBHOOK_SUBSCRIPTION_LIMIT_REACHED',
 
   // Webhooks
   WEBHOOK_URL_NOT_ALLOWED: 'WEBHOOK_URL_NOT_ALLOWED',
@@ -80,6 +92,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   REFRESH_TOKEN_REUSED: 'The refresh token has already been used. All sessions were revoked.',
   EMAIL_ALREADY_REGISTERED: 'An account with this e-mail address already exists.',
   ACCOUNT_DISABLED: 'This account has been disabled.',
+  PASSWORD_RESET_INVALID: 'This reset link is invalid, used or expired. Ask for a new one.',
 
   API_KEY_INVALID: 'The API key is not recognised.',
   API_KEY_REVOKED: 'The API key has been revoked.',
@@ -87,6 +100,18 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   API_KEY_NOT_ALLOWED: 'This action needs a signed-in person, not an API key.',
   API_KEY_ROLE_NOT_ALLOWED: 'An API key can be a guest, a member or a manager.',
   API_KEY_LIMIT_REACHED: 'This workspace already has the maximum number of API keys.',
+
+  OAUTH_TOKEN_INVALID: 'The access token is not recognised, or the app was disconnected.',
+  OAUTH_TOKEN_EXPIRED: 'The access token has expired. Use the refresh token for a new one.',
+  OAUTH_TOKEN_NOT_ALLOWED: 'This action needs a signed-in person, not an app.',
+  OAUTH_APP_LIMIT_REACHED: 'You already have the maximum number of OAuth apps.',
+  OAUTH_UNKNOWN_CLIENT: 'This app is not registered with CoreTask.',
+  OAUTH_REDIRECT_URI_MISMATCH: 'The app asked to send you somewhere it did not register.',
+  OAUTH_INVALID_REQUEST: 'The app sent an authorization request CoreTask cannot accept.',
+  INTEGRATION_ONLY:
+    'Webhook subscriptions are made by API keys and OAuth apps. People add webhooks in Settings.',
+  WEBHOOK_SUBSCRIPTION_LIMIT_REACHED:
+    'This integration already has the maximum number of webhook subscriptions.',
 
   WEBHOOK_URL_NOT_ALLOWED: 'CoreTask cannot send webhooks to that address.',
   WEBHOOK_ENDPOINT_LIMIT_REACHED:
