@@ -32,6 +32,7 @@ describe('Automations (e2e)', () => {
     // and the broadcast to open tabs is fire-and-forget by design.
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toWorkspace: async () => undefined,
     } as never);
   });
 
@@ -252,6 +253,140 @@ describe('Automations (e2e)', () => {
           after: expect.objectContaining({ sectionId: targetSectionId }),
         }),
       ]);
+    });
+
+    it('adds the task to another project too, keeping it here, and once', async () => {
+      const scope = await setupScope();
+      const sibling = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Renewals' })
+        .expect(201);
+      const targetProjectId = sibling.body.data.id as string;
+      const targetSections = sibling.body.data.sections as { id: string }[];
+      const targetSectionId = targetSections[1]?.id ?? targetSections[0]?.id ?? '';
+
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_PROJECT',
+          parentId: 't',
+          configuration: { projectId: targetProjectId, targetSectionId, mode: 'ADD' },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+      expect(result.executed).toBe(1);
+
+      // Still home here, and in the other project's chosen section as well.
+      const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      expect(task.projectId).not.toBe(targetProjectId);
+      const links = await context.prisma.taskProject.findMany({ where: { taskId: scope.taskId } });
+      expect(links).toEqual([
+        expect.objectContaining({ projectId: targetProjectId, sectionId: targetSectionId }),
+      ]);
+
+      // A second run finds it already there and adds nothing.
+      await runner.handle(moveEvent(scope));
+      expect(await context.prisma.taskProject.count({ where: { taskId: scope.taskId } })).toBe(1);
+    });
+
+    it('fills variables into the titles of the subtasks it creates', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'CREATE_SUBTASK',
+          parentId: 't',
+          configuration: { subtasks: ['Inspect {{task.name}}', 'Plain step'] },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+        orderBy: { position: 'asc' },
+        select: { title: true },
+      });
+      expect(subtasks.map((subtask) => subtask.title)).toEqual([
+        `Inspect ${task.title}`,
+        'Plain step',
+      ]);
+    });
+
+    it('emails the people on the task, never an address in the rule', async () => {
+      const scope = await setupScope();
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { assigneeId: scope.member.userId },
+      });
+
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'SEND_EMAIL',
+          parentId: 't',
+          configuration: {
+            recipients: ['ASSIGNEE', 'CREATOR', 'someone@else.example'],
+            subject: 'About {{task.name}}',
+            body: 'It moved.',
+          },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+      const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      const people = await context.prisma.user.findMany({
+        where: { id: { in: [scope.member.userId, task.createdById] } },
+        select: { email: true },
+      });
+
+      expect(result.emails.map((email) => email.to).sort()).toEqual(
+        people.map((person) => person.email).sort(),
+      );
+      expect(result.emails[0]).toMatchObject({
+        subject: `About ${task.title}`,
+        body: 'It moved.',
+        taskId: scope.taskId,
+        ruleName: 'Graph rule',
+      });
+    });
+
+    it('will not publish an email step with nobody to send it to', async () => {
+      const scope = await setupScope();
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Silent email',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.sectionId },
+          nodes: [
+            { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+            {
+              id: 'a',
+              nodeType: 'ACTION',
+              subtype: 'SEND_EMAIL',
+              parentId: 't',
+              configuration: { recipients: [], subject: 'Hello' },
+            },
+          ],
+        })
+        .expect(201);
+
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id as string}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
     });
 
     it('evaluates a date condition instead of quietly never matching', async () => {
@@ -1286,28 +1421,34 @@ describe('Automations (e2e)', () => {
       );
     });
 
-    it('refuses a step type nothing executes', async () => {
-      /*
-       * DELAY is in the schema and nothing runs it. A published rule containing
-       * one would look like it waits and would run straight through — worse
-       * than not offering it at all. BRANCH was refused for the same reason
-       * until the runner learned to walk the tree.
-       */
+    it('asks a Wait step how long, now that the runner waits', async () => {
       const scope = await setupScope();
       const ruleId = await draftWithNodes(scope, []);
+      const withWait = (configuration: Record<string, unknown>) =>
+        check(scope, ruleId, {
+          name: 'Has a delay',
+          nodes: [
+            { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
+            { id: 'd', nodeType: 'DELAY', subtype: 'DELAY', parentId: 't', configuration },
+            {
+              id: 'a',
+              nodeType: 'ACTION',
+              subtype: 'ASSIGN_USER',
+              parentId: 'd',
+              configuration: { userId: scope.owner.userId },
+            },
+          ],
+        });
 
-      const result = await check(scope, ruleId, {
-        name: 'Has a delay',
-        nodes: [
-          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null },
-          { id: 'd', nodeType: 'DELAY', subtype: 'WAIT', parentId: 't' },
-          { id: 'a', nodeType: 'ACTION', subtype: 'ASSIGN_USER', parentId: 'd' },
-        ],
-      });
+      const unset = await withWait({});
+      expect(unset.publishable).toBe(false);
+      expect(unset.issues.map((issue) => issue.message)).toContain(
+        'Choose minutes, hours or days.',
+      );
 
-      expect(result.publishable).toBe(false);
-      expect(result.issues.map((issue) => issue.message)).toContain(
-        'This step type cannot run yet.',
+      const set = await withWait({ amount: 2, unit: 'DAYS' });
+      expect(set.issues.map((issue) => issue.message)).not.toContain(
+        'Choose minutes, hours or days.',
       );
     });
 
@@ -1551,7 +1692,7 @@ describe('Automations (e2e)', () => {
         .send({
           name: 'Future',
           triggerType: 'TASK_CREATED',
-          nodes: [{ nodeType: 'ACTION', subtype: 'SEND_EMAIL', configuration: {} }],
+          nodes: [{ nodeType: 'ACTION', subtype: 'DELAY', configuration: {} }],
         })
         .expect(201);
 
@@ -1561,34 +1702,273 @@ describe('Automations (e2e)', () => {
         .expect(400);
     });
 
-    it('refuses to publish a ticket trigger while actions only operate on tasks', async () => {
+    it('keeps ticket rules to what a ticket can do, and task rules to tasks', async () => {
       const scope = await setupScope();
+      const publish = async (
+        triggerType: string,
+        nodes: Record<string, unknown>[],
+        expected: number,
+      ) => {
+        const created = await request(server())
+          .post(rulesUrl(scope))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({ name: 'Rule', triggerType, nodes })
+          .expect(201);
+        return request(server())
+          .post(`${rulesUrl(scope)}/${created.body.data.id as string}/publish`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(expected);
+      };
+
+      // A ticket has no subtasks.
+      const subtasks = await publish(
+        'TICKET_CREATED',
+        [
+          { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+          { nodeType: 'ACTION', subtype: 'CREATE_SUBTASK', configuration: { subtasks: ['Look'] } },
+        ],
+        400,
+      );
+      expect(subtasks.body.error.details.problems.join(' ')).toMatch(/ticket rule cannot do this/i);
+
+      // A task has no ticket status.
+      const status = await publish(
+        'TASK_CREATED',
+        [
+          { nodeType: 'TRIGGER', subtype: 'TASK_CREATED', configuration: {} },
+          {
+            nodeType: 'ACTION',
+            subtype: 'SET_TICKET_STATUS',
+            configuration: { status: 'TRIAGED' },
+          },
+        ],
+        400,
+      );
+      expect(status.body.error.details.problems.join(' ')).toMatch(/choose a ticket trigger/i);
+
+      // A ticket is checked with "Ticket is…", and its settings must be whole.
+      const check = await publish(
+        'TICKET_CREATED',
+        [
+          { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+          {
+            nodeType: 'CONDITION',
+            subtype: 'FIELD_COMPARISON',
+            configuration: { field: 'ticket.type', operator: 'IS', value: 'PIZZA' },
+          },
+          { nodeType: 'ACTION', subtype: 'UNASSIGN_USER', configuration: {} },
+        ],
+        400,
+      );
+      expect(check.body.error.details.problems.join(' ')).toMatch(/not a value/i);
+
+      await publish(
+        'TICKET_CREATED',
+        [
+          { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+          {
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_USER',
+            configuration: { userId: scope.owner.userId },
+          },
+        ],
+        200,
+      );
+    });
+
+    it('runs a ticket rule: checks the ticket, then triages it', async () => {
+      const scope = await setupScope();
+      const ticketsUrl = url(`/workspaces/${scope.workspaceId}/tickets`);
+      const report = async (title: string, type: string) =>
+        (
+          await request(server())
+            .post(ticketsUrl)
+            .set('Authorization', `Bearer ${scope.owner.token}`)
+            .send({ title, projectId: scope.projectId, type, priority: 'LOW' })
+            .expect(201)
+        ).body.data as { id: string; key: string };
 
       const created = await request(server())
         .post(rulesUrl(scope))
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .send({
-          name: 'Assign a new ticket',
+          name: 'Triage bugs',
           triggerType: 'TICKET_CREATED',
           nodes: [
-            { nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', configuration: {} },
+            { id: 't', nodeType: 'TRIGGER', subtype: 'TICKET_CREATED', parentId: null },
             {
+              id: 'c',
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              parentId: 't',
+              configuration: {
+                field: 'ticket.type',
+                operator: 'IS_ONE_OF',
+                value: ['BUG', 'INCIDENT'],
+              },
+            },
+            {
+              id: 'a1',
               nodeType: 'ACTION',
               subtype: 'ASSIGN_USER',
-              configuration: { userId: scope.owner.userId },
+              parentId: 'c',
+              configuration: { userId: scope.member.userId },
+            },
+            {
+              id: 'a2',
+              nodeType: 'ACTION',
+              subtype: 'SET_TICKET_STATUS',
+              parentId: 'a1',
+              configuration: { status: 'TRIAGED' },
+            },
+            {
+              id: 'a3',
+              nodeType: 'ACTION',
+              subtype: 'SET_TICKET_PRIORITY',
+              parentId: 'a2',
+              configuration: { priority: 'HIGH' },
+            },
+            {
+              id: 'a4',
+              nodeType: 'ACTION',
+              subtype: 'MOVE_TO_SECTION',
+              parentId: 'a3',
+              configuration: { sectionId: scope.otherSectionId },
+            },
+            {
+              id: 'a5',
+              nodeType: 'ACTION',
+              subtype: 'ADD_COMMENT',
+              parentId: 'a4',
+              configuration: { body: 'Triaged {{task.name}}' },
+            },
+            {
+              id: 'a6',
+              nodeType: 'ACTION',
+              subtype: 'CREATE_TASK',
+              parentId: 'a5',
+              configuration: { title: 'Fix {{task.name}}' },
             },
           ],
         })
         .expect(201);
-
-      const response = await request(server())
-        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id as string}/publish`)
         .set('Authorization', `Bearer ${scope.owner.token}`)
-        .expect(400);
+        .expect(200);
 
-      expect(response.body.error.details.problems.join(' ')).toMatch(
-        /automation actions currently operate on tasks/i,
-      );
+      const bug = await report('Login fails', 'BUG');
+      const ticketEvent = (entityId: string) => ({
+        ...moveEvent(scope),
+        trigger: 'TICKET_CREATED' as const,
+        entityType: 'TICKET' as const,
+        entityId,
+        after: { status: 'OPEN' },
+      });
+
+      const result = await runner.handle(ticketEvent(bug.id));
+      expect(result.executed).toBe(1);
+      // Its change of status is raised for the next rule, about the ticket; the
+      // task it created is announced as any new task is.
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          trigger: 'TICKET_STATUS_CHANGED',
+          entityType: 'TICKET',
+          entityId: bug.id,
+          after: { status: 'TRIAGED' },
+        }),
+        expect.objectContaining({ trigger: 'TASK_CREATED', entityType: 'TASK' }),
+      ]);
+
+      const after = await context.prisma.ticket.findUniqueOrThrow({ where: { id: bug.id } });
+      expect(after).toMatchObject({
+        assigneeId: scope.member.userId,
+        status: 'TRIAGED',
+        priority: 'HIGH',
+        sectionId: scope.otherSectionId,
+      });
+      const comment = await context.prisma.comment.findFirstOrThrow({
+        where: { ticketId: bug.id },
+      });
+      expect(comment.body).toBe(`Triaged ${bug.key} Login fails`);
+      const task = await context.prisma.task.findFirst({
+        where: { title: `Fix ${bug.key} Login fails` },
+      });
+      expect(task?.projectId).toBe(scope.projectId);
+      // The assignee follows the ticket now.
+      expect(
+        await context.prisma.follower.count({
+          where: { ticketId: bug.id, userId: scope.member.userId },
+        }),
+      ).toBe(1);
+
+      // A question is not a bug: the condition holds it back.
+      const question = await report('How do I export?', 'QUESTION');
+      const skipped = await runner.handle(ticketEvent(question.id));
+      expect(skipped.executed).toBe(0);
+      expect(
+        (await context.prisma.ticket.findUniqueOrThrow({ where: { id: question.id } })).status,
+      ).toBe('OPEN');
+    });
+
+    it('fires "ticket status changes to" only for that status, and ignores a ticket in task rules', async () => {
+      const scope = await setupScope();
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Close resolved',
+          triggerType: 'TICKET_STATUS_CHANGED',
+          triggerConfig: { status: 'RESOLVED' },
+          nodes: [
+            {
+              nodeType: 'TRIGGER',
+              subtype: 'TICKET_STATUS_CHANGED',
+              configuration: { status: 'RESOLVED' },
+            },
+            {
+              nodeType: 'ACTION',
+              subtype: 'SET_TICKET_STATUS',
+              configuration: { status: 'CLOSED' },
+            },
+          ],
+        })
+        .expect(201);
+      await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id as string}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+      const ticket = (
+        await request(server())
+          .post(url(`/workspaces/${scope.workspaceId}/tickets`))
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({ title: 'Printer jam', projectId: scope.projectId })
+          .expect(201)
+      ).body.data as { id: string };
+      const statusEvent = (status: string) => ({
+        ...moveEvent(scope),
+        trigger: 'TICKET_STATUS_CHANGED' as const,
+        entityType: 'TICKET' as const,
+        entityId: ticket.id,
+        before: { status: 'OPEN' },
+        after: { status },
+      });
+
+      expect((await runner.handle(statusEvent('WAITING'))).executed).toBe(0);
+      expect((await runner.handle(statusEvent('RESOLVED'))).executed).toBe(1);
+      const closed = await context.prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      expect(closed.status).toBe('CLOSED');
+      // Closing stamps resolution and closure, as a person's change does.
+      expect(closed.resolvedAt).not.toBeNull();
+      expect(closed.closedAt).not.toBeNull();
+
+      // A ticket dragged on a board raises the task trigger; task rules ignore it.
+      const ignored = await runner.handle({
+        ...moveEvent(scope),
+        entityType: 'TICKET' as const,
+        entityId: ticket.id,
+      });
+      expect(ignored).toMatchObject({ executed: 0, skipped: 0 });
     });
 
     /*
@@ -2979,9 +3359,13 @@ describe('Automations (e2e)', () => {
         'Section is not…',
         'Section is one of…',
       ]);
+      // All four run as written now — `automation-triggers` drives the two
+      // that used to be disabled through the runner.
       expect(moved?.configForms.filter((form) => form.available).map((form) => form.form)).toEqual([
         'SECTION_CHANGED',
         'SECTION_CHANGED_TO',
+        'SECTION_CHANGED_TO_NOT',
+        'SECTION_CHANGED_TO_ANY_OF',
       ]);
     });
 

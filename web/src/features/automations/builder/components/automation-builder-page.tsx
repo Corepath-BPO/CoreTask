@@ -1,4 +1,10 @@
-import { AutomationRuleStatus, type AutomationNodeType } from '@coretask/contracts';
+import {
+  AutomationRuleStatus,
+  type AutomationNodeType,
+  isTicketTrigger,
+  DELAY_SUBTYPE,
+  DEFAULT_DELAY,
+} from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
@@ -40,6 +46,7 @@ import {
 import { conditionFromCatalogueEntry } from '../configuration/condition-value';
 import { NodeConfigRail, type RailMode } from '../configuration/node-config-rail';
 import type { RuleSettings } from '../configuration/rule-settings-panel';
+import { defaultTriggerConfiguration } from '../configuration/timed-triggers';
 import {
   adoptChildren,
   applyEdits,
@@ -298,9 +305,18 @@ export function AutomationBuilderPage({
   /** Answers with the step it added, so the caller can go on to set it up. */
   const addAction = (subtype: string, configuration: Record<string, unknown> = {}): CanvasNode => {
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
+    // "Wait…" is a step of its own kind, not an action, and starts at a day.
+    const wait = subtype === DELAY_SUBTYPE;
     const node = {
-      ...makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes),
-      configuration,
+      ...makeNodeUnder(
+        wait ? 'DELAY' : 'ACTION',
+        subtype,
+        target.parentId || null,
+        target.arm,
+        realNodes,
+      ),
+      configuration:
+        wait && Object.keys(configuration).length === 0 ? { ...DEFAULT_DELAY } : configuration,
     };
 
     setEdits((previous) => ({
@@ -485,6 +501,26 @@ export function AutomationBuilderPage({
     ? metadata?.sections.find((entry) => entry.id === watchedSectionId)?.name
     : undefined;
 
+  /*
+   * A ticket rule works on the ticket, a task rule on the task. Steps for the
+   * other kind stay in the list, greyed with the reason — this panel's habit —
+   * rather than vanishing when the trigger changes.
+   */
+  const subject = isTicketTrigger(triggerNode?.subtype) ? 'TICKET' : 'TASK';
+  const forSubject = (entries: readonly AutomationCatalogEntry[]): AutomationCatalogEntry[] =>
+    entries.map((entry) =>
+      (entry.subjects ?? ['TASK']).includes(subject) || !entry.available
+        ? entry
+        : {
+            ...entry,
+            available: false,
+            reason:
+              subject === 'TICKET'
+                ? 'A ticket rule cannot do this — it works on tasks.'
+                : 'For ticket rules. Choose a ticket trigger to use it.',
+          },
+    );
+
   const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
     setAnswering(null);
     setAddingAt(target);
@@ -493,7 +529,7 @@ export function AutomationBuilderPage({
       catalogue: 'actions',
       title: 'Do this…',
       description: 'Add an action that happens as a result of the rule.',
-      entries: metadata?.actions ?? [],
+      entries: forSubject(metadata?.actions ?? []),
     });
   };
 
@@ -537,7 +573,7 @@ export function AutomationBuilderPage({
       catalogue: 'conditions',
       title: alternative ? 'Otherwise if…' : 'Check if…',
       description: 'Choose what this branch checks.',
-      entries: metadata?.conditions ?? [],
+      entries: forSubject(metadata?.conditions ?? []),
     });
   };
 
@@ -556,10 +592,13 @@ export function AutomationBuilderPage({
     }
 
     if (!addingAt) {
-      // "[Field] is changed" is one subtype per field only in its label; the
-      // field itself rides in the configuration, exactly as the generated
-      // action rows below carry theirs.
-      setTrigger(entry.subtype, entry.fieldId ? { fieldId: entry.fieldId } : {});
+      // "[Field] is changed" (and a date field's "is approaching") is one
+      // subtype per field only in its label; the field itself rides in the
+      // configuration, exactly as the generated action rows below carry theirs.
+      setTrigger(entry.subtype, {
+        ...defaultTriggerConfiguration(entry.subtype),
+        ...(entry.fieldId ? { fieldId: entry.fieldId } : {}),
+      });
       return;
     }
 

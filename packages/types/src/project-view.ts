@@ -7,6 +7,7 @@ import type {
   SortDirection,
 } from '@coretask/contracts';
 
+import type { TagRef } from './tags.js';
 import type { UserRef } from './work-items.js';
 
 export interface ViewFilterCondition {
@@ -241,4 +242,6 @@ export interface ProjectFieldMetadata {
   priorities: { id: string; name: string; level: number; colorToken: string }[];
   sections: { id: string; name: string }[];
   members: UserRef[];
+  /** The workspace's tags, for the Tags filter. */
+  tags: TagRef[];
 }

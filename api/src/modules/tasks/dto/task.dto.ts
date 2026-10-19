@@ -10,6 +10,10 @@ import {
   TASK_TITLE_MIN_LENGTH,
   TaskPriority,
   TaskStatus,
+  TASK_KINDS,
+  APPROVAL_STATUSES,
+  type TaskKind,
+  type ApprovalStatus,
 } from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
@@ -25,6 +29,8 @@ import {
   Max,
   Min,
   ValidateIf,
+  IsObject,
+  IsIn,
 } from 'class-validator';
 
 const trim = () =>
@@ -164,6 +170,11 @@ export class CreateTaskDto {
   @ValidateIf((_, value) => value !== null)
   @IsUUID()
   afterTaskId?: string | null;
+
+  @ApiPropertyOptional({ enum: TASK_KINDS, example: 'MILESTONE' })
+  @IsOptional()
+  @IsIn(TASK_KINDS)
+  kind?: TaskKind;
 }
 
 /**
@@ -254,6 +265,33 @@ export class UpdateTaskDto {
   @Min(0)
   @Max(TASK_MAX_ESTIMATED_MINUTES)
   estimatedMinutes?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: { frequency: 'WEEKLY', interval: 1, weekdays: [1] },
+    description:
+      '"Set to repeat". Completing the task creates the next one. Null stops it repeating.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsObject()
+  recurrence?: Record<string, unknown> | null;
+
+  @ApiPropertyOptional({
+    enum: TASK_KINDS,
+    description: 'Convert to a task, milestone or approval.',
+  })
+  @IsOptional()
+  @IsIn(TASK_KINDS)
+  kind?: TaskKind;
+
+  @ApiPropertyOptional({
+    enum: APPROVAL_STATUSES,
+    description: 'Decide an approval. Approving or rejecting completes it.',
+  })
+  @IsOptional()
+  @IsIn(APPROVAL_STATUSES)
+  approvalStatus?: ApprovalStatus;
 }
 
 export class MoveTaskDto {
@@ -366,4 +404,43 @@ export class TaskListQueryDto {
   @booleanQuery()
   @IsBoolean()
   includeSubtasks?: boolean = false;
+
+  @ApiPropertyOptional({
+    enum: TASK_KINDS,
+    description: 'Only tasks of this kind — milestones, say.',
+  })
+  @IsOptional()
+  @IsIn(TASK_KINDS)
+  kind?: TaskKind;
+}
+
+/** Multi-homing: add a task to another project. */
+export class AddTaskToProjectDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  projectId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: "That project's section; its first when left out, none when null.",
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  sectionId?: string | null;
+}
+
+/** Multi-homing: the task's section in one of its projects. */
+export class SetTaskProjectSectionDto {
+  @ApiProperty({ format: 'uuid', nullable: true })
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  sectionId!: string | null;
+}
+
+export class MarkDuplicateDto {
+  @ApiProperty({ format: 'uuid', description: 'The task this one repeats.' })
+  @IsUUID()
+  taskId!: string;
 }

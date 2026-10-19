@@ -32,7 +32,7 @@ export interface StoredObject {
 }
 
 /**
- * Object-storage foundation (MinIO locally, any S3-compatible service in
+ * Object-storage foundation (RustFS locally, any S3-compatible service in
  * production).
  *
  * Validation lives here rather than in a controller so every future upload path
@@ -61,7 +61,7 @@ export class StorageService implements OnModuleDestroy {
 
     const base = {
       region,
-      // MinIO serves one bucket per path segment rather than per subdomain, so
+      // Local storage keeps one bucket per path segment rather than per subdomain, so
       // virtual-host addressing would resolve to a hostname that does not exist.
       forcePathStyle,
       credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
@@ -148,7 +148,8 @@ export class StorageService implements OnModuleDestroy {
         // degrades to a suggestion: a URL signed for image/png happily accepts
         // text/html and stores it as such. Naming it here puts it in
         // SignedHeaders, so a mismatched upload fails the signature outright.
-        // Verified against MinIO — it accepted the swap before this was added.
+        // Verified against MinIO, which accepted the swap before this was added;
+        // attachments.e2e-spec.ts now holds every storage server to it.
         signableHeaders: new Set(['content-type']),
       },
     );
@@ -232,6 +233,22 @@ export class StorageService implements OnModuleDestroy {
       if (isNotFound(error)) return null;
       throw error;
     }
+  }
+
+  /**
+   * Writes bytes the server already holds — a file that arrived attached to
+   * an email. Uploads from people go straight to the bucket instead.
+   */
+  async putObject(objectKey: string, body: Buffer, mimeType: string): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Body: body,
+        ContentType: mimeType,
+        ContentLength: body.length,
+      }),
+    );
   }
 
   /** Deleting something that is not there is a success, not an error. */

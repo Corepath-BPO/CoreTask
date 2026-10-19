@@ -9,6 +9,7 @@ import { useCurrentUser } from '@/stores/auth.store';
 
 import { ProjectListView } from '../components/project-list-view';
 import { SaveViewDialog } from '../components/toolbar/save-view-dialog';
+import { ViewPicker } from '../components/toolbar/view-picker';
 import {
   canPersistView,
   useActiveView,
@@ -142,6 +143,24 @@ export function ProjectListPage({ projectId }: { projectId: string }) {
         canPersist={canPersist}
         dirty={editor.dirty}
         onSaveAs={() => setSavingAs(true)}
+        viewPicker={
+          <ViewPicker
+            workspaceId={workspaceId}
+            projectId={projectId}
+            views={(views ?? []).filter((view) => view.type === ProjectViewType.LIST)}
+            activeView={listView}
+            meId={me?.id}
+            role={role}
+            onSelect={(viewId) =>
+              void navigate({
+                to: '/projects/$projectId/list',
+                params: { projectId },
+                search: { view: viewId },
+                resetScroll: false,
+              })
+            }
+          />
+        }
         selectedSectionId={selectedSectionId}
         onSelectSection={selectSection}
       />

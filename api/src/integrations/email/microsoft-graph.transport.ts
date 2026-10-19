@@ -57,6 +57,9 @@ export class MicrosoftGraphTransport {
               ? { contentType: 'HTML', content: message.html }
               : { contentType: 'Text', content: message.text },
             toRecipients: [{ emailAddress: { address: message.to } }],
+            ...(message.replyTo
+              ? { replyTo: [{ emailAddress: { address: message.replyTo } }] }
+              : {}),
           },
           // The copy is the record that it was sent, which is worth having when
           // someone insists an invitation never arrived.

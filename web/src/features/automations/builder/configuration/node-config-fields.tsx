@@ -2,12 +2,20 @@ import {
   AUTOMATION_VALUE_TOKEN_LABEL,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  isDateTrigger,
   isTokenValue,
   operatorNeedsValue,
   operatorTakesMultipleValues,
   tokensForFieldType,
   type ConditionOperator,
   type ConditionValueType,
+  AUTOMATION_DELAY_UNITS,
+  AUTOMATION_DELAY_UNIT_LABEL,
+  AutomationDelayUnit,
+  delayProblem,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
 import { ChevronDown, X } from 'lucide-react';
@@ -24,11 +32,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
+import { AiActionFields, AiCheckFields } from './ai-step-fields';
 import {
   canonicalOperator,
   operatorOptionLabel,
@@ -46,8 +54,20 @@ import {
   readTriggerForm,
   readTriggerSections,
 } from './trigger-forms';
+import {
+  CollaboratorFields,
+  CompletionFields,
+  CreateTaskFields,
+  SendEmailFields,
+  VariableTextField,
+} from './extra-action-fields';
 import { RadioItem } from './radio-item';
 import { SendWebhookFields } from './send-webhook-fields';
+import {
+  DateTriggerFields,
+  ManualTriggerFields,
+  ScheduleTriggerFields,
+} from './timed-trigger-fields';
 import { SubtaskListFields } from './subtask-list-fields';
 import { MultiSelect, OptionFace, type ChoiceOption } from './value-controls';
 
@@ -101,8 +121,20 @@ export function NodeConfigFields({
     );
   }
 
+  // How long a Wait step waits.
+  if (node.type === 'DELAY') {
+    return <DelayFields configuration={node.configuration} onChange={onChange} />;
+  }
+
   /* A branch holds the comparison that chooses its arm, so it is configured
      exactly as a condition is — one decision, one node. */
+  if (
+    (node.type === 'CONDITION' || node.type === 'BRANCH') &&
+    node.configuration['field'] === AI_CHECK_FIELD
+  ) {
+    return <AiCheckFields configuration={node.configuration} onChange={onChange} />;
+  }
+
   if (node.type === 'CONDITION' || node.type === 'BRANCH') {
     return (
       <ConditionFields configuration={node.configuration} metadata={metadata} onChange={onChange} />
@@ -145,6 +177,35 @@ function TriggerFields({
 }) {
   const forms = formsForTrigger(subtype, metadata);
   const form = readTriggerForm(configuration, forms);
+
+  // The triggers that are not edits each have their own few questions.
+  if (subtype === 'RUN_MANUALLY') {
+    return <ManualTriggerFields configuration={configuration} onChange={onChange} />;
+  }
+  if (subtype === 'SCHEDULED_TIME') {
+    return (
+      <ScheduleTriggerFields
+        configuration={configuration}
+        metadata={metadata}
+        onChange={onChange}
+      />
+    );
+  }
+  if (isDateTrigger(subtype)) {
+    return (
+      <DateTriggerFields
+        subtype={subtype}
+        configuration={configuration}
+        metadata={metadata}
+        onChange={onChange}
+      />
+    );
+  }
+
+  // Any change of a ticket's status, or a change to one status.
+  if (subtype === 'TICKET_STATUS_CHANGED') {
+    return <TicketStatusTriggerFields configuration={configuration} onChange={onChange} />;
+  }
 
   // Which field to watch — or every field, which is what no fieldId stores and
   // what every rule saved before the narrowing existed still means.
@@ -641,6 +702,23 @@ function ActionFields({
     case 'MOVE_TO_SECTION':
       return picker('sectionId', 'Section', metadata?.sections, 'Choose a section');
 
+    // A ticket's own values, not the project's statuses and priorities.
+    case 'SET_TICKET_STATUS':
+      return picker(
+        'status',
+        'Ticket status',
+        TICKET_STATUSES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a status',
+      );
+
+    case 'SET_TICKET_PRIORITY':
+      return picker(
+        'priority',
+        'Ticket priority',
+        TICKET_PRIORITIES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a priority',
+      );
+
     case 'MOVE_TO_PROJECT':
       return (
         <MoveToProjectFields
@@ -717,15 +795,58 @@ function ActionFields({
 
     case 'ADD_COMMENT':
       return (
-        <Field label="Comment" htmlFor="step-body">
-          <Textarea
-            id="step-body"
-            rows={4}
-            value={read('body')}
-            onChange={(event) => set('body', event.target.value)}
-            placeholder="What should it say?"
-          />
-        </Field>
+        <VariableTextField
+          id="step-body"
+          label="Comment"
+          value={read('body')}
+          onChange={(value) => set('body', value)}
+          placeholder="What should it say?"
+          multiline
+        />
+      );
+
+    case 'SET_COMPLETION':
+      return <CompletionFields configuration={configuration} onChange={onChange} />;
+
+    case 'REMOVE_FROM_PROJECT':
+      return (
+        <p className="text-sm text-muted-foreground">
+          The task leaves this project, with its subtasks. It keeps its assignee, so it stays in
+          their My Tasks.
+        </p>
+      );
+
+    case 'CREATE_TASK':
+      return (
+        <CreateTaskFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
+    case 'ADD_REMOVE_COLLABORATORS':
+      return (
+        <CollaboratorFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
+    case 'SET_TASK_NAME':
+      return (
+        <VariableTextField
+          id="step-text"
+          label="New name"
+          value={read('text')}
+          onChange={(value) => set('text', value)}
+          placeholder="e.g. [Review] {{task.name}}"
+        />
+      );
+
+    case 'SET_TASK_DESCRIPTION':
+      return (
+        <VariableTextField
+          id="step-text"
+          label="Description"
+          value={read('text')}
+          onChange={(value) => set('text', value)}
+          hint="Replaces the description. Left empty, it clears it."
+          multiline
+        />
       );
 
     case 'CREATE_SUBTASK':
@@ -738,23 +859,30 @@ function ActionFields({
         <SendWebhookFields configuration={configuration} metadata={metadata} onChange={onChange} />
       );
 
+    case 'SEND_EMAIL':
+      return <SendEmailFields configuration={configuration} onChange={onChange} />;
+
+    case 'AI_ACTION':
+      return (
+        <AiActionFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
+
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;
   }
 }
 
-/** The one answer "Choose an option" has. */
+/** "Choose an option": move the task there, or add it there as well. */
 const MOVE_OPTION = 'MOVE';
+const ADD_OPTION = 'ADD';
 
 /**
  * Moving a task to another project: which one, and which of its sections.
  *
  * Laid out as the same panel is in Asana — an option, a project, a section —
- * because that is the shape somebody arriving from there expects to find. The
- * option has one working answer. A task lives in one project here, so "add"
- * (the same task in two projects at once) has nothing to write; it is shown
- * disabled with that reason rather than left out, so nobody goes looking for it
- * under another name.
+ * because that is the shape somebody arriving from there expects to find.
+ * "Move" takes the task out of this project; "Add" (stored as `mode: 'ADD'`)
+ * leaves it here and puts it in the other project too, in the section chosen.
  *
  * The section list follows the chosen project, and changing the project clears
  * the section: a section id means nothing in another project, and keeping it
@@ -789,17 +917,25 @@ function MoveToProjectFields({
   return (
     <div className="space-y-4">
       <Field label="Choose an option" htmlFor="step-move-option">
-        <Select value={MOVE_OPTION}>
+        <Select
+          value={read('mode') === ADD_OPTION ? ADD_OPTION : MOVE_OPTION}
+          onValueChange={(value) => {
+            // Radix answers a reset with an empty value; that is not a choice.
+            if (!value) return;
+            const { mode: _mode, ...rest } = configuration;
+            onChange(value === ADD_OPTION ? { ...rest, mode: ADD_OPTION } : rest);
+          }}
+        >
           <SelectTrigger id="step-move-option" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <RadioItem value={MOVE_OPTION}>Move task to another project</RadioItem>
-            <RadioItem value="ADD" disabled>
+            <RadioItem value={ADD_OPTION}>
               <span className="flex flex-col">
                 <span>Add task to another project</span>
                 <span className="text-xs italic text-muted-foreground">
-                  A task lives in one project here, so it can only be moved.
+                  It stays in this project and shows in that one too.
                 </span>
               </span>
             </RadioItem>
@@ -1097,4 +1233,117 @@ function CustomFieldAction({
 /** A rating is a bounded whole number; the runner stores and compares it as one. */
 function isNumeric(type: string): boolean {
   return type === 'NUMBER' || type === 'RATING';
+}
+
+const ANY_STATUS = '__any__';
+
+/** "Ticket status changes": to any status, or to one — "when a ticket is resolved". */
+function TicketStatusTriggerFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const status =
+    typeof configuration['status'] === 'string' && configuration['status'] !== ''
+      ? configuration['status']
+      : ANY_STATUS;
+
+  return (
+    <Field
+      label="When the status changes to"
+      htmlFor="trigger-ticket-status"
+      hint="Any status fires on every change."
+    >
+      <Select
+        value={status}
+        onValueChange={(next) => {
+          // Radix answers a reset with an empty value; that is not a choice.
+          if (!next) return;
+          onChange(next === ANY_STATUS ? {} : { status: next });
+        }}
+      >
+        <SelectTrigger id="trigger-ticket-status" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <RadioItem value={ANY_STATUS}>Any status</RadioItem>
+          {TICKET_STATUSES.map((value) => (
+            <RadioItem key={value} value={value}>
+              {humanizeEnum(value)}
+            </RadioItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * "Wait…": how many minutes, hours or days before what follows runs. What
+ * follows is judged on the task as it is by then, so a condition after the
+ * wait is how a rule says "if it is still open".
+ */
+function DelayFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const unit = AUTOMATION_DELAY_UNITS.includes(configuration['unit'] as AutomationDelayUnit)
+    ? (configuration['unit'] as AutomationDelayUnit)
+    : AutomationDelayUnit.DAYS;
+  const amount = typeof configuration['amount'] === 'number' ? configuration['amount'] : '';
+  const problem = delayProblem(configuration);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Wait for" htmlFor="step-delay-amount" error={problem ?? undefined}>
+          <Input
+            id="step-delay-amount"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={amount}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              onChange({
+                ...configuration,
+                unit,
+                amount: event.target.value === '' || Number.isNaN(next) ? undefined : next,
+              });
+            }}
+          />
+        </Field>
+        <Field label="Unit" htmlFor="step-delay-unit">
+          <Select
+            value={unit}
+            onValueChange={(next) => {
+              // Radix answers a reset with an empty value; that is not a choice.
+              if (next) onChange({ ...configuration, unit: next });
+            }}
+          >
+            <SelectTrigger id="step-delay-unit" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_DELAY_UNITS.map((entry) => (
+                <RadioItem key={entry} value={entry}>
+                  {AUTOMATION_DELAY_UNIT_LABEL[entry]}
+                </RadioItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Steps after this run once the time has passed, checked against the task as it is then — add
+        a condition after it to act only if something is still true.
+      </p>
+    </div>
+  );
 }

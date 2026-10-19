@@ -12,6 +12,21 @@ packages:
 overrides:
   prosemirror-transform: 1.12.0
 
+  # Security floors for transitive dependencies whose parents' ranges already
+  # allow the patched release, but which `pnpm update` will not re-resolve on
+  # its own. Each selector is scoped to its own major line, so nothing is
+  # pushed across a breaking boundary. Mirrored in package.json for pnpm 9,
+  # like the pin above. Drop each once a fresh resolution picks it up unaided.
+  #
+  #   nanoid         ships, via sanitize-html -> postcss. Not reachable: postcss
+  #                  calls the plain nanoid(6), not the custom generators the
+  #                  advisory concerns.
+  #   source-map-js  dev only (jsdom's css-tree); production already has 1.2.2.
+  #   js-yaml 3.x    dev only (Jest's coverage config loader).
+  "nanoid@>=3.0.0 <3.3.18": ^3.3.18
+  "source-map-js@>=1.0.0 <1.2.2": ^1.2.2
+  "js-yaml@>=3.0.0 <3.15.2": ^3.15.2
+
 # pnpm >= 10 blocks dependency lifecycle scripts unless they are approved here.
 # Only packages that legitimately need to compile or fetch a native binary are
 # allowed; everything else stays sandboxed.

@@ -30,8 +30,11 @@ const item = (overrides: Partial<ProjectWorkItem> & { id: string }): ProjectWork
   commentCount: 0,
   attachmentCount: 0,
   customFieldValues: [],
+  tags: [],
   details: {
     kind: 'TASK',
+    taskKind: 'TASK',
+    approvalStatus: null,
     estimatedMinutes: null,
     rawStatus: TaskStatus.TODO,
     rawPriority: TaskPriority.NONE,
@@ -91,6 +94,7 @@ const metadata: ProjectFieldMetadata = {
     { id: 'st-doing', name: 'Doing', category: 'IN_PROGRESS', colorToken: 'blue' },
   ],
   priorities: [],
+  tags: [],
   sections: [
     { id: 's-1', name: 'Backlog' },
     { id: 's-2', name: 'Done' },
@@ -245,6 +249,55 @@ describe('groupValueChange', () => {
       payload: { optionIds: ['o-high'] },
     });
     expect(groupValueChange('custom:f-sev', group, ticket, metadata)).toMatchObject({
+      kind: 'refused',
+    });
+  });
+});
+
+describe('by due date', () => {
+  // Wednesday 14 October 2026.
+  const now = new Date(2026, 9, 14, 10);
+
+  it('puts rows under Asana’s date headings, and draws the empty ones too', () => {
+    const groups = groupRows(
+      rows(
+        item({ id: 'late', dueDate: '2026-10-12T00:00:00.000Z' }),
+        item({ id: 'today', dueDate: '2026-10-14T00:00:00.000Z' }),
+        item({ id: 'friday', dueDate: '2026-10-16T00:00:00.000Z' }),
+        item({ id: 'undated' }),
+      ),
+      'dueDate',
+      metadata,
+      now,
+    );
+
+    expect(groups.map((group) => [group.name, group.tasks.map((row) => row.id)])).toEqual([
+      ['Overdue', ['late']],
+      ['Today', ['today']],
+      ['Tomorrow', []],
+      ['This week', ['friday']],
+      ['Next week', []],
+      ['Later', []],
+      ['No due date', ['undated']],
+    ]);
+  });
+
+  it('sets the date a heading names when a row is dropped there', () => {
+    const groups = groupRows(rows(item({ id: 'a' })), 'dueDate', metadata, now);
+    const row = rows(
+      item({ id: 'a', dueDate: '2026-10-14T00:00:00.000Z', dueAt: '2026-10-14T16:00:00.000Z' }),
+    )[0]!;
+    const named = (name: string) => groups.find((group) => group.name === name)!;
+
+    expect(groupValueChange('dueDate', named('Tomorrow'), row, metadata, now)).toEqual({
+      kind: 'update',
+      payload: { dueDate: '2026-10-15T00:00:00.000Z', dueAt: '2026-10-15T16:00:00.000Z' },
+    });
+    expect(groupValueChange('dueDate', named('No due date'), row, metadata, now)).toEqual({
+      kind: 'update',
+      payload: { dueDate: null, dueAt: null },
+    });
+    expect(groupValueChange('dueDate', named('Overdue'), row, metadata, now)).toMatchObject({
       kind: 'refused',
     });
   });

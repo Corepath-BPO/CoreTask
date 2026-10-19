@@ -8,7 +8,6 @@ import {
   ProjectStatus,
   ProjectVisibility,
   ServerEvent,
-  TaskStatus,
   canManageProject,
   effectiveWorkspaceRole,
 } from '@coretask/contracts';
@@ -25,7 +24,8 @@ import { PrismaService } from '../../database/prisma.service';
 import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ProjectAccessService } from '../project-access/project-access.service';
-import { toSectionDto, type SectionWithCount } from '../sections/section.mapper';
+import { sectionInclude, toSectionDto, type SectionWithCount } from '../sections/section.mapper';
+import { projectTaskCounts } from '../tasks/task-projects';
 
 import type { CreateProjectDto, ProjectListQueryDto, UpdateProjectDto } from './dto/project.dto';
 
@@ -42,7 +42,8 @@ const PROJECT_INCLUDE = {
     orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
     include: { user: { select: MEMBER_USER_SELECT } },
   },
-  _count: { select: { sections: true, tasks: true, members: true } },
+  // Linked tasks count too: a project's board shows them (multi-homing).
+  _count: { select: { sections: true, tasks: true, taskLinks: true, members: true } },
 } satisfies Prisma.ProjectInclude;
 
 type ProjectWithCounts = Prisma.ProjectGetPayload<{ include: typeof PROJECT_INCLUDE }>;
@@ -121,7 +122,7 @@ export class ProjectsService {
         ...PROJECT_INCLUDE,
         sections: {
           orderBy: { position: 'asc' },
-          include: { _count: { select: { tasks: true } } },
+          include: sectionInclude,
         },
       },
     });
@@ -496,17 +497,9 @@ export class ProjectsService {
   private async completedTaskCounts(projectIds: string[]): Promise<Map<string, number>> {
     if (projectIds.length === 0) return new Map();
 
-    const rows = await this.prisma.task.groupBy({
-      by: ['projectId'],
-      where: { projectId: { in: projectIds }, status: TaskStatus.DONE },
-      _count: { _all: true },
-    });
-
-    return new Map(
-      rows
-        .filter((row): row is typeof row & { projectId: string } => row.projectId !== null)
-        .map((row) => [row.projectId, row._count._all]),
-    );
+    // Home and linked tasks alike, as the board shows them.
+    const counts = await projectTaskCounts(this.prisma, projectIds);
+    return new Map([...counts.entries()].map(([projectId, count]) => [projectId, count.done]));
   }
 
   /**
@@ -619,7 +612,7 @@ export class ProjectsService {
       dueDate: project.dueDate?.toISOString() ?? null,
       completedAt: project.completedAt?.toISOString() ?? null,
       archivedAt: project.archivedAt?.toISOString() ?? null,
-      taskCount: project._count.tasks,
+      taskCount: project._count.tasks + project._count.taskLinks,
       completedTaskCount,
       sectionCount: project._count.sections,
       memberCount: project._count.members,

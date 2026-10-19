@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  ProjectApp,
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
   WEBHOOK_EVENT_ID_HEADER,
@@ -20,16 +21,34 @@ import { UnrecoverableError } from 'bullmq';
 import { fetchWithTimeout, safeBody } from '../../common/utils/http.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
+import { SlackApiClient, SlackApiError } from '../../integrations/slack/slack-api.client';
 import type { RuleWebhookRequest } from '../../jobs/queue-names';
 import { WebhookQueue } from '../../jobs/webhook/webhook.queue';
 import type { AutomationEvent } from '../automations/automation-event.publisher';
+import { ProjectAccessService } from '../project-access/project-access.service';
 
+import {
+  renderAppMessage,
+  renderSlackChannelMessage,
+  type AppMessageContext,
+} from './lib/app-messages';
 import { decryptSecret, deriveKey } from './lib/secret-cipher';
 import { signWebhook } from './lib/signature';
 import { assertResolvesToAllowedAddress } from './lib/url-policy';
 import { WebhookPayloadBuilder } from './webhook-payload.builder';
 
 type DeliveryWithEndpoint = WebhookDelivery & { endpoint: WebhookEndpoint | null };
+
+/** What fan-out needs to decide whether an endpoint may hear an event. */
+const endpointAudienceSelect = {
+  id: true,
+  url: true,
+  projectId: true,
+  apiKey: { select: { userId: true, revokedAt: true } },
+  oauthGrant: { select: { userId: true, revokedAt: true } },
+} satisfies Prisma.WebhookEndpointSelect;
+
+type EndpointAudience = Prisma.WebhookEndpointGetPayload<{ select: typeof endpointAudienceSelect }>;
 
 interface AttemptResult {
   succeeded: boolean;
@@ -56,24 +75,56 @@ export class WebhookDeliveryService {
     private readonly config: AppConfigService,
     private readonly queue: WebhookQueue,
     private readonly payloads: WebhookPayloadBuilder,
+    private readonly projectAccess: ProjectAccessService,
+    private readonly slack: SlackApiClient,
   ) {
     this.key = deriveKey(config.webhooks.encryptionKeyMaterial);
   }
 
+  /**
+   * The endpoints an event may reach, of those that asked for it.
+   *
+   * An integration's subscription speaks for the person — or the API key's
+   * service account — that made it, so it hears about a project only while
+   * that owner can still open it: a project made private, or a person
+   * removed, silences it at once. One that lost its project (deleted, so the
+   * column went null) or its owner (revoked) hears nothing, rather than
+   * falling back to the whole workspace the way a null project means for an
+   * admin's endpoint.
+   */
+  private async withinReach(rows: EndpointAudience[]): Promise<{ id: string; url: string }[]> {
+    const reachable: { id: string; url: string }[] = [];
+    for (const row of rows) {
+      const owner = row.oauthGrant ?? row.apiKey;
+      if (owner) {
+        if (owner.revokedAt || !row.projectId) continue;
+        if (!(await this.projectAccess.canJoinProject(row.projectId, owner.userId))) continue;
+      }
+      reachable.push({ id: row.id, url: row.url });
+    }
+    return reachable;
+  }
+
   /** One domain event → a pending delivery per endpoint that subscribed to it. */
   async fanOut(event: AutomationEvent): Promise<{ deliveries: number }> {
-    const type = webhookEventTypeFor(event.trigger, event.entityType);
+    const type =
+      event.entityType === 'PROJECT' ? null : webhookEventTypeFor(event.trigger, event.entityType);
     if (!type) return { deliveries: 0 };
 
-    const endpoints = await this.prisma.webhookEndpoint.findMany({
-      where: {
-        workspaceId: event.workspaceId,
-        enabled: true,
-        events: { has: type },
-        OR: [{ projectId: null }, { projectId: event.projectId }],
-      },
-      select: { id: true, url: true },
-    });
+    const endpoints = await this.prisma.webhookEndpoint
+      .findMany({
+        where: {
+          workspaceId: event.workspaceId,
+          enabled: true,
+          events: { has: type },
+          OR: [
+            { projectId: null, app: null, apiKeyId: null, oauthGrantId: null },
+            ...(event.projectId ? [{ projectId: event.projectId }] : []),
+          ],
+        },
+        select: endpointAudienceSelect,
+      })
+      .then((rows) => this.withinReach(rows));
     if (endpoints.length === 0) return { deliveries: 0 };
 
     // Built once; every endpoint gets the same bytes.
@@ -103,10 +154,78 @@ export class WebhookDeliveryService {
     return { deliveries: endpoints.length };
   }
 
+  /**
+   * A project's status update, to the endpoints that asked for one: the
+   * workspace's own webhooks and the project's chat apps. Not an automation
+   * event — a status is the project speaking about itself, not a task change —
+   * so it is fanned out here, by the service that posts it.
+   */
+  async fanOutStatusUpdate(input: {
+    workspaceId: string;
+    projectId: string;
+    actorId: string | null;
+    update: {
+      id: string;
+      status: string;
+      title: string;
+      summary: string | null;
+      nextSteps: string | null;
+      createdAt: string;
+    };
+  }): Promise<{ deliveries: number }> {
+    const type = WebhookEventType.PROJECT_STATUS_UPDATED;
+    const endpoints = await this.prisma.webhookEndpoint
+      .findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          enabled: true,
+          events: { has: type },
+          OR: [
+            { projectId: null, app: null, apiKeyId: null, oauthGrantId: null },
+            { projectId: input.projectId },
+          ],
+        },
+        select: endpointAudienceSelect,
+      })
+      .then((rows) => this.withinReach(rows));
+    if (endpoints.length === 0) return { deliveries: 0 };
+
+    const payload: WebhookEventPayload = {
+      id: randomUUID(),
+      type,
+      createdAt: input.update.createdAt,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      actor: await this.payloads.actor(input.actorId),
+      causedByRuleId: null,
+      correlationId: null,
+      data: { statusUpdate: input.update },
+      changes: null,
+    };
+
+    for (const endpoint of endpoints) {
+      const delivery = await this.prisma.webhookDelivery.create({
+        data: {
+          workspaceId: input.workspaceId,
+          endpointId: endpoint.id,
+          eventType: type,
+          eventId: payload.id,
+          url: endpoint.url,
+          payload: payload as unknown as Prisma.InputJsonValue,
+          maxAttempts: this.config.webhooks.maxAttempts,
+        },
+        select: { id: true },
+      });
+      await this.queue.enqueueDelivery(delivery.id);
+    }
+    return { deliveries: endpoints.length };
+  }
+
   /** A `ping`, so an admin can see the shape and check the receiver answers. Returns the delivery id. */
   async createPing(
     endpoint: Pick<WebhookEndpoint, 'id' | 'workspaceId' | 'url' | 'name'>,
     actorId: string | null,
+    message = 'CoreTask can reach this endpoint. Real events look like this.',
   ): Promise<string> {
     const payload: WebhookEventPayload = {
       id: randomUUID(),
@@ -120,7 +239,7 @@ export class WebhookDeliveryService {
       data: {
         endpointId: endpoint.id,
         name: endpoint.name,
-        message: 'CoreTask can reach this endpoint. Real events look like this.',
+        message,
       },
       changes: null,
     };
@@ -251,6 +370,28 @@ export class WebhookDeliveryService {
     return { deleted: result.count };
   }
 
+  /** Names an app's message needs that the payload carries only as ids. */
+  private async appContext(
+    projectId: string | null,
+    payload: Prisma.JsonValue,
+  ): Promise<AppMessageContext> {
+    const task = (payload as { data?: { task?: { sectionId?: string | null } | null } } | null)
+      ?.data?.task;
+    const [project, section] = await Promise.all([
+      projectId
+        ? this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true } })
+        : null,
+      task?.sectionId
+        ? this.prisma.section.findUnique({ where: { id: task.sectionId }, select: { name: true } })
+        : null,
+    ]);
+    return {
+      projectName: project?.name ?? null,
+      sectionName: section?.name ?? null,
+      webUrl: this.config.http.webUrl,
+    };
+  }
+
   /**
    * One attempt. Throws when the queue should try again, `UnrecoverableError`
    * when it should not (a 404 will not fix itself), and returns quietly when
@@ -281,7 +422,24 @@ export class WebhookDeliveryService {
       return { status: 'endpoint-disabled' };
     }
 
-    const body = JSON.stringify(delivery.payload);
+    if (delivery.endpoint?.app === ProjectApp.SLACK && delivery.endpoint.slackChannelId) {
+      return this.postAsSlackBot(
+        delivery,
+        delivery.endpoint,
+        delivery.endpoint.slackChannelId,
+        attempt,
+      );
+    }
+
+    const body = delivery.endpoint?.app
+      ? JSON.stringify(
+          renderAppMessage(
+            delivery.endpoint.app as ProjectApp,
+            delivery.payload as unknown as WebhookEventPayload,
+            await this.appContext(delivery.endpoint.projectId, delivery.payload),
+          ),
+        )
+      : JSON.stringify(delivery.payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': WEBHOOK_USER_AGENT,
@@ -361,6 +519,82 @@ export class WebhookDeliveryService {
 
     if (!retryable) throw new UnrecoverableError(message);
     throw new Error(message);
+  }
+
+  /**
+   * A Slack app that posts as the CoreTask bot: `chat.postMessage` with the
+   * workspace's bot token, and buttons under a task's post. Slack answers
+   * 200 with `ok: false` for nearly every failure, so its error code — not
+   * the status — says whether another try could help: `channel_not_found`
+   * will not fix itself, `ratelimited` will.
+   */
+  private async postAsSlackBot(
+    delivery: DeliveryWithEndpoint,
+    endpoint: WebhookEndpoint,
+    channelId: string,
+    attempt: number,
+  ): Promise<{ status: string }> {
+    const installation = await this.prisma.slackInstallation.findUnique({
+      where: { workspaceId: delivery.workspaceId },
+      select: { botToken: true },
+    });
+    if (!installation) {
+      const error = 'Slack is not connected to this workspace.';
+      await this.settle(
+        delivery,
+        attempt,
+        { succeeded: false, responseStatus: null, error, durationMs: null, snippet: null },
+        { final: true, countAgainstEndpoint: true },
+      );
+      throw new UnrecoverableError(error);
+    }
+
+    const message = renderSlackChannelMessage(
+      delivery.payload as unknown as WebhookEventPayload,
+      await this.appContext(endpoint.projectId, delivery.payload),
+    );
+    const started = Date.now();
+    try {
+      const posted = await this.slack.postMessage(
+        decryptSecret(installation.botToken, this.key),
+        channelId,
+        message,
+      );
+      await this.settle(
+        delivery,
+        attempt,
+        {
+          succeeded: true,
+          responseStatus: 200,
+          error: null,
+          durationMs: Date.now() - started,
+          snippet: JSON.stringify({ ok: true, channel: posted.channel, ts: posted.ts }),
+        },
+        { final: true, countAgainstEndpoint: true },
+      );
+      return { status: 'delivered' };
+    } catch (error) {
+      const retryable = !(error instanceof SlackApiError) || error.retryable;
+      const reason =
+        error instanceof SlackApiError
+          ? `Slack said ${error.error}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      await this.settle(
+        delivery,
+        attempt,
+        {
+          succeeded: false,
+          responseStatus: null,
+          error: reason,
+          durationMs: Date.now() - started,
+          snippet: null,
+        },
+        { final: !retryable || attempt >= delivery.maxAttempts, countAgainstEndpoint: true },
+      );
+      throw retryable ? new Error(reason) : new UnrecoverableError(reason);
+    }
   }
 
   /** Records the attempt on the delivery and, when it counts, on the endpoint's health. */

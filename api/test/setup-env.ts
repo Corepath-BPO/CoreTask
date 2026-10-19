@@ -35,6 +35,11 @@ process.env['STORAGE_PUBLIC_ENDPOINT'] = process.env['STORAGE_ENDPOINT'] ?? '';
 process.env['RATE_LIMIT_MAX'] = '100000';
 process.env['AUTH_RATE_LIMIT_MAX'] = '100000';
 
+// Assigned, not defaulted: the inbound suite addresses mail to this domain and
+// signs with this secret, whatever a developer's own .env says.
+process.env['INBOUND_EMAIL_DOMAIN'] = 'inbound.coretask.test';
+process.env['INBOUND_EMAIL_SECRET'] = 'test_only_inbound_email_secret';
+
 // The webhook suite delivers to a listener on 127.0.0.1, which the policy would
 // otherwise refuse as a private address.
 process.env['WEBHOOK_ALLOW_PRIVATE_URLS'] ??= 'true';

@@ -59,41 +59,64 @@ services:
     networks: [coretask]
 
   # ---------------------------------------------------------------------------
-  # MinIO — S3-compatible object storage for attachments
+  # RustFS — S3-compatible object storage for attachments
   # ---------------------------------------------------------------------------
-  coretask-minio:
-    image: minio/minio:latest
-    container_name: coretask-minio
+  # MinIO held this slot until its community edition was archived upstream and
+  # its images disappeared from Docker Hub, which left every fresh machine and
+  # every CI runner unable to start storage at all. RustFS has the same shape:
+  # one container, the S3 API on 9000, a console on 9001.
+  #
+  # Pinned rather than `latest`. On a storage server, a floating tag is how the
+  # on-disk format changes underneath a volume without anyone deciding it.
+  #
+  # The region is set to whatever the API signs with: SigV4 covers the region,
+  # so a mismatch reads as a bad signature rather than a configuration error.
+  coretask-storage:
+    image: rustfs/rustfs:1.0.3
+    container_name: coretask-storage
     restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-coretask_minio}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      RUSTFS_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-coretask_minio}
+      RUSTFS_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      RUSTFS_REGION: ${STORAGE_REGION:-us-east-1}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
     volumes:
-      - coretask-minio-data:/data
+      - coretask-storage-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 15s
+      retries: 12
+      start_period: 10s
     networks: [coretask]
 
   # Short-lived: creates the bucket, then exits 0. `docker compose ps` showing
   # it as "exited" is the success state.
-  coretask-minio-init:
-    image: minio/mc:latest
-    container_name: coretask-minio-init
+  #
+  # The AWS CLI rather than the storage vendor's own client, so this job does
+  # not have to change the next time the server behind it does. Path-style
+  # addressing is set explicitly: virtual-host style would ask for a hostname
+  # of `<bucket>.coretask-storage`, which exists nowhere.
+  coretask-storage-init:
+    image: amazon/aws-cli:2.38.1
+    container_name: coretask-storage-init
     restart: "no"
     depends_on:
-      coretask-minio:
+      coretask-storage:
         condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY:-coretask_minio}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      AWS_DEFAULT_REGION: ${STORAGE_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: http://coretask-storage:9000
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        mc alias set coretask http://coretask-minio:9000 \
-          "${STORAGE_ACCESS_KEY:-coretask_minio}" "${STORAGE_SECRET_KEY:-coretask_minio_dev_password}" &&
-        mc mb --ignore-existing "coretask/${STORAGE_BUCKET:-coretask}" &&
+        aws configure set default.s3.addressing_style path &&
+        { aws s3api head-bucket --bucket "${STORAGE_BUCKET:-coretask}" 2>/dev/null ||
+          aws s3api create-bucket --bucket "${STORAGE_BUCKET:-coretask}"; } &&
         echo "bucket ${STORAGE_BUCKET:-coretask} ready"
     networks: [coretask]
 
@@ -130,7 +153,7 @@ services:
       RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-10}
-      STORAGE_ENDPOINT: http://coretask-minio:9000
+      STORAGE_ENDPOINT: http://coretask-storage:9000
       # Where a *browser* reaches storage. The value above is a compose-network
       # hostname that no client can resolve, and a presigned URL is signed for
       # the host it will be fetched from, so the two cannot be the same here.
@@ -141,12 +164,6 @@ services:
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_MAX_FILE_SIZE_MB: ${STORAGE_MAX_FILE_SIZE_MB:-25}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
       # No defaults for the credentials: an empty value selects the log
       # transport, which is the right outcome for anyone who has not set them.
       MICROSOFT_GRAPH_TENANT_ID: ${MICROSOFT_GRAPH_TENANT_ID:-}
@@ -155,6 +172,18 @@ services:
       MICROSOFT_GRAPH_BASE_URL: "${MICROSOFT_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}"
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
       MAIL_CONNECTION_TIMEOUT_MS: ${MAIL_CONNECTION_TIMEOUT_MS:-15000}
+      # Email to a project: both or neither. Empty leaves the addresses unshown.
+      INBOUND_EMAIL_DOMAIN: ${INBOUND_EMAIL_DOMAIN:-}
+      INBOUND_EMAIL_SECRET: ${INBOUND_EMAIL_SECRET:-}
+      # The AI steps in rules and the CoreTask Slack app: empty leaves each
+      # greyed out with a reason.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-30000}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
     networks: [coretask]
 
   # ---------------------------------------------------------------------------
@@ -181,7 +210,7 @@ services:
       REDIS_DB: ${REDIS_DB:-0}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
-      STORAGE_ENDPOINT: http://coretask-minio:9000
+      STORAGE_ENDPOINT: http://coretask-storage:9000
       # Where a *browser* reaches storage. The value above is a compose-network
       # hostname that no client can resolve, and a presigned URL is signed for
       # the host it will be fetched from, so the two cannot be the same here.
@@ -189,12 +218,6 @@ services:
       STORAGE_BUCKET: ${STORAGE_BUCKET:-coretask}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-coretask_minio}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_FROM: ${SMTP_FROM:-CoreTask <no-reply@coretask.local>}
       # The worker is what actually drains the e-mail queue, so these matter
       # more here than on the API — without them invitations are only logged.
       MICROSOFT_GRAPH_TENANT_ID: ${MICROSOFT_GRAPH_TENANT_ID:-}
@@ -203,6 +226,17 @@ services:
       MICROSOFT_GRAPH_BASE_URL: "${MICROSOFT_GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}"
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
       MAIL_CONNECTION_TIMEOUT_MS: ${MAIL_CONNECTION_TIMEOUT_MS:-15000}
+      INBOUND_EMAIL_DOMAIN: ${INBOUND_EMAIL_DOMAIN:-}
+      INBOUND_EMAIL_SECRET: ${INBOUND_EMAIL_SECRET:-}
+      # The AI steps in rules and the CoreTask Slack app: empty leaves each
+      # greyed out with a reason.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-30000}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       # Migrations are the API container's job; two processes racing
       # `migrate deploy` on start would deadlock on the advisory lock.
       RUN_MIGRATIONS: "false"
@@ -229,5 +263,5 @@ volumes:
     name: coretask-postgres-data
   coretask-redis-data:
     name: coretask-redis-data
-  coretask-minio-data:
-    name: coretask-minio-data
+  coretask-storage-data:
+    name: coretask-storage-data

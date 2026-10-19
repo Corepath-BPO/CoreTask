@@ -1,8 +1,17 @@
+import { readRecurrence } from '@coretask/contracts';
 import { TaskStatus } from '@coretask/contracts';
 import type { Task, TaskDetail } from '@coretask/types';
 import type { Prisma } from '@prisma/client';
 
-const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } as const;
+import { taskTagsInclude, toTagRefs } from '../tags/tag.mapper';
+
+const USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  isServiceAccount: true,
+} as const;
 
 /**
  * Subtask rollups come from a filtered relation count. Prisma cannot alias two
@@ -16,6 +25,7 @@ const USER_SELECT = { id: true, name: true, email: true, avatarUrl: true, isServ
  */
 export const taskInclude = {
   assignee: { select: USER_SELECT },
+  tags: taskTagsInclude,
   _count: {
     select: {
       subtasks: { where: { archivedAt: null } },
@@ -33,6 +43,15 @@ export const taskDetailInclude = {
   createdBy: { select: USER_SELECT },
   project: { select: { id: true, name: true, key: true, color: true } },
   section: { select: { id: true, name: true } },
+  duplicateOf: { select: { id: true, title: true } },
+  // Multi-homing: the other projects it is in, each with its section there.
+  projectLinks: {
+    orderBy: { addedAt: 'asc' },
+    select: {
+      project: { select: { id: true, name: true, key: true, color: true } },
+      section: { select: { id: true, name: true } },
+    },
+  },
   subtasks: {
     where: { archivedAt: null },
     // The id as tiebreak, because rows written before positions were set all
@@ -64,6 +83,9 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     completedAt: task.completedAt?.toISOString() ?? null,
     archivedAt: task.archivedAt?.toISOString() ?? null,
     estimatedMinutes: task.estimatedMinutes,
+    recurrence: readRecurrence(task.recurrence),
+    kind: task.kind,
+    approvalStatus: task.approvalStatus,
     assigneeId: task.assigneeId,
     assignee: task.assignee,
     createdById: task.createdById,
@@ -71,12 +93,20 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     completedSubtaskCount,
     commentCount: task._count.comments,
     attachmentCount: task._count.attachments,
+    tags: toTagRefs(task.tags),
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
 }
 
-export function toTaskDetailDto(task: TaskWithDetail): TaskDetail {
+/**
+ * `canSee` narrows the other projects to those the reader can open: being in
+ * a private project is that project's business, even when the task is not.
+ */
+export function toTaskDetailDto(
+  task: TaskWithDetail,
+  canSee: (projectId: string) => boolean = () => true,
+): TaskDetail {
   const subtasks = task.subtasks.map((subtask) => toTaskDto(subtask));
 
   return {
@@ -84,6 +114,10 @@ export function toTaskDetailDto(task: TaskWithDetail): TaskDetail {
     subtasks,
     project: task.project,
     section: task.section,
+    otherProjects: task.projectLinks
+      .filter((link) => canSee(link.project.id))
+      .map((link) => ({ project: link.project, section: link.section })),
     createdBy: task.createdBy,
+    duplicateOf: task.duplicateOf,
   };
 }

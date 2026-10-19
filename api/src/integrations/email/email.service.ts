@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createTransport, type Transporter } from 'nodemailer';
 
 import { AppConfigService } from '../../config/app-config.service';
 
@@ -11,12 +10,13 @@ export interface EmailMessage {
   subject: string;
   text: string;
   html?: string;
+  /** Where a reply goes — a task's reply address, for update emails. */
+  replyTo?: string;
 }
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: Transporter | null = null;
 
   constructor(
     private readonly config: AppConfigService,
@@ -24,14 +24,11 @@ export class EmailService {
   ) {}
 
   /**
-   * Sends a message through whichever transport is configured.
+   * Sends a message through Microsoft Graph, the one real transport.
    *
-   * Microsoft Graph wins over SMTP when both are present: it is the deliberate,
-   * explicitly-credentialed choice, whereas SMTP settings are easy to leave
-   * pointing at a local catcher by accident. With neither, the log transport
-   * writes the rendered message out — which keeps local development free of a
-   * mail container while still exercising the whole
-   * queue → processor → template → integration path.
+   * Without Graph configured, the log transport writes the rendered message
+   * out instead — which keeps local development free of a mail account while
+   * still exercising the whole queue → processor → template → integration path.
    */
   async send(message: EmailMessage): Promise<void> {
     if (!this.canReachRecipient(message)) return;
@@ -41,19 +38,10 @@ export class EmailService {
       return;
     }
 
-    const { from, enabled } = this.config.smtp;
-
-    if (!enabled) {
-      this.logger.log(
-        { to: message.to, subject: message.subject, body: message.text },
-        'E-mail suppressed (no MICROSOFT_GRAPH_* or SMTP_HOST configured)',
-      );
-      return;
-    }
-
-    const transporter = (this.transporter ??= this.createTransporter());
-    await transporter.sendMail({ from, ...message });
-    this.logger.log({ to: message.to, subject: message.subject }, 'E-mail sent');
+    this.logger.log(
+      { to: message.to, subject: message.subject, body: message.text },
+      'E-mail suppressed (no MICROSOFT_GRAPH_* configured)',
+    );
   }
 
   /**
@@ -89,16 +77,5 @@ export class EmailService {
     }
 
     return true;
-  }
-
-  private createTransporter(): Transporter {
-    const { host, port, user, password, secure } = this.config.smtp;
-
-    return createTransport({
-      host,
-      port,
-      secure,
-      ...(user ? { auth: { user, pass: password ?? '' } } : {}),
-    });
   }
 }

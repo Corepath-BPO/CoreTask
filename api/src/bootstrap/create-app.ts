@@ -1,4 +1,4 @@
-import { API_PREFIX } from '@coretask/contracts';
+import { API_PREFIX, ApiRoutes } from '@coretask/contracts';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 
 import { AllExceptionsFilter } from '../common/filters/all-exceptions.filter';
+import { largeBody } from '../common/middleware/large-body.middleware';
 import { requestIdMiddleware } from '../common/middleware/request-id.middleware';
 import { AppConfigService } from '../config/app-config.service';
 
@@ -27,6 +28,9 @@ export async function createApp(): Promise<INestApplication> {
     bufferLogs: true,
     // The filter below owns error rendering.
     abortOnError: false,
+    // Kept beside the parsed body: Slack signs the bytes it sent, and a body
+    // parsed and encoded again would not match.
+    rawBody: true,
   });
 
   app.useLogger(app.get(Logger));
@@ -49,6 +53,8 @@ export async function createApp(): Promise<INestApplication> {
   );
   app.use(compression());
   app.use(cookieParser());
+  // Mail comes with its attachments inline; only this route reads that much.
+  app.use(`${API_PREFIX}${ApiRoutes.projectEmail.inbound}`, largeBody(40 * 1024 * 1024));
 
   // Behind nginx/ALB, `req.ip` and secure-cookie detection need the proxy hop.
   app.set('trust proxy', 1);
@@ -64,7 +70,8 @@ export async function createApp(): Promise<INestApplication> {
       'X-Request-Id',
       'Idempotency-Key',
     ],
-    exposedHeaders: ['X-Request-Id', 'Idempotency-Replayed'],
+    // Content-Disposition carries a download's file name (CSV export).
+    exposedHeaders: ['X-Request-Id', 'Idempotency-Replayed', 'Content-Disposition'],
     maxAge: 86_400,
   });
 

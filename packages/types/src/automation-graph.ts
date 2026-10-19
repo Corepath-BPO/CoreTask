@@ -181,6 +181,11 @@ export interface AutomationCatalogEntry {
   /** False for something declared but not executable — shown disabled. */
   available: boolean;
   /**
+   * What a rule with this entry acts on: tasks, tickets, or either. The
+   * builder offers a ticket rule only the entries that name tickets.
+   */
+  subjects?: ('TASK' | 'TICKET')[];
+  /**
    * Why it cannot be chosen, when it cannot.
    *
    * A greyed row with no explanation is worse than an absent one: it says "not

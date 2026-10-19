@@ -1,5 +1,6 @@
 import {
   AutomationTrigger,
+  ADDABLE_WORK_ITEM_TYPES,
   CREATABLE_WORK_ITEM_TYPES,
   ServerEvent,
   WorkItemType,
@@ -24,6 +25,8 @@ import {
 } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import { taskSiblingsIn } from '../tasks/task-projects';
+import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { planPlacement } from '../../common/utils/position.util';
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
@@ -49,6 +52,7 @@ import { ProjectsService } from '../projects/projects.service';
 
 import {
   compareWorkItems,
+  inProject,
   taskToWorkItem,
   ticketToWorkItem,
   workItemTaskInclude,
@@ -144,9 +148,11 @@ export class ProjectWorkItemService {
         : Promise.resolve([]),
     ]);
 
-    const items = [...tasks.map(taskToWorkItem), ...tickets.map(ticketToWorkItem)].sort(
-      compareWorkItems,
-    );
+    // A task linked in from another project reads as it sits here.
+    const items = [
+      ...tasks.map((task) => inProject(taskToWorkItem(task), projectId)),
+      ...tickets.map(ticketToWorkItem),
+    ].sort(compareWorkItems);
 
     /*
      * Paged after merging, not before.
@@ -198,7 +204,7 @@ export class ProjectWorkItemService {
     ]);
 
     const limit = query.limit ?? 200;
-    const ordered = await this.order.orderIds(taskIds, ticketIds, plan, limit + 1);
+    const ordered = await this.order.orderIds(taskIds, ticketIds, plan, limit + 1, projectId);
     const page = ordered.slice(0, limit);
 
     const [tasks, tickets] = await Promise.all([
@@ -206,7 +212,7 @@ export class ProjectWorkItemService {
       this.tickets.hydrate(page.filter((row) => row.kind === 'TICKET').map((row) => row.id)),
     ]);
     const byId = new Map<string, ProjectWorkItem>();
-    for (const task of tasks) byId.set(task.id, taskToWorkItem(task));
+    for (const task of tasks) byId.set(task.id, inProject(taskToWorkItem(task), projectId));
     for (const ticket of tickets) byId.set(ticket.id, ticketToWorkItem(ticket));
 
     const items = page
@@ -234,10 +240,15 @@ export class ProjectWorkItemService {
     return this.withFormulas(projectId, item);
   }
 
-  /** One item with its formula values, the shape every single-item response takes. */
+  /**
+   * One item with its formula values, the shape every single-item response
+   * takes — read as it sits in this project, which for a task linked in from
+   * elsewhere is its link's section and position.
+   */
   private async withFormulas(projectId: string, item: ProjectWorkItem): Promise<ProjectWorkItem> {
-    const [decorated] = await this.formulas.decorateWorkItems(projectId, [item]);
-    return decorated ?? item;
+    const here = inProject(item, projectId);
+    const [decorated] = await this.formulas.decorateWorkItems(projectId, [here]);
+    return decorated ?? here;
   }
 
   async create(
@@ -256,10 +267,10 @@ export class ProjectWorkItemService {
      * whichever record the service defaulted to, wearing a label that lies
      * about what it is.
      */
-    if (!CREATABLE_WORK_ITEM_TYPES.includes(payload.type)) {
+    if (!ADDABLE_WORK_ITEM_TYPES.includes(payload.type)) {
       throw AppException.badRequest(
         'BAD_REQUEST',
-        `${payload.type} cannot be created yet. Supported: ${CREATABLE_WORK_ITEM_TYPES.join(', ')}.`,
+        `${payload.type} cannot be created yet. Supported: ${ADDABLE_WORK_ITEM_TYPES.join(', ')}.`,
       );
     }
 
@@ -362,6 +373,15 @@ export class ProjectWorkItemService {
 
     const changedFields = this.changedFields(before, updated);
     if (changedFields.length === 0) return this.withFormulas(projectId, updated);
+
+    // Completing a repeating task from the list makes its next occurrence too.
+    if (
+      updated.type !== WorkItemType.TICKET &&
+      before.completedAt === null &&
+      updated.completedAt !== null
+    ) {
+      await spawnNextOccurrence(this.prisma, updated.id, userId);
+    }
 
     const itemWord = updated.type === WorkItemType.TICKET ? 'ticket' : 'task';
     const stories = diffItemStories(
@@ -470,10 +490,20 @@ export class ProjectWorkItemService {
 
     const plan = planPlacement(siblings, anchor, workItemId);
 
-    const moved =
+    /*
+     * A task linked in from another project moves on this board only: its
+     * link takes the new section and position, and its home stays where it
+     * was. `moved` is read from the home either way; `movedHere` is how it
+     * now sits in this project.
+     */
+    const linked = before.type === WorkItemType.TASK && before.homeProjectId !== undefined;
+    const raw =
       before.type === WorkItemType.TICKET
         ? await this.tickets.move(workspaceId, workItemId, sectionId, plan.position)
-        : await this.tasks.move(workspaceId, workItemId, sectionId, plan.position);
+        : linked
+          ? await this.tasks.moveLink(workspaceId, workItemId, projectId, sectionId, plan.position)
+          : await this.tasks.move(workspaceId, workItemId, sectionId, plan.position);
+    const moved = inProject(raw, projectId);
 
     /*
      * A section story, with both names, when the column changed. A drag that
@@ -534,7 +564,7 @@ export class ProjectWorkItemService {
       });
     }
 
-    this.emit(ServerEvent.WORK_ITEM_MOVED, moved, userId, {
+    this.emit(ServerEvent.WORK_ITEM_MOVED, raw, userId, {
       fromSectionId: before.sectionId,
       toSectionId: moved.sectionId,
       ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
@@ -706,7 +736,11 @@ export class ProjectWorkItemService {
   ): Promise<ProjectWorkItem[]> {
     const [tasks, tickets] = await Promise.all([
       this.prisma.task.findMany({
-        where: { id: { in: ids }, workspaceId, projectId },
+        where: {
+          id: { in: ids },
+          workspaceId,
+          OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
+        },
         include: workItemTaskInclude,
       }),
       this.prisma.ticket.findMany({
@@ -716,7 +750,7 @@ export class ProjectWorkItemService {
     ]);
 
     const byId = new Map<string, ProjectWorkItem>();
-    for (const task of tasks) byId.set(task.id, taskToWorkItem(task));
+    for (const task of tasks) byId.set(task.id, inProject(taskToWorkItem(task), projectId));
     for (const ticket of tickets) byId.set(ticket.id, ticketToWorkItem(ticket));
 
     if (byId.size !== ids.length) {
@@ -740,8 +774,13 @@ export class ProjectWorkItemService {
      * primary-key lookup — cheaper than the migration that would avoid it.
      */
     const [task, ticket] = await Promise.all([
+      // Here by home or by link: a task linked in is this project's to edit.
       this.prisma.task.findFirst({
-        where: { id: workItemId, workspaceId, projectId },
+        where: {
+          id: workItemId,
+          workspaceId,
+          OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
+        },
         include: workItemTaskInclude,
       }),
       this.prisma.ticket.findFirst({
@@ -803,11 +842,9 @@ export class ProjectWorkItemService {
   ): Promise<{ id: string; position: number }[]> {
     const where = { workspaceId, projectId, sectionId, archivedAt: null };
 
+    // Tasks at home here and tasks linked in, each at its place in this section.
     const [tasks, tickets] = await Promise.all([
-      this.prisma.task.findMany({
-        where: { ...where, parentTaskId: null },
-        select: { id: true, position: true },
-      }),
+      taskSiblingsIn(this.prisma, workspaceId, projectId, sectionId),
       this.prisma.ticket.findMany({ where, select: { id: true, position: true } }),
     ]);
 
@@ -956,11 +993,17 @@ export class ProjectWorkItemService {
   }
 
   /**
-   * One event shape for every change, sent to the project room.
+   * One event shape for every change, sent to the project room — to each
+   * project room the item is in, for a task in several. Each room gets the
+   * item as it sits in that project, so every open board files it under its
+   * own column.
    *
    * The room rather than the whole workspace: everybody watching this project
    * needs it and nobody else does, and a workspace-wide broadcast makes every
    * open tab decide whether a change concerns it.
+   *
+   * `item` is read from its home (what the repositories return), so it can be
+   * re-read for every other project it is in.
    */
   private emit(
     event: string,
@@ -968,18 +1011,32 @@ export class ProjectWorkItemService {
     actorId: string | null,
     extra: Partial<WorkItemEventPayload<ProjectWorkItem>> = {},
   ): void {
-    const payload: WorkItemEventPayload<ProjectWorkItem> = {
-      workspaceId: item.workspaceId,
-      projectId: item.projectId,
-      workItemId: item.id,
-      workItemType: item.type,
-      workItem: item,
-      actorId,
-      occurredAt: new Date().toISOString(),
-      ...extra,
-    };
+    const rooms = new Set([
+      item.homeProjectId ?? item.projectId,
+      ...(item.memberships ?? []).map((membership) => membership.projectId),
+    ]);
 
-    this.realtime.emitToProject(item.projectId, event, payload);
+    for (const room of rooms) {
+      const shaped = item.homeProjectId
+        ? room === item.projectId
+          ? item
+          : null
+        : inProject(item, room);
+      if (!shaped) continue;
+
+      const payload: WorkItemEventPayload<ProjectWorkItem> = {
+        workspaceId: item.workspaceId,
+        projectId: room,
+        workItemId: item.id,
+        workItemType: item.type,
+        workItem: shaped,
+        actorId,
+        occurredAt: new Date().toISOString(),
+        ...extra,
+      };
+
+      this.realtime.emitToProject(room, event, payload);
+    }
   }
 }
 

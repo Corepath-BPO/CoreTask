@@ -147,7 +147,13 @@ function systemKey(field: SystemField, join: Joiner): Omit<OrderKey, 'direction'
       };
 
     case SystemField.SECTION:
-      join('task', 'ts', Prisma.sql`LEFT JOIN sections ts ON ts.id = t."sectionId"`);
+      // A linked task's section in this project is its link's (`tpl`, joined
+      // by the order repository for the project being read).
+      join(
+        'task',
+        'ts',
+        Prisma.sql`LEFT JOIN sections ts ON ts.id = (CASE WHEN tpl."taskId" IS NULL THEN t."sectionId" ELSE tpl."sectionId" END)`,
+      );
       join('ticket', 'ks', Prisma.sql`LEFT JOIN sections ks ON ks.id = k."sectionId"`);
       return {
         task: Prisma.sql`ts.position::double precision`,
@@ -181,6 +187,10 @@ function systemKey(field: SystemField, join: Joiner): Omit<OrderKey, 'direction'
 
     case SystemField.ESTIMATE:
       return { task: Prisma.sql`t."estimatedMinutes"::double precision`, ticket: NULL_NUMBER };
+
+    case SystemField.TAGS:
+      // Several values per task: there is no single one to order by.
+      throw AppException.badRequest('BAD_REQUEST', 'Tasks cannot be sorted or grouped by tags.');
   }
 }
 

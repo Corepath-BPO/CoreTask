@@ -27,7 +27,16 @@ import type { ActorContext, PaginatedResult } from '../../common/types/api.types
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { TaskDetailDto, TaskDto } from './dto/task-response.dto';
-import { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
+import {
+  AddTaskToProjectDto,
+  MarkDuplicateDto,
+  CreateTaskDto,
+  MoveTaskDto,
+  SetTaskProjectSectionDto,
+  TaskListQueryDto,
+  UpdateTaskDto,
+} from './dto/task.dto';
+import { TaskProjectsService } from './task-projects.service';
 import { TasksService } from './tasks.service';
 
 /**
@@ -45,7 +54,10 @@ import { TasksService } from './tasks.service';
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 @ApiErrorResponseDoc(403, 'The caller is not a member of this workspace')
 export class TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly taskProjects: TaskProjectsService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -180,5 +192,89 @@ export class TasksController {
     @Actor() actor: ActorContext,
   ): Promise<Task> {
     return this.tasks.restore(workspaceId, actor, taskId);
+  }
+
+  @Post(':taskId/duplicate-of')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Mark a task as a duplicate of another',
+    description: 'Completes it, links it to the original, and moves its collaborators there.',
+  })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiEnvelopeResponse(TaskDetailDto)
+  markDuplicate(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
+    @Body() dto: MarkDuplicateDto,
+  ): Promise<TaskDetail> {
+    return this.tasks.markDuplicate(workspaceId, actor, taskId, dto.taskId);
+  }
+
+  @Delete(':taskId/duplicate-of')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Stop marking a task as a duplicate' })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiEnvelopeResponse(TaskDetailDto)
+  clearDuplicate(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<TaskDetail> {
+    return this.tasks.clearDuplicate(workspaceId, actor, taskId);
+  }
+
+  @Post(':taskId/projects')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @ApiOperation({
+    summary: 'Add a task to another project',
+    description: 'Multi-homing: the task keeps its home and appears in this project too.',
+  })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiEnvelopeResponse(TaskDetailDto)
+  addToProject(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
+    @Body() dto: AddTaskToProjectDto,
+  ): Promise<TaskDetail> {
+    return this.taskProjects.add(workspaceId, actor, taskId, dto);
+  }
+
+  @Patch(':taskId/projects/:projectId')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @ApiOperation({ summary: "Change the task's section in one of its projects" })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiParam({ name: 'projectId', format: 'uuid' })
+  @ApiEnvelopeResponse(TaskDetailDto)
+  setProjectSection(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Actor() actor: ActorContext,
+    @Body() dto: SetTaskProjectSectionDto,
+  ): Promise<TaskDetail> {
+    return this.taskProjects.setSection(workspaceId, actor, taskId, projectId, dto.sectionId);
+  }
+
+  @Delete(':taskId/projects/:projectId')
+  @RequireWorkspaceRole(WorkspaceRole.MEMBER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Remove a task from one of its projects',
+    description:
+      'Leaving its home, the project it joined first becomes its home. Returns the task, or null if the caller can no longer see it.',
+  })
+  @ApiParam({ name: 'taskId', format: 'uuid' })
+  @ApiParam({ name: 'projectId', format: 'uuid' })
+  removeFromProject(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<TaskDetail | null> {
+    return this.taskProjects.remove(workspaceId, actor, taskId, projectId);
   }
 }

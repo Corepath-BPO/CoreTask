@@ -1,4 +1,4 @@
-import { WEBHOOK_EVENT_LABEL } from '@coretask/contracts';
+import { PROJECT_APP_INFO, WEBHOOK_EVENT_LABEL } from '@coretask/contracts';
 import type { WebhookEndpoint } from '@coretask/types';
 import { History, KeyRound, MoreHorizontal, Pencil, Send, Trash2, Webhook } from 'lucide-react';
 
@@ -156,7 +156,23 @@ function WebhookRow({
           )}
         </div>
       </td>
-      <td className="px-3 py-3 text-muted-foreground">{webhook.project?.name ?? 'All projects'}</td>
+      <td className="px-3 py-3 text-muted-foreground">
+        <span className="flex flex-wrap items-center gap-1.5">
+          {webhook.project?.name ?? 'All projects'}
+          {/* Connected from the project's Customize › Apps, posting as that tool. */}
+          {webhook.app && (
+            <Badge variant="muted" className="text-[10px]">
+              {PROJECT_APP_INFO[webhook.app].label} app
+            </Badge>
+          )}
+          {/* Subscribed through the API by an API key or an OAuth app. */}
+          {webhook.source.kind !== 'SETTINGS' && (
+            <Badge variant="muted" className="text-[10px]">
+              Added by {webhook.source.name ?? 'an integration'}
+            </Badge>
+          )}
+        </span>
+      </td>
       <td className="px-3 py-3">
         <div className="flex items-center gap-2">
           <Switch

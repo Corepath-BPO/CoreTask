@@ -1,7 +1,9 @@
-import type {
-  SubscribableWebhookEvent,
-  WebhookDeliveryStatus,
-  WebhookEventType,
+import {
+  WebhookEndpointSource,
+  type ProjectApp,
+  type SubscribableWebhookEvent,
+  type WebhookDeliveryStatus,
+  type WebhookEventType,
 } from '@coretask/contracts';
 import type {
   WebhookDelivery as WebhookDeliveryDto,
@@ -14,7 +16,11 @@ import type { Prisma } from '@prisma/client';
 
 export const endpointInclude = {
   project: { select: { id: true, name: true } },
-  createdBy: { select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true } },
+  createdBy: {
+    select: { id: true, name: true, email: true, avatarUrl: true, isServiceAccount: true },
+  },
+  apiKey: { select: { name: true } },
+  oauthGrant: { select: { app: { select: { name: true } } } },
 } satisfies Prisma.WebhookEndpointInclude;
 
 export type EndpointRow = Prisma.WebhookEndpointGetPayload<{ include: typeof endpointInclude }>;
@@ -28,6 +34,7 @@ export function toWebhookEndpointDto(row: EndpointRow): WebhookEndpointDto {
     url: row.url,
     events: row.events as SubscribableWebhookEvent[],
     project: row.project,
+    app: (row.app as ProjectApp | null) ?? null,
     enabled: row.enabled,
     disabledReason: row.disabledReason,
     consecutiveFailures: row.consecutiveFailures,
@@ -35,6 +42,11 @@ export function toWebhookEndpointDto(row: EndpointRow): WebhookEndpointDto {
     lastDeliveryStatus: (row.lastDeliveryStatus as WebhookDeliveryStatus | null) ?? null,
     lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
     createdBy: row.createdBy,
+    source: row.oauthGrant
+      ? { kind: WebhookEndpointSource.OAUTH_APP, name: row.oauthGrant.app.name }
+      : row.apiKey
+        ? { kind: WebhookEndpointSource.API_KEY, name: row.apiKey.name }
+        : { kind: WebhookEndpointSource.SETTINGS, name: null },
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

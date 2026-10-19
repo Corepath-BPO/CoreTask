@@ -7,6 +7,10 @@ import {
   WorkspaceRole,
   defaultOperatorForConditionField,
   isEvaluableOperator,
+  isTicketConditionField,
+  DELAY_SUBTYPE,
+  AI_ACTION_SUBTYPE,
+  AI_UNAVAILABLE_REASON,
 } from '@coretask/contracts';
 import type { Task } from '@prisma/client';
 
@@ -84,7 +88,10 @@ describe('the automation catalogue', () => {
   // ---------------------------------------------------------------------------
   describe('actions match what the runner implements', () => {
     it('marks an action available exactly when the engine can perform it', () => {
-      const executable = new Set<string>(AUTOMATION_ACTIONS);
+      // The Wait step is a step of its own that the runner takes, not an action.
+      // "Use AI…" also needs a model, and this catalogue was built without one.
+      const executable = new Set<string>([...AUTOMATION_ACTIONS, DELAY_SUBTYPE]);
+      executable.delete(AI_ACTION_SUBTYPE);
 
       for (const action of actions) {
         expect({ subtype: action.subtype, available: action.available }).toEqual({
@@ -92,6 +99,23 @@ describe('the automation catalogue', () => {
           available: executable.has(action.subtype),
         });
       }
+    });
+
+    it('offers "Use AI…" and the AI check only with a model behind them', () => {
+      const without = actions.find((action) => action.subtype === AI_ACTION_SUBTYPE);
+      expect(without).toMatchObject({ available: false, reason: AI_UNAVAILABLE_REASON });
+
+      expect(
+        actionCatalogue(fields, true).find((action) => action.subtype === AI_ACTION_SUBTYPE),
+      ).toMatchObject({ available: true, reason: null, subjects: ['TASK'] });
+      expect(
+        conditionCatalogue(fields, true).find((entry) => entry.subtype === 'ai.check'),
+      ).toMatchObject({ available: true, subjects: ['TASK'] });
+      expect(
+        conditionCatalogue(fields).find((entry) => entry.subtype === 'ai.check'),
+      ).toMatchObject({ available: false, reason: AI_UNAVAILABLE_REASON });
+      expect(capabilities(true).ai).toBe(true);
+      expect(capabilities().ai).toBe(false);
     });
 
     /*
@@ -103,7 +127,12 @@ describe('the automation catalogue', () => {
     it('offers every executable action somewhere', () => {
       const offered = new Set(actions.filter((action) => action.available).map((a) => a.subtype));
 
-      expect([...AUTOMATION_ACTIONS].filter((action) => !offered.has(action))).toEqual([]);
+      // "Use AI…" is offered whenever the server has a model — see the test above.
+      expect(
+        [...AUTOMATION_ACTIONS].filter(
+          (action) => !offered.has(action) && action !== AI_ACTION_SUBTYPE,
+        ),
+      ).toEqual([]);
     });
 
     it('files every entry under one of the catalogue’s groups', () => {
@@ -155,6 +184,8 @@ describe('the automation catalogue', () => {
       startDate: new Date('2026-01-01T00:00:00.000Z'),
       estimatedMinutes: 45,
       createdAt: new Date('2025-12-31T10:00:00.000Z'),
+      kind: 'APPROVAL',
+      approvalStatus: 'PENDING',
     } as unknown as Task;
 
     const probed = [...READABLE_TASK_FIELDS, customFieldKey('field-risk')];
@@ -301,8 +332,11 @@ describe('the automation catalogue', () => {
 
       for (const condition of conditions) {
         if (!condition.available) continue;
+        // A ticket's fields are read by the ticket half of the runner.
         expect(
-          readable.has(condition.subtype) || condition.subtype.startsWith('customField:'),
+          readable.has(condition.subtype) ||
+            condition.subtype.startsWith('customField:') ||
+            isTicketConditionField(condition.subtype),
         ).toBe(true);
       }
     });
@@ -492,12 +526,11 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * `triggerMatches` reads one `sectionId` and compares it for equality. A
-     * rule saved as "section is not Done" would be matched by that same branch
-     * and fire on exactly the events it was written to exclude — so these two
-     * are offered disabled rather than offered wrong.
+     * `triggerMatches` reads the stored form before the section, so "section
+     * is not Done" and "section is one of…" run as written — the e2e suite
+     * drives both through the runner — and all four are offered.
      */
-    it('disables the forms the runner would match backwards', () => {
+    it('offers every form the runner reads', () => {
       const available = Object.fromEntries(
         (moved?.configForms ?? []).map((form) => [form.form, form.available]),
       );
@@ -505,8 +538,8 @@ describe('the automation catalogue', () => {
       expect(available).toEqual({
         [TRIGGER_CONFIG_FORM.SECTION_CHANGED]: true,
         [TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO]: true,
-        [TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_NOT]: false,
-        [TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_ANY_OF]: false,
+        [TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_NOT]: true,
+        [TRIGGER_CONFIG_FORM.SECTION_CHANGED_TO_ANY_OF]: true,
       });
     });
 
@@ -530,17 +563,16 @@ describe('the automation catalogue', () => {
     /*
      * The planned rows borrow the picker without joining the engine: their
      * subtypes must stay outside the enum, or one could collide with a real
-     * trigger and validate as something the runner never fires.
+     * trigger and validate as something the runner never fires. None are left,
+     * a date field's rows included — every generated row is a real trigger.
      */
-    it('keeps every planned trigger row outside the enum, disabled, and explained', () => {
-      const planned = triggers.filter(
+    it('keeps no planned trigger rows, a date field’s included', () => {
+      const withDates = triggerCatalogue([{ id: 'field-started', name: 'Started', type: 'DATE' }]);
+      const planned = withDates.filter(
         (trigger) => !(AUTOMATION_TRIGGERS as readonly string[]).includes(trigger.subtype),
       );
 
-      expect(planned.length).toBeGreaterThan(0);
-      expect(planned.every((trigger) => !trigger.available)).toBe(true);
-      expect(planned.every((trigger) => typeof trigger.reason === 'string')).toBe(true);
-      expect(planned.every((trigger) => trigger.configForms.length === 0)).toBe(true);
+      expect(planned).toEqual([]);
     });
 
     /*
@@ -569,25 +601,22 @@ describe('the automation catalogue', () => {
     });
 
     /*
-     * "[Field] is changed" is the real trigger with the field pre-filled — the
-     * runner narrows on the `fieldId` the row carries — while the date rows
-     * still wait on something watching the clock.
+     * Every per-field row is the real trigger with the field pre-filled: the
+     * runner narrows "is changed" on the `fieldId` the row carries, and the
+     * clock reads that field for "is approaching" and "is overdue".
      */
-    it('offers the per-field change rows and greys only the date ones', () => {
+    it('offers every per-field row, a date field’s clock rows included', () => {
       const rows = triggerCatalogue([{ id: 'field-started', name: 'Started', type: 'DATE' }]);
       const generated = rows.filter((trigger) => trigger.fieldId === 'field-started');
 
-      const changed = generated.find((trigger) => trigger.label === 'Started is changed');
-      expect(changed).toMatchObject({
-        subtype: AutomationTrigger.CUSTOM_FIELD_CHANGED,
-        available: true,
-        reason: null,
-        fieldId: 'field-started',
-      });
-
-      const dated = generated.filter((trigger) => trigger.label !== 'Started is changed');
-      expect(dated).toHaveLength(2);
-      expect(dated.every((trigger) => !trigger.available && trigger.reason)).toBe(true);
+      expect(
+        generated.map((trigger) => [trigger.label, trigger.subtype, trigger.available]),
+      ).toEqual([
+        ['Started is changed', AutomationTrigger.CUSTOM_FIELD_CHANGED, true],
+        ['Started is approaching', AutomationTrigger.CUSTOM_DATE_APPROACHING, true],
+        ['Started is overdue', AutomationTrigger.CUSTOM_DATE_PASSED, true],
+      ]);
+      expect(generated.every((trigger) => trigger.reason === null)).toBe(true);
     });
 
     it('gathers each group rather than interleaving them', () => {
@@ -624,7 +653,7 @@ describe('the automation catalogue', () => {
       expect(comment?.reason).toBeNull();
     });
 
-    it('disables ticket triggers while actions only operate on tasks', () => {
+    it('offers the ticket triggers, marked as ticket rules', () => {
       const ticketTriggerTypes = new Set<string>([
         AutomationTrigger.TICKET_CREATED,
         AutomationTrigger.TICKET_STATUS_CHANGED,
@@ -632,7 +661,8 @@ describe('the automation catalogue', () => {
       const ticketTriggers = triggers.filter((trigger) => ticketTriggerTypes.has(trigger.subtype));
 
       expect(ticketTriggers).toHaveLength(2);
-      expect(ticketTriggers.every((trigger) => !trigger.available && trigger.reason)).toBe(true);
+      expect(ticketTriggers.every((trigger) => trigger.available)).toBe(true);
+      expect(ticketTriggers.every((trigger) => trigger.subjects?.includes('TICKET'))).toBe(true);
     });
   });
 
@@ -685,7 +715,8 @@ describe('the automation catalogue', () => {
         ai: false,
         conditionsOnCustomFields: true,
         actionsOnCustomFields: true,
-        delays: false,
+        // The runner stops at a Wait step and the clock resumes the run.
+        delays: true,
       });
     });
 

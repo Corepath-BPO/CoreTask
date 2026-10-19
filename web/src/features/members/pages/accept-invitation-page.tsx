@@ -93,8 +93,10 @@ export function AcceptInvitationPage({ token }: { token: string }) {
             {invitation.teamName ? (
               <>
                 {' '}
-                on the{' '}
-                <span className="font-medium text-foreground">{invitation.teamName}</span> team
+                on the <span className="font-medium text-foreground">
+                  {invitation.teamName}
+                </span>{' '}
+                team
               </>
             ) : null}
             .

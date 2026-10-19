@@ -1,7 +1,6 @@
 import {
-  CREATABLE_WORK_ITEM_TYPES,
+  ADDABLE_WORK_ITEM_TYPES,
   WORK_ITEM_TYPE_LABEL,
-  type CreatableWorkItemType,
   type WorkItemType,
 } from '@coretask/contracts';
 import type { CreateWorkItemPayload, ProjectFieldMetadata } from '@coretask/types';
@@ -36,7 +35,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Which type the dialog opens on — the project default, or a menu choice. */
-  initialType: CreatableWorkItemType;
+  initialType: WorkItemType;
   /** Preselected when opened from a section rather than the toolbar. */
   initialSectionId?: string | undefined;
   metadata: ProjectFieldMetadata | undefined;
@@ -150,7 +149,7 @@ function CreateWorkItemForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CREATABLE_WORK_ITEM_TYPES.map((option) => (
+                {ADDABLE_WORK_ITEM_TYPES.map((option) => (
                   <SelectItem key={option} value={option}>
                     <span className="flex items-center gap-2">
                       <WorkItemTypeIcon type={option} />

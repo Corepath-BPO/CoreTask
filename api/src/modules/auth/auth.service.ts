@@ -1,3 +1,6 @@
+import { createHash, randomBytes } from 'node:crypto';
+
+import { PASSWORD_RESET_RESEND_SECONDS, PASSWORD_RESET_TTL_MINUTES } from '@coretask/contracts';
 import type { AuthSession, AuthUser } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 
@@ -50,6 +53,88 @@ export class AuthService {
     this.logger.log({ userId: user.id }, 'User registered');
 
     return this.toAuthResult(UsersService.toAuthUser(user), issued);
+  }
+
+  /**
+   * "Forgot password": e-mails a link when the address is an active person's
+   * account, and does nothing otherwise — the caller gets the same answer
+   * either way, so the form cannot be used to find out who has an account.
+   *
+   * A new link replaces any unused one, and at most one is sent a minute, so
+   * the form cannot be used to fill somebody's inbox either.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.users.findByEmail(UsersService.normalizeEmail(email));
+    if (!user || user.isServiceAccount || !user.isActive) return;
+
+    const recent = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        userId: user.id,
+        createdAt: { gt: new Date(Date.now() - PASSWORD_RESET_RESEND_SECONDS * 1_000) },
+      },
+      select: { id: true },
+    });
+    if (recent) return;
+
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60_000);
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
+      this.prisma.passwordResetToken.create({
+        data: { userId: user.id, tokenHash: hashResetToken(token), expiresAt },
+      }),
+    ]);
+
+    await this.emailQueue.enqueuePasswordReset({
+      email: user.email,
+      name: user.name,
+      token,
+      expiresAt: expiresAt.toISOString(),
+    });
+    this.logger.log({ userId: user.id }, 'Password reset requested');
+  }
+
+  /**
+   * Sets a new password from a link. The link works once; every session the
+   * account had is signed out, since whoever asked may be locking someone
+   * else out of a stolen session.
+   */
+  async resetPassword(token: string, password: string): Promise<void> {
+    const row = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashResetToken(token) },
+      select: {
+        id: true,
+        usedAt: true,
+        expiresAt: true,
+        user: { select: { id: true, isActive: true, isServiceAccount: true } },
+      },
+    });
+    if (
+      !row ||
+      row.usedAt ||
+      row.expiresAt.getTime() <= Date.now() ||
+      !row.user.isActive ||
+      row.user.isServiceAccount
+    ) {
+      throw AppException.badRequest('PASSWORD_RESET_INVALID');
+    }
+
+    // Claimed first, so two tabs submitting the same link cannot both win.
+    const claimed = await this.prisma.passwordResetToken.updateMany({
+      where: { id: row.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (claimed.count === 0) throw AppException.badRequest('PASSWORD_RESET_INVALID');
+
+    const passwordHash = await this.passwords.hash(password);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: row.user.id }, data: { passwordHash } }),
+      this.prisma.passwordResetToken.deleteMany({
+        where: { userId: row.user.id, id: { not: row.id } },
+      }),
+    ]);
+    await this.tokens.revokeAllForUser(row.user.id);
+    this.logger.log({ userId: row.user.id }, 'Password reset');
   }
 
   async login(dto: LoginDto, context: SessionContext): Promise<AuthResult> {
@@ -132,4 +217,9 @@ export class AuthService {
       refreshExpiresInMs: issued.refreshExpiresInMs,
     };
   }
+}
+
+/** SHA-256, as for refresh tokens: the token carries 256 bits, so a slow KDF adds nothing. */
+function hashResetToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }

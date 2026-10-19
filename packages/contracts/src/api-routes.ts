@@ -16,6 +16,8 @@ export const ApiRoutes = {
     refresh: '/auth/refresh',
     logout: '/auth/logout',
     me: '/auth/me',
+    forgotPassword: '/auth/forgot-password',
+    resetPassword: '/auth/reset-password',
   },
   workspaces: {
     list: '/workspaces',
@@ -34,6 +36,12 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/teams/${teamId}/members`,
     removeMember: (workspaceId: string, teamId: string, userId: string) =>
       `/workspaces/${workspaceId}/teams/${teamId}/members/${userId}`,
+    messages: (workspaceId: string, teamId: string) =>
+      `/workspaces/${workspaceId}/teams/${teamId}/messages`,
+    message: (workspaceId: string, teamId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/teams/${teamId}/messages/${messageId}`,
+    replies: (workspaceId: string, teamId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/teams/${teamId}/messages/${messageId}/replies`,
   },
   members: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
@@ -61,6 +69,174 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/projects/${projectId}`,
     restore: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/restore`,
+  },
+  /** Intake forms: managed per project, filled in publicly by link. */
+  forms: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/forms`,
+    detail: (workspaceId: string, projectId: string, formId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/forms/${formId}`,
+    public: (token: string) => `/public/forms/${token}`,
+    submit: (token: string) => `/public/forms/${token}/submissions`,
+  },
+  /** A project's task statuses, and the workspace's priorities. */
+  definitions: {
+    statuses: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/statuses`,
+    status: (workspaceId: string, projectId: string, statusId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/statuses/${statusId}`,
+    reorderStatuses: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/statuses/reorder`,
+    priorities: (workspaceId: string) => `/workspaces/${workspaceId}/priorities`,
+    priority: (workspaceId: string, priorityId: string) =>
+      `/workspaces/${workspaceId}/priorities/${priorityId}`,
+    reorderPriorities: (workspaceId: string) => `/workspaces/${workspaceId}/priorities/reorder`,
+  },
+  /** Workspace tags, and the tags on a task. */
+  tags: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/tags`,
+    detail: (workspaceId: string, tagId: string) => `/workspaces/${workspaceId}/tags/${tagId}`,
+    onTask: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/tags`,
+    onTaskDetail: (workspaceId: string, taskId: string, tagId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/tags/${tagId}`,
+  },
+  /** Advanced search over tasks, and the searches people keep. */
+  savedSearches: {
+    tasks: (workspaceId: string) => `/workspaces/${workspaceId}/search/tasks`,
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/saved-searches`,
+    detail: (workspaceId: string, searchId: string) =>
+      `/workspaces/${workspaceId}/saved-searches/${searchId}`,
+  },
+  /** Chat apps a project posts its updates to (Slack, Teams…). */
+  projectApps: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/apps`,
+    detail: (workspaceId: string, projectId: string, appId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/apps/${appId}`,
+    test: (workspaceId: string, projectId: string, appId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/apps/${appId}/test`,
+  },
+  /** Every dependency between two tasks of a project, for its Timeline. */
+  projectDependencies: (workspaceId: string, projectId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/dependencies`,
+  /** A project's key resources, on its Overview. */
+  projectResources: (workspaceId: string, projectId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/resources`,
+  projectResource: (workspaceId: string, projectId: string, resourceId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/resources/${resourceId}`,
+  /** The caller's own profile. */
+  profile: '/users/me',
+  /** A person's calendar links: their My Tasks, or one project. */
+  calendarFeeds: {
+    mine: (workspaceId: string) => `/workspaces/${workspaceId}/calendar-feeds`,
+    reset: (workspaceId: string) => `/workspaces/${workspaceId}/calendar-feeds/reset`,
+    /** What calendar apps fetch — no account, the token is the key. */
+    feed: (token: string) => `/calendar/${token}.ics`,
+  },
+  /** A project's tasks as a CSV file. */
+  projectExportCsv: (workspaceId: string, projectId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/export/csv`,
+  /** A project's Note tab: one document per project. */
+  projectNote: (workspaceId: string, projectId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/note`,
+  /** A project's email address, and the webhook mail providers deliver to. */
+  projectEmail: {
+    settings: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/email`,
+    resetAddress: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/email/address`,
+    inbound: '/inbound/email',
+  },
+  /** Task templates: ready-made tasks a project's Add menu can create. */
+  taskTemplates: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/task-templates`,
+    detail: (workspaceId: string, projectId: string, templateId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/task-templates/${templateId}`,
+    use: (workspaceId: string, projectId: string, templateId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/task-templates/${templateId}/use`,
+  },
+  /** Report dashboards, and the numbers behind one chart. */
+  reports: {
+    dashboards: (workspaceId: string) => `/workspaces/${workspaceId}/report-dashboards`,
+    dashboard: (workspaceId: string, dashboardId: string) =>
+      `/workspaces/${workspaceId}/report-dashboards/${dashboardId}`,
+    tasks: (workspaceId: string) => `/workspaces/${workspaceId}/reports/tasks`,
+  },
+  /** The caller's own Home: which widgets, in what order, and their notepad. */
+  home: (workspaceId: string) => `/workspaces/${workspaceId}/home`,
+  /** Project templates, and a project's own copy of itself. */
+  projectTemplates: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/project-templates`,
+    detail: (workspaceId: string, templateId: string) =>
+      `/workspaces/${workspaceId}/project-templates/${templateId}`,
+    use: (workspaceId: string, templateId: string) =>
+      `/workspaces/${workspaceId}/project-templates/${templateId}/use`,
+    duplicate: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/duplicate`,
+  },
+  /** Bundles: a project's workflow, packaged for other projects. */
+  bundles: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/bundles`,
+    detail: (workspaceId: string, bundleId: string) =>
+      `/workspaces/${workspaceId}/bundles/${bundleId}`,
+    refresh: (workspaceId: string, bundleId: string) =>
+      `/workspaces/${workspaceId}/bundles/${bundleId}/refresh`,
+    project: (workspaceId: string, bundleId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/bundles/${bundleId}/projects/${projectId}`,
+  },
+  /** Status templates: a status update's starting point, per project. */
+  statusTemplates: {
+    list: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-templates`,
+    detail: (workspaceId: string, projectId: string, templateId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-templates/${templateId}`,
+  },
+  /** Portfolios: named sets of projects, workspace-wide, starred per person. */
+  portfolios: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/portfolios`,
+    detail: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}`,
+    projects: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/projects`,
+    project: (workspaceId: string, portfolioId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/projects/${projectId}`,
+    star: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/star`,
+    capacity: (workspaceId: string, portfolioId: string, userId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/capacity/${userId}`,
+    messages: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/messages`,
+    message: (workspaceId: string, portfolioId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/messages/${messageId}`,
+    replies: (workspaceId: string, portfolioId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/messages/${messageId}/replies`,
+    statusUpdates: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/status-updates`,
+    statusUpdate: (workspaceId: string, portfolioId: string, updateId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/status-updates/${updateId}`,
+    requestStatus: (workspaceId: string, portfolioId: string) =>
+      `/workspaces/${workspaceId}/portfolios/${portfolioId}/status-updates/request`,
+  },
+  /** Status updates, messages and files — what a project says about itself. */
+  projectUpdates: {
+    latestStatus: (workspaceId: string) => `/workspaces/${workspaceId}/status-updates/latest`,
+    statusUpdates: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-updates`,
+    statusUpdate: (workspaceId: string, projectId: string, updateId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-updates/${updateId}`,
+    /** Ask the project's owner for a status update. */
+    requestStatus: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-updates/request`,
+    messages: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/messages`,
+    message: (workspaceId: string, projectId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/messages/${messageId}`,
+    replies: (workspaceId: string, projectId: string, messageId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/messages/${messageId}/replies`,
+    files: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/files`,
   },
   /**
    * A project's members — the list a private project is private to. Removing
@@ -98,6 +274,25 @@ export const ApiRoutes = {
     archive: (workspaceId: string, taskId: string) => `/workspaces/${workspaceId}/tasks/${taskId}`,
     restore: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/restore`,
+    likes: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/likes`,
+    dependencies: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/dependencies`,
+    dependency: (workspaceId: string, taskId: string, dependencyId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/dependencies/${dependencyId}`,
+    /** Time logged against a task. */
+    /** "Mark as duplicate": POST names the original, DELETE undoes it. */
+    duplicateOf: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/duplicate-of`,
+    timeEntries: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/time-entries`,
+    timeEntry: (workspaceId: string, taskId: string, entryId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/time-entries/${entryId}`,
+    /** Multi-homing: the other projects a task is in. */
+    projects: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/projects`,
+    project: (workspaceId: string, taskId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/projects/${projectId}`,
   },
   /**
    * Like tasks, workspace-scoped: a ticket may have no project, and the queue
@@ -225,6 +420,39 @@ export const ApiRoutes = {
   integration: {
     whoami: '/integration/whoami',
   },
+  oauth: {
+    consent: '/oauth/consent',
+    authorize: '/oauth/authorize',
+    token: '/oauth/token',
+    revoke: '/oauth/revoke',
+    apps: '/users/me/oauth-apps',
+    app: (appId: string) => `/users/me/oauth-apps/${appId}`,
+    rotateSecret: (appId: string) => `/users/me/oauth-apps/${appId}/rotate-secret`,
+    connectedApps: '/users/me/connected-apps',
+    connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
+  },
+  /**
+   * The CoreTask Slack app. The workspace's own routes are for the
+   * Integrations page; `complete` and the link pair are posted by web pages
+   * Slack sends people to; `commands` and `interactions` are Slack's, signed
+   * with the app's signing secret rather than signed in.
+   */
+  slack: {
+    status: (workspaceId: string) => `/workspaces/${workspaceId}/slack`,
+    install: (workspaceId: string) => `/workspaces/${workspaceId}/slack/install`,
+    channels: (workspaceId: string) => `/workspaces/${workspaceId}/slack/channels`,
+    myLink: (workspaceId: string) => `/workspaces/${workspaceId}/slack/me`,
+    complete: '/integrations/slack/install',
+    linkPreview: '/integrations/slack/link/preview',
+    link: '/integrations/slack/link',
+    commands: '/integrations/slack/commands',
+    interactions: '/integrations/slack/interactions',
+  },
+  webhookSubscriptions: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,
+    one: (workspaceId: string, subscriptionId: string) =>
+      `/workspaces/${workspaceId}/webhook-subscriptions/${subscriptionId}`,
+  },
   webhooks: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
     create: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,
@@ -252,16 +480,45 @@ export const ApiRoutes = {
     redeliver: (workspaceId: string, deliveryId: string) =>
       `/workspaces/${workspaceId}/webhook-deliveries/${deliveryId}/redeliver`,
   },
+  search: (workspaceId: string) => `/workspaces/${workspaceId}/search`,
+  starredProjects: (workspaceId: string) => `/workspaces/${workspaceId}/starred-projects`,
+  goals: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/goals`,
+    detail: (workspaceId: string, goalId: string) => `/workspaces/${workspaceId}/goals/${goalId}`,
+    project: (workspaceId: string, goalId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/goals/${goalId}/projects/${projectId}`,
+    updates: (workspaceId: string, goalId: string) =>
+      `/workspaces/${workspaceId}/goals/${goalId}/updates`,
+    update: (workspaceId: string, goalId: string, updateId: string) =>
+      `/workspaces/${workspaceId}/goals/${goalId}/updates/${updateId}`,
+  },
+  myTaskPlacements: (workspaceId: string) => `/workspaces/${workspaceId}/my-tasks/placements`,
+  myTaskPlacement: (workspaceId: string, taskId: string) =>
+    `/workspaces/${workspaceId}/my-tasks/placements/${taskId}`,
+  /** The caller's My Tasks auto-sort rules, in this workspace. */
+  myTasksRules: (workspaceId: string) => `/workspaces/${workspaceId}/my-tasks/rules`,
+  projectStar: (workspaceId: string, projectId: string) =>
+    `/workspaces/${workspaceId}/projects/${projectId}/star`,
   activity: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/activity`,
     /** One item's stories, newest first, by `entity`, `entityId` and a `before` cursor. */
     forItem: (workspaceId: string) => `/workspaces/${workspaceId}/activity/item`,
+    /** One project's history, newest first, by `projectId` and a `before` cursor. */
+    forProject: (workspaceId: string) => `/workspaces/${workspaceId}/activity/project`,
   },
+  /** Which notifications the caller also gets by email, in this workspace. */
+  notificationPreferences: (workspaceId: string) =>
+    `/workspaces/${workspaceId}/notification-preferences`,
   notifications: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/notifications`,
     markRead: (workspaceId: string) => `/workspaces/${workspaceId}/notifications/read`,
     markUnread: (workspaceId: string, notificationId: string) =>
       `/workspaces/${workspaceId}/notifications/${notificationId}/unread`,
+    archive: (workspaceId: string) => `/workspaces/${workspaceId}/notifications/archive`,
+    unarchive: (workspaceId: string, notificationId: string) =>
+      `/workspaces/${workspaceId}/notifications/${notificationId}/unarchive`,
+    bookmark: (workspaceId: string, notificationId: string) =>
+      `/workspaces/${workspaceId}/notifications/${notificationId}/bookmark`,
   },
   sections: {
     list: (workspaceId: string, projectId: string) =>

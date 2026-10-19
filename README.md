@@ -62,7 +62,7 @@ database or a secret.
 | Cache/queues  | Redis, BullMQ (consumed by a separate worker process)                    |
 | Realtime      | Socket.IO gateway, authenticated with the same access token as REST      |
 | Auth          | Argon2id passwords, short-lived JWT + rotating refresh token in a cookie |
-| Storage       | MinIO locally, any S3-compatible service in production                   |
+| Storage       | RustFS locally, any S3-compatible service in production                  |
 
 The frontend and backend are **independently deployable**: the browser talks to
 the API only over HTTP and WebSocket, and the API has no knowledge of the
@@ -87,7 +87,7 @@ CoreTask/
 │   ├── src/common/           filters, guards, interceptors, decorators, DTOs, utils
 │   ├── src/database/         Prisma service
 │   ├── src/modules/          auth, users, workspaces, workspace-members, …
-│   ├── src/integrations/     email, storage, notification dispatch
+│   ├── src/integrations/     email, storage, notification dispatch, AI
 │   ├── src/jobs/             BullMQ queues and processors
 │   ├── src/websocket/        Socket.IO gateway
 │   ├── prisma/               schema, migrations, seed
@@ -110,12 +110,12 @@ CoreTask/
 
 ## Prerequisites
 
-| Tool           | Version | Notes                                                        |
-| -------------- | ------- | ------------------------------------------------------------ |
-| Node.js        | ≥ 20.11 | Only needed for running outside Docker                       |
-| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate` |
-| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                           |
-| Git            | any     |                                                              |
+| Tool           | Version | Notes                                                                                                       |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| Node.js        | ≥ 24.9  | Only needed outside Docker. The API runs on 22.12+, but its Jest suites need 24.9+ (see api/jest.config.ts) |
+| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate`                                                |
+| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                                                                          |
+| Git            | any     |                                                                                                             |
 
 npm and Yarn are not supported — the workspace uses pnpm's linker and lockfile.
 
@@ -168,7 +168,7 @@ prefix.
 
 ## Running with Docker
 
-The full stack — web, API, worker, PostgreSQL, Redis and MinIO:
+The full stack — web, API, worker, PostgreSQL, Redis and RustFS for object storage:
 
 ```bash
 pnpm dev:build
@@ -195,8 +195,9 @@ pnpm down
 pnpm infra
 ```
 
-`pnpm infra` starts only PostgreSQL, Redis and MinIO — the combination you want
-when running the API and web dev servers on the host.
+`pnpm infra` starts only PostgreSQL, Redis and RustFS, and creates the storage
+bucket — the combination you want when running the API and web dev servers on
+the host.
 
 To discard all database and object-storage volumes:
 
@@ -268,18 +269,18 @@ cheap on a small laptop.
 
 ## Default ports
 
-| Service       | URL                                 |
-| ------------- | ----------------------------------- |
-| Frontend      | http://localhost:5173               |
-| API           | http://localhost:3000               |
-| REST base     | http://localhost:3000/api/v1        |
-| Swagger UI    | http://localhost:3000/api/docs      |
-| OpenAPI JSON  | http://localhost:3000/api/docs-json |
-| Health        | http://localhost:3000/api/v1/health |
-| PostgreSQL    | localhost:5432                      |
-| Redis         | localhost:6379                      |
-| MinIO API     | http://localhost:9000               |
-| MinIO Console | http://localhost:9001               |
+| Service         | URL                                   |
+| --------------- | ------------------------------------- |
+| Frontend        | http://localhost:5173                 |
+| API             | http://localhost:3000                 |
+| REST base       | http://localhost:3000/api/v1          |
+| Swagger UI      | http://localhost:3000/api/docs        |
+| OpenAPI JSON    | http://localhost:3000/api/docs-json   |
+| Health          | http://localhost:3000/api/v1/health   |
+| PostgreSQL      | localhost:5432                        |
+| Redis           | localhost:6379                        |
+| Storage API     | http://localhost:9000                 |
+| Storage console | http://localhost:9001/rustfs/console/ |
 
 Every published port is configurable — see
 [Troubleshooting → port already allocated](#port-already-allocated).
@@ -539,13 +540,96 @@ pnpm compose:validate
   with Asana's "All activity / Comments only" switch
 - Comment and attachment counts on list rows and board cards; image
   thumbnails and a lightbox in the attachment strip
+- Global search (Ctrl/⌘ K or `/`): tasks, tickets, projects and people, best
+  match first, narrowed by kind, with recents — private projects stay private
+- Asana's Create menu: a task from anywhere (Tab+N too), a project, a team, an
+  invitation or a workspace
+- Starred projects in the sidebar, starred from a project's header or the
+  projects list — a per-person bookmark
+- Project tabs beyond List and Board: a Timeline (Gantt bars dragged to move,
+  ends dragged to change a date), a Calendar (bars from start to due, dragged
+  to reschedule, an Unscheduled tray), a Dashboard (totals, completion, open
+  work by section and assignee, a burn-up) and the project's Activity feed
+- Task likes, and dependencies — blocked by / blocking, with a loop guard —
+  plus the pane's full-screen view, a "…" menu (duplicate, copy link, open in
+  a new tab, archive), status and priority rows, and links to subtasks
+- My Tasks in Asana's sections — Recently assigned, Do today, Do next week,
+  Do later — personal, dragged or moved by menu
+- Inbox Archive and Bookmarks, with "Archive all"
+- Profiles with pronouns, title, department and out-of-office dates, shown
+  beside a name when someone picks an assignee; My Tasks auto-sort by due date
+- Sync to calendar: a private iCalendar link for My Tasks or a project, which
+  can be reset and follows its owner's access
+- Ticket rules: when a ticket is reported or changes status, check it and
+  triage it — status, priority, assignee, section, comments, e-mail, a task
+- Rules that wait: a Wait step of minutes, hours or days, after which the
+  rest of the rule runs against the task as it is by then
+- Connectors: OAuth 2.0 apps (register under Integrations › OAuth apps; people
+  allow them on a consent page and disconnect them under Connected apps), and
+  webhook subscriptions an API key or app makes through the API, one project
+  at a time
+- AI in rules (with an Anthropic API key): "Use AI…" makes the changes its
+  instructions call for, from a list the author ticks and the project's own
+  options, and "Check with AI" lets a yes-or-no question decide a path
+- Rules that add a task to another project as well, fill variables into the
+  subtasks they create, and e-mail the people on a task
+- Goals: a tree of outcomes with status, owner, team and time period, and
+  progress set by hand, rolled up from sub-goals or connected projects, or
+  measured by a number moving from a start towards a target
+- Rules that are not edits: run by hand from a task's menu or a selection,
+  on a schedule (with Asana's execution scope), or by a due or start date
+  drawing near or passing — plus "no longer blocked", "attachment added" and
+  "collaborator added", new actions (complete or reopen, create a task, rename
+  with variables, collaborators, remove from project) and new checks
+- Project Messages (posts and replies) beside status updates kept on the
+  server, a Files tab, and repeating tasks ("Set to repeat")
+- Portfolios kept on the server — shared with the workspace, filtered by what
+  each person can open — with Dashboard, Progress, Workload (load against
+  per-person capacity, in tasks or estimated hours) and Messages tabs, and a
+  status of their own set by the owner or a manager
+- Milestones and approvals beside ordinary tasks (approve, request changes,
+  reject), follow-up tasks, and task templates with their subtasks
+- Intake forms: a public link anyone can fill in without an account, each
+  response a task in the project with the answers in its description
+- Status templates that fill the status composer, and rules on a custom date
+  field drawing near or passing
+- Bundles: one project's sections, fields, rules and task templates applied
+  to others and kept in step when the source changes
+- Report dashboards: shared charts of tasks by status, priority, assignee,
+  project or week, answered per viewer over what they can see
+- Multi-homing: a task in several projects, in its own section and place on
+  each board, visible through any of them, with each project's rules and
+  fields applying to it
+- Project templates and "Duplicate project": sections, tasks with subtasks and
+  relative dates, fields, rules and task templates, as chosen
+- Export to CSV: a project's tasks with Asana's columns and one per custom
+  field, safe to open in a spreadsheet
+- Team pages: the team's projects and people, and its own Messages
+- Project Note, Workload and Settings tabs: a shared document, open work by
+  person and week (drag a task to reassign or reschedule it), and statuses,
+  priorities and details in one place
+- Tags: workspace labels on tasks, on cards and in a List column, filtering
+  views and search, managed in Settings
+- Time tracking: time logged by hand or with a timer against a task's
+  estimate, entry by entry
+- Advanced search over tasks — words, assignee, projects, status, due date,
+  creator, collaborators — as a link, with saved searches in the sidebar
+- Apps: a project's updates posted to Slack, Microsoft Teams, Google Chat or
+  Discord, as each tool's own messages
+- Two-way Slack: `/coretask` and a message shortcut make tasks as the linked
+  person, and the app's channel posts carry buttons to complete or take a
+  task — see [Slack](docs/integrations/slack.md)
+- Email to a project: an address per project whose mail becomes tasks, with
+  comments sent back to the people on the email and their replies kept as
+  comments
 - Read-only activity feed and a per-user notification inbox with unread counts
-- A dashboard driven entirely by live data — no fixtures anywhere in the app
+- A Home driven entirely by live data — no fixtures anywhere in the app — with
+  widgets each person shows, hides and reorders, and a private notepad
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
-- Real outbound e-mail through Microsoft Graph, with SMTP and a log transport as
-  the other two options — see [Outbound e-mail](docs/architecture/backend.md)
+- Real outbound e-mail through Microsoft Graph, or written to the log when Graph
+  is not configured — see [Outbound e-mail](docs/architecture/backend.md)
 
 ### Design notes
 
@@ -588,8 +672,8 @@ API_PORT=3010
 POSTGRES_PORT=55432
 REDIS_PORT=56379
 WEB_PORT=5173
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
+STORAGE_API_PORT=9000
+STORAGE_CONSOLE_PORT=9001
 ```
 
 Remember to update `DATABASE_URL`, `API_URL` and `VITE_API_URL` to match when
@@ -600,6 +684,20 @@ Find the offender:
 ```bash
 docker ps --format "{{.Names}}\t{{.Ports}}"
 ```
+
+### `coretask-storage` will not start: port 9000 already allocated
+
+A stack created before the move from MinIO to RustFS still has its old
+`coretask-minio` container holding ports 9000 and 9001. Compose no longer
+defines that service, so `up` leaves it running. Remove it as an orphan:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --remove-orphans
+```
+
+Nothing stored in MinIO carries over: RustFS starts on a new, empty volume, so
+attachments uploaded before the switch will show as missing. Once you no longer
+need them, reclaim the space with `docker volume rm coretask-minio-data`.
 
 ### `Environment validation failed` on API start
 
@@ -706,6 +804,7 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 | [Task dates, times and rich text](docs/architecture/task-dates-and-rich-text.md)             | Date/instant pairs, overdue, the picker, sanitised HTML, mentions, pictures |
 | [List selection, bulk edit and shortcuts](docs/architecture/list-selection-and-shortcuts.md) | Multi-select rules, the bulk bar and route, Tab chords                      |
 | [Comments and collaboration](docs/architecture/comments-and-collaboration.md)                | Followers, who gets told, stories in the panel, rich-text threads           |
+| [OAuth apps and webhook subscriptions](docs/architecture/oauth-and-connectors.md)            | Authorization-code flow, tokens, revocation, REST hooks for connectors      |
 | [Comments, followers and activity API](docs/api/comments-followers-activity.md)              | Threads by cursor, likes, pins, followers, an item's stories                |
 | [Project privacy and members API](docs/api/project-members.md)                               | Public/private projects, the roster and its roles, what `access` means      |
 | [Custom field system](docs/architecture/custom-field-system.md)                              | Eleven types incl. rating and formula, formats, stories, remove modes       |

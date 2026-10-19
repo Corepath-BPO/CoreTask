@@ -75,6 +75,46 @@ export function invitationEmail(params: {
   };
 }
 
+/**
+ * The "forgot password" link. Points at the web app's reset page; says how
+ * long it works and what to do if the reader did not ask.
+ */
+export function passwordResetEmail(params: {
+  to: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+  webUrl: string;
+}): EmailMessage {
+  const firstName = params.name.split(' ')[0] ?? params.name;
+  const link = `${params.webUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(params.token)}`;
+  const expires = new Date(params.expiresAt).toUTCString();
+
+  return {
+    to: params.to,
+    subject: 'Reset your CoreTask password',
+    text: [
+      `Hi ${firstName},`,
+      '',
+      'Someone asked to reset the password for your CoreTask account. To choose a new one:',
+      link,
+      '',
+      `The link works once, until ${expires}. Setting a new password signs you out everywhere.`,
+      'If you did not ask, ignore this e-mail — your password stays as it is.',
+      '',
+      '— The CoreTask team',
+    ].join('\n'),
+    html: [
+      `<p>Hi ${escapeHtml(firstName)},</p>`,
+      '<p>Someone asked to reset the password for your CoreTask account.</p>',
+      `<p><a href="${escapeHtml(link)}">Choose a new password</a></p>`,
+      `<p>The link works once, until ${escapeHtml(expires)}. Setting a new password signs you out everywhere.</p>`,
+      '<p>If you did not ask, ignore this e-mail — your password stays as it is.</p>',
+      '<p>— The CoreTask team</p>',
+    ].join(''),
+  };
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

@@ -4,13 +4,16 @@ import { Link } from '@tanstack/react-router';
 import {
   Archive,
   ArchiveRestore,
+  CalendarSync,
   ChevronDown,
   Circle,
+  Copy,
+  FileDown,
   LayoutGrid,
+  LayoutTemplate,
   List,
   LogOut,
   Pencil,
-  Star,
   Ticket,
   UserPlus,
   Users,
@@ -27,10 +30,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { StatusUpdateChip, StatusUpdateMenu } from '@/features/portfolios/components/status-update';
-import type { ProjectStatusUpdateValue } from '@/stores/status-update.store';
+import type { ProjectStatusUpdateValue } from '@/features/projects/hooks/use-project-updates';
 
 import type { ProjectAccess } from '../lib/project-access';
 
+import { ProjectStarButton } from './project-star-button';
 import { ProjectMembersStack } from './sharing/project-members-stack';
 import { ProjectPrivacyBadge } from './sharing/project-privacy-badge';
 
@@ -47,6 +51,16 @@ interface ProjectHeaderProps {
   onLeave: () => void;
   onSetStatus: (status: ProjectStatusUpdateValue) => void;
   onCustomize: () => void;
+  /** Whether the reader may start projects — and so duplicate this one, or keep it as a template. */
+  canStartProjects?: boolean;
+  onDuplicate?: () => void;
+  onSaveTemplate?: () => void;
+  /** Open "Sync to calendar" — anyone who can see the project may. */
+  onSyncCalendar?: () => void;
+  /** Download the project as CSV — a read, open to anyone who can see it. */
+  onExportCsv?: () => void;
+  /** Ask the project's owner for a status update; left out for the owner. */
+  onRequestStatus?: () => void;
 }
 
 /**
@@ -72,10 +86,22 @@ export function ProjectHeader({
   onLeave,
   onSetStatus,
   onCustomize,
+  canStartProjects = false,
+  onDuplicate,
+  onSaveTemplate,
+  onSyncCalendar,
+  onExportCsv,
+  onRequestStatus,
 }: ProjectHeaderProps) {
   const archived = project.archivedAt !== null;
   const TileIcon = project.defaultWorkItemType === WorkItemType.TICKET ? Ticket : List;
-  const showsMenu = access.canEdit || access.canManage || access.canLeave;
+  const showsMenu =
+    access.canEdit ||
+    access.canManage ||
+    access.canLeave ||
+    canStartProjects ||
+    Boolean(onSyncCalendar) ||
+    Boolean(onExportCsv);
 
   return (
     <>
@@ -118,6 +144,30 @@ export function ProjectHeader({
                   Edit project
                 </DropdownMenuItem>
               )}
+              {canStartProjects && onDuplicate && (
+                <DropdownMenuItem onSelect={onDuplicate}>
+                  <Copy />
+                  Duplicate project
+                </DropdownMenuItem>
+              )}
+              {canStartProjects && onSaveTemplate && (
+                <DropdownMenuItem onSelect={onSaveTemplate}>
+                  <LayoutTemplate />
+                  Save as template
+                </DropdownMenuItem>
+              )}
+              {onSyncCalendar && (
+                <DropdownMenuItem onSelect={onSyncCalendar}>
+                  <CalendarSync />
+                  Sync to calendar
+                </DropdownMenuItem>
+              )}
+              {onExportCsv && (
+                <DropdownMenuItem onSelect={onExportCsv}>
+                  <FileDown />
+                  Export to CSV
+                </DropdownMenuItem>
+              )}
               {access.canLeave && (
                 <DropdownMenuItem onSelect={onLeave}>
                   <LogOut />
@@ -138,20 +188,17 @@ export function ProjectHeader({
           </DropdownMenu>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled
-          title="Starring projects is not built yet"
-          aria-label="Star project (not built yet)"
-        >
-          <Star />
-        </Button>
+        <ProjectStarButton
+          workspaceId={project.workspaceId}
+          projectId={project.id}
+          projectName={project.name}
+        />
 
         {/* Asana's "Set status" — the portfolios status machinery, from the
             project itself. Picking a status opens the composer. */}
         <StatusUpdateMenu
           onPick={onSetStatus}
+          onRequest={onRequestStatus}
           trigger={
             <Button variant="ghost" size="sm" className="text-muted-foreground">
               {statusUpdate ? (

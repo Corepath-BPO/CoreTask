@@ -189,7 +189,15 @@ function TeamCard({ team, canManage, isAdmin, onView, onEdit, onDelete }: TeamCa
           />
 
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold leading-tight">{team.name}</h3>
+            <h3 className="truncate text-sm font-semibold leading-tight">
+              <Link
+                to="/teams/$teamId"
+                params={{ teamId: team.id }}
+                className="hover:underline focus-visible:underline focus-visible:outline-none"
+              >
+                {team.name}
+              </Link>
+            </h3>
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
               {team.description || 'No description'}
             </p>

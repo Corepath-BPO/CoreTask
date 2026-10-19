@@ -1,7 +1,7 @@
 import type { ProjectSummary, UserRef } from '@coretask/types';
 
 import { percentage } from '@/lib/utils';
-import type { Portfolio } from '@/stores/portfolio.store';
+import type { Portfolio } from '@/features/portfolios/hooks/use-portfolios';
 
 export interface PortfolioRollup {
   /** Members that resolved against the live project list, in portfolio order. */

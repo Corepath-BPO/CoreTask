@@ -103,6 +103,14 @@ export class WhoAmIKeyDto {
   role!: string;
 }
 
+export class WhoAmIOAuthAppDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Leasing sync' })
+  name!: string;
+}
+
 export class IntegrationWhoAmIDto {
   @ApiProperty({ enum: INTEGRATION_PRINCIPALS, example: 'api_key' })
   principal!: string;
@@ -115,4 +123,11 @@ export class IntegrationWhoAmIDto {
 
   @ApiProperty({ type: WhoAmIKeyDto, nullable: true })
   apiKey!: WhoAmIKeyDto | null;
+
+  @ApiProperty({
+    type: WhoAmIOAuthAppDto,
+    nullable: true,
+    description: 'The app an OAuth access token was issued to.',
+  })
+  oauthApp!: WhoAmIOAuthAppDto | null;
 }

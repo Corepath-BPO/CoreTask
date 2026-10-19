@@ -1,13 +1,54 @@
-import { BOARD_TASK_LIMIT, PAGINATION_MAX_LIMIT } from '@coretask/contracts';
-import { Link } from '@tanstack/react-router';
-import { AlertTriangle, CheckCircle2, CircleGauge, FolderKanban, UsersRound } from 'lucide-react';
+import {
+  BOARD_TASK_LIMIT,
+  PAGINATION_MAX_LIMIT,
+  REPORT_DASHBOARD_NAME_MAX,
+  WorkspaceRole,
+  hasAtLeastRole,
+} from '@coretask/contracts';
+import { Link, useNavigate } from '@tanstack/react-router';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleGauge,
+  FolderKanban,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+  UsersRound,
+} from 'lucide-react';
+import { useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
 import { StatCard } from '@/components/data-display/stat-card';
 import { EmptyState } from '@/components/feedback/empty-state';
-import { Badge } from '@/components/ui/badge';
+import { Field } from '@/components/forms/field';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProjects } from '@/features/projects/hooks/use-projects';
@@ -17,8 +58,239 @@ import {
   useActiveWorkspace,
   useWorkspaceMembers,
 } from '@/features/workspaces/hooks/use-workspaces';
+import { cn } from '@/lib/utils';
+import { useCurrentUser } from '@/stores/auth.store';
 
-export function ReportsPage() {
+import { ReportDashboardView } from '../components/report-dashboard-view';
+import {
+  useCreateReportDashboard,
+  useDeleteReportDashboard,
+  useReportDashboards,
+  useUpdateReportDashboard,
+} from '../hooks/use-report-dashboards';
+
+/**
+ * Reports — the workspace overview, and the dashboards people build.
+ *
+ * Overview is the fixed report. Each dashboard is a tab beside it, shared
+ * with the workspace; its charts are worked out for whoever opens it. The
+ * open tab lives in `?dashboard=`, so a dashboard can be linked to.
+ */
+export function ReportsPage({ dashboardId }: { dashboardId?: string | undefined }) {
+  const navigate = useNavigate();
+  const { workspace } = useActiveWorkspace();
+  const workspaceId = workspace?.id;
+  const me = useCurrentUser();
+  const { data: dashboards } = useReportDashboards(workspaceId);
+  const create = useCreateReportDashboard(workspaceId);
+  const update = useUpdateReportDashboard(workspaceId);
+  const remove = useDeleteReportDashboard(workspaceId);
+  const [naming, setNaming] = useState<'new' | 'rename' | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const role = workspace?.role ?? WorkspaceRole.GUEST;
+  const active = dashboards?.find((dashboard) => dashboard.id === dashboardId) ?? null;
+  const canEdit =
+    active !== null && (active.owner?.id === me?.id || hasAtLeastRole(role, WorkspaceRole.MANAGER));
+
+  const open = (id: string | undefined) =>
+    void navigate({ to: '/reports', search: id ? { dashboard: id } : {} });
+
+  return (
+    <div className="mx-auto w-full max-w-[1440px] space-y-6">
+      <PageHeader
+        title={active?.name ?? 'Reports'}
+        description={
+          active
+            ? `${active.owner ? `${active.owner.name}’s dashboard` : 'A dashboard'} — counted over the tasks you can see.`
+            : `A live operational view of ${workspace?.name ?? 'this workspace'}.`
+        }
+        actions={
+          canEdit && active ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon-sm" aria-label="Dashboard actions">
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setNaming('rename')}>
+                  <Pencil />
+                  Rename dashboard
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
+                  <Trash2 />
+                  Delete dashboard
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : undefined
+        }
+      />
+
+      <nav aria-label="Reports" className="flex flex-wrap items-center gap-1 border-b pb-2">
+        <TabButton active={active === null} onClick={() => open(undefined)}>
+          Overview
+        </TabButton>
+        {(dashboards ?? []).map((dashboard) => (
+          <TabButton
+            key={dashboard.id}
+            active={active?.id === dashboard.id}
+            onClick={() => open(dashboard.id)}
+          >
+            {dashboard.name}
+          </TabButton>
+        ))}
+        {hasAtLeastRole(role, WorkspaceRole.MEMBER) && (
+          <Button variant="ghost" size="sm" onClick={() => setNaming('new')}>
+            <Plus />
+            New dashboard
+          </Button>
+        )}
+      </nav>
+
+      {active ? (
+        <ReportDashboardView workspaceId={workspaceId} dashboard={active} canEdit={canEdit} />
+      ) : (
+        <ReportsOverview />
+      )}
+
+      <NameDialog
+        open={naming !== null}
+        title={naming === 'rename' ? 'Rename dashboard' : 'New dashboard'}
+        initial={naming === 'rename' ? (active?.name ?? '') : ''}
+        onOpenChange={(next) => !next && setNaming(null)}
+        onSave={(name) => {
+          if (naming === 'rename' && active) {
+            update.mutate({ dashboardId: active.id, draft: { name } });
+          } else {
+            create.mutate({ name }, { onSuccess: (dashboard) => open(dashboard.id) });
+          }
+          setNaming(null);
+        }}
+      />
+
+      <AlertDialog open={deleting} onOpenChange={setDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{active?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its charts go with it, for everyone it was shared with. The tasks it counted are
+              untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (active) remove.mutate(active.id, { onSuccess: () => open(undefined) });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+      className={cn(
+        'max-w-48 truncate rounded-md px-3 py-1.5 text-sm transition-colors',
+        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+        active
+          ? 'bg-muted font-medium text-foreground'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function NameDialog({
+  open,
+  title,
+  initial,
+  onOpenChange,
+  onSave,
+}: {
+  open: boolean;
+  title: string;
+  initial: string;
+  onOpenChange: (open: boolean) => void;
+  onSave: (name: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        {open && (
+          <NameForm initial={initial} onCancel={() => onOpenChange(false)} onSave={onSave} />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NameForm({
+  initial,
+  onCancel,
+  onSave,
+}: {
+  initial: string;
+  onCancel: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState(initial);
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (name.trim()) onSave(name.trim());
+      }}
+    >
+      <Field label="Name" htmlFor="dashboard-name">
+        <Input
+          id="dashboard-name"
+          value={name}
+          maxLength={REPORT_DASHBOARD_NAME_MAX}
+          placeholder="e.g. Leasing operations"
+          onChange={(event) => setName(event.target.value)}
+          autoFocus
+        />
+      </Field>
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={!name.trim()}>
+          Save
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+/** The workspace overview — the fixed report every workspace has. */
+function ReportsOverview() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
   const tasks = useTasks(workspace?.id, { limit: BOARD_TASK_LIMIT });
   const tickets = useTickets(workspace?.id, { limit: PAGINATION_MAX_LIMIT, includeClosed: true });
@@ -77,17 +349,7 @@ export function ReportsPage() {
     .slice(0, 6);
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] space-y-7">
-      <PageHeader
-        title="Reports"
-        description={`A live operational view of ${workspace.name}.`}
-        actions={
-          <Badge variant="outline" className="h-8">
-            Workspace overview
-          </Badge>
-        }
-      />
-
+    <div className="space-y-7">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Task completion"
@@ -168,7 +430,9 @@ export function ReportsPage() {
                     <div className="mb-1.5 flex justify-between text-sm">
                       <span className="truncate">{member.name}</span>
                     </div>
-                    <Progress value={totalWorkload === 0 ? 0 : (member.count / totalWorkload) * 100} />
+                    <Progress
+                      value={totalWorkload === 0 ? 0 : (member.count / totalWorkload) * 100}
+                    />
                   </div>
                   <span className="text-right text-sm font-semibold tabular-nums">
                     {member.count}

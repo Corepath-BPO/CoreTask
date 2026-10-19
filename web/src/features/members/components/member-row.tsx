@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { OutOfOfficeHint } from '@/components/data-display/out-of-office';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -75,7 +76,12 @@ export function MemberRow({ member, workspaceId, actorRole, isSelf, onLeave }: M
           {member.user.name}
           {isSelf && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
         </p>
-        <p className="truncate text-xs text-muted-foreground">{member.user.email}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {[member.user.jobTitle, member.user.pronouns, member.user.email]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+        <OutOfOfficeHint period={member.user.outOfOffice} />
       </div>
 
       <div className="flex shrink-0 items-center gap-2">

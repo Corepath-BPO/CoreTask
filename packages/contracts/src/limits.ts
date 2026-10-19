@@ -6,6 +6,9 @@
  */
 
 export const PASSWORD_MIN_LENGTH = 10;
+/** How long a "forgot password" link works, and how often one may be sent to the same account. */
+export const PASSWORD_RESET_TTL_MINUTES = 60;
+export const PASSWORD_RESET_RESEND_SECONDS = 60;
 export const PASSWORD_MAX_LENGTH = 128;
 
 export const NAME_MIN_LENGTH = 1;
@@ -206,3 +209,44 @@ export const ALLOWED_UPLOAD_MIME_TYPES: readonly string[] = [
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
+
+/** Top-bar search: how long a query may be, and how many hits per kind. */
+export const SEARCH_QUERY_MAX_LENGTH = 100;
+export const SEARCH_DEFAULT_LIMIT = 6;
+export const SEARCH_MAX_LIMIT = 20;
+
+/** Asana caps a task's dependencies; past this a plan is a web, not a sequence. */
+export const MAX_DEPENDENCIES_PER_TASK = 30;
+
+/** How many projects one person can star; past this the sidebar stops being a shortlist. */
+export const MAX_STARRED_PROJECTS = 50;
+
+/** Portfolios: a name like a project's, and room for a programme of work. */
+export const PORTFOLIO_NAME_MAX = 120;
+export const PORTFOLIO_DESCRIPTION_MAX = 2_000;
+export const MAX_PORTFOLIO_PROJECTS = 200;
+
+/** Multi-homing: how many projects besides its home one task may be in. */
+export const MAX_TASK_EXTRA_PROJECTS = 20;
+
+/**
+ * Workload capacity: how much open work a person should carry in a portfolio,
+ * counted in its measure — open tasks, or the hours their estimates add up to.
+ */
+export const PortfolioWorkloadMeasure = {
+  TASKS: 'TASKS',
+  HOURS: 'HOURS',
+} as const;
+export type PortfolioWorkloadMeasure =
+  (typeof PortfolioWorkloadMeasure)[keyof typeof PortfolioWorkloadMeasure];
+export const PORTFOLIO_WORKLOAD_MEASURES = Object.values(PortfolioWorkloadMeasure);
+export const PORTFOLIO_CAPACITY_MAX = 1_000;
+
+/** Task templates: a menu-length name, and a checklist's worth of subtasks. */
+export const TASK_TEMPLATE_NAME_MAX = 120;
+export const MAX_TASK_TEMPLATES_PER_PROJECT = 50;
+export const MAX_TEMPLATE_SUBTASKS = 20;
+
+/** Key resources on a project's Overview. */
+export const MAX_PROJECT_RESOURCES = 20;
+export const PROJECT_RESOURCE_TITLE_MAX = 120;

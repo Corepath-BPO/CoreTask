@@ -134,6 +134,9 @@ enum NotificationType {
   FIELD_CHANGED
   /// Someone added you to a project's members.
   PROJECT_MEMBER_ADDED
+  /// A status update or a message was posted in a project you are on, or a
+  /// message you are part of got a reply.
+  PROJECT_UPDATE
 }
 
 /// What happened. A story's kind is what the audit trail and the task panel's
@@ -194,6 +197,15 @@ model User {
   name             String    @db.VarChar(120)
   avatarUrl        String?
   timezone         String    @default("UTC") @db.VarChar(64)
+  /// The profile: shown on member lists and beside a name in pickers.
+  pronouns         String?   @db.VarChar(40)
+  jobTitle         String?   @db.VarChar(80)
+  department       String?   @db.VarChar(80)
+  aboutMe          String?
+  /// Time off, calendar days both inclusive; both set or both null.
+  outOfOfficeFrom  DateTime? @db.Date
+  outOfOfficeUntil DateTime? @db.Date
+  outOfOfficeNote  String?   @db.VarChar(200)
   emailVerifiedAt  DateTime?
   isActive         Boolean   @default(true)
   /// True for the hidden principal behind an API key. It never signs in, never
@@ -206,36 +218,70 @@ model User {
 
   refreshTokens              RefreshToken[]
   apiKey                     ApiKey?
-  createdApiKeys             ApiKey[]                @relation("ApiKeyCreatedBy")
-  createdWebhookEndpoints    WebhookEndpoint[]       @relation("WebhookEndpointCreatedBy")
+  createdApiKeys             ApiKey[]                 @relation("ApiKeyCreatedBy")
+  createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
+  oauthApps                  OAuthApp[]
+  passwordResetTokens        PasswordResetToken[]
+  oauthCodes                 OAuthAuthorizationCode[]
+  oauthGrants                OAuthGrant[]
+  slackInstallations         SlackInstallation[]
+  slackLinks                 SlackUserLink[]
   memberships                WorkspaceMember[]
-  invitedMembers             WorkspaceMember[]       @relation("MemberInvitedBy")
-  createdWorkspaces          Workspace[]             @relation("WorkspaceCreatedBy")
-  ledProjects                Project[]               @relation("ProjectLead")
-  projectMemberships         ProjectMember[]         @relation("ProjectMemberships")
-  projectMembersAdded        ProjectMember[]         @relation("ProjectMemberAddedBy")
-  createdTasks               Task[]                  @relation("TaskCreatedBy")
-  assignedTasks              Task[]                  @relation("TaskAssignee")
-  reportedTickets            Ticket[]                @relation("TicketReporter")
-  assignedTickets            Ticket[]                @relation("TicketAssignee")
+  invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
+  createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
+  ledProjects                Project[]                @relation("ProjectLead")
+  projectMemberships         ProjectMember[]          @relation("ProjectMemberships")
+  projectMembersAdded        ProjectMember[]          @relation("ProjectMemberAddedBy")
+  createdTasks               Task[]                   @relation("TaskCreatedBy")
+  assignedTasks              Task[]                   @relation("TaskAssignee")
+  reportedTickets            Ticket[]                 @relation("TicketReporter")
+  assignedTickets            Ticket[]                 @relation("TicketAssignee")
   comments                   Comment[]
   attachments                Attachment[]
   mentionedIn                CommentMention[]
   commentLikes               CommentLike[]
-  pinnedComments             Comment[]               @relation("CommentPinnedBy")
+  pinnedComments             Comment[]                @relation("CommentPinnedBy")
   following                  Follower[]
-  sentInvitations            WorkspaceInvitation[]   @relation("InvitationSentBy")
+  taskLikes                  TaskLike[]
+  starredProjects            ProjectStar[]
+  projectStatusUpdates       ProjectStatusUpdate[]
+  ownedPortfolios            Portfolio[]              @relation("PortfolioOwner")
+  portfolioStars             PortfolioStar[]
+  projectMessages            ProjectMessage[]
+  projectMessageReplies      ProjectMessageReply[]
+  myTaskPlacements           MyTaskPlacement[]
+  ownedGoals                 Goal[]                   @relation("GoalOwner")
+  createdGoals               Goal[]                   @relation("GoalCreatedBy")
+  createdDependencies        TaskDependency[]         @relation("DependencyCreatedBy")
+  sentInvitations            WorkspaceInvitation[]    @relation("InvitationSentBy")
   teamMemberships            TeamMember[]
-  ledTeams                   Team[]                  @relation("TeamLead")
+  ledTeams                   Team[]                   @relation("TeamLead")
   activityLogs               ActivityLog[]
   notifications              Notification[]
-  createdFields              CustomField[]           @relation("CustomFieldCreatedBy")
-  updatedFieldValues         TaskCustomFieldValue[]  @relation("CustomFieldValueUpdatedBy")
-  ownedViews                 ProjectView[]           @relation("ProjectViewOwner")
-  createdViews               ProjectView[]           @relation("ProjectViewCreatedBy")
-  createdAutomations         AutomationRule[]        @relation("AutomationCreatedBy")
-  createdAutomationVersions  AutomationRuleVersion[] @relation("AutomationVersionCreatedBy")
-  createdAutomationTemplates AutomationTemplate[]    @relation("AutomationTemplateCreatedBy")
+  createdFields              CustomField[]            @relation("CustomFieldCreatedBy")
+  updatedFieldValues         TaskCustomFieldValue[]   @relation("CustomFieldValueUpdatedBy")
+  ownedViews                 ProjectView[]            @relation("ProjectViewOwner")
+  createdViews               ProjectView[]            @relation("ProjectViewCreatedBy")
+  createdAutomations         AutomationRule[]         @relation("AutomationCreatedBy")
+  createdAutomationVersions  AutomationRuleVersion[]  @relation("AutomationVersionCreatedBy")
+  createdAutomationTemplates AutomationTemplate[]     @relation("AutomationTemplateCreatedBy")
+  portfolioMessages          PortfolioMessage[]       @relation("PortfolioMessageAuthor")
+  portfolioStatusUpdates     PortfolioStatusUpdate[]  @relation("PortfolioStatusAuthor")
+  teamMessages               TeamMessage[]            @relation("TeamMessageAuthor")
+  projectNotesEdited         ProjectNote[]            @relation("ProjectNoteEditor")
+  goalUpdates                GoalUpdate[]             @relation("GoalUpdateAuthor")
+  notificationPreferences    NotificationPreference[]
+  projectResourcesAdded      ProjectResource[]        @relation("ProjectResourceCreator")
+  teamMessageReplies         TeamMessageReply[]       @relation("TeamMessageReplyAuthor")
+  portfolioCapacities        PortfolioCapacity[]      @relation("PortfolioCapacityUser")
+  homeLayouts                HomeLayout[]
+  reportDashboards           ReportDashboard[]        @relation("ReportDashboardOwner")
+  savedSearches              SavedSearch[]
+  calendarFeeds              CalendarFeed[]
+  tagsCreated                Tag[]                    @relation("TagCreatedBy")
+  projectTemplates           ProjectTemplate[]        @relation("ProjectTemplateCreator")
+  portfolioMessageReplies    PortfolioMessageReply[]  @relation("PortfolioMessageReplyAuthor")
+  timeEntries                TimeEntry[]              @relation("TimeEntryUser")
 
   @@index([isActive])
   @@map("users")
@@ -293,12 +339,103 @@ model ApiKey {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdBy User?     @relation("ApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy        User?             @relation("ApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  webhookEndpoints WebhookEndpoint[]
 
   @@index([workspaceId, revokedAt])
   @@map("api_keys")
+}
+
+/// An app a developer registered so other tools can act for CoreTask users
+/// (OAuth 2.0, authorization-code flow). Owned by the person who registered it.
+model OAuthApp {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  ownerId          String   @db.Uuid
+  name             String   @db.VarChar(80)
+  description      String?  @db.VarChar(500)
+  websiteUrl       String?  @db.VarChar(2048)
+  /// Matched exactly at authorization: the only places a code can be sent.
+  redirectUris     String[]
+  /// `ctc_…`, public.
+  clientId         String   @unique @db.VarChar(64)
+  /// SHA-256 hex of the `cts_…` secret.
+  clientSecretHash String   @db.VarChar(64)
+  /// `cts_` plus the first characters — for the list, never for lookup.
+  secretHint       String   @db.VarChar(16)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  owner  User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  codes  OAuthAuthorizationCode[]
+  grants OAuthGrant[]
+
+  @@index([ownerId])
+  @@map("oauth_apps")
+}
+
+/// A code handed to an app's redirect URI, good once, for a few minutes.
+model OAuthAuthorizationCode {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  appId         String    @db.Uuid
+  userId        String    @db.Uuid
+  /// SHA-256 hex of the code.
+  codeHash      String    @unique @db.VarChar(64)
+  redirectUri   String    @db.VarChar(2048)
+  scopes        String[]
+  /// PKCE (S256), when the app sent a challenge.
+  codeChallenge String?   @db.VarChar(128)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  /// The grant the code was exchanged for, so a replayed code can revoke it.
+  grantId       String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  app  OAuthApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("oauth_authorization_codes")
+}
+
+/// One person's authorization of one app. Holds the refresh token; revoking it
+/// ends every access token issued under it and the webhooks it subscribed.
+model OAuthGrant {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  appId            String    @db.Uuid
+  userId           String    @db.Uuid
+  scopes           String[]
+  /// SHA-256 hex of the `ctr_…` refresh token.
+  refreshTokenHash String    @unique @db.VarChar(64)
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  app              OAuthApp           @relation(fields: [appId], references: [id], onDelete: Cascade)
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokens     OAuthAccessToken[]
+  webhookEndpoints WebhookEndpoint[]
+
+  @@index([userId, revokedAt])
+  @@index([appId, revokedAt])
+  @@map("oauth_grants")
+}
+
+/// A `cto_…` access token: an hour, then the app refreshes.
+model OAuthAccessToken {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  grantId   String   @db.Uuid
+  /// SHA-256 hex of the token.
+  tokenHash String   @unique @db.VarChar(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  grant OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId, expiresAt])
+  @@map("oauth_access_tokens")
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +462,10 @@ model WebhookEndpoint {
   events              String[]
   /// Null means every project in the workspace.
   projectId           String?                @db.Uuid
+  /// SLACK, TEAMS, GOOGLE_CHAT or DISCORD: a project's chat app (Customize ›
+  /// Apps), posted as that tool's message format. Null for a plain webhook.
+  /// An app is only ever its project's: with the project gone, it is silent.
+  app                 String?                @db.VarChar(16)
   enabled             Boolean                @default(true)
   /// Set when the endpoint switched itself off after too many failed deliveries.
   disabledReason      String?                @db.VarChar(200)
@@ -333,15 +474,28 @@ model WebhookEndpoint {
   lastDeliveryStatus  WebhookDeliveryStatus?
   lastSuccessAt       DateTime?
   createdById         String?                @db.Uuid
+  /// Subscribed through the API by this API key — gone with the key.
+  apiKeyId            String?                @db.Uuid
+  /// Subscribed through the API by an OAuth app — gone when it is disconnected.
+  oauthGrantId        String?                @db.Uuid
+  /// A Slack app posting through the installed CoreTask bot rather than an
+  /// incoming webhook: the channel, and its name as it was when chosen. Such
+  /// a post carries buttons, which a webhook's cannot.
+  slackChannelId      String?                @db.VarChar(32)
+  slackChannelName    String?                @db.VarChar(120)
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project    Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdBy  User?             @relation("WebhookEndpointCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  apiKey     ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  oauthGrant OAuthGrant?       @relation(fields: [oauthGrantId], references: [id], onDelete: Cascade)
   deliveries WebhookDelivery[]
 
   @@index([workspaceId, enabled])
+  @@index([apiKeyId])
+  @@index([oauthGrantId])
   @@map("webhook_endpoints")
 }
 
@@ -407,30 +561,42 @@ model Workspace {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  createdBy            User                  @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  members              WorkspaceMember[]
-  invitations          WorkspaceInvitation[]
-  apiKeys              ApiKey[]
-  webhookEndpoints     WebhookEndpoint[]
-  webhookDeliveries    WebhookDelivery[]
-  teams                Team[]
-  projects             Project[]
-  projectMembers       ProjectMember[]
-  sections             Section[]
-  tasks                Task[]
-  tickets              Ticket[]
-  comments             Comment[]
-  attachments          Attachment[]
-  followers            Follower[]
-  activityLogs         ActivityLog[]
-  notifications        Notification[]
-  statuses             StatusDefinition[]
-  priorities           PriorityDefinition[]
-  customFields         CustomField[]
-  projectViews         ProjectView[]
-  automationRules      AutomationRule[]
-  automationExecutions AutomationExecution[]
-  automationTemplates  AutomationTemplate[]
+  createdBy               User                     @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  members                 WorkspaceMember[]
+  invitations             WorkspaceInvitation[]
+  apiKeys                 ApiKey[]
+  webhookEndpoints        WebhookEndpoint[]
+  webhookDeliveries       WebhookDelivery[]
+  slackInstallation       SlackInstallation?
+  teams                   Team[]
+  projects                Project[]
+  projectMembers          ProjectMember[]
+  sections                Section[]
+  tasks                   Task[]
+  taskDependencies        TaskDependency[]
+  goals                   Goal[]
+  portfolios              Portfolio[]
+  tickets                 Ticket[]
+  comments                Comment[]
+  attachments             Attachment[]
+  followers               Follower[]
+  activityLogs            ActivityLog[]
+  notifications           Notification[]
+  statuses                StatusDefinition[]
+  priorities              PriorityDefinition[]
+  customFields            CustomField[]
+  projectViews            ProjectView[]
+  automationRules         AutomationRule[]
+  automationExecutions    AutomationExecution[]
+  automationTemplates     AutomationTemplate[]
+  bundles                 Bundle[]
+  homeLayouts             HomeLayout[]
+  reportDashboards        ReportDashboard[]
+  savedSearches           SavedSearch[]
+  calendarFeeds           CalendarFeed[]
+  notificationPreferences NotificationPreference[]
+  tags                    Tag[]
+  projectTemplates        ProjectTemplate[]
 
   @@index([createdById])
   @@index([archivedAt])
@@ -438,14 +604,16 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id          String        @id @default(uuid(7)) @db.Uuid
-  workspaceId String        @db.Uuid
-  userId      String        @db.Uuid
-  role        WorkspaceRole @default(MEMBER)
-  invitedById String?       @db.Uuid
-  joinedAt    DateTime      @default(now())
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(uuid(7)) @db.Uuid
+  workspaceId  String        @db.Uuid
+  userId       String        @db.Uuid
+  role         WorkspaceRole @default(MEMBER)
+  invitedById  String?       @db.Uuid
+  /// The person's My Tasks auto-sort rules here; contracts' `myTasksRulesOf` fills gaps.
+  myTasksRules Json          @default("{}")
+  joinedAt     DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -529,10 +697,25 @@ model Project {
   /// workspace at large, and a project outlives the team that started it.
   teamId String? @db.Uuid
 
-  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lead             User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
-  team             Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead             User?                 @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  team             Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
   members          ProjectMember[]
+  stars            ProjectStar[]
+  statusUpdates    ProjectStatusUpdate[]
+  portfolios       PortfolioProject[]
+  statusTemplates  StatusTemplate[]
+  bundles          BundleProject[]
+  bundlesMade      Bundle[]              @relation("BundleSource")
+  taskTemplates    TaskTemplate[]
+  forms            ProjectForm[]
+  emailInbox       ProjectEmailInbox?
+  note             ProjectNote?
+  calendarFeeds    CalendarFeed[]
+  resources        ProjectResource[]
+  inboundEmails    InboundEmail[]
+  messages         ProjectMessage[]
+  goals            GoalProject[]
   sections         Section[]
   tasks            Task[]
   tickets          Ticket[]
@@ -544,7 +727,8 @@ model Project {
   activityLogs     ActivityLog[]
   /// Templates saved from this project's rules. Informational — a template
   /// outlives the project, which is why the link nulls rather than cascades.
-  savedTemplates   AutomationTemplate[] @relation("TemplateSourceProject")
+  savedTemplates   AutomationTemplate[]  @relation("TemplateSourceProject")
+  taskLinks        TaskProject[]         @relation("TaskProjectLinks")
 
   @@unique([workspaceId, key])
   @@index([workspaceId, status])
@@ -553,6 +737,637 @@ model Project {
   @@index([leadId])
   @@index([workspaceId, teamId])
   @@map("projects")
+}
+
+/// A project someone has starred — Asana's sidebar favourites.
+///
+/// Per person, not per project: starring is a bookmark, so it changes nothing
+/// anyone else sees. `position` is fractional, so the sidebar list can be
+/// reordered by writing one row. Visibility is not stored here; a star on a
+/// project that later turns private is simply not listed for whoever lost
+/// access, and comes back if they regain it.
+model ProjectStar {
+  projectId String   @db.Uuid
+  userId    String   @db.Uuid
+  position  Float    @default(0)
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId, position])
+  @@map("project_stars")
+}
+
+/// An intake form — Asana's Forms: a public page anyone with the link can fill
+/// in, each submission becoming a task in the project.
+model ProjectForm {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workspaceId     String   @db.Uuid
+  projectId       String   @db.Uuid
+  name            String   @db.VarChar(120)
+  description     String?
+  /// The unguessable part of the public link.
+  token           String   @unique @db.VarChar(64)
+  /// Off, the link answers "this form is closed".
+  isActive        Boolean  @default(true)
+  /// Where submissions land; the project's first section when null.
+  sectionId       String?  @db.Uuid
+  /// `{ id, label, kind, required }[]`, asked after the title and details.
+  questions       Json     @default("[]")
+  createdById     String?  @db.Uuid
+  submissionCount Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("project_forms")
+}
+
+/// A task template — Asana's "Task types and templates": a ready-made task,
+/// with its subtasks, that the project's Add menu can create in one step.
+model TaskTemplate {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  workspaceId String        @db.Uuid
+  projectId   String        @db.Uuid
+  /// What the template is called in the menu.
+  name        String        @db.VarChar(120)
+  /// The title the created task gets.
+  title       String        @db.VarChar(500)
+  description String?
+  kind        TaskKind      @default(TASK)
+  priority    TaskPriority?
+  assigneeId  String?       @db.Uuid
+  /// Due this many days after it is created; null for no due date.
+  dueInDays   Int?
+  /// `{ title, assigneeId? }[]`, created as subtasks in this order.
+  subtasks    Json          @default("[]")
+  createdById String?       @db.Uuid
+  /// Set when a bundle wrote this template; the bundle replaces it on refresh.
+  bundleId    String?       @db.Uuid
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bundle  Bundle? @relation(fields: [bundleId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("task_templates")
+}
+
+/// A named set of projects watched together — Asana's portfolios.
+///
+/// Workspace-wide: everyone in the workspace sees it, and what each person
+/// sees inside it is filtered by project visibility. Stars are per person.
+model Portfolio {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workspaceId     String   @db.Uuid
+  name            String   @db.VarChar(120)
+  description     String?
+  color           String   @db.VarChar(7)
+  ownerId         String?  @db.Uuid
+  /// Workload: TASKS (open tasks) or HOURS (summed estimates).
+  workloadMeasure String   @default("TASKS") @db.VarChar(10)
+  /// Everyone's capacity unless set per person; null for none.
+  defaultCapacity Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace     Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner         User?                   @relation("PortfolioOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  projects      PortfolioProject[]
+  stars         PortfolioStar[]
+  messages      PortfolioMessage[]
+  capacities    PortfolioCapacity[]
+  statusUpdates PortfolioStatusUpdate[]
+
+  @@index([workspaceId])
+  @@map("portfolios")
+}
+
+model PortfolioProject {
+  portfolioId String   @db.Uuid
+  projectId   String   @db.Uuid
+  position    Float    @default(0)
+  addedAt     DateTime @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([portfolioId, projectId])
+  @@index([projectId])
+  @@map("portfolio_projects")
+}
+
+/// A message on a portfolio's Messages tab — a conversation across its projects.
+model PortfolioMessage {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  portfolioId String   @db.Uuid
+  authorId    String?  @db.Uuid
+  title       String   @db.VarChar(200)
+  /// Sanitised rich text, as a project message is stored.
+  body        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  portfolio Portfolio               @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  author    User?                   @relation("PortfolioMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  replies   PortfolioMessageReply[]
+
+  @@index([portfolioId, createdAt])
+  @@map("portfolio_messages")
+}
+
+/// A team's Messages tab: conversations for the team as a whole.
+model TeamMessage {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  teamId      String   @db.Uuid
+  authorId    String?  @db.Uuid
+  title       String   @db.VarChar(200)
+  /// Sanitised rich text, like a project message.
+  body        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team    Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author  User?              @relation("TeamMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  replies TeamMessageReply[]
+
+  @@index([teamId, createdAt])
+  @@map("team_messages")
+}
+
+model TeamMessageReply {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  messageId String   @db.Uuid
+  authorId  String?  @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  message TeamMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  author  User?       @relation("TeamMessageReplyAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([messageId, createdAt])
+  @@map("team_message_replies")
+}
+
+model PortfolioMessageReply {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  messageId String   @db.Uuid
+  authorId  String?  @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  message PortfolioMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  author  User?            @relation("PortfolioMessageReplyAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([messageId, createdAt])
+  @@map("portfolio_message_replies")
+}
+
+/// One person's capacity in a portfolio, where it differs from the default.
+model PortfolioCapacity {
+  portfolioId String @db.Uuid
+  userId      String @db.Uuid
+  capacity    Int
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  user      User      @relation("PortfolioCapacityUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([portfolioId, userId])
+  @@map("portfolio_capacities")
+}
+
+/// One person's Home in one workspace: the widgets it shows, in order, and
+/// their private notepad.
+model HomeLayout {
+  userId      String   @db.Uuid
+  workspaceId String   @db.Uuid
+  widgets     String[]
+  notepad     String   @default("")
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+  @@map("home_layouts")
+}
+
+/// A report dashboard — Asana's Reporting. Shared with the workspace; its
+/// charts are questions, answered for each reader when drawn.
+/// A tag — Asana's workspace-wide label. `nameKey` is the lowercase,
+/// single-spaced name, unique per workspace, so "Urgent" and "urgent" are one.
+model Tag {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String   @db.VarChar(60)
+  nameKey     String   @db.VarChar(60)
+  /// A colour token (contracts' colors.ts).
+  color       String   @default("gray") @db.VarChar(20)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("TagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tasks     TaskTag[]
+
+  @@unique([workspaceId, nameKey])
+  @@map("tags")
+}
+
+/// A tag on a task.
+model TaskTag {
+  taskId    String   @db.Uuid
+  tagId     String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+  @@index([tagId])
+  @@map("task_tags")
+}
+
+/// Which notifications someone also gets by email, per workspace — Asana's
+/// Settings › Notifications. No row means the defaults (assignments, mentions).
+model NotificationPreference {
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  /// NotificationEmailGroup values (contracts' notification-emails.ts).
+  emailGroups String[]
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@map("notification_preferences")
+}
+
+/// A search someone kept — Asana's saved searches. The filters are
+/// `TaskSearchFilters` (contracts' saved-searches.ts); "me" in them is
+/// whoever runs it, which is always the person who saved it.
+model SavedSearch {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  name        String   @db.VarChar(80)
+  filters     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId])
+  @@map("saved_searches")
+}
+
+model ReportDashboard {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String   @db.VarChar(120)
+  ownerId     String?  @db.Uuid
+  /// `ReportChart[]` — see contracts' reports.ts.
+  charts      Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User?     @relation("ReportDashboardOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("report_dashboards")
+}
+
+/// A project template — a blueprint any number of projects start from, their
+/// task dates counted from the day each starts.
+model ProjectTemplate {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workspaceId     String   @db.Uuid
+  name            String   @db.VarChar(120)
+  description     String?
+  color           String   @db.VarChar(7)
+  /// Which of tasks, subtasks, dates, fields, rules… it carries.
+  parts           String[]
+  /// The blueprint itself — see project-templates' blueprint.ts.
+  blueprint       Json
+  sourceProjectId String?  @db.Uuid
+  createdById     String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ProjectTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("project_templates")
+}
+
+model PortfolioStar {
+  portfolioId String   @db.Uuid
+  userId      String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([portfolioId, userId])
+  @@index([userId])
+  @@map("portfolio_stars")
+}
+
+/// What kind of task a task is. See `task-kinds.ts` in contracts.
+enum TaskKind {
+  TASK
+  MILESTONE
+  APPROVAL
+}
+
+/// An approval's answer. Approving or rejecting completes it; requesting
+/// changes sends it back open.
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+}
+
+/// Asana's project status colours. A person's judgement of how the work is
+/// going, never derived from it.
+enum ProjectStatusValue {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+  ON_HOLD
+  COMPLETE
+  DROPPED
+}
+
+/// A posted status update — "On track", with a summary and next steps.
+///
+/// Kept as a history rather than one current value: the project's status is
+/// its newest update, and the older ones are what the Messages tab and the
+/// Overview read back. Never edited after posting, as in Asana; a wrong one is
+/// deleted and posted again.
+model ProjectStatusUpdate {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
+  projectId   String             @db.Uuid
+  authorId    String?            @db.Uuid
+  status      ProjectStatusValue
+  title       String             @db.VarChar(200)
+  summary     String?
+  nextSteps   String?
+  createdAt   DateTime           @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@map("project_status_updates")
+}
+
+/// A package of a project's workflow — Customize › Bundles. Its sections and
+/// fields are added to every project it is applied to; its rules and task
+/// templates are written into each, tagged, and replaced when it changes.
+model Bundle {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workspaceId     String   @db.Uuid
+  name            String   @db.VarChar(120)
+  description     String?
+  /// The project it was made from, and is refreshed from.
+  sourceProjectId String?  @db.Uuid
+  /// Section names, in board order.
+  sections        Json     @default("[]")
+  /// Workspace library fields, attached where the project lacks them.
+  customFieldIds  String[] @db.Uuid
+  /// Rule snapshots — the shape the rule library keeps.
+  rules           Json     @default("[]")
+  /// Task template snapshots, without ids.
+  taskTemplates   Json     @default("[]")
+  /// Which of sections, fields, rules and task templates it carries.
+  parts           String[] @default(["SECTIONS", "FIELDS", "RULES", "TASK_TEMPLATES"])
+  /// Bumped on every refresh, so a project can tell it is behind.
+  version         Int      @default(1)
+  createdById     String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceProject Project?         @relation("BundleSource", fields: [sourceProjectId], references: [id], onDelete: SetNull)
+  projects      BundleProject[]
+  rulesWritten  AutomationRule[]
+  templates     TaskTemplate[]
+
+  @@index([workspaceId])
+  @@map("bundles")
+}
+
+/// A project a bundle is applied to, and the version it last took.
+model BundleProject {
+  bundleId       String   @db.Uuid
+  projectId      String   @db.Uuid
+  appliedVersion Int
+  appliedAt      DateTime @default(now())
+
+  bundle  Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([bundleId, projectId])
+  @@index([projectId])
+  @@map("bundle_projects")
+}
+
+/// A status update's starting point — Customize › Status templates.
+model StatusTemplate {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  workspaceId String              @db.Uuid
+  projectId   String              @db.Uuid
+  name        String              @db.VarChar(120)
+  /// The status the composer starts on; null keeps the one picked.
+  status      ProjectStatusValue?
+  summary     String?
+  nextSteps   String?
+  createdById String?             @db.Uuid
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("status_templates")
+}
+
+/// A message posted to a project — Asana's Messages tab — with its replies.
+model ProjectMessage {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  authorId    String?  @db.Uuid
+  title       String   @db.VarChar(200)
+  /// Sanitised rich text, as a task description is stored.
+  body        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User?                 @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  replies ProjectMessageReply[]
+
+  @@index([projectId, createdAt])
+  @@map("project_messages")
+}
+
+model ProjectMessageReply {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  messageId String   @db.Uuid
+  authorId  String?  @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  message ProjectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  author  User?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([messageId, createdAt])
+  @@map("project_message_replies")
+}
+
+/// My Tasks' sections, per person: Asana's Recently assigned / Do today /
+/// Do next week / Do later.
+enum MyTasksBucket {
+  RECENTLY_ASSIGNED
+  TODAY
+  NEXT_WEEK
+  LATER
+}
+
+/// Where a task sits in one person's My Tasks.
+///
+/// Personal and separate from the task, so moving something to "Do today"
+/// changes nothing anyone else sees. No row means "Recently assigned" — new
+/// work needs no write to appear there. Keyed by person and task, so a task
+/// sits in exactly one of someone's sections.
+model MyTaskPlacement {
+  userId    String        @db.Uuid
+  taskId    String        @db.Uuid
+  bucket    MyTasksBucket
+  updatedAt DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([userId, taskId])
+  @@index([taskId])
+  @@map("my_task_placements")
+}
+
+enum GoalStatus {
+  NO_STATUS
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+  ACHIEVED
+  PARTIAL
+  MISSED
+  DROPPED
+}
+
+enum GoalProgressSource {
+  MANUAL
+  SUB_GOALS
+  PROJECTS
+  METRIC
+}
+
+/// Asana's goals: what the work is for.
+///
+/// A tree through `parentId` — company goals over team goals over the rest —
+/// with no depth limit, and the service refuses a parent that would make a
+/// goal its own ancestor. Progress is stored only for a MANUAL goal; one that
+/// rolls up its sub-goals or connected projects is worked out on read, so it
+/// can never go stale. Deleting a goal is a soft archive, and its sub-goals
+/// move up to its parent rather than disappearing with it.
+model Goal {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  workspaceId    String             @db.Uuid
+  parentId       String?            @db.Uuid
+  name           String             @db.VarChar(200)
+  description    String?
+  status         GoalStatus         @default(NO_STATUS)
+  progressSource GoalProgressSource @default(MANUAL)
+  /// 0–100; read only when `progressSource` is MANUAL.
+  progress       Int                @default(0)
+  /// For METRIC: the number it starts at, has reached, and aims for.
+  metricStart    Float?
+  metricCurrent  Float?
+  metricTarget   Float?
+  metricUnit     String?            @db.VarChar(16)
+  ownerId        String?            @db.Uuid
+  teamId         String?            @db.Uuid
+  timePeriod     String?            @db.VarChar(32)
+  dueDate        DateTime?
+  position       Float              @default(0)
+  createdById    String             @db.Uuid
+  archivedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    Goal?         @relation("GoalTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Goal[]        @relation("GoalTree")
+  owner     User?         @relation("GoalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User          @relation("GoalCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  team      Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  projects  GoalProject[]
+  updates   GoalUpdate[]
+
+  @@index([workspaceId, archivedAt])
+  @@index([parentId])
+  @@map("goals")
+}
+
+/// A project connected to a goal — its completion can feed the goal's progress.
+/// A goal's status update — Asana's goal check-in: a status, a note, and the
+/// progress at the time. The newest sets the goal's status.
+model GoalUpdate {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  workspaceId String     @db.Uuid
+  goalId      String     @db.Uuid
+  authorId    String?    @db.Uuid
+  status      GoalStatus
+  /// The goal's progress when the update was posted, 0–100.
+  progress    Int
+  /// Sanitised rich text; may be empty.
+  body        String     @default("")
+  createdAt   DateTime   @default(now())
+
+  goal   Goal  @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  author User? @relation("GoalUpdateAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([goalId, createdAt])
+  @@map("goal_updates")
+}
+
+model GoalProject {
+  goalId    String   @db.Uuid
+  projectId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  goal    Goal    @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([goalId, projectId])
+  @@index([projectId])
+  @@map("goal_projects")
 }
 
 /// Membership of a project — the list a private project is private to, and
@@ -610,7 +1425,9 @@ model Team {
   lead        User?                 @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
   members     TeamMember[]
   projects    Project[]
+  goals       Goal[]
   invitations WorkspaceInvitation[]
+  messages    TeamMessage[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
@@ -655,6 +1472,7 @@ model Section {
   tasks         Task[]
   tickets       Ticket[]
   defaultStatus StatusDefinition? @relation(fields: [defaultStatusId], references: [id], onDelete: SetNull)
+  taskLinks     TaskProject[]     @relation("TaskProjectLinkSection")
 
   @@index([projectId, position])
   @@index([workspaceId])
@@ -662,24 +1480,24 @@ model Section {
 }
 
 model Task {
-  id                   String       @id @default(uuid(7)) @db.Uuid
-  workspaceId          String       @db.Uuid
-  projectId            String?      @db.Uuid
-  sectionId            String?      @db.Uuid
-  parentTaskId         String?      @db.Uuid
-  title                String       @db.VarChar(500)
+  id                   String          @id @default(uuid(7)) @db.Uuid
+  workspaceId          String          @db.Uuid
+  projectId            String?         @db.Uuid
+  sectionId            String?         @db.Uuid
+  parentTaskId         String?         @db.Uuid
+  title                String          @db.VarChar(500)
   description          String?
   /// Legacy enum. Still authoritative until the definition backfill is
   /// verified in production; the FKs below shadow it in the meantime. See
   /// docs/database/project-view-migration.md for the cut-over.
-  status               TaskStatus   @default(TODO)
-  priority             TaskPriority @default(NONE)
+  status               TaskStatus      @default(TODO)
+  priority             TaskPriority    @default(NONE)
   /// Set by the backfill, and by every write once definitions are live.
-  statusDefinitionId   String?      @db.Uuid
-  priorityDefinitionId String?      @db.Uuid
-  position             Float        @default(0)
-  assigneeId           String?      @db.Uuid
-  createdById          String       @db.Uuid
+  statusDefinitionId   String?         @db.Uuid
+  priorityDefinitionId String?         @db.Uuid
+  position             Float           @default(0)
+  assigneeId           String?         @db.Uuid
+  createdById          String          @db.Uuid
   /// The calendar date, stored at UTC midnight. Every date-only reader
   /// (filters, automations, the calendar) keeps using this column.
   startDate            DateTime?
@@ -690,23 +1508,50 @@ model Task {
   dueAt                DateTime?
   completedAt          DateTime?
   estimatedMinutes     Int?
+  /// A plain task, a milestone, or an approval — Asana's task types.
+  kind                 TaskKind        @default(TASK)
+  /// The decision on an approval. Null for every other kind.
+  approvalStatus       ApprovalStatus?
+  /// "Set to repeat": see `TaskRecurrence` in contracts. Null for a one-off.
+  recurrence           Json?
+  /// The task this one's completion created, once it has. Unique and set in
+  /// the same transaction as the creation, so completing a repeating task
+  /// twice — or two writers completing it at once — makes one successor.
+  nextOccurrenceId     String?         @unique @db.Uuid
   archivedAt           DateTime?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  /// Set by "Mark as duplicate": the task this one repeats. It is completed,
+  /// and its collaborators join the original.
+  duplicateOfId        String?         @db.Uuid
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
-  workspace          Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project            Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  section            Section?               @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  parentTask         Task?                  @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks           Task[]                 @relation("TaskSubtasks")
-  assignee           User?                  @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdBy          User                   @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  workspace          Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section            Section?                @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  parentTask         Task?                   @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks           Task[]                  @relation("TaskSubtasks")
+  assignee           User?                   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy          User                    @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   comments           Comment[]
   attachments        Attachment[]
   followers          Follower[]
-  statusDefinition   StatusDefinition?      @relation(fields: [statusDefinitionId], references: [id], onDelete: SetNull)
-  priorityDefinition PriorityDefinition?    @relation(fields: [priorityDefinitionId], references: [id], onDelete: SetNull)
+  likes              TaskLike[]
+  myTaskPlacements   MyTaskPlacement[]
+  /// Rows where this task waits on another.
+  blockedBy          TaskDependency[]        @relation("DependencyBlocked")
+  clockFirings       AutomationClockFiring[]
+  /// Rows where another task waits on this one.
+  blocking           TaskDependency[]        @relation("DependencyBlocking")
+  statusDefinition   StatusDefinition?       @relation(fields: [statusDefinitionId], references: [id], onDelete: SetNull)
+  priorityDefinition PriorityDefinition?     @relation(fields: [priorityDefinitionId], references: [id], onDelete: SetNull)
   customFieldValues  TaskCustomFieldValue[]
+  projectLinks       TaskProject[]
+  timeEntries        TimeEntry[]
+  emailRecipients    TaskEmailRecipient[]
+  tags               TaskTag[]
+  duplicateOf        Task?                   @relation("TaskDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates         Task[]                  @relation("TaskDuplicates")
+  inboundEmails      InboundEmail[]
 
   @@index([statusDefinitionId])
   @@index([priorityDefinitionId])
@@ -716,6 +1561,46 @@ model Task {
   @@index([workspaceId, dueDate])
   @@index([parentTaskId])
   @@map("tasks")
+}
+
+/// One person's like on one task — Asana's thumbs-up in the pane. The pair is
+/// the key, so liking twice is the same row and needs no read-before-write.
+model TaskLike {
+  taskId    String   @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+  @@index([userId])
+  @@map("task_likes")
+}
+
+/// "`blockedTask` is waiting on `blockingTask`" — Asana's dependencies.
+///
+/// Directed, one row per edge, unique per pair. The service refuses an edge
+/// that would close a loop, since tasks that each wait on the next can never
+/// start. Both ends live in the same workspace; deleting either task takes the
+/// edge with it.
+model TaskDependency {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  workspaceId    String   @db.Uuid
+  blockedTaskId  String   @db.Uuid
+  blockingTaskId String   @db.Uuid
+  createdById    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  blockedTask  Task      @relation("DependencyBlocked", fields: [blockedTaskId], references: [id], onDelete: Cascade)
+  blockingTask Task      @relation("DependencyBlocking", fields: [blockingTaskId], references: [id], onDelete: Cascade)
+  createdBy    User?     @relation("DependencyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([blockedTaskId, blockingTaskId])
+  @@index([blockingTaskId])
+  @@index([workspaceId])
+  @@map("task_dependencies")
 }
 
 model Ticket {
@@ -946,23 +1831,28 @@ model ActivityLog {
 }
 
 model Notification {
-  id          String           @id @default(uuid(7)) @db.Uuid
-  userId      String           @db.Uuid
+  id           String           @id @default(uuid(7)) @db.Uuid
+  userId       String           @db.Uuid
   /// Null for account-level notifications that are not workspace-scoped.
-  workspaceId String?          @db.Uuid
-  type        NotificationType
-  title       String           @db.VarChar(200)
-  body        String?          @db.VarChar(1000)
-  entity      ActivityEntity?
-  entityId    String?          @db.Uuid
-  actionUrl   String?          @db.VarChar(500)
-  readAt      DateTime?
-  createdAt   DateTime         @default(now())
+  workspaceId  String?          @db.Uuid
+  type         NotificationType
+  title        String           @db.VarChar(200)
+  body         String?          @db.VarChar(1000)
+  entity       ActivityEntity?
+  entityId     String?          @db.Uuid
+  actionUrl    String?          @db.VarChar(500)
+  readAt       DateTime?
+  /// Asana's Archive: out of the inbox, kept for later. Archiving also reads it.
+  archivedAt   DateTime?
+  /// Asana's Bookmarks: kept at hand whether or not it is archived.
+  bookmarkedAt DateTime?
+  createdAt    DateTime         @default(now())
 
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([userId, archivedAt])
   @@index([userId, createdAt(sort: Desc)])
   @@index([workspaceId])
   @@map("notifications")
@@ -1163,6 +2053,48 @@ model CustomFieldOption {
 ///
 /// `optionIds` and `userIds` are arrays so single- and multi-select share one
 /// shape; a single-select simply holds at most one.
+/// A project a task is in besides its home — Asana's multi-homing. The home
+/// stays on `Task.projectId`; each extra project keeps its own section and
+/// position, so a task can sit in "Review" on one board and "Q4" on another.
+model TaskProject {
+  taskId    String   @db.Uuid
+  projectId String   @db.Uuid
+  sectionId String?  @db.Uuid
+  position  Float    @default(0)
+  addedById String?  @db.Uuid
+  addedAt   DateTime @default(now())
+
+  task    Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project Project  @relation("TaskProjectLinks", fields: [projectId], references: [id], onDelete: Cascade)
+  section Section? @relation("TaskProjectLinkSection", fields: [sectionId], references: [id], onDelete: SetNull)
+
+  @@id([taskId, projectId])
+  @@index([projectId, sectionId, position])
+  @@map("task_projects")
+}
+
+/// Time spent on a task — Asana's actual time. A task's actual time is the
+/// sum of its entries.
+model TimeEntry {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  taskId      String   @db.Uuid
+  userId      String?  @db.Uuid
+  minutes     Int
+  /// The day the time was spent.
+  date        DateTime @db.Date
+  note        String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User? @relation("TimeEntryUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, date])
+  @@index([userId, date])
+  @@map("time_entries")
+}
+
 model TaskCustomFieldValue {
   taskId        String    @db.Uuid
   customFieldId String    @db.Uuid
@@ -1305,7 +2237,12 @@ model AutomationRule {
   /// true so every existing rule keeps behaving exactly as it did.
   allowChaining      Boolean                @default(true)
   createdById        String?                @db.Uuid
+  /// Set when a bundle wrote this rule; the bundle replaces it on refresh.
+  bundleId           String?                @db.Uuid
   publishedAt        DateTime?
+  /// For a SCHEDULED_TIME rule, the scheduled moment last run. The clock runs
+  /// any later occurrence that has arrived, once, and moves this forward.
+  scheduleCursor     DateTime?
   lastRunAt          DateTime?
   lastRunStatus      String?                @db.VarChar(30)
   runCount           Int                    @default(0)
@@ -1318,14 +2255,18 @@ model AutomationRule {
   createdBy         User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   nodes             AutomationNode[]
   executions        AutomationExecution[]
+  delayedRuns       AutomationDelayedRun[]
   webhookDeliveries WebhookDelivery[]
   versions          AutomationRuleVersion[] @relation("RuleVersions")
   draftVersion      AutomationRuleVersion?  @relation("RuleDraft", fields: [draftVersionId], references: [id], onDelete: SetNull)
   publishedVersion  AutomationRuleVersion?  @relation("RulePublished", fields: [publishedVersionId], references: [id], onDelete: SetNull)
   savedAsTemplates  AutomationTemplate[]    @relation("TemplateSourceRule")
+  clockFirings      AutomationClockFiring[]
+  bundle            Bundle?                 @relation(fields: [bundleId], references: [id], onDelete: SetNull)
 
   /// The matcher's query: active rules for a project on a given trigger.
   @@index([projectId, status, triggerType])
+  @@index([bundleId])
   @@index([workspaceId, status])
   @@map("automation_rules")
 }
@@ -1536,6 +2477,27 @@ model AutomationTemplate {
   @@map("automation_templates")
 }
 
+/// A date trigger that has fired for one task.
+///
+/// "Due in two days" holds for two days, and the clock looks every minute; this
+/// is what makes it announce each crossing once. Keyed on the moment the window
+/// opened, so a task whose date moves can fire again for its new date.
+model AutomationClockFiring {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  ruleId    String   @db.Uuid
+  taskId    String   @db.Uuid
+  /// When the trigger's condition began to hold for this task.
+  firedFor  DateTime
+  createdAt DateTime @default(now())
+
+  rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  task Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, taskId, firedFor])
+  @@index([taskId])
+  @@map("automation_clock_firings")
+}
+
 /// One run of one rule.
 model AutomationExecution {
   id            String                    @id @default(uuid(7)) @db.Uuid
@@ -1593,4 +2555,231 @@ model AutomationExecutionLog {
 
   @@index([executionId, createdAt])
   @@map("automation_execution_logs")
+}
+
+/// A project's key resource — Asana's Overview "Key resources": a link the
+/// whole project should have to hand (the brief, a drive folder, the spec).
+model ProjectResource {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  title       String   @db.VarChar(120)
+  url         String   @db.VarChar(2048)
+  position    Float    @default(0)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("ProjectResourceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, position])
+  @@map("project_resources")
+}
+
+/// A project's Note tab — Asana's project page: one rich-text document the
+/// whole project reads and its editors write, saved as they type.
+model ProjectNote {
+  projectId   String   @id @db.Uuid
+  workspaceId String   @db.Uuid
+  /// Sanitised rich text.
+  body        String   @default("")
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  updatedBy User?   @relation("ProjectNoteEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("project_notes")
+}
+
+/// A project's email address — Asana's "Add tasks via email". Mail sent to
+/// `<token>@<INBOUND_EMAIL_DOMAIN>` becomes a task here, and mail sent to
+/// `<token>+<task>@…` (the reply address of an update) a comment on that task.
+model ProjectEmailInbox {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  workspaceId      String   @db.Uuid
+  projectId        String   @unique @db.Uuid
+  /// Lowercase hex: mail systems may fold the case of an address.
+  token            String   @unique @db.VarChar(32)
+  /// Off, mail to the address is dropped.
+  isActive         Boolean  @default(true)
+  /// Where new tasks land; the project's first section when null.
+  sectionId        String?  @db.Uuid
+  /// MEMBERS: only workspace members' mail is taken. ANYONE: anyone's, credited
+  /// to whoever set the address up when the sender has no account.
+  acceptFrom       String   @default("MEMBERS") @db.VarChar(16)
+  /// Members on To and CC become the task's collaborators.
+  addCollaborators Boolean  @default(true)
+  /// Addresses on From, To and CC that are not members hear about comments.
+  sendUpdates      Boolean  @default(true)
+  receivedCount    Int      @default(0)
+  createdById      String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_email_inboxes")
+}
+
+/// One message that reached a project's address, and what became of it. The
+/// Message-ID makes a provider's retry a no-op instead of a second task.
+model InboundEmail {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  messageId   String?  @db.VarChar(998)
+  fromAddress String   @db.VarChar(320)
+  subject     String   @db.VarChar(500)
+  /// TASK_CREATED, COMMENTED or REJECTED.
+  outcome     String   @db.VarChar(16)
+  reason      String?  @db.VarChar(300)
+  taskId      String?  @db.Uuid
+  receivedAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, messageId])
+  @@index([projectId, receivedAt])
+  @@map("inbound_emails")
+}
+
+/// Someone outside the workspace who was on a task's email thread, and so is
+/// sent its comments — replying to one adds theirs.
+model TaskEmailRecipient {
+  taskId    String   @db.Uuid
+  address   String   @db.VarChar(320)
+  /// The project whose address the thread came through: its reply address.
+  projectId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, address])
+  @@map("task_email_recipients")
+}
+
+/// A private calendar link — Asana's "Sync to calendar". Calendar apps fetch
+/// `/calendar/<token>.ics` with no account, so the token is the credential: it
+/// only reads, as its owner may see things now, and a reset replaces it.
+model CalendarFeed {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  workspaceId   String    @db.Uuid
+  userId        String    @db.Uuid
+  /// Null: the owner's My Tasks. Otherwise that project's tasks.
+  projectId     String?   @db.Uuid
+  token         String    @unique @db.VarChar(64)
+  lastFetchedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, workspaceId])
+  @@map("calendar_feeds")
+}
+
+/// A status update on a portfolio as a whole — beside the per-project ones its
+/// Progress tab rolls up. The newest is the portfolio's status.
+model PortfolioStatusUpdate {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
+  portfolioId String             @db.Uuid
+  authorId    String?            @db.Uuid
+  status      ProjectStatusValue
+  title       String             @db.VarChar(200)
+  summary     String?
+  nextSteps   String?
+  createdAt   DateTime           @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  author    User?     @relation("PortfolioStatusAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([portfolioId, createdAt])
+  @@map("portfolio_status_updates")
+}
+
+/// A rule run waiting at a Wait step. The clock publishes `event` again, aimed
+/// at the rule and marked to resume from `nodeId`, once `runAt` has passed.
+model AutomationDelayedRun {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectId   String   @db.Uuid
+  ruleId      String   @db.Uuid
+  /// The Wait step the run resumes after.
+  nodeId      String   @db.Uuid
+  runAt       DateTime
+  /// The event the run started from, to be published again.
+  event       Json
+  /// PENDING until the clock takes it; DONE once republished; CANCELLED when
+  /// the rule had stopped by then.
+  status      String   @default("PENDING") @db.VarChar(16)
+  createdAt   DateTime @default(now())
+
+  rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@map("automation_delayed_runs")
+}
+
+/// A link to set a new password: an hour, once. Only the hash is kept, and
+/// asking for a new link replaces any unused one.
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
+}
+
+/// The CoreTask Slack app installed in a Slack workspace, for one CoreTask
+/// workspace: one each way, so a slash command always knows where it is.
+model SlackInstallation {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  workspaceId   String   @unique @db.Uuid
+  /// Slack's team id (`T…`).
+  teamId        String   @unique @db.VarChar(32)
+  teamName      String   @db.VarChar(200)
+  /// The app's bot user there (`U…`), so its own posts can be told apart.
+  botUserId     String   @db.VarChar(32)
+  /// `xoxb-…`, encrypted like a webhook signing secret.
+  botToken      String
+  scopes        String[]
+  installedById String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installedBy User?           @relation(fields: [installedById], references: [id], onDelete: SetNull)
+  links       SlackUserLink[]
+
+  @@map("slack_installations")
+}
+
+/// A Slack user who has said which CoreTask person they are. What they do
+/// from Slack is done as that person, with that person's access.
+model SlackUserLink {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  installationId String   @db.Uuid
+  slackUserId    String   @db.VarChar(32)
+  userId         String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  installation SlackInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([installationId, slackUserId])
+  @@unique([installationId, userId])
+  @@index([userId])
+  @@map("slack_user_links")
 }

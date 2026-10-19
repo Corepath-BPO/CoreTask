@@ -103,10 +103,7 @@ export function TeamFormDialog({
     };
 
     if (isEdit) {
-      updateTeam.mutate(
-        { teamId: team.id, payload },
-        { onSuccess: () => onOpenChange(false) },
-      );
+      updateTeam.mutate({ teamId: team.id, payload }, { onSuccess: () => onOpenChange(false) });
     } else {
       createTeam.mutate(
         { ...payload, description: values.description || undefined },

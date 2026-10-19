@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 import { CustomFieldDto } from '../../custom-fields/dto/custom-field-response.dto';
+import { TagRefDto } from '../../tasks/dto/task-response.dto';
 
 class MetadataStatusDto {
   @ApiProperty({ format: 'uuid' })
@@ -68,4 +69,7 @@ export class ProjectFieldMetadataDto {
 
   @ApiProperty({ type: [MetadataMemberDto] })
   members!: MetadataMemberDto[];
+
+  @ApiProperty({ type: [TagRefDto], description: "The workspace's tags, for the Tags filter." })
+  tags!: TagRefDto[];
 }

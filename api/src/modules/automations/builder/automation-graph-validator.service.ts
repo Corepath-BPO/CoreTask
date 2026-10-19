@@ -11,6 +11,33 @@ import {
   subtaskEntries,
   subtaskProblems,
   subtaskTitles,
+  APPROACHING_DAYS,
+  AutomationTrigger,
+  ExecutionScope,
+  isApproachingTrigger,
+  isCustomDateTrigger,
+  isDateTrigger,
+  isTimeZone,
+  MANUAL_RULE_LABEL_MAX,
+  readSchedule,
+  scheduleProblems,
+  unknownVariables,
+  TASK_KINDS,
+  emailRecipientsOf,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  actionFitsTrigger,
+  isTicketTrigger,
+  ticketConditionProblem,
+  TICKET_ONLY_ACTIONS,
+  isTicketConditionField,
+  delayProblem,
+  AI_CHECK_FIELD,
+  AI_FIELD_TYPES,
+  AI_UNAVAILABLE_REASON,
+  aiActionProblem,
+  aiPermissionFieldId,
+  aiPermissionsOf,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -76,6 +103,15 @@ type StructuralNode = Parameters<typeof validateGraphStructure>[0][number];
  * project. A browser cannot check any of it, and a rule that passes the form
  * and points at a deleted section is a rule that silently never fires.
  */
+/** Steps whose status and priority are a ticket's own values, not project definitions. */
+function ticketOwned(node: { subtype: string; configuration: Record<string, unknown> }): boolean {
+  return (
+    TICKET_ONLY_ACTIONS.includes(node.subtype) ||
+    isTicketConditionField(node.configuration['field']) ||
+    isTicketTrigger(node.subtype)
+  );
+}
+
 @Injectable()
 export class AutomationGraphValidatorService {
   constructor(
@@ -96,6 +132,8 @@ export class AutomationGraphValidatorService {
     const issues: AutomationGraphIssue[] = [
       ...validateGraphStructure(graph, name),
       ...this.checkSubtypes(graph),
+      ...this.checkSubjects(graph),
+      ...this.checkSettings(graph),
       ...(await this.checkReferences(projectId, workspaceId, graph)),
       ...this.checkLoopRisk(graph),
     ];
@@ -104,6 +142,73 @@ export class AutomationGraphValidatorService {
       publishable: !issues.some((issue) => issue.level === GraphIssueLevel.ERROR),
       issues,
     };
+  }
+
+  /**
+   * A ticket rule works on the ticket, and a task rule on the task.
+   *
+   * A ticket has no subtasks, fields or project status, so a ticket rule may
+   * use only the actions in `TICKET_RULE_ACTIONS` and check the ticket with
+   * "Ticket is…"; the ticket's own actions and condition mean nothing to a
+   * task rule. Each step's settings are checked here too.
+   */
+  private checkSubjects(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
+    const trigger = nodes.find((node) => node.type === AutomationNodeType.TRIGGER);
+    if (!trigger) return [];
+    const ticketRule = isTicketTrigger(trigger.subtype);
+    const issues: AutomationGraphIssue[] = [];
+    const error = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.ERROR, nodeId, path, message });
+
+    const wanted = trigger.configuration['status'];
+    if (
+      trigger.subtype === AutomationTrigger.TICKET_STATUS_CHANGED &&
+      wanted !== undefined &&
+      wanted !== null &&
+      wanted !== '' &&
+      !(TICKET_STATUSES as readonly unknown[]).includes(wanted)
+    ) {
+      error(trigger.id, 'status', 'Choose a ticket status, or leave it blank for any change.');
+    }
+
+    for (const node of nodes) {
+      const config = node.configuration;
+      if (node.type === AutomationNodeType.ACTION) {
+        if (!actionFitsTrigger(node.subtype, trigger.subtype)) {
+          error(
+            node.id,
+            'subtype',
+            ticketRule
+              ? 'A ticket rule cannot do this — it works on tasks.'
+              : 'This changes a ticket. Choose a ticket trigger to use it.',
+          );
+        }
+        if (node.subtype === AutomationAction.SET_TICKET_STATUS) {
+          if (!(TICKET_STATUSES as readonly unknown[]).includes(config['status'])) {
+            error(node.id, 'status', 'Choose the status to set.');
+          }
+        }
+        if (node.subtype === AutomationAction.SET_TICKET_PRIORITY) {
+          if (!(TICKET_PRIORITIES as readonly unknown[]).includes(config['priority'])) {
+            error(node.id, 'priority', 'Choose the priority to set.');
+          }
+        }
+      }
+
+      const checks =
+        node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH;
+      if (!checks || isFallbackBranch(config)) continue;
+      const aboutTicket = isTicketConditionField(config['field']);
+      if (ticketRule && !aboutTicket) {
+        error(node.id, 'field', 'A ticket rule checks the ticket’s own fields.');
+      } else if (!ticketRule && aboutTicket) {
+        error(node.id, 'field', 'This checks a ticket, and this rule is about tasks.');
+      } else if (aboutTicket) {
+        const problem = ticketConditionProblem(config);
+        if (problem) error(node.id, 'field', problem);
+      }
+    }
+    return issues;
   }
 
   /** A trigger or action this engine has no code for cannot run, whatever it says. */
@@ -174,13 +279,216 @@ export class AutomationGraphValidatorService {
        * BRANCH used to be refused for the same reason and no longer is — the
        * runner walks the tree and takes one arm. See the branching document.
        */
+      // A Wait step waits a whole number of minutes, hours or days.
       if (node.type === AutomationNodeType.DELAY) {
-        issues.push({
-          level: GraphIssueLevel.ERROR,
-          nodeId: node.id,
-          path: null,
-          message: 'This step type cannot run yet.',
-        });
+        const problem = delayProblem(node.configuration);
+        if (problem) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'amount',
+            message: problem,
+          });
+        }
+        if (!nodes.some((other) => other.parentId === node.id)) {
+          issues.push({
+            level: GraphIssueLevel.WARNING,
+            nodeId: node.id,
+            path: null,
+            message: 'Nothing follows this wait, so it waits for nothing.',
+          });
+        }
+      }
+    }
+
+    return issues;
+  }
+
+  /**
+   * Settings only this engine can judge: a schedule that would never run, a
+   * name that would come out empty, a step a task-less run cannot perform.
+   *
+   * Each is checkable before publishing and would otherwise publish cleanly
+   * and then fail — or do nothing — on every run.
+   */
+  private checkSettings(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
+    const issues: AutomationGraphIssue[] = [];
+    const error = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.ERROR, nodeId, path, message });
+    const warn = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.WARNING, nodeId, path, message });
+
+    const trigger = nodes.find((node) => node.type === AutomationNodeType.TRIGGER);
+
+    if (trigger) {
+      const config = trigger.configuration;
+
+      if (trigger.subtype === AutomationTrigger.SCHEDULED_TIME) {
+        for (const problem of scheduleProblems(config)) error(trigger.id, 'configuration', problem);
+      }
+
+      if (trigger.subtype === AutomationTrigger.RUN_MANUALLY) {
+        const label = config['label'];
+        if (typeof label === 'string' && label.trim().length > MANUAL_RULE_LABEL_MAX) {
+          error(
+            trigger.id,
+            'label',
+            `Keep the menu label to ${MANUAL_RULE_LABEL_MAX} characters, so it fits on one line.`,
+          );
+        }
+      }
+
+      if (isApproachingTrigger(trigger.subtype) && config['days'] !== undefined) {
+        const days = config['days'];
+        if (
+          typeof days !== 'number' ||
+          !Number.isInteger(days) ||
+          days < APPROACHING_DAYS.MIN ||
+          days > APPROACHING_DAYS.MAX
+        ) {
+          error(
+            trigger.id,
+            'days',
+            `Choose between ${APPROACHING_DAYS.MIN} and ${APPROACHING_DAYS.MAX} days.`,
+          );
+        }
+      }
+
+      // A custom date trigger watches one field; without it there is no date.
+      if (isCustomDateTrigger(trigger.subtype)) {
+        const fieldId = config['fieldId'];
+        if (typeof fieldId !== 'string' || fieldId === '') {
+          error(trigger.id, 'fieldId', 'Choose the date field this rule watches.');
+        }
+      }
+
+      if (isDateTrigger(trigger.subtype) && config['timezone'] !== undefined) {
+        if (!isTimeZone(config['timezone'])) {
+          error(trigger.id, 'timezone', 'That timezone is not one this server recognises.');
+        }
+      }
+    }
+
+    /*
+     * A schedule with no tasks in scope runs with nothing to check and nothing
+     * to change, so only "Create a task" has anything to do.
+     */
+    const taskless =
+      trigger?.subtype === AutomationTrigger.SCHEDULED_TIME &&
+      readSchedule(trigger.configuration).scope === ExecutionScope.NONE;
+
+    for (const node of nodes) {
+      const config = node.configuration;
+
+      if (taskless) {
+        if (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so there is nothing to check. Choose tasks for it to run on, or remove the check.',
+          );
+        }
+        if (node.type === AutomationNodeType.DELAY) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so there is nothing to wait for. Choose tasks for it to run on.',
+          );
+        }
+        if (
+          node.type === AutomationNodeType.ACTION &&
+          node.subtype !== AutomationAction.CREATE_TASK
+        ) {
+          error(
+            node.id,
+            null,
+            'This rule runs on no tasks, so it can only create new ones. Choose tasks for it to run on.',
+          );
+        }
+      }
+
+      // "Check with AI" needs a model to ask; its question is checked with the
+      // rest of the graph's structure, in `validateGraphStructure`.
+      if (
+        (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) &&
+        config['field'] === AI_CHECK_FIELD &&
+        !this.config.ai.enabled
+      ) {
+        error(node.id, 'field', AI_UNAVAILABLE_REASON);
+      }
+
+      if (node.type !== AutomationNodeType.ACTION) continue;
+
+      const text = (key: string) => (typeof config[key] === 'string' ? config[key] : '');
+      const flagUnknown = (key: string) => {
+        const unknown = unknownVariables(text(key));
+        if (unknown.length) {
+          warn(
+            node.id,
+            key,
+            `${unknown.map((name) => `{{${name}}}`).join(', ')} is not a variable this rule knows, so it is written as is.`,
+          );
+        }
+      };
+
+      switch (node.subtype) {
+        case AutomationAction.CREATE_TASK:
+          if (text('title').trim() === '') error(node.id, 'title', 'Give the new task a name.');
+          flagUnknown('title');
+          flagUnknown('description');
+          if (
+            config['dueInDays'] !== undefined &&
+            config['dueInDays'] !== null &&
+            !(
+              typeof config['dueInDays'] === 'number' &&
+              Number.isInteger(config['dueInDays']) &&
+              config['dueInDays'] >= 0
+            )
+          ) {
+            error(
+              node.id,
+              'dueInDays',
+              'Days until it is due has to be a whole number, zero or more.',
+            );
+          }
+          break;
+        case AutomationAction.SET_TASK_NAME:
+          if (text('text').trim() === '') error(node.id, 'text', 'Write the name to set.');
+          flagUnknown('text');
+          break;
+        case AutomationAction.SET_TASK_DESCRIPTION:
+          flagUnknown('text');
+          break;
+        case AutomationAction.ADD_COMMENT:
+          flagUnknown('body');
+          break;
+        case AutomationAction.SEND_EMAIL:
+          if (text('subject').trim() === '') error(node.id, 'subject', 'Give the email a subject.');
+          if (emailRecipientsOf(config).length === 0) {
+            error(node.id, 'recipients', 'Choose who the email goes to.');
+          }
+          flagUnknown('subject');
+          flagUnknown('body');
+          break;
+        case AutomationAction.ADD_REMOVE_COLLABORATORS:
+          if (peopleIn(config['add']).length === 0 && peopleIn(config['remove']).length === 0) {
+            error(node.id, 'add', 'Choose somebody to add or remove.');
+          }
+          break;
+        case AutomationAction.SET_TASK_TYPE:
+          if (!(TASK_KINDS as readonly unknown[]).includes(config['kind'])) {
+            error(node.id, 'kind', 'Choose the type to convert to.');
+          }
+          break;
+        // "Use AI…": instructions, at least one thing it may change, and a model.
+        case AutomationAction.AI_ACTION: {
+          if (!this.config.ai.enabled) error(node.id, 'subtype', AI_UNAVAILABLE_REASON);
+          const problem = aiActionProblem(config);
+          if (problem) {
+            error(node.id, problem.startsWith('Choose') ? 'allow' : 'instructions', problem);
+          }
+          break;
+        }
       }
     }
 
@@ -242,6 +550,12 @@ export class AutomationGraphValidatorService {
         }
       }
 
+      // So is everybody a collaborators step adds; removing someone who has
+      // left is harmless, so only the additions are references.
+      if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
+        for (const id of peopleIn(config['add'])) userIds.add(id);
+      }
+
       // A webhook step names a workspace endpoint; a rule may not send to
       // another workspace's, so the lookup is scoped like every other.
       if (node.subtype === AutomationAction.SEND_WEBHOOK) {
@@ -260,10 +574,15 @@ export class AutomationGraphValidatorService {
        * A legacy enum name is not a definition id and has nothing to look up,
        * so it is skipped rather than reported as a missing definition.
        */
-      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      // A ticket's status and priority are its own values, not project rows.
+      const statusId = ticketOwned(node)
+        ? null
+        : read(config['status'] ?? config['statusDefinitionId']);
       if (statusId && !(statusId in TaskStatus)) statusIds.add(statusId);
 
-      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      const priorityId = ticketOwned(node)
+        ? null
+        : read(config['priority'] ?? config['priorityDefinitionId']);
       if (priorityId && !(priorityId in TaskPriority)) priorityIds.add(priorityId);
 
       const fieldId = read(config['fieldId'] ?? config['customFieldId']);
@@ -273,6 +592,14 @@ export class AutomationGraphValidatorService {
       // rather than under `fieldId`; its type decides which comparisons fit.
       const conditionFieldId = customFieldConditionId(config['field']);
       if (conditionFieldId) fieldIds.add(conditionFieldId);
+
+      // So are the fields a "Use AI…" step may fill in.
+      if (node.subtype === AutomationAction.AI_ACTION) {
+        for (const permission of aiPermissionsOf(config)) {
+          const id = aiPermissionFieldId(permission);
+          if (id) fieldIds.add(id);
+        }
+      }
     }
 
     const [
@@ -417,6 +744,17 @@ export class AutomationGraphValidatorService {
         });
       }
 
+      if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
+        if (peopleIn(config['add']).some((id) => !liveMembers.has(id))) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'add',
+            message: 'Somebody this step adds is no longer a member of this workspace.',
+          });
+        }
+      }
+
       if (node.subtype === AutomationAction.CREATE_SUBTASK) {
         subtaskEntries(config).forEach((entry, index) => {
           if (entry.assigneeId && !liveMembers.has(entry.assigneeId)) {
@@ -430,7 +768,9 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      const statusId = ticketOwned(node)
+        ? null
+        : read(config['status'] ?? config['statusDefinitionId']);
       if (statusId && !(statusId in TaskStatus) && !liveStatuses.has(statusId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
@@ -440,7 +780,9 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      const priorityId = ticketOwned(node)
+        ? null
+        : read(config['priority'] ?? config['priorityDefinitionId']);
       if (priorityId && !(priorityId in TaskPriority) && !livePriorities.has(priorityId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
@@ -457,6 +799,17 @@ export class AutomationGraphValidatorService {
           nodeId: node.id,
           path: 'customFieldId',
           message: 'That field no longer exists.',
+        });
+      } else if (
+        fieldId &&
+        isCustomDateTrigger(node.subtype) &&
+        fieldType.get(fieldId) !== 'DATE'
+      ) {
+        issues.push({
+          level: GraphIssueLevel.ERROR,
+          nodeId: node.id,
+          path: 'fieldId',
+          message: 'Only a date field can approach or pass.',
         });
       }
 
@@ -535,7 +888,35 @@ export class AutomationGraphValidatorService {
        * have one — so a rule with an "otherwise" would be refused for being
        * exactly what somebody built.
        */
-      if (node.type === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
+      if (node.subtype === AutomationAction.AI_ACTION) {
+        for (const permission of aiPermissionsOf(config)) {
+          const id = aiPermissionFieldId(permission);
+          if (!id) continue;
+          if (!liveFields.has(id)) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'allow',
+              message: 'A field AI may fill in no longer exists.',
+            });
+          } else if (!(AI_FIELD_TYPES as readonly string[]).includes(fieldType.get(id) ?? '')) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'allow',
+              message: 'AI fills in choice, text, number and checkbox fields only.',
+            });
+          }
+        }
+      }
+
+      if (
+        node.type === AutomationNodeType.CONDITION &&
+        !isFallbackBranch(config) &&
+        !isTicketConditionField(config['field']) &&
+        // Asks a question rather than comparing a field; checked in `checkSettings`.
+        config['field'] !== AI_CHECK_FIELD
+      ) {
         /*
          * A generated key's kind comes from the field's own type — and from
          * the *live* field, so a condition about a deleted one falls to
@@ -587,6 +968,12 @@ export class AutomationGraphValidatorService {
       TASK_DUE_DATE_CHANGED: ['SET_DUE_DATE', 'CLEAR_DUE_DATE'],
       TASK_START_DATE_CHANGED: ['SET_START_DATE', 'CLEAR_START_DATE'],
       TASK_ESTIMATE_CHANGED: ['SET_ESTIMATE'],
+      TASK_TITLE_CHANGED: ['SET_TASK_NAME'],
+      TASK_DESCRIPTION_CHANGED: ['SET_TASK_DESCRIPTION'],
+      TASK_COMPLETED: ['SET_COMPLETION'],
+      COLLABORATOR_ADDED: ['ADD_REMOVE_COLLABORATORS'],
+      TASK_CREATED: ['CREATE_TASK'],
+      TASK_TYPE_CHANGED: ['SET_TASK_TYPE'],
     };
 
     const risky = willRetrigger[trigger.subtype] ?? [];
@@ -632,4 +1019,11 @@ function asConfiguration(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
 
   return value as Record<string, unknown>;
+}
+
+/** The people a collaborators step names, from whatever the column holds. */
+function peopleIn(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '')
+    : [];
 }

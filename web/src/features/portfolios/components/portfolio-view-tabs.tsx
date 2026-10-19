@@ -23,10 +23,10 @@ interface PortfolioTab {
 const TABS: PortfolioTab[] = [
   { label: 'List', segment: 'list', icon: List },
   { label: 'Timeline', segment: 'timeline', icon: CalendarRange },
-  { label: 'Dashboard', segment: 'dashboard', icon: LayoutDashboard, comingSoon: true },
-  { label: 'Progress', segment: 'progress', icon: TrendingUp, comingSoon: true },
-  { label: 'Workload', segment: 'workload', icon: Gauge, comingSoon: true },
-  { label: 'Messages', segment: 'messages', icon: MessageSquare, comingSoon: true },
+  { label: 'Dashboard', segment: 'dashboard', icon: LayoutDashboard },
+  { label: 'Progress', segment: 'progress', icon: TrendingUp },
+  { label: 'Workload', segment: 'workload', icon: Gauge },
+  { label: 'Messages', segment: 'messages', icon: MessageSquare },
 ];
 
 /**

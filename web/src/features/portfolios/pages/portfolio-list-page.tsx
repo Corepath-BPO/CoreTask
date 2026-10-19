@@ -1,3 +1,4 @@
+import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import type { ProjectSummary } from '@coretask/types';
 import { Link } from '@tanstack/react-router';
 import { ArrowRightToLine, CalendarDays, FolderKanban, Link2, Plus, X } from 'lucide-react';
@@ -11,13 +12,19 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProjectStatusBadge } from '@/features/projects/components/project-status-badge';
+import { ConnectedGoals } from '@/features/goals/components/connected-goals';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
+import { useCurrentUser } from '@/stores/auth.store';
 import { cn, daysUntil, formatDate, formatDueDate, initials, percentage } from '@/lib/utils';
-import { usePortfolio, usePortfolioStore } from '@/stores/portfolio.store';
+import {
+  usePortfolio,
+  useRemovePortfolioProject,
+} from '@/features/portfolios/hooks/use-portfolios';
 import {
   useProjectStatusUpdate,
+  useRequestProjectStatus,
   type ProjectStatusUpdateValue,
-} from '@/stores/status-update.store';
+} from '@/features/projects/hooks/use-project-updates';
 
 import { AddProjectsDialog } from '../components/add-projects-dialog';
 import {
@@ -38,8 +45,8 @@ export function PortfolioListPage({ portfolioId }: { portfolioId: string }) {
   const { workspace } = useActiveWorkspace();
   const workspaceId = workspace?.id;
 
-  const portfolio = usePortfolio(workspaceId, portfolioId);
-  const removeProject = usePortfolioStore((state) => state.removeProject);
+  const { portfolio } = usePortfolio(workspaceId, portfolioId);
+  const removeProject = useRemovePortfolioProject(workspaceId);
   const { projectsById, isLoading } = usePortfolioProjectIndex(workspaceId);
 
   const [adding, setAdding] = useState(false);
@@ -52,7 +59,7 @@ export function PortfolioListPage({ portfolioId }: { portfolioId: string }) {
   const selected = selectedId ? (projectsById.get(selectedId) ?? null) : null;
 
   const handleRemove = (project: ProjectSummary) => {
-    removeProject(workspaceId, portfolio.id, project.id);
+    removeProject.mutate({ portfolioId: portfolio.id, projectId: project.id });
     if (selectedId === project.id) setSelectedId(null);
     toast.success(`"${project.name}" removed from ${portfolio.name}`);
   };
@@ -289,6 +296,9 @@ function ProjectSidePanel({
 
   // Called unconditionally — hooks cannot sit behind the `shown` guard below.
   const statusUpdate = useProjectStatusUpdate(shown?.id ?? '');
+  const { workspace } = useActiveWorkspace();
+  const requestStatus = useRequestProjectStatus(workspace?.id);
+  const currentUser = useCurrentUser();
 
   /** Status picked from the menu; non-null while the composer is open. */
   const [composeStatus, setComposeStatus] = useState<ProjectStatusUpdateValue | null>(null);
@@ -423,24 +433,31 @@ function ProjectSidePanel({
                     Update your team and others on the progress of this project.
                   </p>
                 )}
-                <StatusUpdateMenu onPick={setComposeStatus} tabIndex={tabbable} />
+                <StatusUpdateMenu
+                  onPick={setComposeStatus}
+                  onRequest={
+                    shown.lead && shown.lead.id !== currentUser?.id
+                      ? () => requestStatus.mutate(shown.id)
+                      : undefined
+                  }
+                  tabIndex={tabbable}
+                />
               </div>
             </section>
 
             <section className="space-y-2">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-                Connected goals
-                <Badge variant="muted" className="text-[10px]">
-                  Soon
-                </Badge>
-              </h3>
-              <div className="space-y-3 rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">
-                  Connect or create a goal to link this project to a larger purpose.
-                </p>
-                <Button variant="outline" size="sm" disabled>
-                  Add goal
-                </Button>
+              <h3 className="text-sm font-semibold">Connected goals</h3>
+              <div className="rounded-lg border p-4">
+                {workspace && (
+                  <ConnectedGoals
+                    workspaceId={workspace.id}
+                    projectId={shown.id}
+                    canConnect={hasAtLeastRole(
+                      workspace.role ?? WorkspaceRole.GUEST,
+                      WorkspaceRole.MEMBER,
+                    )}
+                  />
+                )}
               </div>
             </section>
 

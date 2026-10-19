@@ -173,11 +173,71 @@ export class ProjectAccessService {
     return { OR: [{ projectId: null }, { project: this.projectWhere(actor) }] };
   }
 
+  /**
+   * `scopedWhere` for tasks, which multi-homing lets live in several projects:
+   * visible through the home project or through any other it is in. Seeing a
+   * task in one project you can open is seeing the task.
+   */
+  taskWhere(actor: VisibilityActor): Prisma.TaskWhereInput {
+    if (actor.role && hasProjectAdminOverride(actor.role)) return {};
+    const visible = this.projectWhere(actor);
+    return {
+      OR: [
+        { projectId: null },
+        { project: visible },
+        { projectLinks: { some: { project: visible } } },
+      ],
+    };
+  }
+
   /** `projectWhere` for rows that hang off a task or a ticket (comments, attachments). */
   itemParentWhere(actor: VisibilityActor): ItemParentWhere {
     if (actor.role && hasProjectAdminOverride(actor.role)) return {};
-    const scoped = this.scopedWhere(actor);
-    return { OR: [{ task: { is: scoped } }, { ticket: { is: scoped } }] };
+    return {
+      OR: [{ task: { is: this.taskWhere(actor) } }, { ticket: { is: this.scopedWhere(actor) } }],
+    };
+  }
+
+  /**
+   * The role `actor` acts with on a task: the best of its home project's and
+   * those of the other projects it is in that `actor` can open. Somebody who
+   * may edit the tasks of a project may edit the tasks in it, wherever they
+   * were first filed.
+   */
+  async effectiveRoleForTask(
+    task: { id: string; projectId: string | null },
+    actor: ActorContext,
+  ): Promise<WorkspaceRole> {
+    const home = await this.effectiveRoleFor(task.projectId, actor);
+    if (!task.projectId || hasProjectAdminOverride(actor.role)) return home;
+
+    const links = await this.prisma.taskProject.findMany({
+      where: { taskId: task.id, project: { AND: [this.projectWhere(actor)] } },
+      select: { projectId: true },
+    });
+    let best = home;
+    for (const link of links) {
+      const role = await this.effectiveRoleFor(link.projectId, actor);
+      if (hasAtLeastRole(role, best)) best = role;
+    }
+    return best;
+  }
+
+  /** `assertEffectiveRole` for a task, by the best role across its projects. */
+  async assertEffectiveTaskRole(
+    task: { id: string; projectId: string | null },
+    actor: ActorContext,
+    minimum: WorkspaceRole,
+  ): Promise<WorkspaceRole> {
+    const effective = await this.effectiveRoleForTask(task, actor);
+    if (!hasAtLeastRole(effective, minimum)) {
+      throw AppException.forbidden(
+        effective === actor.role ? 'INSUFFICIENT_WORKSPACE_ROLE' : 'INSUFFICIENT_PROJECT_ROLE',
+        undefined,
+        { required: minimum, actual: effective },
+      );
+    }
+    return effective;
   }
 
   /**

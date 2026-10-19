@@ -33,6 +33,8 @@ export class WorkItemOrderRepository {
     ticketIds: readonly string[],
     plan: OrderPlan,
     take: number,
+    /** The project being read: a linked task orders by its place there. */
+    projectId: string,
   ): Promise<OrderedId[]> {
     if (taskIds.length === 0 && ticketIds.length === 0) return [];
 
@@ -47,11 +49,11 @@ export class WorkItemOrderRepository {
         ? Prisma.sql`SELECT t.id AS id, 'TASK'::text AS kind, ${Prisma.join(
             [
               ...plan.keys.map((key, index) => Prisma.sql`${key.task} AS ${keyAlias(index)}`),
-              Prisma.sql`t.position::double precision AS pos`,
+              Prisma.sql`COALESCE(tpl.position, t.position)::double precision AS pos`,
               Prisma.sql`t.id AS tie`,
             ],
             ', ',
-          )} FROM tasks t ${joins(plan.taskJoins)} WHERE t.id IN (${idList(taskIds)})`
+          )} FROM tasks t LEFT JOIN task_projects tpl ON tpl."taskId" = t.id AND tpl."projectId" = ${projectId}::uuid ${joins(plan.taskJoins)} WHERE t.id IN (${idList(taskIds)})`
         : null;
 
     const ticketPart =

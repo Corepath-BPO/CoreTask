@@ -1,4 +1,4 @@
-import type { ProjectStatusUpdateValue } from '@/stores/status-update.store';
+import type { ProjectStatusUpdateValue } from '@/features/projects/hooks/use-project-updates';
 
 export interface StatusUpdateOption {
   value: ProjectStatusUpdateValue;

@@ -1,6 +1,8 @@
 import type {
+  ProjectApp,
   SubscribableWebhookEvent,
   WebhookDeliveryStatus,
+  WebhookEndpointSource,
   WebhookEventType,
 } from '@coretask/contracts';
 
@@ -25,6 +27,8 @@ export interface WebhookEndpoint {
   events: SubscribableWebhookEvent[];
   /** Null means every project in the workspace. */
   project: { id: string; name: string } | null;
+  /** The chat app it posts to (Customize › Apps); null for a plain JSON webhook. */
+  app: ProjectApp | null;
   enabled: boolean;
   /** Set when deliveries kept failing and the endpoint switched itself off. */
   disabledReason: string | null;
@@ -33,6 +37,8 @@ export interface WebhookEndpoint {
   lastDeliveryStatus: WebhookDeliveryStatus | null;
   lastSuccessAt: string | null;
   createdBy: WebhookEndpointCreator | null;
+  /** Settings, or the API key or OAuth app that subscribed it through the API. */
+  source: { kind: WebhookEndpointSource; name: string | null };
   createdAt: string;
   updatedAt: string;
 }

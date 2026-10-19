@@ -86,7 +86,9 @@ describe('Teams (e2e)', () => {
 
   /** Creates a team as the owner and returns its id. */
   const seedTeam = async (scope: Scope, body: Record<string, unknown> = {}): Promise<string> => {
-    const response = await createTeam(scope, scope.owner, { name: 'Platform', ...body }).expect(201);
+    const response = await createTeam(scope, scope.owner, { name: 'Platform', ...body }).expect(
+      201,
+    );
     return response.body.data.id as string;
   };
 
@@ -457,7 +459,9 @@ describe('Teams (e2e)', () => {
         data: { tokenHash: sha256(token) },
       });
 
-      const preview = await request(server()).get(url(`/invitations/${token}`)).expect(200);
+      const preview = await request(server())
+        .get(url(`/invitations/${token}`))
+        .expect(200);
 
       expect(preview.body.data.teamName).toBe('Platform');
       expect(Object.keys(preview.body.data).sort()).toEqual([

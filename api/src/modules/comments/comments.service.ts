@@ -28,6 +28,7 @@ import { AutomationEventPublisher } from '../automations/automation-event.publis
 import { FollowersService } from '../followers/followers.service';
 import { linkOf, type ItemLink } from '../followers/item-ref';
 import { ProjectAccessService } from '../project-access/project-access.service';
+import { TaskEmailUpdatesService } from '../project-email/task-email-updates.service';
 import { TasksService } from '../tasks/tasks.service';
 import { TicketsService } from '../tickets/tickets.service';
 
@@ -67,6 +68,7 @@ export class CommentsService {
     private readonly notifications: NotificationDispatcher,
     private readonly followers: FollowersService,
     private readonly automation: AutomationEventPublisher,
+    private readonly taskEmail: TaskEmailUpdatesService,
   ) {}
 
   async listForTask(
@@ -94,9 +96,11 @@ export class CommentsService {
     actor: ActorContext,
     taskId: string,
     dto: CreateCommentDto,
+    /** Set when the words arrived by email, from this address. */
+    emailedBy?: string,
   ): Promise<Comment> {
     const parent = await this.resolveTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
-    return this.create(workspaceId, actor.userId, parent, dto);
+    return this.create(workspaceId, actor.userId, parent, dto, emailedBy);
   }
 
   async createForTicket(
@@ -407,6 +411,7 @@ export class CommentsService {
     userId: string,
     parent: CommentParent,
     dto: CreateCommentDto,
+    emailedBy?: string,
   ): Promise<Comment> {
     const body = this.requireBody(dto.body);
     const mentioned = await this.resolveMentions(workspaceId, body);
@@ -503,6 +508,15 @@ export class CommentsService {
 
     await this.notifyMentioned(workspaceId, userId, parent, created, mentioned);
     await this.notifyFollowers(workspaceId, userId, parent, created, mentioned);
+    // A task that came in by email answers its email thread too.
+    if (parent.link.taskId) {
+      await this.taskEmail.commentPosted({
+        taskId: parent.link.taskId,
+        authorName: created.author?.name ?? 'Someone',
+        body,
+        skipAddress: emailedBy ?? null,
+      });
+    }
     this.logger.log(
       { commentId: created.id, entity: parent.entity, mentions: mentioned.length },
       'Comment created',

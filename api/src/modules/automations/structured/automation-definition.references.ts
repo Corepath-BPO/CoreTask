@@ -162,6 +162,11 @@ const ACTION_CONFIG: Readonly<Record<string, readonly ConfigField[]>> = {
     { key: 'value', kind: ConfigKind.ANY, required: false },
   ],
   ADD_COMMENT: [{ key: 'body', kind: ConfigKind.TEXT, required: true }],
+  // Recipients are checked by the graph validator: a list of who, not a reference.
+  SEND_EMAIL: [{ key: 'subject', kind: ConfigKind.TEXT, required: true }],
+  // A ticket's own status and priority; the graph validator checks the values.
+  SET_TICKET_STATUS: [{ key: 'status', kind: ConfigKind.ANY, required: true }],
+  SET_TICKET_PRIORITY: [{ key: 'priority', kind: ConfigKind.ANY, required: true }],
   SEND_IN_APP_NOTIFICATION: [
     /*
      * Optional because the runner falls back to the task's assignee. A rule

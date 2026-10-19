@@ -74,6 +74,8 @@ export function CustomizeRulesSection({
             <span className="block truncate font-medium">{rule.name}</span>
             <span className="block truncate text-xs text-muted-foreground">
               {TRIGGER_LABEL[rule.triggerType as keyof typeof TRIGGER_LABEL] ?? rule.triggerType}
+              {/* Changed in the bundle, not here: the next sync replaces it. */}
+              {rule.bundleId && ' · From a bundle'}
             </span>
           </span>
           <SemanticBadge

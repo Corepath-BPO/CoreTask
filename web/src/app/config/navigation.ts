@@ -7,7 +7,9 @@ import {
   Home,
   Inbox,
   Plug,
+  Search,
   Settings,
+  Target,
   Ticket,
   Users,
   UsersRound,
@@ -53,6 +55,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Projects', to: '/projects', icon: FolderKanban },
       { label: 'Portfolios', to: '/portfolios', icon: Folder },
+      { label: 'Goals', to: '/goals', icon: Target },
       { label: 'Tickets', to: '/tickets', icon: Ticket },
       { label: 'Members', to: '/members', icon: Users },
       { label: 'Teams', to: '/teams', icon: UsersRound },
@@ -64,6 +67,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Calendar', to: '/calendar', icon: CalendarDays },
       { label: 'Reports', to: '/reports', icon: BarChart3 },
+      { label: 'Search', to: '/search', icon: Search },
     ],
   },
   {

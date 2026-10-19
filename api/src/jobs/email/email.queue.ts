@@ -6,6 +6,8 @@ import {
   EmailJob,
   QueueName,
   type InvitationEmailJobData,
+  type MessageEmailJobData,
+  type PasswordResetEmailJobData,
   type WelcomeEmailJobData,
 } from '../queue-names';
 
@@ -53,6 +55,42 @@ export class EmailQueue {
       });
     } catch (error) {
       this.logger.error({ err: error, email: data.email }, 'Failed to enqueue invitation e-mail');
+    }
+  }
+
+  /**
+   * Enqueues a message the API has already written. Never rejects: these are
+   * updates to an email thread, and the comment behind one is already saved.
+   */
+  async enqueueMessage(data: MessageEmailJobData): Promise<void> {
+    try {
+      await this.queue.add(EmailJob.MESSAGE, data, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { age: 3_600, count: 1_000 },
+        removeOnFail: { age: 86_400 },
+      });
+    } catch (error) {
+      this.logger.error({ err: error, to: data.to }, 'Failed to enqueue an e-mail message');
+    }
+  }
+
+  /**
+   * Enqueues a "forgot password" link. Load-bearing like an invitation — it is
+   * the only way back into the account — so a failure is logged loudly, but
+   * never thrown: the answer to the request must not depend on it.
+   */
+  async enqueuePasswordReset(data: PasswordResetEmailJobData): Promise<void> {
+    try {
+      await this.queue.add(EmailJob.PASSWORD_RESET, data, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+        // Removed on completion so the raw token does not linger in Redis.
+        removeOnComplete: true,
+        removeOnFail: { age: 3_600 },
+      });
+    } catch (error) {
+      this.logger.error({ err: error }, 'Failed to enqueue a password reset e-mail');
     }
   }
 }

@@ -18,7 +18,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { usePortfolioStore, type Portfolio } from '@/stores/portfolio.store';
+import {
+  useCreatePortfolio,
+  useUpdatePortfolio,
+  type Portfolio,
+} from '@/features/portfolios/hooks/use-portfolios';
 
 import { portfolioFormSchema, type PortfolioFormInput } from '../lib/portfolio-schema';
 
@@ -46,8 +50,8 @@ export function PortfolioFormDialog({
   onCreated,
 }: PortfolioFormDialogProps) {
   const isEdit = portfolio !== null;
-  const createPortfolio = usePortfolioStore((state) => state.createPortfolio);
-  const updatePortfolio = usePortfolioStore((state) => state.updatePortfolio);
+  const createPortfolio = useCreatePortfolio(workspaceId);
+  const updatePortfolio = useUpdatePortfolio(workspaceId);
 
   const {
     register,
@@ -74,7 +78,7 @@ export function PortfolioFormDialog({
     );
   }, [open, portfolio, reset]);
 
-  const onSubmit = handleSubmit((values) => {
+  const onSubmit = handleSubmit(async (values) => {
     if (!workspaceId) return;
 
     const draft = {
@@ -83,16 +87,22 @@ export function PortfolioFormDialog({
       color: values.color,
     };
 
-    if (isEdit) {
-      updatePortfolio(workspaceId, portfolio.id, draft);
-      toast.success(`Portfolio "${draft.name}" updated`);
-    } else {
-      const created = createPortfolio(workspaceId, draft);
-      toast.success(`Portfolio "${created.name}" created`);
-      onCreated?.(created);
+    // Failures are reported by the hooks; the dialog stays open to retry.
+    try {
+      if (isEdit) {
+        await updatePortfolio.mutateAsync({ portfolioId: portfolio.id, draft });
+        toast.success(`Portfolio "${draft.name}" updated`);
+      } else {
+        const created = await createPortfolio.mutateAsync(draft);
+        if (created) {
+          toast.success(`Portfolio "${created.name}" created`);
+          onCreated?.(created);
+        }
+      }
+      onOpenChange(false);
+    } catch {
+      // Already reported.
     }
-
-    onOpenChange(false);
   });
 
   return (
@@ -102,8 +112,8 @@ export function PortfolioFormDialog({
           <DialogTitle>{isEdit ? 'Edit portfolio' : 'Create a portfolio'}</DialogTitle>
           <DialogDescription>
             A portfolio watches a group of projects together. It only references them. Adding or
-            removing a project never changes the project itself. Portfolios are stored in this
-            browser for now.
+            removing a project never changes the project itself. Everyone in the workspace sees it,
+            each person only the projects they can open.
           </DialogDescription>
         </DialogHeader>
 

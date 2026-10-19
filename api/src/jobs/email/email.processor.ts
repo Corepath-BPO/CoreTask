@@ -4,12 +4,18 @@ import type { Job } from 'bullmq';
 
 import { AppConfigService } from '../../config/app-config.service';
 import { EmailService } from '../../integrations/email/email.service';
-import { invitationEmail, welcomeEmail } from '../../integrations/email/email.templates';
+import {
+  invitationEmail,
+  passwordResetEmail,
+  welcomeEmail,
+} from '../../integrations/email/email.templates';
 import {
   EmailJob,
   QueueName,
   type EmailJobData,
   type InvitationEmailJobData,
+  type MessageEmailJobData,
+  type PasswordResetEmailJobData,
   type WelcomeEmailJobData,
 } from '../queue-names';
 
@@ -52,6 +58,25 @@ export class EmailProcessor extends WorkerHost {
             invitedByName: data.invitedByName,
             role: data.role,
             teamName: data.teamName,
+            expiresAt: data.expiresAt,
+            webUrl: this.config.http.webUrl,
+          }),
+        );
+        return;
+      }
+
+      case EmailJob.MESSAGE: {
+        await this.email.send(job.data as MessageEmailJobData);
+        return;
+      }
+
+      case EmailJob.PASSWORD_RESET: {
+        const data = job.data as PasswordResetEmailJobData;
+        await this.email.send(
+          passwordResetEmail({
+            to: data.email,
+            name: data.name,
+            token: data.token,
             expiresAt: data.expiresAt,
             webUrl: this.config.http.webUrl,
           }),

@@ -17,4 +17,11 @@ export const authApi = {
     apiClient.post<{ loggedOut: boolean }>(ApiRoutes.auth.logout),
 
   me: (): Promise<AuthUser> => apiClient.get<AuthUser>(ApiRoutes.auth.me),
+
+  /** Answers the same whether or not the address has an account. */
+  forgotPassword: (email: string): Promise<{ sent: true }> =>
+    apiClient.post<{ sent: true }>(ApiRoutes.auth.forgotPassword, { email }),
+
+  resetPassword: (token: string, password: string): Promise<void> =>
+    apiClient.post<void>(ApiRoutes.auth.resetPassword, { token, password }),
 };

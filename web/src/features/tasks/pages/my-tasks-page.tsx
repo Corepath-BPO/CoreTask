@@ -1,6 +1,13 @@
-import { TASK_PRIORITIES, TASK_STATUSES, TaskStatus, WorkspaceRole } from '@coretask/contracts';
+import {
+  PAGINATION_MAX_LIMIT,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  TaskStatus,
+  WorkspaceRole,
+  hasAtLeastRole,
+} from '@coretask/contracts';
 import type { Task } from '@coretask/types';
-import { CircleCheckBig, Search } from 'lucide-react';
+import { CalendarSync, CircleCheckBig, Search } from 'lucide-react';
 import { useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -21,9 +28,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CalendarSyncDialog } from '@/features/calendar-sync/components/calendar-sync-dialog';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatDue, humanizeEnum, isOverdue } from '@/lib/utils';
 
+import { MyTasksRulesMenu } from '../components/my-tasks-rules-menu';
+import { MyTasksSections } from '../components/my-tasks-sections';
 import { TaskDetailDialog } from '../components/task-detail-dialog';
 import { useTasks } from '../hooks/use-tasks';
 
@@ -38,12 +48,18 @@ export function MyTasksPage() {
   const { workspace, isLoading: workspaceLoading } = useActiveWorkspace();
   const workspaceId = workspace?.id;
 
+  /*
+   * Asana opens My Tasks on its sections; the filtered list stays one click
+   * away for searching across everyone's work.
+   */
+  const [view, setView] = useState<'sections' | 'board' | 'list'>('sections');
   const [scope, setScope] = useState<'me' | 'all'>('me');
   const [statusFilter, setStatusFilter] = useState<string>(OPEN_ONLY);
   const [priority, setPriority] = useState<string>(ALL);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   /*
    * Notifications link here as `/my-tasks?task=<id>`. Without this the link
    * lands on a list and leaves the reader to find the task it was about, which
@@ -86,6 +102,19 @@ export function MyTasksPage() {
           ? undefined
           : [statusFilter];
 
+    // Sections (and their Board) hold the reader's own open work, all of it on one screen.
+    if (view !== 'list') {
+      return {
+        page: 1,
+        limit: PAGINATION_MAX_LIMIT,
+        assigneeId: 'me',
+        status: TASK_STATUSES.filter(
+          (value) => value !== TaskStatus.DONE && value !== TaskStatus.CANCELLED,
+        ),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      };
+    }
+
     return {
       page,
       limit: PAGE_SIZE,
@@ -94,7 +123,7 @@ export function MyTasksPage() {
       ...(priority !== ALL ? { priority: [priority] } : {}),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
     };
-  }, [page, scope, statusFilter, priority, debouncedSearch]);
+  }, [view, page, scope, statusFilter, priority, debouncedSearch]);
 
   const { data, isLoading, isError, error } = useTasks(workspaceId, params);
 
@@ -125,6 +154,22 @@ export function MyTasksPage() {
             ? `Work assigned to you across ${workspace.name}.`
             : `All work across ${workspace.name}.`
         }
+        actions={
+          <>
+            {scope === 'me' && view !== 'list' && <MyTasksRulesMenu workspaceId={workspace.id} />}
+            <Button variant="outline" size="sm" onClick={() => setCalendarOpen(true)}>
+              <CalendarSync />
+              Sync to calendar
+            </Button>
+          </>
+        }
+      />
+      <CalendarSyncDialog
+        workspaceId={workspace.id}
+        projectId={null}
+        label="My Tasks"
+        open={calendarOpen}
+        onOpenChange={setCalendarOpen}
       />
 
       {summary && (
@@ -137,6 +182,32 @@ export function MyTasksPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg bg-muted p-0.5" role="radiogroup" aria-label="Show">
+          {(
+            [
+              ['sections', 'Sections'],
+              ['board', 'Board'],
+              ['list', 'All tasks'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={view === value}
+              onClick={() => applyFilter(setView)(value)}
+              className={cn(
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+                view === value
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative min-w-56 flex-1 sm:max-w-xs">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -151,47 +222,51 @@ export function MyTasksPage() {
           />
         </div>
 
-        <Select
-          value={scope}
-          onValueChange={(value) => applyFilter(setScope)(value as 'me' | 'all')}
-        >
-          <SelectTrigger aria-label="Filter by assignee" className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="me">Assigned to me</SelectItem>
-            <SelectItem value="all">Everyone</SelectItem>
-          </SelectContent>
-        </Select>
+        {view === 'list' && (
+          <>
+            <Select
+              value={scope}
+              onValueChange={(value) => applyFilter(setScope)(value as 'me' | 'all')}
+            >
+              <SelectTrigger aria-label="Filter by assignee" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="me">Assigned to me</SelectItem>
+                <SelectItem value="all">Everyone</SelectItem>
+              </SelectContent>
+            </Select>
 
-        <Select value={statusFilter} onValueChange={applyFilter(setStatusFilter)}>
-          <SelectTrigger aria-label="Filter by status" className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={OPEN_ONLY}>Open only</SelectItem>
-            <SelectItem value={ALL}>All statuses</SelectItem>
-            {TASK_STATUSES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {humanizeEnum(value)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <Select value={statusFilter} onValueChange={applyFilter(setStatusFilter)}>
+              <SelectTrigger aria-label="Filter by status" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={OPEN_ONLY}>Open only</SelectItem>
+                <SelectItem value={ALL}>All statuses</SelectItem>
+                {TASK_STATUSES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {humanizeEnum(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-        <Select value={priority} onValueChange={applyFilter(setPriority)}>
-          <SelectTrigger aria-label="Filter by priority" className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Any priority</SelectItem>
-            {TASK_PRIORITIES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {humanizeEnum(value)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <Select value={priority} onValueChange={applyFilter(setPriority)}>
+              <SelectTrigger aria-label="Filter by priority" className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any priority</SelectItem>
+                {TASK_PRIORITIES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {humanizeEnum(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
       </div>
 
       {isError && (
@@ -204,7 +279,7 @@ export function MyTasksPage() {
 
       {isLoading && <TaskRowsSkeleton />}
 
-      {!isLoading && !isError && tasks.length === 0 && (
+      {view === 'list' && !isLoading && !isError && tasks.length === 0 && (
         <EmptyState
           icon={CircleCheckBig}
           title={scope === 'me' ? 'Nothing assigned to you' : 'No tasks match those filters'}
@@ -216,7 +291,17 @@ export function MyTasksPage() {
         />
       )}
 
-      {tasks.length > 0 && (
+      {(view === 'sections' || view === 'board') && !isLoading && !isError && (
+        <MyTasksSections
+          workspaceId={workspaceId}
+          tasks={tasks}
+          canEdit={hasAtLeastRole(role, WorkspaceRole.MEMBER)}
+          onOpen={setOpenTaskId}
+          layout={view === 'board' ? 'board' : 'list'}
+        />
+      )}
+
+      {view === 'list' && tasks.length > 0 && (
         <Card>
           <CardContent className="px-0 py-0">
             <ul className="divide-y">
@@ -228,7 +313,7 @@ export function MyTasksPage() {
         </Card>
       )}
 
-      {meta && meta.totalPages > 1 && (
+      {view === 'list' && meta && meta.totalPages > 1 && (
         <div className="flex items-center justify-between border-t pt-4">
           <p className="text-sm text-muted-foreground">
             Page {meta.page} of {meta.totalPages} · {meta.total} tasks

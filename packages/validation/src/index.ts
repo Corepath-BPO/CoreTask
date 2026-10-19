@@ -16,5 +16,7 @@ export * from './task.js';
 export * from './team.js';
 export * from './ticket.js';
 export * from './webhook.js';
+export * from './oauth.js';
+export * from './slack.js';
 export * from './work-item.js';
 export * from './workspace.js';

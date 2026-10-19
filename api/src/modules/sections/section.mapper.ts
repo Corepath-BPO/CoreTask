@@ -2,7 +2,8 @@ import type { Section } from '@coretask/types';
 import type { Prisma } from '@prisma/client';
 
 const SECTION_INCLUDE = {
-  _count: { select: { tasks: true } },
+  // Tasks at home in the section, and tasks linked into it from elsewhere.
+  _count: { select: { tasks: true, taskLinks: true } },
 } satisfies Prisma.SectionInclude;
 
 export const sectionInclude = SECTION_INCLUDE;
@@ -21,7 +22,7 @@ export function toSectionDto(section: SectionWithCount): Section {
     name: section.name,
     position: section.position,
     defaultStatusId: section.defaultStatusId,
-    taskCount: section._count.tasks,
+    taskCount: section._count.tasks + section._count.taskLinks,
     createdAt: section.createdAt.toISOString(),
     updatedAt: section.updatedAt.toISOString(),
   };
