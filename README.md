@@ -556,6 +556,8 @@ pnpm compose:validate
   beside a name when someone picks an assignee; My Tasks auto-sort by due date
 - Sync to calendar: a private iCalendar link for My Tasks or a project, which
   can be reset and follows its owner's access
+- Ticket rules: when a ticket is reported or changes status, check it and
+  triage it — status, priority, assignee, section, comments, e-mail, a task
 - Rules that add a task to another project as well, fill variables into the
   subtasks they create, and e-mail the people on a task
 - Goals: a tree of outcomes with status, owner, team and time period, and

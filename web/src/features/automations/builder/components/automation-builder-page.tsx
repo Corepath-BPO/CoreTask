@@ -1,4 +1,8 @@
-import { AutomationRuleStatus, type AutomationNodeType } from '@coretask/contracts';
+import {
+  AutomationRuleStatus,
+  type AutomationNodeType,
+  isTicketTrigger,
+} from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
@@ -486,6 +490,26 @@ export function AutomationBuilderPage({
     ? metadata?.sections.find((entry) => entry.id === watchedSectionId)?.name
     : undefined;
 
+  /*
+   * A ticket rule works on the ticket, a task rule on the task. Steps for the
+   * other kind stay in the list, greyed with the reason — this panel's habit —
+   * rather than vanishing when the trigger changes.
+   */
+  const subject = isTicketTrigger(triggerNode?.subtype) ? 'TICKET' : 'TASK';
+  const forSubject = (entries: readonly AutomationCatalogEntry[]): AutomationCatalogEntry[] =>
+    entries.map((entry) =>
+      (entry.subjects ?? ['TASK']).includes(subject) || !entry.available
+        ? entry
+        : {
+            ...entry,
+            available: false,
+            reason:
+              subject === 'TICKET'
+                ? 'A ticket rule cannot do this — it works on tasks.'
+                : 'For ticket rules. Choose a ticket trigger to use it.',
+          },
+    );
+
   const openActionPicker = (target: { parentId: string; arm: string | null; insert?: boolean }) => {
     setAnswering(null);
     setAddingAt(target);
@@ -494,7 +518,7 @@ export function AutomationBuilderPage({
       catalogue: 'actions',
       title: 'Do this…',
       description: 'Add an action that happens as a result of the rule.',
-      entries: metadata?.actions ?? [],
+      entries: forSubject(metadata?.actions ?? []),
     });
   };
 
@@ -538,7 +562,7 @@ export function AutomationBuilderPage({
       catalogue: 'conditions',
       title: alternative ? 'Otherwise if…' : 'Check if…',
       description: 'Choose what this branch checks.',
-      entries: metadata?.conditions ?? [],
+      entries: forSubject(metadata?.conditions ?? []),
     });
   };
 

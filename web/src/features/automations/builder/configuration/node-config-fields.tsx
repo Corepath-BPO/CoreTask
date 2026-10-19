@@ -2,6 +2,8 @@ import {
   AUTOMATION_VALUE_TOKEN_LABEL,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
   isDateTrigger,
   isTokenValue,
   operatorNeedsValue,
@@ -25,7 +27,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
@@ -180,6 +182,11 @@ function TriggerFields({
         onChange={onChange}
       />
     );
+  }
+
+  // Any change of a ticket's status, or a change to one status.
+  if (subtype === 'TICKET_STATUS_CHANGED') {
+    return <TicketStatusTriggerFields configuration={configuration} onChange={onChange} />;
   }
 
   // Which field to watch — or every field, which is what no fieldId stores and
@@ -676,6 +683,23 @@ function ActionFields({
 
     case 'MOVE_TO_SECTION':
       return picker('sectionId', 'Section', metadata?.sections, 'Choose a section');
+
+    // A ticket's own values, not the project's statuses and priorities.
+    case 'SET_TICKET_STATUS':
+      return picker(
+        'status',
+        'Ticket status',
+        TICKET_STATUSES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a status',
+      );
+
+    case 'SET_TICKET_PRIORITY':
+      return picker(
+        'priority',
+        'Ticket priority',
+        TICKET_PRIORITIES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a priority',
+      );
 
     case 'MOVE_TO_PROJECT':
       return (
@@ -1186,4 +1210,49 @@ function CustomFieldAction({
 /** A rating is a bounded whole number; the runner stores and compares it as one. */
 function isNumeric(type: string): boolean {
   return type === 'NUMBER' || type === 'RATING';
+}
+
+const ANY_STATUS = '__any__';
+
+/** "Ticket status changes": to any status, or to one — "when a ticket is resolved". */
+function TicketStatusTriggerFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const status =
+    typeof configuration['status'] === 'string' && configuration['status'] !== ''
+      ? configuration['status']
+      : ANY_STATUS;
+
+  return (
+    <Field
+      label="When the status changes to"
+      htmlFor="trigger-ticket-status"
+      hint="Any status fires on every change."
+    >
+      <Select
+        value={status}
+        onValueChange={(next) => {
+          // Radix answers a reset with an empty value; that is not a choice.
+          if (!next) return;
+          onChange(next === ANY_STATUS ? {} : { status: next });
+        }}
+      >
+        <SelectTrigger id="trigger-ticket-status" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <RadioItem value={ANY_STATUS}>Any status</RadioItem>
+          {TICKET_STATUSES.map((value) => (
+            <RadioItem key={value} value={value}>
+              {humanizeEnum(value)}
+            </RadioItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
 }

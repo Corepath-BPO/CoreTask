@@ -65,7 +65,15 @@ every row the engine can run is enabled.
   missed by more than an hour is skipped rather than fired late.
 - Task types and approvals are rule material too: _Task type is changed_,
   _Approval status is changed_, a check on each, and _Set task type_.
-- Still greyed, with reasons: AI steps, tickets as rule targets.
+- **Ticket rules:** _Ticket is reported_ and _Ticket status changes_ (to any
+  status, or to one) start rules that act on the ticket. They check its type,
+  priority, severity, status or assignee. They can set its status or priority,
+  assign or unassign it, move it to a section, set or clear its due date,
+  comment, notify, email its people, change its collaborators, or create a task
+  from it ("Fix {{task.name}}" names the ticket). The builder greys out the
+  steps that belong to the other kind of rule, and publishing refuses them.
+  Setting a ticket's status raises _Ticket status changes_ for the next rule.
+- Still greyed, with reasons: AI steps, a Delay step.
 
 ## Project templates and duplicates
 

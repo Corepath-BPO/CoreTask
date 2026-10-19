@@ -39,6 +39,11 @@ import {
   AutomationEmailRecipient,
   MAX_EMAIL_RECIPIENTS,
   emailRecipientsOf,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  isTicketTrigger,
+  ticketConditionHolds,
+  isTicketConditionField,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -68,6 +73,7 @@ import type { AutomationEvent } from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
+import { ticketLifecycle } from '../tickets/ticket-lifecycle';
 
 import { fieldChangeTriggers } from './task-field-triggers';
 
@@ -115,6 +121,20 @@ export interface AutomationRunResult {
  * loaded together so evaluation never reaches for the database mid-walk.
  */
 type EvaluableTask = Task & { customFieldValues?: TaskCustomFieldValue[]; facts?: TaskFacts };
+
+/**
+ * What a rule's words can name: the task — or ticket — it acted on. A ticket
+ * fills `task.name` with its title, so one set of variables serves both.
+ */
+interface TextSource {
+  title: string;
+  assigneeId: string | null;
+  dueDate: Date | null;
+  startDate?: Date | null;
+  createdById?: string | null;
+}
+
+type TicketRow = Prisma.TicketGetPayload<object>;
 
 /**
  * What a condition can ask about the task beyond its own columns — "has an
@@ -192,6 +212,18 @@ export class AutomationRunnerService {
    * next rule in a chain gets its turn.
    */
   async handle(event: AutomationEvent): Promise<AutomationRunResult> {
+    /*
+     * A ticket's event is for ticket rules, and a task's for task rules.
+     *
+     * Moving or re-prioritising a ticket on a board raises the task trigger
+     * of the same name with a ticket as its subject; a task rule has no ticket
+     * to act on, so those events are not for it, and a ticket rule never hears
+     * a task's.
+     */
+    if ((event.entityType === 'TICKET') !== isTicketTrigger(event.trigger)) {
+      return { executed: 0, skipped: 0, events: [], webhooks: [], emails: [] };
+    }
+
     /*
      * Depth is checked before anything is read.
      *
@@ -496,6 +528,12 @@ export class AutomationRunnerService {
       }
     }
 
+    // "Ticket status changes to…": left blank, any change.
+    if (event.trigger === AutomationTrigger.TICKET_STATUS_CHANGED) {
+      const wanted = (config as { status?: unknown } | null)?.status;
+      return typeof wanted !== 'string' || wanted === '' || event.after?.['status'] === wanted;
+    }
+
     // Matched on the id, never the name: the name is somebody's to rename.
     if (scope.fieldId && event.trigger === 'CUSTOM_FIELD_CHANGED') {
       return event.after?.['fieldId'] === scope.fieldId;
@@ -585,6 +623,11 @@ export class AutomationRunnerService {
       return this.runTaskless(rule, event, execution.id, started);
     }
 
+    // A ticket rule acts on the ticket. See `runTicketRule`.
+    if (event.entityType === 'TICKET') {
+      return this.runTicketRule(rule, event, execution.id, started);
+    }
+
     if (!context) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
         skippedReason: 'The task no longer exists.',
@@ -599,7 +642,7 @@ export class AutomationRunnerService {
     // Conditions are all-or-nothing: a rule whose conditions do not hold has
     // not failed, it simply does not apply. Recorded as SKIPPED with a reason
     // so the history distinguishes "did not match" from "went wrong".
-    const plan = this.plan(rule.nodes, asFound, event);
+    const plan = this.plan(rule.nodes, (node) => this.conditionHolds(node, asFound, event));
 
     if (plan.skippedBy) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
@@ -829,15 +872,14 @@ export class AutomationRunnerService {
    */
   private plan(
     nodes: AutomationNode[],
-    task: EvaluableTask,
-    event: AutomationEvent,
+    holds: (node: AutomationNode) => boolean,
   ): { actions: AutomationNode[]; skippedBy: string | null } {
     const isTree = nodes.some((node) => node.parentNodeId !== null);
 
     if (!isTree) {
       const unmet = nodes
         .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
-        .find((node) => !this.conditionHolds(node, task, event));
+        .find((node) => !holds(node));
 
       if (unmet) return { actions: [], skippedBy: unmet.subtype };
 
@@ -883,7 +925,7 @@ export class AutomationRunnerService {
 
           // A condition governs what follows it, not the whole rule. Its
           // siblings on another path are unaffected.
-          if (!this.conditionHolds(node, task, event)) {
+          if (!holds(node)) {
             skippedBy ??= node.subtype;
             continue;
           }
@@ -895,9 +937,9 @@ export class AutomationRunnerService {
         }
 
         if (node.nodeType === AutomationNodeType.BRANCH) {
-          const holds = this.conditionHolds(node, task, event);
+          const branchHolds = holds(node);
 
-          walk(node.id, holds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          walk(node.id, branchHolds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
           continue;
         }
 
@@ -2204,7 +2246,7 @@ export class AutomationRunnerService {
    */
   private async createTask(
     config: Record<string, unknown>,
-    source: EvaluableTask | null,
+    source: TextSource | null,
     rule: RunnableRule,
     event: AutomationEvent,
     at: Date,
@@ -2375,7 +2417,7 @@ export class AutomationRunnerService {
    * empty rather than the placeholder.
    */
   private async textValues(
-    task: EvaluableTask | null,
+    task: TextSource | null,
     rule: RunnableRule,
     event: AutomationEvent,
     at: Date,
@@ -2755,6 +2797,402 @@ export class AutomationRunnerService {
         finishedAt: new Date(),
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Ticket rules
+  // -------------------------------------------------------------------------
+
+  /**
+   * A rule set off by a ticket. The same plan, log and history as a task's,
+   * over the ticket: "Ticket is…" conditions, and the short list of actions a
+   * ticket takes (contracts' `TICKET_RULE_ACTIONS`). The validator refuses the
+   * rest at publish; anything that slips by fails here rather than guessing.
+   */
+  private async runTicketRule(
+    rule: RunnableRule,
+    event: AutomationEvent,
+    executionId: string,
+    started: number,
+  ): Promise<{
+    ran: boolean;
+    events: AutomationEvent[];
+    webhooks: RuleWebhookRequest[];
+    emails: RuleEmailRequest[];
+  }> {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: event.entityId, workspaceId: rule.workspaceId, archivedAt: null },
+    });
+    if (!ticket) {
+      await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
+        skippedReason: 'The ticket no longer exists.',
+      });
+      return { ran: false, events: [], webhooks: [], emails: [] };
+    }
+
+    // Judged on the ticket as the event found it.
+    const facts = {
+      type: ticket.type as string,
+      priority: ticket.priority as string,
+      severity: ticket.severity as string,
+      status: ticket.status as string,
+      assigneeId: ticket.assigneeId,
+    };
+    const plan = this.plan(rule.nodes, (node) => {
+      const config = (node.configuration ?? {}) as Record<string, unknown>;
+      return (
+        isFallbackBranch(node.configuration) ||
+        (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
+      );
+    });
+    if (plan.skippedBy) {
+      await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
+        skippedReason: `Condition not met: ${plan.skippedBy}.`,
+      });
+      await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
+      return { ran: false, events: [], webhooks: [], emails: [] };
+    }
+
+    const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
+    const live: TicketRow = { ...ticket };
+    let failures = 0;
+    const events: AutomationEvent[] = [];
+    const emails: RuleEmailRequest[] = [];
+
+    for (const node of actions) {
+      const outcome = await this.runTicketAction(node, live, rule, event, new Date(started)).catch(
+        (error: unknown): ActionOutcome => ({
+          succeeded: false,
+          message: error instanceof Error ? error.message : 'Action failed.',
+        }),
+      );
+      if (!outcome.succeeded) failures += 1;
+      events.push(...(outcome.events ?? []));
+      emails.push(...(outcome.emails ?? []));
+
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: outcome.succeeded,
+          message: outcome.message?.slice(0, 500) ?? null,
+          beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
+          afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    const status =
+      failures === 0
+        ? AutomationExecutionStatus.COMPLETED
+        : failures === actions.length
+          ? AutomationExecutionStatus.FAILED
+          : AutomationExecutionStatus.PARTIALLY_FAILED;
+    await this.finish(executionId, status, started, {});
+    await this.bumpRule(rule.id, status, failures > 0);
+
+    if (actions.length > failures) {
+      // The ticket's history says a rule did it, as a task's does.
+      await this.prisma.activityLog.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          actorId: event.actorId ?? null,
+          action: ActivityAction.UPDATED,
+          entity: ActivityEntity.TICKET,
+          entityId: ticket.id,
+          projectId: ticket.projectId,
+          summary: `Automation "${rule.name}" updated ${ticket.key}`,
+          metadata: { ruleId: rule.id, executionId, actions: actions.length, failures },
+        },
+      });
+      for (const projectId of new Set([event.projectId, live.projectId ?? event.projectId])) {
+        await this.relay.toProject(projectId, ServerEvent.WORK_ITEM_UPDATED, {
+          workspaceId: rule.workspaceId,
+          projectId,
+          occurredAt: new Date().toISOString(),
+          source: 'automation',
+        });
+      }
+    }
+
+    return { ran: true, events, webhooks: [], emails };
+  }
+
+  /** One action on a ticket. `ticket` is the live row, kept current across actions. */
+  private async runTicketAction(
+    node: AutomationNode,
+    ticket: TicketRow,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    at: Date,
+  ): Promise<ActionOutcome> {
+    const config = (node.configuration ?? {}) as Record<string, unknown>;
+    const write = async (data: Prisma.TicketUncheckedUpdateInput) => {
+      const updated = await this.prisma.ticket.update({ where: { id: ticket.id }, data });
+      Object.assign(ticket, updated);
+    };
+    const source: TextSource = {
+      title: `${ticket.key} ${ticket.title}`,
+      assigneeId: ticket.assigneeId,
+      dueDate: ticket.dueDate,
+      createdById: ticket.reporterId,
+    };
+    const link = `/tickets?ticket=${ticket.key}`;
+
+    switch (node.subtype) {
+      case AutomationAction.SET_TICKET_STATUS: {
+        const status = String(config['status'] ?? '');
+        if (!(TICKET_STATUSES as readonly string[]).includes(status)) {
+          return { succeeded: false, message: 'Choose a ticket status.' };
+        }
+        const before = ticket.status as string;
+        if (before === status) {
+          return { succeeded: true, message: 'The ticket already has that status.' };
+        }
+        await write({
+          status: status as TicketRow['status'],
+          ...ticketLifecycle(status, ticket.resolvedAt, ticket.closedAt, at),
+        });
+        // Raised for the next rule, as a person's change of status is.
+        return {
+          succeeded: true,
+          before,
+          after: status,
+          events: [
+            this.followTicket(
+              rule,
+              event,
+              AutomationTrigger.TICKET_STATUS_CHANGED,
+              ticket.id,
+              { status: before },
+              { status },
+            ),
+          ],
+        };
+      }
+
+      case AutomationAction.SET_TICKET_PRIORITY: {
+        const priority = String(config['priority'] ?? '');
+        if (!(TICKET_PRIORITIES as readonly string[]).includes(priority)) {
+          return { succeeded: false, message: 'Choose a ticket priority.' };
+        }
+        const before = ticket.priority as string;
+        if (before !== priority) await write({ priority: priority as TicketRow['priority'] });
+        return { succeeded: true, before, after: priority };
+      }
+
+      case AutomationAction.ASSIGN_USER: {
+        const userId = String(config['userId'] ?? config['assigneeId'] ?? '');
+        const member = await this.prisma.workspaceMember.findFirst({
+          where: { workspaceId: rule.workspaceId, userId },
+          select: { id: true },
+        });
+        if (!member) {
+          return { succeeded: false, message: 'That person is no longer in this workspace.' };
+        }
+        const before = ticket.assigneeId;
+        await write({ assigneeId: userId });
+        // An assignee follows what they are given, as on a task.
+        await this.prisma.follower.createMany({
+          data: [{ workspaceId: rule.workspaceId, userId, taskId: null, ticketId: ticket.id }],
+          skipDuplicates: true,
+        });
+        return { succeeded: true, before, after: userId };
+      }
+
+      case AutomationAction.UNASSIGN_USER: {
+        const before = ticket.assigneeId;
+        await write({ assigneeId: null });
+        return { succeeded: true, before, after: null };
+      }
+
+      case AutomationAction.MOVE_TO_SECTION: {
+        const sectionId = String(config['sectionId'] ?? '');
+        const section = await this.prisma.section.findFirst({
+          where: { id: sectionId, projectId: rule.projectId },
+          select: { id: true },
+        });
+        if (!section) return { succeeded: false, message: 'That section is not in this project.' };
+        const before = ticket.sectionId;
+        if (before !== sectionId) {
+          // Last in its new column, as a card dragged there lands.
+          const last = await this.prisma.ticket.findFirst({
+            where: { sectionId, archivedAt: null },
+            orderBy: { position: 'desc' },
+            select: { position: true },
+          });
+          await write({ sectionId, position: (last?.position ?? 0) + POSITION_STEP });
+        }
+        return { succeeded: true, before, after: sectionId };
+      }
+
+      case AutomationAction.SET_DUE_DATE: {
+        const days = Number(config['daysFromNow'] ?? 0);
+        const due = new Date(at);
+        due.setUTCDate(due.getUTCDate() + days);
+        const dueDate = toCalendarDate(due);
+        const before = ticket.dueDate?.toISOString() ?? null;
+        await write({ dueDate });
+        return { succeeded: true, before, after: dueDate.toISOString() };
+      }
+
+      case AutomationAction.CLEAR_DUE_DATE: {
+        const before = ticket.dueDate?.toISOString() ?? null;
+        await write({ dueDate: null });
+        return { succeeded: true, before, after: null };
+      }
+
+      case AutomationAction.ADD_COMMENT: {
+        const body = renderAutomationText(
+          String(config['body'] ?? ''),
+          await this.textValues(source, rule, event, at),
+        ).trim();
+        if (!body) return { succeeded: false, message: 'The comment is empty.' };
+        const authorId =
+          event.actorId ?? ticket.reporterId ?? rule.createdById ?? (await this.ownerOf(rule));
+        if (!authorId) return { succeeded: false, message: 'Nobody to write the comment as.' };
+        await this.prisma.comment.create({
+          data: { workspaceId: rule.workspaceId, authorId, body, ticketId: ticket.id },
+        });
+        return { succeeded: true, after: body.slice(0, 100) };
+      }
+
+      case AutomationAction.SEND_IN_APP_NOTIFICATION: {
+        const userId = String(config['userId'] ?? ticket.assigneeId ?? '');
+        if (!userId) return { succeeded: false, message: 'Nobody to notify.' };
+        await this.prisma.notification.create({
+          data: {
+            userId,
+            workspaceId: rule.workspaceId,
+            type: NotificationType.TICKET_UPDATED,
+            title: String(config['title'] ?? `Automation updated ${ticket.key}: ${ticket.title}`),
+            body: config['body'] ? String(config['body']) : null,
+            entity: 'TICKET',
+            entityId: ticket.id,
+            actionUrl: link,
+          },
+        });
+        return { succeeded: true, after: userId };
+      }
+
+      case AutomationAction.SEND_EMAIL: {
+        const values = await this.textValues(source, rule, event, at);
+        const subject = renderAutomationText(String(config['subject'] ?? ''), values)
+          .trim()
+          .slice(0, AUTOMATION_EMAIL_SUBJECT_MAX);
+        if (!subject) return { succeeded: false, message: 'The email has no subject.' };
+        const body = renderAutomationText(String(config['body'] ?? ''), values).trim();
+        const who = emailRecipientsOf(config);
+        if (who.length === 0) return { succeeded: false, message: 'Nobody is chosen to email.' };
+
+        // The ticket's people: whoever it is assigned to, its followers, and
+        // whoever reported it.
+        const ids = new Set<string>();
+        if (who.includes(AutomationEmailRecipient.ASSIGNEE) && ticket.assigneeId) {
+          ids.add(ticket.assigneeId);
+        }
+        if (who.includes(AutomationEmailRecipient.CREATOR) && ticket.reporterId) {
+          ids.add(ticket.reporterId);
+        }
+        if (who.includes(AutomationEmailRecipient.COLLABORATORS)) {
+          const followers = await this.prisma.follower.findMany({
+            where: { ticketId: ticket.id },
+            select: { userId: true },
+          });
+          for (const follower of followers) ids.add(follower.userId);
+        }
+        const members = await this.prisma.workspaceMember.findMany({
+          where: { workspaceId: rule.workspaceId, userId: { in: [...ids] } },
+          select: { user: { select: { email: true } } },
+          take: MAX_EMAIL_RECIPIENTS,
+        });
+        if (members.length === 0) {
+          return {
+            succeeded: true,
+            message: 'Nobody to email: the ticket has none of those people.',
+          };
+        }
+        return {
+          succeeded: true,
+          message: `Queued an email to ${members.length} ${members.length === 1 ? 'person' : 'people'}`,
+          after: { recipients: members.length },
+          emails: members.map((member) => ({
+            to: member.user.email,
+            subject,
+            body,
+            taskId: ticket.id,
+            taskTitle: `${ticket.key} ${ticket.title}`,
+            path: link,
+            ruleName: rule.name,
+          })),
+        };
+      }
+
+      case AutomationAction.ADD_REMOVE_COLLABORATORS: {
+        const people = (key: string): string[] =>
+          Array.isArray(config[key])
+            ? [
+                ...new Set(
+                  (config[key] as unknown[]).filter(
+                    (value): value is string => typeof value === 'string' && value !== '',
+                  ),
+                ),
+              ]
+            : [];
+        const add = people('add');
+        const remove = people('remove').filter((id) => !add.includes(id));
+        if (add.length === 0 && remove.length === 0) {
+          return { succeeded: false, message: 'Nobody was chosen to add or remove.' };
+        }
+        const members = add.length
+          ? await this.prisma.workspaceMember.findMany({
+              where: { workspaceId: rule.workspaceId, userId: { in: add } },
+              select: { userId: true },
+            })
+          : [];
+        if (members.length) {
+          await this.prisma.follower.createMany({
+            data: members.map((member) => ({
+              workspaceId: rule.workspaceId,
+              userId: member.userId,
+              taskId: null,
+              ticketId: ticket.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+        if (remove.length) {
+          await this.prisma.follower.deleteMany({
+            where: { ticketId: ticket.id, userId: { in: remove } },
+          });
+        }
+        return {
+          succeeded: true,
+          after: { added: members.map((member) => member.userId), removed: remove },
+        };
+      }
+
+      // "Investigate {{task.name}}": a task in this project, named from the ticket.
+      case AutomationAction.CREATE_TASK:
+        return this.createTask(config, source, rule, event, at);
+
+      default:
+        return { succeeded: false, message: 'A ticket rule cannot do this — it works on tasks.' };
+    }
+  }
+
+  /** A follow-up event about a ticket, for the next rule in the chain. */
+  private followTicket(
+    rule: { id: string; workspaceId: string },
+    event: AutomationEvent,
+    trigger: AutomationTrigger,
+    entityId: string,
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+  ): AutomationEvent {
+    return { ...this.follow(rule, event, trigger, entityId, before, after), entityType: 'TICKET' };
   }
 }
 

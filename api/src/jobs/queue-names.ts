@@ -106,6 +106,8 @@ export interface RuleEmailRequest {
   body: string;
   taskId: string;
   taskTitle: string;
+  /** Where the link goes, when it is not the task — a ticket's page. */
+  path?: string;
   ruleName: string;
 }
 

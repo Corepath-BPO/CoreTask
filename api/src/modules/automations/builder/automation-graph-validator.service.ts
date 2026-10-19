@@ -24,6 +24,13 @@ import {
   unknownVariables,
   TASK_KINDS,
   emailRecipientsOf,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  actionFitsTrigger,
+  isTicketTrigger,
+  ticketConditionProblem,
+  TICKET_ONLY_ACTIONS,
+  isTicketConditionField,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -89,6 +96,15 @@ type StructuralNode = Parameters<typeof validateGraphStructure>[0][number];
  * project. A browser cannot check any of it, and a rule that passes the form
  * and points at a deleted section is a rule that silently never fires.
  */
+/** Steps whose status and priority are a ticket's own values, not project definitions. */
+function ticketOwned(node: { subtype: string; configuration: Record<string, unknown> }): boolean {
+  return (
+    TICKET_ONLY_ACTIONS.includes(node.subtype) ||
+    isTicketConditionField(node.configuration['field']) ||
+    isTicketTrigger(node.subtype)
+  );
+}
+
 @Injectable()
 export class AutomationGraphValidatorService {
   constructor(
@@ -109,6 +125,7 @@ export class AutomationGraphValidatorService {
     const issues: AutomationGraphIssue[] = [
       ...validateGraphStructure(graph, name),
       ...this.checkSubtypes(graph),
+      ...this.checkSubjects(graph),
       ...this.checkSettings(graph),
       ...(await this.checkReferences(projectId, workspaceId, graph)),
       ...this.checkLoopRisk(graph),
@@ -118,6 +135,73 @@ export class AutomationGraphValidatorService {
       publishable: !issues.some((issue) => issue.level === GraphIssueLevel.ERROR),
       issues,
     };
+  }
+
+  /**
+   * A ticket rule works on the ticket, and a task rule on the task.
+   *
+   * A ticket has no subtasks, fields or project status, so a ticket rule may
+   * use only the actions in `TICKET_RULE_ACTIONS` and check the ticket with
+   * "Ticket is…"; the ticket's own actions and condition mean nothing to a
+   * task rule. Each step's settings are checked here too.
+   */
+  private checkSubjects(nodes: readonly StructuralNode[]): AutomationGraphIssue[] {
+    const trigger = nodes.find((node) => node.type === AutomationNodeType.TRIGGER);
+    if (!trigger) return [];
+    const ticketRule = isTicketTrigger(trigger.subtype);
+    const issues: AutomationGraphIssue[] = [];
+    const error = (nodeId: string, path: string | null, message: string) =>
+      issues.push({ level: GraphIssueLevel.ERROR, nodeId, path, message });
+
+    const wanted = trigger.configuration['status'];
+    if (
+      trigger.subtype === AutomationTrigger.TICKET_STATUS_CHANGED &&
+      wanted !== undefined &&
+      wanted !== null &&
+      wanted !== '' &&
+      !(TICKET_STATUSES as readonly unknown[]).includes(wanted)
+    ) {
+      error(trigger.id, 'status', 'Choose a ticket status, or leave it blank for any change.');
+    }
+
+    for (const node of nodes) {
+      const config = node.configuration;
+      if (node.type === AutomationNodeType.ACTION) {
+        if (!actionFitsTrigger(node.subtype, trigger.subtype)) {
+          error(
+            node.id,
+            'subtype',
+            ticketRule
+              ? 'A ticket rule cannot do this — it works on tasks.'
+              : 'This changes a ticket. Choose a ticket trigger to use it.',
+          );
+        }
+        if (node.subtype === AutomationAction.SET_TICKET_STATUS) {
+          if (!(TICKET_STATUSES as readonly unknown[]).includes(config['status'])) {
+            error(node.id, 'status', 'Choose the status to set.');
+          }
+        }
+        if (node.subtype === AutomationAction.SET_TICKET_PRIORITY) {
+          if (!(TICKET_PRIORITIES as readonly unknown[]).includes(config['priority'])) {
+            error(node.id, 'priority', 'Choose the priority to set.');
+          }
+        }
+      }
+
+      const checks =
+        node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH;
+      if (!checks || isFallbackBranch(config)) continue;
+      const aboutTicket = isTicketConditionField(config['field']);
+      if (ticketRule && !aboutTicket) {
+        error(node.id, 'field', 'A ticket rule checks the ticket’s own fields.');
+      } else if (!ticketRule && aboutTicket) {
+        error(node.id, 'field', 'This checks a ticket, and this rule is about tasks.');
+      } else if (aboutTicket) {
+        const problem = ticketConditionProblem(config);
+        if (problem) error(node.id, 'field', problem);
+      }
+    }
+    return issues;
   }
 
   /** A trigger or action this engine has no code for cannot run, whatever it says. */
@@ -445,10 +529,15 @@ export class AutomationGraphValidatorService {
        * A legacy enum name is not a definition id and has nothing to look up,
        * so it is skipped rather than reported as a missing definition.
        */
-      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      // A ticket's status and priority are its own values, not project rows.
+      const statusId = ticketOwned(node)
+        ? null
+        : read(config['status'] ?? config['statusDefinitionId']);
       if (statusId && !(statusId in TaskStatus)) statusIds.add(statusId);
 
-      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      const priorityId = ticketOwned(node)
+        ? null
+        : read(config['priority'] ?? config['priorityDefinitionId']);
       if (priorityId && !(priorityId in TaskPriority)) priorityIds.add(priorityId);
 
       const fieldId = read(config['fieldId'] ?? config['customFieldId']);
@@ -626,7 +715,9 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const statusId = read(config['status'] ?? config['statusDefinitionId']);
+      const statusId = ticketOwned(node)
+        ? null
+        : read(config['status'] ?? config['statusDefinitionId']);
       if (statusId && !(statusId in TaskStatus) && !liveStatuses.has(statusId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
@@ -636,7 +727,9 @@ export class AutomationGraphValidatorService {
         });
       }
 
-      const priorityId = read(config['priority'] ?? config['priorityDefinitionId']);
+      const priorityId = ticketOwned(node)
+        ? null
+        : read(config['priority'] ?? config['priorityDefinitionId']);
       if (priorityId && !(priorityId in TaskPriority) && !livePriorities.has(priorityId)) {
         issues.push({
           level: GraphIssueLevel.ERROR,
@@ -742,7 +835,11 @@ export class AutomationGraphValidatorService {
        * have one — so a rule with an "otherwise" would be refused for being
        * exactly what somebody built.
        */
-      if (node.type === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
+      if (
+        node.type === AutomationNodeType.CONDITION &&
+        !isFallbackBranch(config) &&
+        !isTicketConditionField(config['field'])
+      ) {
         /*
          * A generated key's kind comes from the field's own type — and from
          * the *live* field, so a condition about a deleted one falls to

@@ -91,6 +91,18 @@ describe('what a node says', () => {
     );
   });
 
+  it('reads the ticket steps in the ticket’s words', () => {
+    expect(
+      summarise(
+        node({ subtype: 'SET_TICKET_STATUS', configuration: { status: 'IN_PROGRESS' } }),
+        metadata,
+      ),
+    ).toBe('Set ticket status to In progress');
+    expect(summarise(node({ subtype: 'SET_TICKET_PRIORITY', configuration: {} }), metadata)).toBe(
+      'Set ticket priority — choose one',
+    );
+  });
+
   it('reads an email step as who it goes to', () => {
     const email = (configuration: Record<string, unknown>) =>
       summarise(node({ subtype: 'SEND_EMAIL', configuration }), metadata);
