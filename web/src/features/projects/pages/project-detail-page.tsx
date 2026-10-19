@@ -15,6 +15,7 @@ import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { ApiError } from '@/lib/api/api-error';
 import { useCurrentUser } from '@/stores/auth.store';
 import {
+  useProjectStatusDraft,
   useProjectStatusUpdate,
   useRequestProjectStatus,
   type ProjectStatusUpdateValue,
@@ -70,7 +71,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
   /** Non-null while the status composer is open — the same one portfolios use. */
   const [composeStatus, setComposeStatus] = useState<ProjectStatusUpdateValue | null>(null);
+  /** Whether the open composer starts from the AI draft rather than blank. */
+  const [composeFromDraft, setComposeFromDraft] = useState(false);
   const statusUpdate = useProjectStatusUpdate(projectId);
+  // Only someone who may post an update is shown the draft a rule wrote.
+  const { data: statusDraft } = useProjectStatusDraft(workspaceId, projectId, access.canEdit);
 
   /*
    * The Customize panel lives in the URL like the open task does: it survives
@@ -169,7 +174,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ? setShareOpen(true)
             : leaveProject.mutate({ projectId: project.id, name: project.name })
         }
-        onSetStatus={setComposeStatus}
+        onSetStatus={(status) => {
+          setComposeFromDraft(false);
+          setComposeStatus(status);
+        }}
+        onReviewDraft={
+          statusDraft
+            ? () => {
+                setComposeFromDraft(true);
+                setComposeStatus(statusDraft.status.toLowerCase() as ProjectStatusUpdateValue);
+              }
+            : undefined
+        }
         onCustomize={openCustomize}
       />
 
@@ -244,6 +260,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         <StatusUpdateComposer
           project={project}
           initialStatus={composeStatus}
+          draft={composeFromDraft ? statusDraft : null}
           onClose={() => setComposeStatus(null)}
         />
       )}

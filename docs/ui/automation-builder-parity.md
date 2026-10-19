@@ -22,10 +22,13 @@ information in the same places, with CoreTask's own tokens, type and spacing.
 
 ### What "partial" means for each
 
-**01.** The header has Back, an inline rule-name input, a status badge, a
-settings toggle, Save draft and Publish. It does **not** show the project name,
-and there is no autosave indicator — saving is an explicit button, not
-debounced. The junction dot on the trigger's outgoing connector and the dashed
+**01.** The header has Back, the project name, an inline rule-name input, a
+status badge, a save indicator, a settings toggle and Publish. A rule that is
+not running saves itself 1.5 seconds after the last edit ("Unsaved changes",
+"Saving…", "Saved"); its Save button only appears when a save failed. An
+active rule keeps an explicit **Save changes**, because saving it changes what
+runs at once — see [versioning](../architecture/automation-versioning.md). A
+brand-new rule's first **Save draft** is explicit, since that creates it. The junction dot on the trigger's outgoing connector and the dashed
 drop to an `+ Add branch` pill do not exist; the equivalent control is an
 ellipsis on the edge that opens a small menu, with a dashed vertical rule
 beneath it.
@@ -209,7 +212,6 @@ noticing the section was deleted.
 - The drag handle and branch reordering (reference 13).
 - Tabs in the catalogue, and the `External actions` tab.
 - Per-custom-field entries in either catalogue.
-- The project name in the header, and the autosave indicator.
 - Any rendering of the structured branch model — the canvas still projects the
   node tree. See [the structured rule model](../architecture/automation-rule-tree.md).
 

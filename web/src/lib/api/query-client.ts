@@ -72,6 +72,8 @@ export const queryKeys = {
     /** Under the project prefix on purpose: one invalidation reaches the roster too. */
     members: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
+    invitations: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'invitations', projectId] as const,
     note: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'note', projectId] as const,
     resources: (workspaceId: string, projectId: string) =>
@@ -224,6 +226,8 @@ export const queryKeys = {
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'messages'] as const,
     files: (workspaceId: string, projectId: string) =>
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'files'] as const,
+    statusDraft: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'status-draft'] as const,
   },
   search: {
     /** Term and kinds are part of the key — each is a different answer. */

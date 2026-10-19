@@ -43,6 +43,7 @@ export const taskDetailInclude = {
   createdBy: { select: USER_SELECT },
   project: { select: { id: true, name: true, key: true, color: true } },
   section: { select: { id: true, name: true } },
+  parentTicket: { select: { id: true, key: true, title: true } },
   duplicateOf: { select: { id: true, title: true } },
   // Multi-homing: the other projects it is in, each with its section there.
   projectLinks: {
@@ -71,6 +72,7 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
     projectId: task.projectId,
     sectionId: task.sectionId,
     parentTaskId: task.parentTaskId,
+    parentTicketId: task.parentTicketId,
     title: task.title,
     description: task.description,
     status: task.status,
@@ -119,5 +121,6 @@ export function toTaskDetailDto(
       .map((link) => ({ project: link.project, section: link.section })),
     createdBy: task.createdBy,
     duplicateOf: task.duplicateOf,
+    parentTicket: task.parentTicket,
   };
 }

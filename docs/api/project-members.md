@@ -63,6 +63,8 @@ Base: `/api/v1/workspaces/:workspaceId/projects/:projectId`
 | `DELETE` | `/members/:userId` | remove someone, or yourself                                 | self, project admin, workspace admin |
 | `POST`   | `/join`            | join a public project as EDITOR (a GUEST joins as VIEWER)   | anyone; idempotent                   |
 | `POST`   | `/leave`           | remove yourself                                             | anyone; idempotent                   |
+| `GET`    | `/invitations`     | invitations still waiting that land someone here            | project admin, or workspace admin    |
+| `POST`   | `/invitations`     | invite someone new by e-mail `{ email, role }`              | workspace admin who can manage it    |
 
 Rules the API enforces:
 
@@ -77,6 +79,17 @@ Rules the API enforces:
   their project memberships in the same transaction.
 - `join` on a private project is a `404` for a non-member — they cannot see it
   to join it — and adds a workspace admin as an editor.
+- `POST /invitations` sends a workspace invitation that also names this project
+  and the role to hold in it. Only a workspace admin may send one (`403`
+  otherwise), as on the Members page: a guest still reads every public project,
+  so a project admin who is not one could otherwise widen the workspace. The
+  person joins the workspace as a MEMBER, or a GUEST when the project role is
+  VIEWER; an address that already holds a live invitation keeps its team and
+  any higher role. Someone already in the workspace is `409` — add them
+  instead. Accepting joins the workspace and the project in one transaction
+  (the project is skipped if it was deleted meanwhile) and answers with its
+  `projectId`, which the web app opens. Revoke one with the workspace's
+  `DELETE /invitations/:id`.
 
 ### `ProjectMember`
 

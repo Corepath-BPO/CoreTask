@@ -14,6 +14,7 @@ const baseTask: Task = {
   projectId: 'p',
   sectionId: 's',
   parentTaskId: null,
+  parentTicketId: null,
   title: 'Wire the dashboard summary endpoints',
   description: null,
   status: TaskStatus.IN_PROGRESS,

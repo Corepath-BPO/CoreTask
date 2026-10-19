@@ -1,6 +1,9 @@
 import { AlertCircle, CheckCircle2, Clock3, History, MinusCircle } from 'lucide-react';
 
+import { useMemo } from 'react';
+
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +29,22 @@ export function AutomationRunHistoryDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const executions = useRuleExecutions(workspaceId, projectId, rule?.id ?? null);
+  /*
+   * Pages are numbered, so a run that lands while older pages load shifts
+   * the rest down by one and the next page repeats a row. Keeping the first
+   * copy of each run makes that invisible.
+   */
+  const runs = useMemo(() => {
+    const seen = new Set<string>();
+    return (executions.data?.pages ?? [])
+      .flatMap((page) => page.items)
+      .filter((run) => {
+        if (seen.has(run.id)) return false;
+        seen.add(run.id);
+        return true;
+      });
+  }, [executions.data]);
+  const total = executions.data?.pages[0]?.meta.total ?? 0;
 
   return (
     <Dialog open={rule !== null} onOpenChange={onOpenChange}>
@@ -36,7 +55,10 @@ export function AutomationRunHistoryDialog({
             Run history
           </DialogTitle>
           <DialogDescription>
-            {rule?.name ?? 'Automation'} · newest executions first
+            {rule?.name ?? 'Automation'} ·{' '}
+            {total > runs.length
+              ? `the newest ${runs.length} of ${total} runs`
+              : 'newest executions first'}
           </DialogDescription>
         </DialogHeader>
 
@@ -51,7 +73,7 @@ export function AutomationRunHistoryDialog({
             <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
               Run history could not be loaded. Close this panel and try again.
             </div>
-          ) : (executions.data ?? []).length === 0 ? (
+          ) : runs.length === 0 ? (
             <div className="flex min-h-40 flex-col items-center justify-center text-center">
               <Clock3 className="mb-3 size-6 text-muted-foreground" aria-hidden="true" />
               <p className="text-sm font-semibold">This rule has not run yet</p>
@@ -62,7 +84,7 @@ export function AutomationRunHistoryDialog({
             </div>
           ) : (
             <ol className="space-y-3">
-              {(executions.data ?? []).map((execution) => {
+              {runs.map((execution) => {
                 const tone = executionTone(execution.status);
                 const StatusIcon = tone.icon;
 
@@ -117,6 +139,18 @@ export function AutomationRunHistoryDialog({
                 );
               })}
             </ol>
+          )}
+          {executions.hasNextPage && (
+            <div className="flex justify-center pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                loading={executions.isFetchingNextPage}
+                onClick={() => void executions.fetchNextPage()}
+              >
+                Show older runs
+              </Button>
+            </div>
           )}
         </div>
       </DialogContent>

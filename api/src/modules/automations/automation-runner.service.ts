@@ -17,9 +17,11 @@ import {
   isTokenValue,
   NotificationType,
   POSITION_STEP,
+  PROJECT_STATUS_LABEL,
   webhookExtraFields,
   ServerEvent,
   isCalendarDate,
+  aiDecidesSubtasks,
   subtaskEntries,
   toFilterOperator,
   isDirectOperator,
@@ -803,9 +805,10 @@ export class AutomationRunnerService {
   /**
    * A rule run with no task at all — a schedule whose scope is "no tasks".
    *
-   * Only "Create a task" has anything to act on; the validator refuses the
-   * rest, and refuses conditions, so a rule reaching here holds what it can
-   * run. Anything else is logged as a failure rather than skipped quietly.
+   * Only "Create a task" and "Draft an update with AI…" have anything to act
+   * on — a new task, and the project; the validator refuses the rest, and
+   * refuses conditions, so a rule reaching here holds what it can run.
+   * Anything else is logged as a failure rather than skipped quietly.
    */
   private async runTaskless(
     rule: RunnableRule,
@@ -826,22 +829,20 @@ export class AutomationRunnerService {
     const events: AutomationEvent[] = [];
 
     for (const node of actions) {
+      const config = (node.configuration ?? {}) as Record<string, unknown>;
+      const failed = (error: unknown): ActionOutcome => ({
+        succeeded: false,
+        message: error instanceof Error ? error.message : 'Action failed.',
+      });
       const outcome: ActionOutcome =
         node.subtype === AutomationAction.CREATE_TASK
-          ? await this.createTask(
-              (node.configuration ?? {}) as Record<string, unknown>,
-              null,
-              rule,
-              event,
-              new Date(started),
-            ).catch((error: unknown): ActionOutcome => ({
-              succeeded: false,
-              message: error instanceof Error ? error.message : 'Action failed.',
-            }))
-          : {
-              succeeded: false,
-              message: 'This step needs a task, and this run had none in scope.',
-            };
+          ? await this.createTask(config, null, rule, event, new Date(started)).catch(failed)
+          : node.subtype === AutomationAction.AI_DRAFT_UPDATE
+            ? await this.draftStatusUpdate(rule, config, new Date(started)).catch(failed)
+            : {
+                succeeded: false,
+                message: 'This step needs a task, and this run had none in scope.',
+              };
 
       if (!outcome.succeeded) failures += 1;
       events.push(...(outcome.events ?? []));
@@ -1362,6 +1363,10 @@ export class AutomationRunnerService {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
     switch (node.subtype) {
+      // A project's update, not the task's: the task only set the rule off.
+      case AutomationAction.AI_DRAFT_UPDATE:
+        return this.draftStatusUpdate(rule, config, at);
+
       /*
        * "Use AI…": the model chooses changes from what the step allows, and
        * each runs here as the action it stands for — the same checks, history
@@ -1656,6 +1661,7 @@ export class AutomationRunnerService {
             workspaceId: rule.workspaceId,
             archivedAt: null,
             parentTaskId: null,
+            parentTicketId: null,
             ...(sectionId ? { sectionId } : { sectionId: null, projectId: project.id }),
           },
           orderBy: { position: 'asc' },
@@ -1876,12 +1882,40 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.CREATE_SUBTASK: {
-        const entries = subtaskEntries(config);
-        if (entries.length === 0) {
+        const listed = subtaskEntries(config);
+        if (listed.length === 0) {
           return { succeeded: false, message: 'The subtasks have no titles.' };
         }
         // Titles may name the task the rule acted on — "Inspect {{task.name}}".
         const values = await this.textValues(task, rule, event, at);
+
+        /*
+         * "Let AI decide the number of subtasks to create": the model keeps
+         * the rows this task needs, by number, and the rest of this case runs
+         * on those alone. It reads the titles as they will be written.
+         */
+        let entries = listed;
+        let aiNote = '';
+        if (aiDecidesSubtasks(config)) {
+          if (!this.ai?.available) {
+            return { succeeded: false, message: 'AI isn’t set up on this server.' };
+          }
+          const choice = await this.ai.chooseSubtasks(
+            task.id,
+            rule,
+            listed.map((entry) => renderAutomationText(entry.title, values).trim() || entry.title),
+            at,
+          );
+          entries = choice.keep.flatMap((index) => {
+            const entry = listed[index];
+            return entry ? [entry] : [];
+          });
+          aiNote = `AI chose ${entries.length} of ${listed.length} subtasks.${choice.reason ? ` ${choice.reason}` : ''}`;
+
+          if (entries.length === 0) {
+            return { succeeded: true, message: aiNote };
+          }
+        }
 
         /*
          * Membership is re-checked at execution time, as ASSIGN_USER's is —
@@ -1977,14 +2011,17 @@ export class AutomationRunnerService {
           );
         }
 
+        const notes = [
+          aiNote,
+          departed > 0
+            ? `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace.`
+            : '',
+        ].filter(Boolean);
+
         return {
           succeeded: true,
           after: created.join(', '),
-          ...(departed > 0
-            ? {
-                message: `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace.`,
-              }
-            : {}),
+          ...(notes.length > 0 ? { message: notes.join(' ') } : {}),
           events,
         };
       }
@@ -2464,6 +2501,84 @@ export class AutomationRunnerService {
    * Credited to whoever set the rule off, then the rule's author, then the
    * workspace owner: a task needs a creator, and a rule is not a person.
    */
+  /**
+   * "Draft an update with AI…": the model drafts the project's status update
+   * and it waits as a draft — replacing any earlier one — for a person to
+   * review and post. The rule never posts it: a status is a person's word on
+   * the project, and members are told when one is posted.
+   *
+   * Whoever would be asked for an update hears there is a draft: the
+   * project's owner, else whoever posted the last update, else the rule's
+   * author — each only while still in the workspace.
+   */
+  private async draftStatusUpdate(
+    rule: RunnableRule,
+    config: Record<string, unknown>,
+    at: Date,
+  ): Promise<ActionOutcome> {
+    if (!this.ai?.available) {
+      return { succeeded: false, message: 'AI isn’t set up on this server.' };
+    }
+
+    const instructions = typeof config['instructions'] === 'string' ? config['instructions'] : '';
+    const draft = await this.ai.draftStatusUpdate(rule, instructions, at);
+    const fields = {
+      ruleId: rule.id,
+      status: draft.status,
+      title: draft.title,
+      summary: draft.summary || null,
+      nextSteps: draft.nextSteps || null,
+    };
+    const row = await this.prisma.projectStatusDraft.upsert({
+      where: { projectId: rule.projectId },
+      create: { workspaceId: rule.workspaceId, projectId: rule.projectId, ...fields },
+      update: { ...fields, createdAt: new Date() },
+    });
+
+    const project = await this.prisma.project.findUniqueOrThrow({
+      where: { id: rule.projectId },
+      select: {
+        name: true,
+        leadId: true,
+        statusUpdates: { orderBy: { createdAt: 'desc' }, take: 1, select: { authorId: true } },
+      },
+    });
+    const candidates = [project.leadId, project.statusUpdates[0]?.authorId, rule.createdById];
+    const members = await this.prisma.workspaceMember.findMany({
+      where: {
+        workspaceId: rule.workspaceId,
+        userId: { in: candidates.filter((id): id is string => Boolean(id)) },
+      },
+      select: { userId: true },
+    });
+    const present = new Set(members.map((member) => member.userId));
+    const reviewer = candidates.find(
+      (id): id is string => Boolean(id) && present.has(id as string),
+    );
+
+    const label = PROJECT_STATUS_LABEL[draft.status];
+    if (reviewer) {
+      await this.prisma.notification.create({
+        data: {
+          userId: reviewer,
+          workspaceId: rule.workspaceId,
+          type: NotificationType.PROJECT_UPDATE,
+          title: `AI drafted a status update for ${project.name}`.slice(0, 200),
+          body: `${label}: ${draft.title}. Review it and post it from the project’s header.`,
+          entity: 'PROJECT',
+          entityId: rule.projectId,
+          actionUrl: `/projects/${rule.projectId}`,
+        },
+      });
+    }
+
+    return {
+      succeeded: true,
+      message: `AI drafted “${draft.title}” (${label}) for review.`,
+      after: row.id,
+    };
+  }
+
   private async createTask(
     config: Record<string, unknown>,
     source: TextSource | null,
@@ -2528,6 +2643,7 @@ export class AutomationRunnerService {
         workspaceId: rule.workspaceId,
         archivedAt: null,
         parentTaskId: null,
+        parentTicketId: null,
         ...(sectionId ? { sectionId } : { sectionId: null, projectId: project.id }),
       },
       orderBy: { position: 'asc' },

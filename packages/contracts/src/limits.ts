@@ -9,6 +9,9 @@ export const PASSWORD_MIN_LENGTH = 10;
 /** How long a "forgot password" link works, and how often one may be sent to the same account. */
 export const PASSWORD_RESET_TTL_MINUTES = 60;
 export const PASSWORD_RESET_RESEND_SECONDS = 60;
+/** How long a "confirm your e-mail address" link works, and how often one may be resent. */
+export const EMAIL_VERIFICATION_TTL_HOURS = 72;
+export const EMAIL_VERIFICATION_RESEND_SECONDS = 60;
 export const PASSWORD_MAX_LENGTH = 128;
 
 export const NAME_MIN_LENGTH = 1;
@@ -156,6 +159,8 @@ export const MAX_PENDING_INVITATIONS = 200;
 export const PAGINATION_DEFAULT_PAGE = 1;
 export const PAGINATION_DEFAULT_LIMIT = 20;
 export const PAGINATION_MAX_LIMIT = 100;
+/** How many runs a rule's history shows at a time. */
+export const AUTOMATION_EXECUTIONS_PAGE_SIZE = 25;
 
 /** Header carrying the per-request correlation id, echoed on every response. */
 export const REQUEST_ID_HEADER = 'x-request-id';

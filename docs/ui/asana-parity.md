@@ -96,9 +96,21 @@ every row the engine can run is enabled.
     goes on only on a yes; a no is logged as a skip with the model's reason,
     and a check that could not be asked fails the run instead of skipping.
     Only the rows a run reaches are asked.
+  - **Let AI decide the number of subtasks to create**, on a _Create
+    subtasks_ step: AI reads the task and keeps only the listed subtasks it
+    needs, in the list's order, each with its own assignee and date. It
+    answers with row numbers, so it can leave a subtask out but never write
+    one; the log says how many it kept and why. Keeping none is a quiet
+    success. The card reads "AI picks from N".
+  - **Draft an update with AI…** drafts the project's status update from its
+    own numbers and recent work — what was finished this week, what is late,
+    what is due next — with optional instructions for what to cover. It is
+    never posted by the rule: the project's owner is told a draft is waiting,
+    and the header shows **Review AI draft**, which opens the status composer
+    on its words with **Discard draft** beside them. A newer draft replaces an
+    older one, and posting any update clears it. It also runs on a schedule
+    with no tasks ("every Friday, draft the update").
   - Task rules only. Task text is treated as data, never as instructions.
-- Still greyed, with reasons: "Draft an update with AI…" and "Let AI decide
-  the number of subtasks" (a Use AI… step that may create subtasks does it).
 
 ## Project templates and duplicates
 
@@ -247,7 +259,11 @@ closing the pane. Each entry has a day and a note; anyone who can edit the task
 logs time, guests read it, and an entry is changed or removed by its author or
 a manager.
 
-Open: subtasks under tickets.
+**Subtasks under tickets**: a ticket's pane has the same Subtasks list as a
+task's — add one, tick it off, open it — and the List expands a ticket row to
+show them. They are tasks, in the ticket's project and in no section, so they
+are not cards of their own; each says "Subtask of KEY · title" with a link
+back, and they move with the ticket when it changes project.
 
 ## Home
 

@@ -14,6 +14,7 @@ const task = (overrides: Partial<Task> = {}): Task =>
     projectId: 'p-1',
     sectionId: 's-1',
     parentTaskId: null,
+    parentTicketId: null,
     title: 'Ship the grid',
     description: null,
     status: TaskStatus.TODO,

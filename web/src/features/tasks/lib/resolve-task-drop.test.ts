@@ -9,6 +9,7 @@ const task = (id: string, sectionId: string): Task => ({
   projectId: 'p',
   sectionId,
   parentTaskId: null,
+  parentTicketId: null,
   title: id,
   description: null,
   status: 'TODO',

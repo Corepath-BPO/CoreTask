@@ -72,10 +72,13 @@ export const workItemTicketInclude = {
   },
   _count: {
     select: {
+      subtasks: { where: { archivedAt: null } },
       comments: { where: { deletedAt: null } },
       attachments: { where: { status: 'READY' } },
     },
   },
+  // As a task's: the statuses too, so "1/3" is real.
+  subtasks: { where: { archivedAt: null }, select: { status: true } },
 } satisfies Prisma.TicketInclude;
 
 type TaskRow = Prisma.TaskGetPayload<{ include: typeof workItemTaskInclude }>;
@@ -225,8 +228,8 @@ export function ticketToWorkItem(ticket: TicketRow): ProjectWorkItem {
     dueAt: null,
     completedAt: ticket.resolvedAt?.toISOString() ?? null,
     archivedAt: ticket.archivedAt?.toISOString() ?? null,
-    subtaskCount: 0,
-    completedSubtaskCount: 0,
+    subtaskCount: ticket._count.subtasks,
+    completedSubtaskCount: ticket.subtasks.filter((row) => row.status === TaskStatus.DONE).length,
     commentCount: ticket._count.comments,
     attachmentCount: ticket._count.attachments,
     /*

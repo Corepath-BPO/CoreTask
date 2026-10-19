@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { NotificationsIntegrationModule } from '../../integrations/notifications/notifications-integration.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { InvitationsModule } from '../invitations/invitations.module';
 import { ProjectAccessModule } from '../project-access/project-access.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
@@ -20,6 +21,7 @@ import { ProjectMembersService } from './project-members.service';
     ProjectAccessModule,
     ActivityLogsModule,
     NotificationsIntegrationModule,
+    InvitationsModule,
   ],
   controllers: [ProjectMembersController],
   providers: [ProjectMembersService],

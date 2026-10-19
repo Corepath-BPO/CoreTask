@@ -124,6 +124,9 @@ function blankRule(
  * and no address of its own — a rule could not be linked to, and Back went to
  * whatever the list was showing.
  */
+/** How long after the last edit a rule that is not running is saved. */
+const AUTOSAVE_DELAY_MS = 1_500;
+
 export function AutomationBuilderPage({
   projectId,
   ruleId,
@@ -710,6 +713,18 @@ export function AutomationBuilderPage({
   const unnamed = currentName.trim() === '';
 
   /*
+   * Autosave, for a rule that is not running.
+   *
+   * Saving writes the rule's live steps — there is no separate draft copy for
+   * the runner to ignore — so saving an ACTIVE rule as somebody types would
+   * run their half-finished step on the next task. A draft, a paused rule or a
+   * never-published one runs nothing, so it is saved a moment after each edit.
+   * A brand-new rule waits for its first explicit save, which is what creates
+   * it; autosaving would leave a draft behind every builder anyone opened.
+   */
+  const autosaves = !isNew && rule?.status !== AutomationRuleStatus.ACTIVE;
+
+  /*
    * What the header reports about the last write.
    *
    * Derived from the mutations rather than tracked: they already know whether a
@@ -718,17 +733,16 @@ export function AutomationBuilderPage({
    *
    * "Saved" needs `!dirty` as well as success — otherwise a rule edited straight
    * after a save would go on claiming to be written while it no longer was.
-   *
-   * TODO(M8): debounced autosave lands in milestone 8. Nothing here starts a
-   * save; this only surfaces the state the existing one already has.
    */
   const saveState: SaveState = saving
     ? 'saving'
     : saveGraph.isError || createRule.isError
       ? 'error'
-      : (saveGraph.isSuccess || createRule.isSuccess) && !dirty
-        ? 'saved'
-        : 'idle';
+      : dirty
+        ? 'unsaved'
+        : saveGraph.isSuccess || createRule.isSuccess
+          ? 'saved'
+          : 'idle';
 
   /**
    * Writes the canvas and answers with the rule's real id.
@@ -741,6 +755,11 @@ export function AutomationBuilderPage({
    */
   const persist = async (): Promise<string | null> => {
     if (!rule) return null;
+
+    // What this save sends. Edits made while it is in flight are newer than
+    // what lands, so only these are cleared afterwards — see below.
+    const sentEdits = edits;
+    const sentSettings = settingsEdits;
 
     const nodes = realNodes.map((node) => ({
       id: node.id,
@@ -774,8 +793,14 @@ export function AutomationBuilderPage({
         }),
         rule.id);
 
-    setSettingsEdits({});
-    setEdits(NO_EDITS);
+    /*
+     * Cleared only if nothing changed while the request was out. With
+     * autosave somebody is usually still typing when a save lands, and
+     * clearing then would throw away the keystrokes after the snapshot. Kept,
+     * they stay on screen and the next save sends them along with the rest.
+     */
+    setSettingsEdits((current) => (current === sentSettings ? {} : current));
+    setEdits((current) => (current === sentEdits ? NO_EDITS : current));
 
     return saved;
   };
@@ -861,23 +886,31 @@ export function AutomationBuilderPage({
   };
 
   /*
-   * Saving lost its button, so it needs a key.
+   * Ctrl/⌘+S, and the autosave below, both land here.
    *
-   * Held in a ref rather than closed over by the listener: the handler depends
-   * on the whole canvas, so naming it as a dependency would tear down and
-   * re-attach a window listener on every keystroke somebody types into a step.
-   *
-   * TODO(M8): debounced autosave lands in milestone 8, after which this is a
-   * shortcut rather than the only way to write a draft.
+   * Held in a ref rather than closed over: the handler depends on the whole
+   * canvas, so naming it as a dependency would tear down and re-attach a
+   * window listener (or restart the autosave timer) on every keystroke.
    */
   const requestSave = useRef<() => void>(() => {});
 
   useEffect(() => {
     requestSave.current = () => {
-      if (!dirty || saving || unnamed) return;
+      if (!dirty || saving || unnamed || !triggerNode?.subtype) return;
       void saveDraft();
     };
   });
+
+  /*
+   * A moment after the last edit, not on every one: typing into a step is an
+   * edit per keystroke. A failed save is not retried on its own — the header
+   * says so and keeps Save — but the next edit tries again.
+   */
+  useEffect(() => {
+    if (!autosaves || !dirty) return;
+    const timer = window.setTimeout(() => requestSave.current(), AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [autosaves, dirty, edits, settingsEdits]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -958,6 +991,7 @@ export function AutomationBuilderPage({
         save={saveState}
         saving={saving}
         canSave={dirty && !unnamed && Boolean(triggerNode?.subtype)}
+        autosaves={autosaves}
         onSave={() => void saveDraft()}
         issues={issues}
         onFocusIssue={(nodeId) => setSelectedId(nodeId)}

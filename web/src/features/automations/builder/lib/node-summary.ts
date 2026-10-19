@@ -14,6 +14,7 @@ import {
   isTokenValue,
   operatorNeedsValue,
   subtaskProblems,
+  aiDecidesSubtasks,
   subtaskTitles,
   toFilterOperator,
   type AutomationAction,
@@ -26,6 +27,7 @@ import {
   describeDelay,
   AI_CHECK_FIELD,
   aiActionProblem,
+  aiDraftUpdateProblem,
   aiCheckProblem,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
@@ -649,6 +651,14 @@ function actionSummary(
         : [{ text: 'Comment — write what it says' }];
     }
 
+    case 'AI_DRAFT_UPDATE': {
+      const instructions =
+        typeof config['instructions'] === 'string' ? config['instructions'].trim() : '';
+      return instructions
+        ? [{ text: 'Draft an update with AI:' }, { text: clipWords(instructions, 60), chip: true }]
+        : [{ text: 'Draft an update with AI' }];
+    }
+
     // "Use AI: Triage the request…" — the instructions, cut to a card's width.
     case 'AI_ACTION': {
       const instructions =
@@ -739,7 +749,12 @@ function actionSummary(
         ? [{ text: 'Create subtasks — add at least one' }]
         : [
             { text: 'Create subtasks' },
-            { text: `${titles.length} subtask${titles.length === 1 ? '' : 's'}`, chip: true },
+            {
+              text: aiDecidesSubtasks(config)
+                ? `AI picks from ${titles.length}`
+                : `${titles.length} subtask${titles.length === 1 ? '' : 's'}`,
+              chip: true,
+            },
           ];
     }
 
@@ -822,6 +837,8 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return emailRecipientsOf(config).length === 0 || !has('subject');
     case 'AI_ACTION':
       return aiActionProblem(config) !== null;
+    case 'AI_DRAFT_UPDATE':
+      return aiDraftUpdateProblem(config) !== null;
     case 'SET_TICKET_STATUS':
       return !has('status');
     case 'SET_TICKET_PRIORITY':

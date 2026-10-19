@@ -272,6 +272,7 @@ export function TaskDetailPanel({
           otherProjects: [],
           createdBy: null,
           duplicateOf: null,
+          parentTicket: null,
         }
       : undefined);
   const isLoading = taskQuery.isLoading || (wantFallback && workItemQuery.isLoading);
@@ -638,7 +639,24 @@ function TaskDetailBody({
   const addSubtask = () => {
     const trimmed = subtaskTitle.trim();
     if (!trimmed) return;
-    createTask.mutate({ title: trimmed, parentTaskId: task.id });
+    createTask.mutate(
+      ticket
+        ? { title: trimmed, parentTicketId: task.id }
+        : { title: trimmed, parentTaskId: task.id },
+      {
+        // A ticket's lines come from the project's subtask list and its row's
+        // counts, neither of which the task invalidation reaches.
+        onSuccess: () => {
+          if (!ticket || !projectRef) return;
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectViews.subtasks(workspaceId ?? '', projectRef.id, task.id),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.workItems.all(workspaceId ?? '', projectRef.id),
+          });
+        },
+      },
+    );
     setSubtaskTitle('');
   };
 
@@ -676,8 +694,8 @@ function TaskDetailBody({
    * Asana's chords, for the task on screen. Registered above the list's own
    * handlers so Tab+A assigns this task rather than the rows behind it, and
    * only while the panel is actually open — it stays mounted while hidden.
-   * `null` claims a chord this task cannot answer (a ticket has no subtasks),
-   * so it does not fall through to the list either.
+   * `null` claims a chord this item cannot answer (a ticket is not completed
+   * by a tick), so it does not fall through to the list either.
    */
   useShortcutActions(
     {
@@ -687,7 +705,7 @@ function TaskDetailBody({
       dueToday: canEdit ? () => dueOn(0) : null,
       dueTomorrow: canEdit ? () => dueOn(1) : null,
       comment: () => composerRef.current?.focus(),
-      subtask: canEdit && !ticket ? () => setAddingSubtask(true) : null,
+      subtask: canEdit ? () => setAddingSubtask(true) : null,
       toggleComplete:
         canEdit && !ticket
           ? () => save({ status: taskDone ? TaskStatus.TODO : TaskStatus.DONE })
@@ -737,6 +755,25 @@ function TaskDetailBody({
           {task.section && <Badge variant="muted">{task.section.name}</Badge>}
           {task.archivedAt && <Badge variant="destructive">Archived</Badge>}
         </div>
+
+        {task.parentTicket && (
+          <p className="text-xs text-muted-foreground">
+            Subtask of{' '}
+            {onOpenTask ? (
+              <button
+                type="button"
+                onClick={() => task.parentTicket && onOpenTask(task.parentTicket.id)}
+                className="cursor-pointer font-medium text-foreground underline-offset-2 hover:underline"
+              >
+                {task.parentTicket.key} · {task.parentTicket.title}
+              </button>
+            ) : (
+              <span className="font-medium text-foreground">
+                {task.parentTicket.key} · {task.parentTicket.title}
+              </span>
+            )}
+          </p>
+        )}
 
         {task.duplicateOf && (
           <DuplicateBanner
@@ -1104,7 +1141,7 @@ function TaskDetailBody({
               {task.completedSubtaskCount}/{task.subtaskCount}
             </span>
           )}
-          {canEdit && !ticket && (
+          {canEdit && (
             <button
               type="button"
               onClick={() => setAddingSubtask(true)}
@@ -1167,16 +1204,7 @@ function TaskDetailBody({
           })}
         </ul>
 
-        {/* The API only parents subtasks under tasks — say so rather than
-            offering an add that fails. */}
-        {ticket && (
-          <p className="pt-1 text-xs text-muted-foreground">
-            Subtasks under tickets need API support. Not built yet.
-          </p>
-        )}
-
         {canEdit &&
-          !ticket &&
           (addingSubtask ? (
             <div className="flex items-center gap-2 pt-1">
               <Input

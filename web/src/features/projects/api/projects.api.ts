@@ -1,6 +1,7 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type {
   AddProjectMemberPayload,
+  CreateProjectInvitationPayload,
   CreateProjectPayload,
   CreateSectionPayload,
   MoveSectionPayload,
@@ -12,6 +13,7 @@ import type {
   UpdateProjectMemberRolePayload,
   UpdateProjectPayload,
   UpdateSectionPayload,
+  WorkspaceInvitation,
 } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
@@ -84,6 +86,23 @@ export const projectMembersApi = {
 
   leave: (workspaceId: string, projectId: string): Promise<{ left: boolean }> =>
     apiClient.post<{ left: boolean }>(ApiRoutes.projectMembers.leave(workspaceId, projectId)),
+
+  /** Invitations still waiting that would land someone in this project. */
+  invitations: (workspaceId: string, projectId: string): Promise<WorkspaceInvitation[]> =>
+    apiClient.get<WorkspaceInvitation[]>(
+      ApiRoutes.projectMembers.invitations(workspaceId, projectId),
+    ),
+
+  /** Workspace admins only: someone outside the workspace, straight into this project. */
+  invite: (
+    workspaceId: string,
+    projectId: string,
+    payload: CreateProjectInvitationPayload,
+  ): Promise<WorkspaceInvitation> =>
+    apiClient.post<WorkspaceInvitation>(
+      ApiRoutes.projectMembers.invitations(workspaceId, projectId),
+      payload,
+    ),
 };
 
 export const sectionsApi = {

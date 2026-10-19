@@ -97,6 +97,21 @@ export function aiPermissionsOf(configuration: Record<string, unknown>): string[
   ];
 }
 
+/**
+ * What is wrong with a "Draft an update with AI…" step's settings, or null.
+ * Its instructions are optional — "what the update should cover" — so only
+ * their length can be wrong.
+ */
+export function aiDraftUpdateProblem(configuration: Record<string, unknown>): string | null {
+  const instructions = configuration['instructions'];
+  if (instructions === undefined || instructions === null) return null;
+  if (typeof instructions !== 'string') return 'Write the instructions as text.';
+  if (instructions.length > AI_INSTRUCTIONS_MAX) {
+    return `Keep the instructions under ${AI_INSTRUCTIONS_MAX} characters.`;
+  }
+  return null;
+}
+
 /** What is wrong with a "Use AI…" step's settings, or null. */
 export function aiActionProblem(configuration: Record<string, unknown>): string | null {
   const instructions = configuration['instructions'];

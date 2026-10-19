@@ -112,9 +112,16 @@ async function spawn(
       archivedAt: null,
       ...(task.parentTaskId
         ? { parentTaskId: task.parentTaskId }
-        : task.sectionId
-          ? { parentTaskId: null, sectionId: task.sectionId }
-          : { parentTaskId: null, projectId: task.projectId, sectionId: null }),
+        : task.parentTicketId
+          ? { parentTicketId: task.parentTicketId }
+          : task.sectionId
+            ? { parentTaskId: null, parentTicketId: null, sectionId: task.sectionId }
+            : {
+                parentTaskId: null,
+                parentTicketId: null,
+                projectId: task.projectId,
+                sectionId: null,
+              }),
     },
     orderBy: { position: 'asc' },
     select: { id: true, position: true },
@@ -129,6 +136,7 @@ async function spawn(
         projectId: task.projectId,
         sectionId: task.sectionId,
         parentTaskId: task.parentTaskId,
+        parentTicketId: task.parentTicketId,
         title: task.title,
         description: task.description,
         priority: task.priority,

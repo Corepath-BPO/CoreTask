@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 import { type Theme, useTheme } from '@/stores/theme.store';
 
+import { AccountSecurityCard } from '../components/account-security-card';
 import { NotificationEmailsCard } from '../components/notification-emails-card';
 import { ProfileCard } from '../components/profile-card';
 
@@ -183,6 +184,7 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
 
         <div className="space-y-5">
           {user && <ProfileCard key={user.id} user={user} />}
+          {user && <AccountSecurityCard user={user} />}
           <Card className="bg-muted/25">
             <CardHeader>
               <CardTitle>Team access</CardTitle>

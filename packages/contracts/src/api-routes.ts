@@ -18,6 +18,10 @@ export const ApiRoutes = {
     me: '/auth/me',
     forgotPassword: '/auth/forgot-password',
     resetPassword: '/auth/reset-password',
+    logoutAll: '/auth/logout-all',
+    changePassword: '/auth/change-password',
+    verifyEmail: '/auth/verify-email',
+    resendVerification: '/auth/resend-verification',
   },
   workspaces: {
     list: '/workspaces',
@@ -229,6 +233,9 @@ export const ApiRoutes = {
     /** Ask the project's owner for a status update. */
     requestStatus: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/status-updates/request`,
+    /** The update a rule's AI step drafted, waiting to be reviewed and posted. */
+    statusDraft: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-draft`,
     messages: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/messages`,
     message: (workspaceId: string, projectId: string, messageId: string) =>
@@ -256,6 +263,9 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/projects/${projectId}/join`,
     leave: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/leave`,
+    /** Invitations by e-mail that join the workspace and land in this project. */
+    invitations: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/invitations`,
   },
   /**
    * Workspace-scoped rather than nested under a project: a task may have no

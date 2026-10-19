@@ -26,6 +26,8 @@ export const ErrorCode = {
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   ACCOUNT_DISABLED: 'ACCOUNT_DISABLED',
   PASSWORD_RESET_INVALID: 'PASSWORD_RESET_INVALID',
+  CURRENT_PASSWORD_INCORRECT: 'CURRENT_PASSWORD_INCORRECT',
+  EMAIL_VERIFICATION_INVALID: 'EMAIL_VERIFICATION_INVALID',
 
   // API keys
   API_KEY_INVALID: 'API_KEY_INVALID',
@@ -93,6 +95,9 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_ALREADY_REGISTERED: 'An account with this e-mail address already exists.',
   ACCOUNT_DISABLED: 'This account has been disabled.',
   PASSWORD_RESET_INVALID: 'This reset link is invalid, used or expired. Ask for a new one.',
+  CURRENT_PASSWORD_INCORRECT: 'Your current password is not right.',
+  EMAIL_VERIFICATION_INVALID:
+    'This confirmation link is invalid, used or expired. Send a new one from Settings.',
 
   API_KEY_INVALID: 'The API key is not recognised.',
   API_KEY_REVOKED: 'The API key has been revoked.',

@@ -3,27 +3,50 @@ import type { EmailMessage } from './email.service';
 /**
  * Plain-text-first templates.
  *
- * Deliberately not a templating engine yet — there is exactly one message. When
- * the second or third arrives, this file is the seam to swap in MJML/Handlebars.
+ * Deliberately not a templating engine yet. When the messages outgrow string
+ * arrays, this file is the seam to swap in MJML/Handlebars.
  */
-export function welcomeEmail(params: { to: string; name: string; webUrl: string }): EmailMessage {
+/**
+ * "Confirm your e-mail address". Sent once on sign-up, where it is also the
+ * welcome — one message rather than two — and again whenever the person asks
+ * for a new link.
+ */
+export function emailVerificationEmail(params: {
+  to: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+  webUrl: string;
+  /** True for the message sent on sign-up. */
+  welcome: boolean;
+}): EmailMessage {
   const firstName = params.name.split(' ')[0] ?? params.name;
+  const link = `${params.webUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(params.token)}`;
+  const expires = new Date(params.expiresAt).toUTCString();
+  const opening = params.welcome
+    ? 'Your CoreTask account is ready. Confirm that this is your e-mail address:'
+    : 'Confirm that this is the e-mail address for your CoreTask account:';
 
   return {
     to: params.to,
-    subject: 'Welcome to CoreTask',
+    subject: params.welcome
+      ? 'Welcome to CoreTask — confirm your e-mail address'
+      : 'Confirm your e-mail address for CoreTask',
     text: [
       `Hi ${firstName},`,
       '',
-      'Your CoreTask account is ready. Create a workspace to start tracking work:',
-      params.webUrl,
+      opening,
+      link,
+      '',
+      `The link works once, until ${expires}. If you did not sign up, ignore this e-mail.`,
       '',
       '— The CoreTask team',
     ].join('\n'),
     html: [
       `<p>Hi ${escapeHtml(firstName)},</p>`,
-      '<p>Your CoreTask account is ready. Create a workspace to start tracking work:</p>',
-      `<p><a href="${escapeHtml(params.webUrl)}">${escapeHtml(params.webUrl)}</a></p>`,
+      `<p>${escapeHtml(opening)}</p>`,
+      `<p><a href="${escapeHtml(link)}">Confirm my e-mail address</a></p>`,
+      `<p>The link works once, until ${escapeHtml(expires)}. If you did not sign up, ignore this e-mail.</p>`,
       '<p>— The CoreTask team</p>',
     ].join(''),
   };
@@ -41,6 +64,8 @@ export function invitationEmail(params: {
   invitedByName: string;
   role: string;
   teamName?: string | null;
+  /** From a project's Share dialog: the project they will land in. */
+  projectName?: string | null;
   expiresAt: string;
   webUrl: string;
 }): EmailMessage {
@@ -52,6 +77,29 @@ export function invitationEmail(params: {
   // part of what is being offered, and somebody deciding whether to accept
   // should not have to click through to find out.
   const onTeam = params.teamName ? ` on the ${params.teamName} team` : '';
+
+  if (params.projectName) {
+    return {
+      to: params.to,
+      subject: `${params.invitedByName} invited you to ${params.projectName} on CoreTask`,
+      text: [
+        `${params.invitedByName} has invited you to the "${params.projectName}" project in the "${params.workspaceName}" workspace on CoreTask.`,
+        '',
+        'Accept the invitation:',
+        link,
+        '',
+        `This link expires on ${expires}. If you were not expecting it, you can ignore this e-mail.`,
+        '',
+        '— The CoreTask team',
+      ].join('\n'),
+      html: [
+        `<p>${escapeHtml(params.invitedByName)} has invited you to the <strong>${escapeHtml(params.projectName)}</strong> project in the <strong>${escapeHtml(params.workspaceName)}</strong> workspace on CoreTask.</p>`,
+        `<p><a href="${escapeHtml(link)}">Accept the invitation</a></p>`,
+        `<p>This link expires on ${escapeHtml(expires)}. If you were not expecting it, you can ignore this e-mail.</p>`,
+        '<p>— The CoreTask team</p>',
+      ].join(''),
+    };
+  }
 
   return {
     to: params.to,

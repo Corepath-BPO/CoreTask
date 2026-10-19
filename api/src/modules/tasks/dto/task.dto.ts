@@ -92,6 +92,17 @@ export class CreateTaskDto {
   @IsUUID()
   parentTaskId?: string | null;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Make this a subtask of a ticket instead of a task. It joins the ticket’s project, in no section; `projectId` and `sectionId` are ignored.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  parentTicketId?: string | null;
+
   @ApiPropertyOptional({ enum: TASK_STATUSES, default: TaskStatus.TODO })
   @IsOptional()
   @IsEnum(TaskStatus)
