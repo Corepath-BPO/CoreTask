@@ -90,6 +90,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
+      // Without this, Vitest 4 reports only the files the run happened to
+      // load, so a module no test imports would drop out of the report
+      // instead of showing as 0%.
+      include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/test/**', 'src/**/*.d.ts', 'src/main.tsx'],
     },
   },
