@@ -110,12 +110,12 @@ CoreTask/
 
 ## Prerequisites
 
-| Tool           | Version | Notes                                                        |
-| -------------- | ------- | ------------------------------------------------------------ |
-| Node.js        | ≥ 20.11 | Only needed for running outside Docker                       |
-| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate` |
-| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                           |
-| Git            | any     |                                                              |
+| Tool           | Version | Notes                                                                                                       |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| Node.js        | ≥ 24.9  | Only needed outside Docker. The API runs on 22.12+, but its Jest suites need 24.9+ (see api/jest.config.ts) |
+| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate`                                                |
+| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                                                                          |
+| Git            | any     |                                                                                                             |
 
 npm and Yarn are not supported — the workspace uses pnpm's linker and lockfile.
 

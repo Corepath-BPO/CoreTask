@@ -1,3 +1,4 @@
+import * as vm from 'node:vm';
 import type { Config } from 'jest';
 
 /**
@@ -7,7 +8,17 @@ import type { Config } from 'jest';
  *   pnpm --filter @coretask/api test:e2e
  *
  * Runs against the `coretask_e2e` schema, so development data is never touched.
+ *
+ * Like the unit suite, it needs Node's vm modules for the ESM-only parser
+ * behind the HTML sanitizer — see the note in ../jest.config.ts.
  */
+if (typeof vm.SourceTextModule?.prototype.hasAsyncGraph !== 'function') {
+  throw new Error(
+    'The API suites need Node 24.9+ started with --experimental-vm-modules, so Jest can ' +
+      'require() ESM-only dependencies. Run them with `pnpm test:e2e`, not the bare jest binary.',
+  );
+}
+
 const config: Config = {
   rootDir: '..',
   roots: ['<rootDir>/test/e2e'],
