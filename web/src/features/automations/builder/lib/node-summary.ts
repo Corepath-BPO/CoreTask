@@ -24,6 +24,9 @@ import {
   delayLength,
   delayProblem,
   describeDelay,
+  AI_CHECK_FIELD,
+  aiActionProblem,
+  aiCheckProblem,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -321,6 +324,14 @@ function conditionSummary(
   const operator = config['operator'];
 
   if (typeof field !== 'string' || field === '') return [{ text: 'Choose what to check' }];
+
+  // "AI: is it about a repair?" — the question is the value.
+  if (field === AI_CHECK_FIELD) {
+    const question = typeof config['question'] === 'string' ? config['question'].trim() : '';
+    return question
+      ? [{ text: 'AI:' }, { text: clipWords(question, 60), chip: true }]
+      : [{ text: 'AI — ask a yes-or-no question' }];
+  }
 
   const definition = metadata?.conditionFields.find((entry) => entry.field === field);
 
@@ -638,6 +649,15 @@ function actionSummary(
         : [{ text: 'Comment — write what it says' }];
     }
 
+    // "Use AI: Triage the request…" — the instructions, cut to a card's width.
+    case 'AI_ACTION': {
+      const instructions =
+        typeof config['instructions'] === 'string' ? config['instructions'].trim() : '';
+      return instructions
+        ? [{ text: 'Use AI:' }, { text: clipWords(instructions, 60), chip: true }]
+        : [{ text: 'Use AI — write the instructions' }];
+    }
+
     case 'SEND_EMAIL': {
       const recipients = emailRecipientsOf(config);
       if (recipients.length === 0) return [{ text: 'Email — choose who' }];
@@ -753,6 +773,9 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
      */
     if (isFallbackBranch(config)) return false;
 
+    // An AI check needs its question, and no comparison.
+    if (config['field'] === AI_CHECK_FIELD) return aiCheckProblem(config) !== null;
+
     if (!has('field') || !has('operator')) return true;
 
     const value = config['value'];
@@ -797,6 +820,8 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return !has('endpointId') && !has('url');
     case 'SEND_EMAIL':
       return emailRecipientsOf(config).length === 0 || !has('subject');
+    case 'AI_ACTION':
+      return aiActionProblem(config) !== null;
     case 'SET_TICKET_STATUS':
       return !has('status');
     case 'SET_TICKET_PRIORITY':
@@ -830,4 +855,12 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** The first `max` characters, ending on a whole word, with an ellipsis if cut. */
+function clipWords(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }

@@ -80,7 +80,25 @@ every row the engine can run is enabled.
   finished it. The rule's log says when it will continue. A run whose rule
   was paused in the meantime is cancelled, and one whose wait step was edited
   away is skipped. Webhooks fire once, for the event, not again on resuming.
-- Still greyed, with reasons: AI steps.
+- **AI steps**, once the server has an Anthropic key (`ANTHROPIC_API_KEY`;
+  without one both stay greyed with that reason):
+  - **Use AI…** takes instructions and a list of what AI may do — comment,
+    assign, move to a section, change status or priority, set the due date,
+    create subtasks, fill in chosen custom fields. The model reads the task
+    (fields, description, subtasks, recent comments) and picks from this
+    project's own sections, statuses, people and options. Its choices run as
+    the ordinary actions, so history, notifications and follow-up rules behave
+    as if the author had added them. The run's log lists what it changed and
+    its one-line reason. Anything it suggests outside the ticked list is
+    ignored and counted. Its comments end "— Written by AI for the rule …",
+    since a rule's comment is posted under whoever set the rule off.
+  - **Create conditional check with AI** asks a yes-or-no question. The rule
+    goes on only on a yes; a no is logged as a skip with the model's reason,
+    and a check that could not be asked fails the run instead of skipping.
+    Only the rows a run reaches are asked.
+  - Task rules only. Task text is treated as data, never as instructions.
+- Still greyed, with reasons: "Draft an update with AI…" and "Let AI decide
+  the number of subtasks" (a Use AI… step that may create subtasks does it).
 
 ## Project templates and duplicates
 

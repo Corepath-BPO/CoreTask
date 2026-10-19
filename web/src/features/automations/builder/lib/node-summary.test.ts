@@ -503,3 +503,37 @@ describe('the Wait step', () => {
     expect(isNodeIncomplete(wait({ amount: 1, unit: 'DAYS' }))).toBe(false);
   });
 });
+
+describe('the AI steps', () => {
+  it('shows what "Use AI…" was told, and flags it until it may change something', () => {
+    const ai = (configuration: Record<string, unknown>) =>
+      node({ subtype: 'AI_ACTION', configuration });
+
+    expect(summarise(ai({}), metadata)).toBe('Use AI — write the instructions');
+    expect(summariseParts(ai({ instructions: 'Triage the request' }), metadata)).toEqual([
+      { text: 'Use AI:' },
+      { text: 'Triage the request', chip: true },
+    ]);
+    expect(
+      summarise(
+        ai({ instructions: 'Read the request and decide whether it is a repair or a renewal' }),
+        metadata,
+      ),
+    ).toBe('Use AI: Read the request and decide whether it is a repair or a…');
+
+    expect(isNodeIncomplete(ai({ instructions: 'Triage' }))).toBe(true);
+    expect(isNodeIncomplete(ai({ instructions: 'Triage', allow: ['COMMENT'] }))).toBe(false);
+  });
+
+  it('shows the AI check’s question, and flags it until there is one', () => {
+    const check = (configuration: Record<string, unknown>) =>
+      node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration });
+
+    expect(summarise(check({ field: 'ai.check' }), metadata)).toBe('AI — ask a yes-or-no question');
+    expect(summarise(check({ field: 'ai.check', question: 'Is it broken?' }), metadata)).toBe(
+      'AI: Is it broken?',
+    );
+    expect(isNodeIncomplete(check({ field: 'ai.check' }))).toBe(true);
+    expect(isNodeIncomplete(check({ field: 'ai.check', question: 'Is it broken?' }))).toBe(false);
+  });
+});

@@ -510,3 +510,63 @@ describe('the Wait step', () => {
     expect(onChange).toHaveBeenLastCalledWith({ amount: undefined, unit: 'HOURS' });
   });
 });
+
+describe('the AI steps', () => {
+  function renderStep(
+    type: string,
+    subtype: string,
+    configuration: Record<string, unknown>,
+    customFields: unknown[] = [],
+  ) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type,
+      subtype,
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(
+      <NodeConfigFields
+        node={node}
+        metadata={{ ...metadata, customFields } as AutomationMetadata}
+        onChange={onChange}
+      />,
+    );
+    return onChange;
+  }
+
+  it('writes the instructions for "Use AI…"', () => {
+    const onChange = renderStep('ACTION', 'AI_ACTION', { allow: ['COMMENT'] });
+
+    fireEvent.change(screen.getByLabelText('Instructions'), { target: { value: 'Triage it' } });
+    expect(onChange).toHaveBeenLastCalledWith({ allow: ['COMMENT'], instructions: 'Triage it' });
+  });
+
+  it('ticks what AI may change, offering only the fields it can fill in', async () => {
+    const onChange = renderStep('ACTION', 'AI_ACTION', { instructions: 'Triage', allow: [] }, [
+      { id: 'f-1', name: 'Request type', type: 'SINGLE_SELECT', options: [] },
+      { id: 'f-2', name: 'Lease ends', type: 'DATE', options: [] },
+    ]);
+
+    expect(screen.getByText('Choose at least one thing AI may change.')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Fill in Lease ends' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Change its priority' }));
+    expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['PRIORITY'] });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Fill in Request type' }));
+    expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['field:f-1'] });
+  });
+
+  it('asks the AI check for its question rather than a comparison', () => {
+    const onChange = renderStep('CONDITION', 'FIELD_COMPARISON', { field: 'ai.check' });
+
+    expect(screen.queryByLabelText('Choose an option')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Is it broken?' } });
+    expect(onChange).toHaveBeenLastCalledWith({ field: 'ai.check', question: 'Is it broken?' });
+  });
+});

@@ -1271,10 +1271,10 @@ test.describe('the automation builder', () => {
   }) => {
     /*
      * The rule the owner set: never an enabled row that creates a name without
-     * functioning task values. "Create conditional check with AI" is the one
-     * every reference screenshot shows and the one nothing stands behind, so it
-     * has to be visible, greyed, and unclickable — visible because absence
-     * reads as "never considered".
+     * functioning task values. "Create conditional check with AI" needs a model,
+     * and the stack these tests run against has no ANTHROPIC_API_KEY, so here
+     * nothing stands behind it: it has to be visible, greyed, and unclickable —
+     * visible because absence reads as "never considered".
      */
     const rail = await openConditionCatalogue(page);
 

@@ -154,6 +154,17 @@ export class AppConfigService {
     } as const;
   }
 
+  /** The model behind the AI steps in rules; `enabled` is whether there is one. */
+  get ai() {
+    return {
+      apiKey: this.env.ANTHROPIC_API_KEY ?? null,
+      baseUrl: this.env.ANTHROPIC_BASE_URL.replace(/\/+$/, ''),
+      model: this.env.AI_MODEL,
+      timeoutMs: this.env.AI_TIMEOUT_MS,
+      enabled: Boolean(this.env.ANTHROPIC_API_KEY),
+    } as const;
+  }
+
   get microsoftGraph() {
     return {
       tenantId: this.env.MICROSOFT_GRAPH_TENANT_ID,

@@ -13,7 +13,7 @@ src/
 ├── database/                PrismaService
 ├── redis/                   RedisService (also supplies BullMQ's connection)
 ├── modules/                 domain modules (controller → service → Prisma)
-├── integrations/            outbound systems: email, storage, notifications
+├── integrations/            outbound systems: email, storage, notifications, AI
 ├── jobs/                    BullMQ queues (producers) and processors (consumers)
 └── websocket/               Socket.IO gateway
 ```

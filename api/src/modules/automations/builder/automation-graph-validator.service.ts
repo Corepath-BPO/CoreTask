@@ -32,6 +32,12 @@ import {
   TICKET_ONLY_ACTIONS,
   isTicketConditionField,
   delayProblem,
+  AI_CHECK_FIELD,
+  AI_FIELD_TYPES,
+  AI_UNAVAILABLE_REASON,
+  aiActionProblem,
+  aiPermissionFieldId,
+  aiPermissionsOf,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -401,6 +407,16 @@ export class AutomationGraphValidatorService {
         }
       }
 
+      // "Check with AI" needs a model to ask; its question is checked with the
+      // rest of the graph's structure, in `validateGraphStructure`.
+      if (
+        (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) &&
+        config['field'] === AI_CHECK_FIELD &&
+        !this.config.ai.enabled
+      ) {
+        error(node.id, 'field', AI_UNAVAILABLE_REASON);
+      }
+
       if (node.type !== AutomationNodeType.ACTION) continue;
 
       const text = (key: string) => (typeof config[key] === 'string' ? config[key] : '');
@@ -464,6 +480,15 @@ export class AutomationGraphValidatorService {
             error(node.id, 'kind', 'Choose the type to convert to.');
           }
           break;
+        // "Use AI…": instructions, at least one thing it may change, and a model.
+        case AutomationAction.AI_ACTION: {
+          if (!this.config.ai.enabled) error(node.id, 'subtype', AI_UNAVAILABLE_REASON);
+          const problem = aiActionProblem(config);
+          if (problem) {
+            error(node.id, problem.startsWith('Choose') ? 'allow' : 'instructions', problem);
+          }
+          break;
+        }
       }
     }
 
@@ -567,6 +592,14 @@ export class AutomationGraphValidatorService {
       // rather than under `fieldId`; its type decides which comparisons fit.
       const conditionFieldId = customFieldConditionId(config['field']);
       if (conditionFieldId) fieldIds.add(conditionFieldId);
+
+      // So are the fields a "Use AI…" step may fill in.
+      if (node.subtype === AutomationAction.AI_ACTION) {
+        for (const permission of aiPermissionsOf(config)) {
+          const id = aiPermissionFieldId(permission);
+          if (id) fieldIds.add(id);
+        }
+      }
     }
 
     const [
@@ -855,10 +888,34 @@ export class AutomationGraphValidatorService {
        * have one — so a rule with an "otherwise" would be refused for being
        * exactly what somebody built.
        */
+      if (node.subtype === AutomationAction.AI_ACTION) {
+        for (const permission of aiPermissionsOf(config)) {
+          const id = aiPermissionFieldId(permission);
+          if (!id) continue;
+          if (!liveFields.has(id)) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'allow',
+              message: 'A field AI may fill in no longer exists.',
+            });
+          } else if (!(AI_FIELD_TYPES as readonly string[]).includes(fieldType.get(id) ?? '')) {
+            issues.push({
+              level: GraphIssueLevel.ERROR,
+              nodeId: node.id,
+              path: 'allow',
+              message: 'AI fills in choice, text, number and checkbox fields only.',
+            });
+          }
+        }
+      }
+
       if (
         node.type === AutomationNodeType.CONDITION &&
         !isFallbackBranch(config) &&
-        !isTicketConditionField(config['field'])
+        !isTicketConditionField(config['field']) &&
+        // Asks a question rather than comparing a field; checked in `checkSettings`.
+        config['field'] !== AI_CHECK_FIELD
       ) {
         /*
          * A generated key's kind comes from the field's own type — and from

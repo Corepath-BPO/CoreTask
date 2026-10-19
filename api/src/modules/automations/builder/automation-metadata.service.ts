@@ -21,6 +21,7 @@ import type {
 } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
 
+import { AppConfigService } from '../../../config/app-config.service';
 import { PrismaService } from '../../../database/prisma.service';
 import { ProjectsService } from '../../projects/projects.service';
 
@@ -38,6 +39,7 @@ import {
   type AutomationPermissions,
   type AutomationTriggerEntry,
 } from './automation-catalogue';
+import { projectStatuses } from './project-statuses';
 
 /**
  * The metadata response.
@@ -79,6 +81,7 @@ export class AutomationMetadataService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
+    private readonly config: AppConfigService,
   ) {}
 
   async forProject(
@@ -121,7 +124,7 @@ export class AutomationMetadataService {
             sections: { orderBy: { position: 'asc' }, select: { id: true, name: true } },
           },
         }),
-        this.statusesFor(workspaceId, projectId),
+        projectStatuses(this.prisma, workspaceId, projectId),
         this.prisma.priorityDefinition.findMany({
           // Archived priorities were being offered alongside live ones, so a rule
           // could be built against a value nothing carries any more.
@@ -179,11 +182,13 @@ export class AutomationMetadataService {
       ]);
 
     const customFields = fieldLinks.map((link) => link.customField);
+    // Whether the AI steps have a model behind them on this server.
+    const ai = this.config.ai.enabled;
 
     return {
       triggers: triggerCatalogue(customFields),
-      actions: actionCatalogue(customFields),
-      conditions: conditionCatalogue(customFields),
+      actions: actionCatalogue(customFields, ai),
+      conditions: conditionCatalogue(customFields, ai),
       conditionFields: this.conditionFields(statuses, priorities, sections, members, customFields),
       sections,
       webhookEndpoints: webhookEndpoints.map((row) => ({
@@ -197,40 +202,9 @@ export class AutomationMetadataService {
       priorities,
       members: members.map((row) => row.user),
       customFields,
-      capabilities: capabilities(),
+      capabilities: capabilities(ai),
       permissions: permissionsFor(role, hasAtLeastRole(role, WorkspaceRole.MANAGER)),
     };
-  }
-
-  /**
-   * The statuses this project actually uses.
-   *
-   * Its own set when it has one, the workspace default set when it does not —
-   * the same resolution `DefinitionsService.statusesFor` performs, because a
-   * project's status list has one right answer and two places computing it
-   * differently is how a rule comes to name a status the board never shows.
-   *
-   * This used to be `OR: [{ projectId }, { projectId: null }]`, which merged the
-   * two: a project that had renamed its statuses saw its own words *and* the
-   * workspace's, duplicated, with no way to tell which of the two "In review"
-   * rows the rule would compare against. Archived rows came through as well.
-   */
-  private async statusesFor(workspaceId: string, projectId: string) {
-    const select = { id: true, name: true, colorToken: true } as const;
-
-    const own = await this.prisma.statusDefinition.findMany({
-      where: { workspaceId, projectId, isArchived: false },
-      orderBy: { position: 'asc' },
-      select,
-    });
-
-    if (own.length > 0) return own;
-
-    return this.prisma.statusDefinition.findMany({
-      where: { workspaceId, projectId: null, isArchived: false },
-      orderBy: { position: 'asc' },
-      select,
-    });
   }
 
   /**
