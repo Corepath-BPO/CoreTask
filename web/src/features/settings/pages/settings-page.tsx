@@ -7,7 +7,17 @@ import {
 } from '@coretask/contracts';
 import { Link } from '@tanstack/react-router';
 import type { WorkspaceSummary } from '@coretask/types';
-import { Building2, Check, KeyRound, Laptop, Moon, Sun, UsersRound, Webhook } from 'lucide-react';
+import {
+  Building2,
+  Check,
+  KeyRound,
+  Laptop,
+  Link2,
+  Moon,
+  Sun,
+  UsersRound,
+  Webhook,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -209,6 +219,12 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
                 <Link to="/integrations/webhooks">
                   <Webhook />
                   Webhooks
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="justify-start">
+                <Link to="/integrations/connected-apps">
+                  <Link2 />
+                  Connected apps
                 </Link>
               </Button>
             </CardContent>

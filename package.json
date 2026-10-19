@@ -18,7 +18,7 @@
     "logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f",
     "prod:build": "docker compose -f docker-compose.yml -f docker-compose.prod.yml build",
     "prod:up": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
-    "infra": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d coretask-postgres coretask-redis coretask-minio",
+    "infra": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d coretask-postgres coretask-redis coretask-storage coretask-storage-init",
     "packages:build": "pnpm --filter \"./packages/*\" build",
     "build": "pnpm --recursive build",
     "lint": "pnpm --recursive lint",
@@ -44,7 +44,10 @@
   },
   "pnpm": {
     "overrides": {
-      "prosemirror-transform": "1.12.0"
+      "prosemirror-transform": "1.12.0",
+      "nanoid@>=3.0.0 <3.3.18": "^3.3.18",
+      "source-map-js@>=1.0.0 <1.2.2": "^1.2.2",
+      "js-yaml@>=3.0.0 <3.15.2": "^3.15.2"
     }
   }
 }

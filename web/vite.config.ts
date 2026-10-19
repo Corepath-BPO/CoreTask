@@ -64,6 +64,16 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     restoreMocks: true,
+
+    /*
+     * The default 5 s is too tight for the suites that drive Radix dropdowns
+     * through `userEvent`: every interaction walks jsdom pointer emulation,
+     * and on a loaded CI runner the OAuth and playground specs time out at 5 s
+     * yet pass comfortably at 30 s. The ceiling is here to catch a genuine
+     * hang, not to police how fast the machine is.
+     */
+    testTimeout: 30_000,
+
     // `e2e/` belongs to Playwright; Vitest would try to execute its
     // `test.describe` blocks and fail on the wrong runner.
     exclude: [...configDefaults.exclude, 'e2e/**'],

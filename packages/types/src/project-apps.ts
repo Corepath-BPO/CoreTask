@@ -8,6 +8,11 @@ export interface ProjectAppConnection {
   name: string;
   /** The webhook's host and the end of its path — enough to tell two apart. */
   urlHint: string;
+  /**
+   * Set when the CoreTask Slack app posts to this channel itself, rather
+   * than through an incoming webhook: its posts carry buttons.
+   */
+  slackChannel: { id: string; name: string } | null;
   events: ProjectAppEvent[];
   enabled: boolean;
   /** Set when posting kept failing and the app switched itself off. */
@@ -21,7 +26,10 @@ export interface ProjectAppConnection {
 
 export interface CreateProjectAppPayload {
   app: ProjectApp;
-  url: string;
+  /** The tool's incoming-webhook URL. Not needed with `slackChannelId`. */
+  url?: string;
+  /** Slack only, with the workspace's Slack app installed: post as the app here. */
+  slackChannelId?: string;
   name?: string;
   events?: ProjectAppEvent[];
 }

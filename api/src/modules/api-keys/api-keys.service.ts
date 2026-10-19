@@ -178,6 +178,8 @@ export class ApiKeysService {
 
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: existing.userId }, data: { isActive: false } });
+      // The webhooks it subscribed go with it: nothing is left to receive them.
+      await tx.webhookEndpoint.deleteMany({ where: { apiKeyId } });
       return tx.apiKey.update({
         where: { id: apiKeyId },
         data: { revokedAt: new Date() },
@@ -205,8 +207,18 @@ export class ApiKeysService {
       select: { id: true, name: true, email: true },
     });
 
+    if (principal.oauth) {
+      return {
+        principal: 'oauth_app',
+        user,
+        workspace: null,
+        apiKey: null,
+        oauthApp: { id: principal.oauth.appId, name: principal.oauth.appName },
+      };
+    }
+
     if (!principal.apiKey) {
-      return { principal: 'user', user, workspace: null, apiKey: null };
+      return { principal: 'user', user, workspace: null, apiKey: null, oauthApp: null };
     }
 
     const workspaceId = principal.apiKey.workspaceId;
@@ -226,6 +238,7 @@ export class ApiKeysService {
       user,
       workspace,
       apiKey: { id: principal.apiKey.id, name: principal.apiKey.name, role: membership.role },
+      oauthApp: null,
     };
   }
 

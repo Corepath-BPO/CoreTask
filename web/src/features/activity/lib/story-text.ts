@@ -110,6 +110,17 @@ export function describeStory(entry: ActivityEntry, ctx: StoryContext): string {
         const text = fieldStory(meta as unknown as FieldStoryMetadata, ctx);
         if (text) return text;
       }
+      /*
+       * A rule's run. The line is credited to whoever set the rule off, and
+       * the server's summary — 'Automation "X" updated CORE-12' — read after
+       * their name as "Ada automation …". Said as what happened instead.
+       */
+      if (typeof meta['ruleId'] === 'string') {
+        const rule = /^Automation "(.+)" updated /.exec(entry.summary)?.[1];
+        return rule
+          ? `set off the rule “${rule}”, which updated ${item}`
+          : `set off a rule on ${item}`;
+      }
       return lowerFirst(entry.summary);
     }
     case ActivityAction.FIELD_CHANGED: {

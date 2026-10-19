@@ -69,6 +69,7 @@ export const EmailJob = {
   INVITATION: 'invitation',
   /** A message already written by the API — a task's update to its email thread. */
   MESSAGE: 'message',
+  PASSWORD_RESET: 'password-reset',
 } as const;
 export type EmailJob = (typeof EmailJob)[keyof typeof EmailJob];
 
@@ -106,6 +107,8 @@ export interface RuleEmailRequest {
   body: string;
   taskId: string;
   taskTitle: string;
+  /** Where the link goes, when it is not the task — a ticket's page. */
+  path?: string;
   ruleName: string;
 }
 
@@ -117,4 +120,17 @@ export interface MessageEmailJobData {
   replyTo?: string;
 }
 
-export type EmailJobData = WelcomeEmailJobData | InvitationEmailJobData | MessageEmailJobData;
+/**
+ * Carries the *raw* reset token, because the link is the only place it exists
+ * in the clear — the database holds a hash. Removed on completion, as an
+ * invitation's job is, so it does not linger in Redis.
+ */
+export interface PasswordResetEmailJobData {
+  email: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+}
+
+export type EmailJobData =
+  WelcomeEmailJobData | InvitationEmailJobData | MessageEmailJobData | PasswordResetEmailJobData;

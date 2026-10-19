@@ -3,6 +3,7 @@ import {
   TRIGGER_LABEL,
   isFallbackBranch,
   type AutomationTrigger,
+  delayLength,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -406,6 +407,9 @@ function inspectorTitle(node: CanvasNode, metadata: AutomationMetadata | undefin
 
     return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
   }
+
+  // "Wait… / 2 days", for the same reason the trigger drops its "When".
+  if (node.type === 'DELAY') return delayLength(node.configuration) ?? 'Choose how long';
 
   if (node.type === 'CONDITION' || node.type === 'BRANCH') {
     // Without the value: it lives in the control immediately below.

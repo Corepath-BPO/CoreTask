@@ -103,8 +103,9 @@ Each ends with format, lint, typecheck, test, build, and a commit.
 
 ## What is deliberately not in this plan
 
-- **AI conditions and AI drafting.** Present in the references, feature-flagged
-  off here. There is no model behind them and a fake one is worse than a gap.
+- **AI drafting.** Present in the references and greyed. AI conditions and the
+  "Use AI…" action came later, behind a real model (`ANTHROPIC_API_KEY`); see
+  the action catalogue document.
 - **External actions.** The tab exists for structural parity and says it will be
   available later. No fake integrations.
 - **Form and email task creation conditions.** Those modules do not exist.

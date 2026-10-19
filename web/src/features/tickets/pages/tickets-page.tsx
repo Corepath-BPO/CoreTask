@@ -42,6 +42,7 @@ import {
 import { TicketDetailDialog } from '../components/ticket-detail-dialog';
 import { TicketFormDialog } from '../components/ticket-form-dialog';
 import { useTickets } from '../hooks/use-tickets';
+import { useTicketsRealtime } from '../hooks/use-tickets-realtime';
 import {
   ALL_STATUSES as ALL,
   buildTicketParams,
@@ -119,6 +120,7 @@ export function TicketsPage() {
   );
 
   const { data, isLoading, isError, error } = useTickets(workspaceId, params);
+  useTicketsRealtime(workspaceId);
 
   const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const canReport = hasAtLeastRole(role, WorkspaceRole.MEMBER);
@@ -247,10 +249,21 @@ export function TicketsPage() {
       {isLoading && <TicketRowsSkeleton />}
 
       {!isLoading && !isError && tickets.length === 0 && (
+        // A workspace with no tickets at all is not a search that missed. The
+        // summary counts everything the scope can see, whatever the other
+        // filters say, so "Everyone" with a zero total means there are none.
         <EmptyState
           icon={TicketIcon}
-          title="No tickets match those filters"
-          description="Try a different search term, or widen the filters."
+          {...(scope === 'all' && (summary?.total ?? 0) === 0
+            ? {
+                title: 'No tickets yet',
+                description:
+                  'Bug reports, requests and incidents land here. Report the first one to start the queue.',
+              }
+            : {
+                title: 'No tickets match those filters',
+                description: 'Try a different search term, or widen the filters.',
+              })}
         />
       )}
 

@@ -2,6 +2,8 @@ import {
   AUTOMATION_VALUE_TOKEN_LABEL,
   CONDITION_OPERATOR,
   CONDITION_VALUE_TYPE,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
   isDateTrigger,
   isTokenValue,
   operatorNeedsValue,
@@ -9,6 +11,11 @@ import {
   tokensForFieldType,
   type ConditionOperator,
   type ConditionValueType,
+  AUTOMATION_DELAY_UNITS,
+  AUTOMATION_DELAY_UNIT_LABEL,
+  AutomationDelayUnit,
+  delayProblem,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type { AutomationMetadata, ConditionFieldDefinition } from '@coretask/types';
 import { ChevronDown, X } from 'lucide-react';
@@ -25,10 +32,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
 
+import { AiActionFields, AiCheckFields } from './ai-step-fields';
 import {
   canonicalOperator,
   operatorOptionLabel,
@@ -113,8 +121,20 @@ export function NodeConfigFields({
     );
   }
 
+  // How long a Wait step waits.
+  if (node.type === 'DELAY') {
+    return <DelayFields configuration={node.configuration} onChange={onChange} />;
+  }
+
   /* A branch holds the comparison that chooses its arm, so it is configured
      exactly as a condition is — one decision, one node. */
+  if (
+    (node.type === 'CONDITION' || node.type === 'BRANCH') &&
+    node.configuration['field'] === AI_CHECK_FIELD
+  ) {
+    return <AiCheckFields configuration={node.configuration} onChange={onChange} />;
+  }
+
   if (node.type === 'CONDITION' || node.type === 'BRANCH') {
     return (
       <ConditionFields configuration={node.configuration} metadata={metadata} onChange={onChange} />
@@ -180,6 +200,11 @@ function TriggerFields({
         onChange={onChange}
       />
     );
+  }
+
+  // Any change of a ticket's status, or a change to one status.
+  if (subtype === 'TICKET_STATUS_CHANGED') {
+    return <TicketStatusTriggerFields configuration={configuration} onChange={onChange} />;
   }
 
   // Which field to watch — or every field, which is what no fieldId stores and
@@ -677,6 +702,23 @@ function ActionFields({
     case 'MOVE_TO_SECTION':
       return picker('sectionId', 'Section', metadata?.sections, 'Choose a section');
 
+    // A ticket's own values, not the project's statuses and priorities.
+    case 'SET_TICKET_STATUS':
+      return picker(
+        'status',
+        'Ticket status',
+        TICKET_STATUSES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a status',
+      );
+
+    case 'SET_TICKET_PRIORITY':
+      return picker(
+        'priority',
+        'Ticket priority',
+        TICKET_PRIORITIES.map((value) => ({ id: value, name: humanizeEnum(value) })),
+        'Choose a priority',
+      );
+
     case 'MOVE_TO_PROJECT':
       return (
         <MoveToProjectFields
@@ -819,6 +861,11 @@ function ActionFields({
 
     case 'SEND_EMAIL':
       return <SendEmailFields configuration={configuration} onChange={onChange} />;
+
+    case 'AI_ACTION':
+      return (
+        <AiActionFields configuration={configuration} metadata={metadata} onChange={onChange} />
+      );
 
     default:
       return <p className="text-sm text-muted-foreground">This step has nothing to configure.</p>;
@@ -1186,4 +1233,117 @@ function CustomFieldAction({
 /** A rating is a bounded whole number; the runner stores and compares it as one. */
 function isNumeric(type: string): boolean {
   return type === 'NUMBER' || type === 'RATING';
+}
+
+const ANY_STATUS = '__any__';
+
+/** "Ticket status changes": to any status, or to one — "when a ticket is resolved". */
+function TicketStatusTriggerFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const status =
+    typeof configuration['status'] === 'string' && configuration['status'] !== ''
+      ? configuration['status']
+      : ANY_STATUS;
+
+  return (
+    <Field
+      label="When the status changes to"
+      htmlFor="trigger-ticket-status"
+      hint="Any status fires on every change."
+    >
+      <Select
+        value={status}
+        onValueChange={(next) => {
+          // Radix answers a reset with an empty value; that is not a choice.
+          if (!next) return;
+          onChange(next === ANY_STATUS ? {} : { status: next });
+        }}
+      >
+        <SelectTrigger id="trigger-ticket-status" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <RadioItem value={ANY_STATUS}>Any status</RadioItem>
+          {TICKET_STATUSES.map((value) => (
+            <RadioItem key={value} value={value}>
+              {humanizeEnum(value)}
+            </RadioItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * "Wait…": how many minutes, hours or days before what follows runs. What
+ * follows is judged on the task as it is by then, so a condition after the
+ * wait is how a rule says "if it is still open".
+ */
+function DelayFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: (configuration: Record<string, unknown>) => void;
+}) {
+  const unit = AUTOMATION_DELAY_UNITS.includes(configuration['unit'] as AutomationDelayUnit)
+    ? (configuration['unit'] as AutomationDelayUnit)
+    : AutomationDelayUnit.DAYS;
+  const amount = typeof configuration['amount'] === 'number' ? configuration['amount'] : '';
+  const problem = delayProblem(configuration);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Wait for" htmlFor="step-delay-amount" error={problem ?? undefined}>
+          <Input
+            id="step-delay-amount"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={amount}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              onChange({
+                ...configuration,
+                unit,
+                amount: event.target.value === '' || Number.isNaN(next) ? undefined : next,
+              });
+            }}
+          />
+        </Field>
+        <Field label="Unit" htmlFor="step-delay-unit">
+          <Select
+            value={unit}
+            onValueChange={(next) => {
+              // Radix answers a reset with an empty value; that is not a choice.
+              if (next) onChange({ ...configuration, unit: next });
+            }}
+          >
+            <SelectTrigger id="step-delay-unit" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_DELAY_UNITS.map((entry) => (
+                <RadioItem key={entry} value={entry}>
+                  {AUTOMATION_DELAY_UNIT_LABEL[entry]}
+                </RadioItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Steps after this run once the time has passed, checked against the task as it is then — add
+        a condition after it to act only if something is still true.
+      </p>
+    </div>
+  );
 }

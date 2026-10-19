@@ -105,19 +105,6 @@ export class AppConfigService {
     } as const;
   }
 
-  get smtp() {
-    return {
-      host: this.env.SMTP_HOST,
-      port: this.env.SMTP_PORT,
-      user: this.env.SMTP_USER,
-      password: this.env.SMTP_PASSWORD,
-      secure: this.env.SMTP_SECURE,
-      from: this.env.SMTP_FROM,
-      /** Without a host the log transport is used — see EmailService. */
-      enabled: Boolean(this.env.SMTP_HOST),
-    } as const;
-  }
-
   /**
    * Microsoft Graph mail settings.
    *
@@ -151,6 +138,36 @@ export class AppConfigService {
       domain: this.env.INBOUND_EMAIL_DOMAIN?.trim().toLowerCase() ?? null,
       secret: this.env.INBOUND_EMAIL_SECRET ?? null,
       enabled: Boolean(this.env.INBOUND_EMAIL_DOMAIN),
+    } as const;
+  }
+
+  /** The model behind the AI steps in rules; `enabled` is whether there is one. */
+  get ai() {
+    return {
+      apiKey: this.env.ANTHROPIC_API_KEY ?? null,
+      baseUrl: this.env.ANTHROPIC_BASE_URL.replace(/\/+$/, ''),
+      model: this.env.AI_MODEL,
+      timeoutMs: this.env.AI_TIMEOUT_MS,
+      enabled: Boolean(this.env.ANTHROPIC_API_KEY),
+    } as const;
+  }
+
+  /**
+   * The CoreTask Slack app. `enabled` checks one value because the schema
+   * refuses a partial set. Installs come back to the web app, which finishes
+   * them with the admin's session — that is what ties an install to the
+   * person who started it.
+   */
+  get slack() {
+    return {
+      clientId: this.env.SLACK_CLIENT_ID ?? null,
+      clientSecret: this.env.SLACK_CLIENT_SECRET ?? null,
+      signingSecret: this.env.SLACK_SIGNING_SECRET ?? null,
+      apiBaseUrl: this.env.SLACK_API_BASE_URL.replace(/\/+$/, ''),
+      authorizeUrl: this.env.SLACK_AUTHORIZE_URL,
+      timeoutMs: this.env.SLACK_TIMEOUT_MS,
+      redirectUri: `${this.corsOrigins[0] ?? this.env.WEB_URL}/integrations/slack/callback`,
+      enabled: Boolean(this.env.SLACK_CLIENT_ID),
     } as const;
   }
 

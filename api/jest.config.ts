@@ -1,7 +1,7 @@
 import type { Config } from 'jest';
 
 /**
- * Unit-test configuration. These specs never touch PostgreSQL, Redis or MinIO,
+ * Unit-test configuration. These specs never touch PostgreSQL, Redis or object storage,
  * so `pnpm test` is safe to run on a bare checkout.
  *
  * Integration coverage lives in `test/e2e` and runs via `pnpm test:e2e`, which

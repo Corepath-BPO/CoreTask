@@ -175,3 +175,21 @@ describe('describeStory', () => {
     ).toBe('marked this ticket complete');
   });
 });
+
+describe('a rule’s run', () => {
+  it('says the person set off the rule, rather than reading "Ada automation …"', () => {
+    expect(
+      describeStory(
+        entry(
+          'UPDATED',
+          { ruleId: 'r-1', executionId: 'e-1' },
+          'Automation "Bugs are high priority" updated CORE-12',
+        ),
+        { itemWord: 'ticket', meId: 'me' },
+      ),
+    ).toBe('set off the rule “Bugs are high priority”, which updated this ticket');
+    expect(describeStory(entry('UPDATED', { ruleId: 'r-1' }, 'Something else'), ctx)).toBe(
+      'set off a rule on this task',
+    );
+  });
+});

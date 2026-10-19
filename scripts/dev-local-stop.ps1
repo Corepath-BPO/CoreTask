@@ -7,7 +7,7 @@
   them). The infra containers keep running unless -Infra is given.
 
 .PARAMETER Infra
-  Also stop the PostgreSQL, Redis and MinIO containers.
+  Also stop the PostgreSQL, Redis and RustFS containers.
 #>
 param(
   [switch]$Infra
@@ -31,5 +31,5 @@ if (-not $procs) {
 }
 
 if ($Infra) {
-  & docker compose -f "$root\docker-compose.yml" -f "$root\docker-compose.dev.yml" stop coretask-postgres coretask-redis coretask-minio
+  & docker compose -f "$root\docker-compose.yml" -f "$root\docker-compose.dev.yml" stop coretask-postgres coretask-redis coretask-storage
 }

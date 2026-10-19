@@ -123,7 +123,10 @@ export function ImportProjectDialog({
 
   const acceptFile = async (file: File) => {
     if (file.size > MAX_FILE_BYTES) {
-      setState({ step: 'pick', error: 'That file is over 20 MB. It does not look like a project export.' });
+      setState({
+        step: 'pick',
+        error: 'That file is over 20 MB. It does not look like a project export.',
+      });
       return;
     }
     try {
@@ -170,9 +173,7 @@ export function ImportProjectDialog({
       includedColumns,
       signal: controller.signal,
       onProgress: (progress) =>
-        setState((current) =>
-          current.step === 'running' ? { ...current, progress } : current,
-        ),
+        setState((current) => (current.step === 'running' ? { ...current, progress } : current)),
     }).then((result) => {
       // The list page should show the new project the moment this closes.
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all(workspaceId) });
@@ -233,9 +234,7 @@ export function ImportProjectDialog({
                   />
                 </label>
               </p>
-              <p className="text-xs text-muted-foreground">
-                Asana: Project actions → Export → CSV
-              </p>
+              <p className="text-xs text-muted-foreground">Asana: Project actions → Export → CSV</p>
             </div>
             {state.error && <p className="text-sm text-destructive">{state.error}</p>}
           </div>
@@ -406,10 +405,7 @@ function PreviewStep({
         <fieldset className="space-y-1.5">
           <legend className="text-sm font-medium">Custom fields to import</legend>
           {plan.customFieldColumns.map((column, index) => (
-            <label
-              key={column.header}
-              className="flex cursor-pointer items-center gap-2 text-sm"
-            >
+            <label key={column.header} className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={includedColumns[index] ?? false}

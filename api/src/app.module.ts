@@ -30,6 +30,7 @@ import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { MyTasksModule } from './modules/my-tasks/my-tasks.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { OAuthModule } from './modules/oauth/oauth.module';
 import { ProjectViewsModule } from './modules/project-views/project-views.module';
 import { WorkItemsModule } from './modules/work-items/work-items.module';
 import { ProjectAccessModule } from './modules/project-access/project-access.module';
@@ -57,6 +58,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
+import { SlackModule } from './modules/slack/slack.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { MembersModule } from './modules/members/members.module';
@@ -99,7 +101,9 @@ import { WebsocketModule } from './websocket/websocket.module';
     // Domain
     AuthModule,
     ApiKeysModule,
+    OAuthModule,
     WebhooksModule,
+    SlackModule,
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,

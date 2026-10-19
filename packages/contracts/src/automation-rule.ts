@@ -287,6 +287,39 @@ export const VALUELESS_CONDITION_OPERATORS: readonly ConditionOperator[] = [
  */
 export const OPERATORS_BY_CONDITION_FIELD: Partial<Record<string, readonly ConditionOperator[]>> = {
   sectionId: [CONDITION_OPERATOR.IS, CONDITION_OPERATOR.IS_NOT, CONDITION_OPERATOR.IS_ONE_OF],
+  // A ticket always has a type, priority, severity and status; only its
+  // assignee can be empty.
+  'ticket.type': [
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_NOT_ONE_OF,
+  ],
+  'ticket.priority': [
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_NOT_ONE_OF,
+  ],
+  'ticket.severity': [
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_NOT_ONE_OF,
+  ],
+  'ticket.status': [
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_NOT_ONE_OF,
+  ],
+  'ticket.assignee': [
+    CONDITION_OPERATOR.IS,
+    CONDITION_OPERATOR.IS_NOT,
+    CONDITION_OPERATOR.IS_ONE_OF,
+    CONDITION_OPERATOR.IS_EMPTY,
+    CONDITION_OPERATOR.IS_NOT_EMPTY,
+  ],
 };
 
 /**

@@ -9,11 +9,11 @@
 | `coretask-worker`   | Node — `dist/worker.js` | BullMQ consumer. Same codebase, no HTTP surface. |
 | `coretask-postgres` | PostgreSQL 17           | System of record.                                |
 | `coretask-redis`    | Redis 7                 | Queues, cache, future Socket.IO adapter.         |
-| `coretask-minio`    | MinIO                   | S3-compatible object storage for attachments.    |
+| `coretask-storage`  | RustFS                  | S3-compatible object storage for attachments.    |
 
 ## Boundaries
 
-The browser never talks to PostgreSQL, Redis or MinIO. Every read and write goes
+The browser never talks to PostgreSQL, Redis or RustFS. Every read and write goes
 through the API, which is the only component holding credentials for those
 services.
 
