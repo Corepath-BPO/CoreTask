@@ -66,6 +66,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # Compose interpolates every service in the file before it starts any of
+    # them, and docker-compose.yml declares the JWT secrets on coretask-api and
+    # coretask-worker as required (`${JWT_ACCESS_SECRET:?...}`). This job never
+    # starts either service, yet without these the whole file fails to parse.
+    # A developer never notices, because their .env supplies both.
+    #
+    # They are throwaway values for an ephemeral runner, not secrets — the same
+    # kind api/test/setup-env.ts already commits. The integration suite picks
+    # them up as well, in place of setup-env's own defaults; both clear the 32
+    # characters env.schema.ts requires, and they differ.
+    env:
+      JWT_ACCESS_SECRET: ci_only_access_secret_for_an_ephemeral_runner
+      JWT_REFRESH_SECRET: ci_only_refresh_secret_for_an_ephemeral_runner
+
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
@@ -91,14 +105,15 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.dev.yml \
             run --rm -T coretask-minio-init
 
-      # Only DATABASE_URL is set here, and it matches the compose defaults
-      # (coretask / coretask_dev_password / coretask).
+      # DATABASE_URL matches the compose defaults (coretask /
+      # coretask_dev_password / coretask); the JWT secrets come from the job's
+      # env above.
       #
-      # Everything else is already handled, and setting it here would be noise
-      # or a lie:
-      #   - api/test/setup-env.ts fills in the JWT secrets, forces NODE_ENV=test
-      #     and raises RATE_LIMIT_MAX / AUTH_RATE_LIMIT_MAX to 100000, so the
-      #     throttler is exercised only by the spec that means to.
+      # Nothing else is set, because it is already handled and setting it here
+      # would be noise or a lie:
+      #   - api/test/setup-env.ts forces NODE_ENV=test and raises
+      #     RATE_LIMIT_MAX / AUTH_RATE_LIMIT_MAX to 100000, so the throttler is
+      #     exercised only by the spec that means to.
       #   - api/test/e2e/global-setup.ts runs `prisma migrate deploy` itself,
       #     against the dedicated `coretask_e2e` schema that
       #     test-database.ts rewrites this URL to. A `db:deploy` step here would
