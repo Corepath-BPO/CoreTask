@@ -63,7 +63,17 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+
+    /*
+     * Before every test, put `vi.spyOn` spies back on their objects and return
+     * every mock, `vi.fn()` included, to no calls and the implementation it was
+     * created with. Vitest 3 did all of that under `restoreMocks` alone;
+     * Vitest 4 narrowed it to restoring spies, so without `mockReset` a
+     * module-level `vi.fn()` carries its calls from one test into the next and
+     * `not.toHaveBeenCalled()` stops meaning "not in this test".
+     */
     restoreMocks: true,
+    mockReset: true,
 
     /*
      * The default 5 s is too tight for the suites that drive Radix dropdowns
@@ -80,6 +90,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
+      // Without this, Vitest 4 reports only the files the run happened to
+      // load, so a module no test imports would drop out of the report
+      // instead of showing as 0%.
+      include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/test/**', 'src/**/*.d.ts', 'src/main.tsx'],
     },
   },
