@@ -65,7 +65,7 @@ export const envSchema = z
     STORAGE_ENDPOINT: z.string().min(1).default('http://localhost:9000'),
     /**
      * Where a *browser* reaches storage, when that differs from where the API
-     * does. In Docker the API talks to `coretask-minio:9000`, a hostname that
+     * does. In Docker the API talks to `coretask-storage:9000`, a hostname that
      * exists only on the compose network — presigning with it produces URLs no
      * client can resolve. The signature covers the Host header, so this cannot
      * be patched in afterwards; the URL has to be signed for the host the

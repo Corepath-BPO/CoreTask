@@ -18,7 +18,7 @@
     "logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f",
     "prod:build": "docker compose -f docker-compose.yml -f docker-compose.prod.yml build",
     "prod:up": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
-    "infra": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d coretask-postgres coretask-redis coretask-minio",
+    "infra": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d coretask-postgres coretask-redis coretask-storage coretask-storage-init",
     "packages:build": "pnpm --filter \"./packages/*\" build",
     "build": "pnpm --recursive build",
     "lint": "pnpm --recursive lint",

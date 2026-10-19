@@ -599,10 +599,12 @@ listed or served, so an abandoned upload is invisible rather than a broken link.
 A worker job sweeps them hourly.
 
 **Confirm is the security boundary, not a formality.** A presigned PUT has no
-way to express a size limit — S3 and MinIO simply cannot — so a URL issued for
-a 2 KB image will accept a gigabyte. This was verified against MinIO rather than
-assumed. Re-reading the object is what makes the recorded size true; a mismatch
-deletes the bytes rather than leaving them to the sweeper.
+way to express a size limit — S3 and the servers modelled on it simply cannot —
+so a URL issued for a 2 KB image will accept a gigabyte. This was verified
+against the storage server rather than assumed, and attachments.e2e-spec.ts
+keeps checking it against whichever one runs. Re-reading the object is what
+makes the recorded size true; a mismatch deletes the bytes rather than leaving
+them to the sweeper.
 
 Content type _is_ enforceable, but only if it is signed. By default the AWS SDK
 signs `host` alone and `ContentType` degrades to a suggestion: a URL signed for
@@ -617,7 +619,7 @@ disposition at signing time means it cannot be dropped by whatever wrote the
 object.
 
 `STORAGE_PUBLIC_ENDPOINT` exists because SigV4 signs the Host header. In Docker
-the API reaches storage at `coretask-minio:9000`, a name that resolves only on
+the API reaches storage at `coretask-storage:9000`, a name that resolves only on
 the compose network, so a URL signed with it is useless to a browser — and the
 hostname cannot be patched in afterwards without invalidating the signature. A
 second S3 client, pointed at the address the client will actually connect to,

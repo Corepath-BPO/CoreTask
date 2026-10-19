@@ -4,7 +4,7 @@
 #   gates             format, lint, typecheck, the unit suites and the build.
 #                     No services; safe on a bare checkout.
 #   api-integration   the Supertest specs under api/test/e2e, against real
-#                     PostgreSQL, Redis and MinIO.
+#                     PostgreSQL, Redis and RustFS.
 #
 # The Playwright browser suite is deliberately not here — see the note at the
 # foot of this file.
@@ -84,26 +84,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
 
-      # Compose, not `services:`. Two reasons it has to be this way:
+      # Compose, not `services:`, so CI starts the same storage server, versions
+      # and health checks a developer runs, from the one definition. A second
+      # copy here would drift — and when MinIO's images vanished, it would have
+      # been one more place to find and fix.
       #
-      #   MinIO needs `server /data --console-address :9001` as its command,
-      #   and a service container cannot express a command at all.
-      #
-      #   The bucket does not create itself. Nothing in api/ calls CreateBucket;
-      #   `coretask-minio-init` makes it, and attachments.e2e-spec.ts PUTs to a
-      #   real presigned URL, so a missing bucket fails the suite.
+      # It also has to run the bucket job. Nothing in api/ calls CreateBucket;
+      # `coretask-storage-init` makes it, and attachments.e2e-spec.ts PUTs to a
+      # real presigned URL, so a missing bucket fails the suite.
       #
       # The dev overlay is what publishes 5432 / 6379 / 9000 to the host, which
       # is where the suite connects from.
-      - name: Start PostgreSQL, Redis and MinIO
+      - name: Start PostgreSQL, Redis and RustFS
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-            up -d --wait coretask-postgres coretask-redis coretask-minio
+            up -d --wait coretask-postgres coretask-redis coretask-storage
 
       - name: Create the storage bucket
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-            run --rm -T coretask-minio-init
+            run --rm -T coretask-storage-init
 
       # DATABASE_URL matches the compose defaults (coretask /
       # coretask_dev_password / coretask); the JWT secrets come from the job's
@@ -135,7 +135,7 @@ jobs:
 # Not covered here: the browser suite (web/e2e, 13 Playwright specs)
 # =============================================================================
 # Playwright drives a browser against a *running* stack — API, web, PostgreSQL,
-# Redis and MinIO together — rather than importing the app the way the Supertest
+# Redis and RustFS together — rather than importing the app the way the Supertest
 # specs do. Standing that up means building the dev images and waiting for the
 # whole compose stack, which is a different and much slower shape of job than
 # either of the two above.

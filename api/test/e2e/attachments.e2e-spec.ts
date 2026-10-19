@@ -10,7 +10,7 @@ import {
 } from './test-app';
 
 /**
- * These talk to the real MinIO the dev stack runs, not a mock.
+ * These talk to the real storage server the dev stack runs (RustFS), not a mock.
  *
  * That is the point: the properties worth guarding here are properties of the
  * storage service's actual behaviour — that a presigned PUT enforces the
