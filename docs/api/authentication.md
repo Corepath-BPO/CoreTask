@@ -21,13 +21,15 @@ it: `HttpOnly`, `SameSite`, `Secure` in production, and scoped to
 
 ## Endpoints
 
-| Method | Path             | Auth           | Purpose                            |
-| ------ | ---------------- | -------------- | ---------------------------------- |
-| POST   | `/auth/register` | none           | Create an account, start a session |
-| POST   | `/auth/login`    | none           | Exchange credentials for a session |
-| POST   | `/auth/refresh`  | refresh cookie | Rotate and mint a new access token |
-| POST   | `/auth/logout`   | refresh cookie | Revoke the current session         |
-| GET    | `/auth/me`       | access token   | Return the authenticated user      |
+| Method | Path                    | Auth           | Purpose                             |
+| ------ | ----------------------- | -------------- | ----------------------------------- |
+| POST   | `/auth/register`        | none           | Create an account, start a session  |
+| POST   | `/auth/login`           | none           | Exchange credentials for a session  |
+| POST   | `/auth/refresh`         | refresh cookie | Rotate and mint a new access token  |
+| POST   | `/auth/logout`          | refresh cookie | Revoke the current session          |
+| GET    | `/auth/me`              | access token   | Return the authenticated user       |
+| POST   | `/auth/forgot-password` | none           | E-mail a link to set a new password |
+| POST   | `/auth/reset-password`  | none           | Set a new password from that link   |
 
 ### POST /auth/register
 
@@ -87,6 +89,22 @@ laptop must not sign you out on a phone.
 Re-reads the user from the database on every call, so a disabled account stops
 working immediately rather than at the next token expiry.
 
+### POST /auth/forgot-password
+
+`{ email }`. Always `202 { sent: true }`, whether or not the address has an
+account, so the answer cannot be used to find out who does. When it is an
+active person's account, a link to `<WEB_URL>/reset-password?token=…` is
+e-mailed: it works once, for an hour. A new request replaces an unused link,
+and at most one link is sent per account a minute. Only the token's SHA-256
+hash is stored; the queued e-mail job is removed once sent.
+
+### POST /auth/reset-password
+
+`{ token, password }`, the password held to the registration policy. `204` on
+success; every session the account had is revoked, so it signs in again.
+`400 PASSWORD_RESET_INVALID` for a link that is unknown, used or expired. The
+web page takes the token out of the address bar as soon as it reads it.
+
 ## Rotation and replay detection
 
 Refresh tokens are single-use. Each rotation revokes the presented token and
@@ -135,6 +153,7 @@ leak cannot be replayed. Passwords, which have low entropy, use Argon2id
 | `REFRESH_TOKEN_EXPIRED`    | 401    | Past its 30-day life                        |
 | `REFRESH_TOKEN_REUSED`     | 401    | Replay detected; the family was revoked     |
 | `ACCOUNT_DISABLED`         | 403    | Account deactivated                         |
+| `PASSWORD_RESET_INVALID`   | 400    | Reset link unknown, used or expired         |
 | `RATE_LIMIT_EXCEEDED`      | 429    | Auth throttle tripped                       |
 
 Branch on `error.code`. `error.message` is human-facing copy and may change.
@@ -245,7 +264,8 @@ workspace id every other call needs:
 
 ## Not yet implemented
 
-E-mail verification, password reset, "sign out everywhere", and MFA. The
-groundwork exists — `emailVerifiedAt` on the user, the e-mail queue and worker,
-and `TokenService.revokeAllForUser()`, which is one controller method away from
+E-mail verification, changing a password while signed in, "sign out
+everywhere", and MFA. The groundwork exists — `emailVerifiedAt` on the user,
+the e-mail queue and worker, and `TokenService.revokeAllForUser()`, which the
+password reset already calls and which is one controller method away from
 being a `/auth/logout-all` endpoint.

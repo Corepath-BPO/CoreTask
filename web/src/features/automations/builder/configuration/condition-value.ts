@@ -11,6 +11,7 @@ import {
   operatorTakesMultipleValues,
   type ConditionOperator,
   type ConditionValueType,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -114,6 +115,9 @@ export function resolveValueType(
 export function conditionFromCatalogueEntry(
   entry: Pick<AutomationCatalogEntry, 'subtype' | 'valueType'>,
 ): Record<string, unknown> {
+  // An AI check asks a question; it has no operator to default.
+  if (entry.subtype === AI_CHECK_FIELD) return { field: AI_CHECK_FIELD };
+
   /*
    * Nothing when the row carried no type, which is a metadata response older
    * than this feature rather than a case anybody meets today.
@@ -346,6 +350,7 @@ export function summariseCondition(
 ): string {
   const field = configuration['field'];
   if (typeof field !== 'string' || field === '') return 'Choose what to check';
+  if (field === AI_CHECK_FIELD) return 'Check with AI';
 
   const definition = metadata?.conditionFields.find((entry) => entry.field === field);
   const label = definition?.label ?? field;

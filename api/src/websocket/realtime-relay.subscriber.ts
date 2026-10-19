@@ -52,9 +52,13 @@ export class RealtimeRelaySubscriber implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (typeof message?.projectId !== 'string' || typeof message.event !== 'string') return;
+    if (typeof message?.event !== 'string') return;
 
-    this.gateway.emitToProject(message.projectId, message.event, message.payload ?? {});
+    if (typeof message.projectId === 'string') {
+      this.gateway.emitToProject(message.projectId, message.event, message.payload ?? {});
+    } else if (typeof message.workspaceId === 'string') {
+      this.gateway.emitToWorkspace(message.workspaceId, message.event, message.payload ?? {});
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

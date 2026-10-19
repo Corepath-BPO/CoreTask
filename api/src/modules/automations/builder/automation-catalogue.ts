@@ -23,6 +23,14 @@ import {
   type CustomFieldType,
   type TriggerConfigForm,
   type WorkspaceRole,
+  TICKET_ONLY_ACTIONS,
+  TICKET_RULE_ACTIONS,
+  isTicketTrigger,
+  TicketConditionField,
+  isTicketConditionField,
+  DELAY_SUBTYPE,
+  AI_CHECK_FIELD,
+  AI_UNAVAILABLE_REASON,
 } from '@coretask/contracts';
 import type { AutomationCatalogEntry } from '@coretask/types';
 
@@ -79,7 +87,7 @@ export interface AutomationConditionEntry extends AutomationCatalogEntry {
 export interface AutomationCapabilities {
   /** The runner walks a branch's arms and takes one. */
   branching: boolean;
-  /** Nothing waits: a DELAY node is refused at validation. */
+  /** A Wait step pauses a run until the clock resumes it. */
   delays: boolean;
   externalActions: boolean;
   ai: boolean;
@@ -332,6 +340,10 @@ export const ACTION_CATEGORY = {
   CREATE_NEW: 'Create new',
   CONVERT: 'Convert task to…',
   ADD_TO_TASK: 'Add to task',
+  /** "Use AI…": instructions, and the changes a model may make from them. */
+  USE_AI: 'Use AI',
+  /** The Wait step: what follows it runs later. */
+  WAIT: 'Wait',
   /** Actions that leave CoreTask. The builder shows this group on its own tab. */
   EXTERNAL: EXTERNAL_ACTION_CATEGORY,
 } as const;
@@ -339,9 +351,6 @@ export const ACTION_CATEGORY = {
 /* -------------------------------------------------------------------------- */
 /* Triggers                                                                    */
 /* -------------------------------------------------------------------------- */
-
-/** Shared by a trigger and a condition greyed for the same missing feature. */
-const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
 
 /**
  * Triggers nothing publishes, and why.
@@ -353,12 +362,7 @@ const NO_APPROVALS_REASON = 'CoreTask has no approvals.';
  * builder can sell: the rule saves, publishes, validates, and then waits
  * forever for an event that is never sent.
  */
-const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {
-  [AutomationTrigger.TICKET_CREATED]:
-    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
-  [AutomationTrigger.TICKET_STATUS_CHANGED]:
-    'Ticket events are delivered, but automation actions currently operate on tasks, not tickets.',
-};
+const TRIGGER_UNAVAILABLE_REASON: Partial<Record<AutomationTrigger, string>> = {};
 
 /** Why the runner cannot execute a trigger, or null when it can. */
 export function triggerUnavailableReason(trigger: string): string | null {
@@ -601,6 +605,7 @@ export function triggerCatalogue(
       available: reason === null,
       reason,
       configForms: configFormsFor(subtype),
+      subjects: isTicketTrigger(subtype) ? ['TICKET' as const] : ['TASK' as const],
     };
   });
 
@@ -712,10 +717,16 @@ interface ConditionSpec {
   description?: string;
 }
 
-const FORMS_AND_EMAIL_REASON = 'Forms and inbound email are not built yet.';
-const TASK_ALONE_REASON =
-  'The engine loads the task an event is about and nothing beside it, so this cannot be checked.';
-
+/*
+ * Forms and email to a project both create tasks, but neither leaves a mark a
+ * rule can read: a form's task does not record the form, and the inbound-mail
+ * record is not something the runner looks up. Said plainly, with what does
+ * work instead.
+ */
+const ADDED_BY_FORM_REASON =
+  'A task does not record which form created it yet, so this cannot be checked. "Task is added to this project" fires for form tasks too.';
+const ADDED_BY_EMAIL_REASON =
+  'Rules cannot tell yet that a task came in by email, so this cannot be checked. "Task is added to this project" fires for emailed tasks too.';
 /** The generic answer, for a field the runner has no case for. */
 const UNREADABLE_FIELD_REASON =
   'The engine cannot read this on a task, so the check would never match.';
@@ -746,14 +757,14 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
     label: 'Task is added to this project by form…',
     category: CONDITION_CATEGORY.TASK_MOVED,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: FORMS_AND_EMAIL_REASON,
+    reason: ADDED_BY_FORM_REASON,
   },
   {
     subtype: 'ADDED_BY_EMAIL',
     label: 'Task is added to this project by email…',
     category: CONDITION_CATEGORY.TASK_MOVED,
     valueType: CONDITION_VALUE_TYPE.TEXT,
-    reason: FORMS_AND_EMAIL_REASON,
+    reason: ADDED_BY_EMAIL_REASON,
   },
 
   // Task field is
@@ -854,12 +865,41 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
      */
     description: 'Holds when this task is complete, or when its last open subtask just was.',
   },
+  // For ticket rules: the ticket's own fields, read by the ticket half of the runner.
   {
-    subtype: 'TICKET',
-    label: 'Ticket is…',
+    subtype: TicketConditionField.TYPE,
+    label: 'Ticket type is…',
     category: CONDITION_CATEGORY.STATUS,
     valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
-    reason: TASK_ALONE_REASON,
+    description: 'Bug, feature, support, question, maintenance or incident.',
+  },
+  {
+    subtype: TicketConditionField.PRIORITY,
+    label: 'Ticket priority is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Low, medium, high or urgent.',
+  },
+  {
+    subtype: TicketConditionField.SEVERITY,
+    label: 'Ticket severity is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Minor, major or critical.',
+  },
+  {
+    subtype: TicketConditionField.STATUS,
+    label: 'Ticket status is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.SINGLE_SELECT,
+    description: 'Open, triaged, in progress, waiting, resolved or closed.',
+  },
+  {
+    subtype: TicketConditionField.ASSIGNEE,
+    label: 'Ticket assignee is…',
+    category: CONDITION_CATEGORY.STATUS,
+    valueType: CONDITION_VALUE_TYPE.PEOPLE,
+    description: 'Who the ticket is assigned to, or nobody.',
   },
   {
     subtype: 'APPROVAL_STATUS',
@@ -901,11 +941,13 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
 
   // Create your own
   {
-    subtype: 'AI_CONDITION',
+    // Available or not with the model behind it — see `toConditionEntry`.
+    subtype: AI_CHECK_FIELD,
     label: 'Create conditional check with AI',
     category: CONDITION_CATEGORY.CREATE_YOUR_OWN,
     valueType: CONDITION_VALUE_TYPE.TEXT,
-    reason: 'Coming later.',
+    description:
+      'Ask a yes-or-no question about the task; the rule goes on only if AI answers yes.',
   },
 ];
 
@@ -935,6 +977,8 @@ const VALUE_TYPE_BY_FIELD_TYPE: Record<string, ConditionValueType> = {
  */
 export function conditionCatalogue(
   fields: readonly CatalogueCustomField[],
+  /** Whether a model is configured, which the AI check needs. */
+  ai = false,
 ): AutomationConditionEntry[] {
   const generated: AutomationConditionEntry[] = settable(fields).map((field) => ({
     ...toConditionEntry({
@@ -965,7 +1009,9 @@ export function conditionCatalogue(
     }
 
     entries.push(
-      ...CONDITION_SPECS.filter((spec) => spec.category === category).map(toConditionEntry),
+      ...CONDITION_SPECS.filter((spec) => spec.category === category).map((spec) =>
+        toConditionEntry(spec, ai),
+      ),
     );
   }
 
@@ -983,7 +1029,7 @@ export function customFieldKey(fieldId: string): string {
   return `customField:${fieldId}`;
 }
 
-function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
+function toConditionEntry(spec: ConditionSpec, ai = false): AutomationConditionEntry {
   /*
    * Three answers, most specific first.
    *
@@ -997,13 +1043,21 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
    * explanation is still an explanation, and a greyed row with none is the
    * thing this catalogue exists to avoid.
    */
+  // A ticket's fields are read by the ticket half of the runner, not `readField`.
   const reason =
     spec.reason ??
-    (!runnerCanReadField(spec.subtype)
-      ? UNREADABLE_FIELD_REASON
-      : !runnerCanCompare(spec.subtype, spec.valueType)
-        ? UNCOMPARABLE_FIELD_REASON
-        : null);
+    // An AI check needs nothing from the field readers, only a model.
+    (spec.subtype === AI_CHECK_FIELD
+      ? ai
+        ? null
+        : AI_UNAVAILABLE_REASON
+      : isTicketConditionField(spec.subtype)
+        ? null
+        : !runnerCanReadField(spec.subtype)
+          ? UNREADABLE_FIELD_REASON
+          : !runnerCanCompare(spec.subtype, spec.valueType)
+            ? UNCOMPARABLE_FIELD_REASON
+            : null);
 
   return {
     subtype: spec.subtype,
@@ -1013,6 +1067,7 @@ function toConditionEntry(spec: ConditionSpec): AutomationConditionEntry {
     valueType: spec.valueType,
     available: reason === null,
     reason,
+    subjects: isTicketConditionField(spec.subtype) ? ['TICKET'] : ['TASK'],
   };
 }
 
@@ -1074,6 +1129,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'The task leaves the project but keeps its assignee, so it stays in My Tasks.',
   },
 
+  // Use AI
+  {
+    subtype: AutomationAction.AI_ACTION,
+    label: 'Use AI…',
+    category: ACTION_CATEGORY.USE_AI,
+    description:
+      'Write instructions; AI reads the task and makes the changes you allow, choosing from this project’s own options.',
+  },
+
   // Change status
   {
     subtype: 'AI_DRAFT_UPDATE',
@@ -1093,10 +1157,17 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'Moves the task to the project’s Done status, or back to its first open one.',
   },
   {
-    subtype: 'SET_TICKET',
-    label: 'Set Ticket to…',
+    subtype: AutomationAction.SET_TICKET_STATUS,
+    label: 'Set ticket status to…',
     category: ACTION_CATEGORY.CHANGE_STATUS,
-    reason: 'No automation action writes a ticket; the engine acts on the task an event is about.',
+    description:
+      'For ticket rules. Resolving or closing stamps the ticket as a person’s change does.',
+  },
+  {
+    subtype: AutomationAction.SET_TICKET_PRIORITY,
+    label: 'Set ticket priority to…',
+    category: ACTION_CATEGORY.CHANGE_STATUS,
+    description: 'For ticket rules: Low, Medium, High or Urgent.',
   },
   {
     subtype: AutomationAction.UPDATE_STATUS,
@@ -1184,7 +1255,7 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     subtype: 'CREATE_APPROVALS',
     label: 'Create approvals…',
     category: ACTION_CATEGORY.CREATE_NEW,
-    reason: NO_APPROVALS_REASON,
+    reason: 'Use “Create a task…”, then “Set task type to” Approval — an approval starts pending.',
   },
 
   // Convert task to…
@@ -1208,6 +1279,15 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     label: 'Add comment',
     category: ACTION_CATEGORY.ADD_TO_TASK,
     description: 'Authored by whoever caused the trigger, falling back to the task’s creator.',
+  },
+
+  // Wait
+  {
+    subtype: DELAY_SUBTYPE,
+    label: 'Wait…',
+    category: ACTION_CATEGORY.WAIT,
+    description:
+      'Minutes, hours or days. What follows runs then, judged on the task as it is by that time.',
   },
 
   // Send to another tool
@@ -1243,7 +1323,11 @@ const ACTION_SPECS: readonly ActionSpec[] = [
 const NOT_IMPLEMENTED_REASON = 'This is not an action the engine can run yet.';
 
 /** The action catalogue for one project, custom fields generated in place. */
-export function actionCatalogue(fields: readonly CatalogueCustomField[]): AutomationCatalogEntry[] {
+export function actionCatalogue(
+  fields: readonly CatalogueCustomField[],
+  /** Whether a model is configured, which "Use AI…" needs. */
+  ai = false,
+): AutomationCatalogEntry[] {
   const generated: AutomationCatalogEntry[] = settable(fields).map((field) => ({
     ...toActionEntry({
       subtype: AutomationAction.SET_CUSTOM_FIELD,
@@ -1262,17 +1346,24 @@ export function actionCatalogue(fields: readonly CatalogueCustomField[]): Automa
       continue;
     }
 
-    entries.push(...ACTION_SPECS.filter((spec) => spec.category === category).map(toActionEntry));
+    entries.push(
+      ...ACTION_SPECS.filter((spec) => spec.category === category).map((spec) =>
+        toActionEntry(spec, ai),
+      ),
+    );
   }
 
   return entries;
 }
 
-function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
+function toActionEntry(spec: ActionSpec, ai = false): AutomationCatalogEntry {
   // The executable list is the whole answer. A row cannot claim to work by
   // being written optimistically, and publishing validates against the same
   // list, so nothing can be offered here and refused there.
-  const available = runnerCanPerform(spec.subtype);
+  // The Wait step is a step of its own, not an action, and the runner takes it.
+  // "Use AI…" runs when there is a model to run it, and publishing asks the same.
+  const aiStep = spec.subtype === AutomationAction.AI_ACTION;
+  const available = aiStep ? ai : runnerCanPerform(spec.subtype) || spec.subtype === DELAY_SUBTYPE;
 
   return {
     subtype: spec.subtype,
@@ -1280,7 +1371,16 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
     description: spec.description ?? '',
     category: spec.category,
     available,
-    reason: available ? null : (spec.reason ?? NOT_IMPLEMENTED_REASON),
+    reason: available
+      ? null
+      : aiStep
+        ? AI_UNAVAILABLE_REASON
+        : (spec.reason ?? NOT_IMPLEMENTED_REASON),
+    subjects: TICKET_ONLY_ACTIONS.includes(spec.subtype)
+      ? ['TICKET']
+      : TICKET_RULE_ACTIONS.includes(spec.subtype) || spec.subtype === DELAY_SUBTYPE
+        ? ['TASK', 'TICKET']
+        : ['TASK'],
   };
 }
 
@@ -1294,15 +1394,18 @@ function toActionEntry(spec: ActionSpec): AutomationCatalogEntry {
  * Derived wherever there is something to derive from, so a capability cannot
  * claim more than the action list supports. The two that are stated rather than
  * computed are pinned by name to the code that decides them: the runner walks a
- * branch's arms in `plan`, and the validator refuses a DELAY node outright in
- * `checkSubtypes` — so neither can change without this line being read.
+ * branch's arms in `plan`, and stops at a Wait step there for the clock to
+ * resume — so neither can change without this line being read.
  */
-export function capabilities(): AutomationCapabilities {
+export function capabilities(
+  /** Whether a model is configured; the AI steps run only with one. */
+  ai = false,
+): AutomationCapabilities {
   return {
     branching: true,
-    delays: false,
+    delays: true,
     externalActions: runnerCanPerform('SEND_EMAIL') || runnerCanPerform('SEND_WEBHOOK'),
-    ai: runnerCanPerform('AI_ACTION'),
+    ai: ai && runnerCanPerform(AutomationAction.AI_ACTION),
     conditionsOnCustomFields: runnerCanReadField(customFieldKey('any')),
     actionsOnCustomFields: runnerCanPerform(AutomationAction.SET_CUSTOM_FIELD),
     maxActionsPerExecution: MAX_ACTIONS_PER_EXECUTION,

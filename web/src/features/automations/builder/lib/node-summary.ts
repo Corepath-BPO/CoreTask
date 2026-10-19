@@ -21,6 +21,12 @@ import {
   type AutomationTrigger,
   type ConditionOperator,
   type FilterOperator,
+  delayLength,
+  delayProblem,
+  describeDelay,
+  AI_CHECK_FIELD,
+  aiActionProblem,
+  aiCheckProblem,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -28,6 +34,7 @@ import { customFieldSetVerb } from '../configuration/condition-value';
 import { readTriggerSections } from '../configuration/trigger-forms';
 
 import { isUnansweredRow, type CanvasNode } from './graph-edits';
+import { humanizeEnum } from '@/lib/utils';
 
 /**
  * How each trigger shape reads on a card.
@@ -161,6 +168,17 @@ export function summariseParts(
 
       const label = TRIGGER_LABEL[node.subtype as AutomationTrigger] ?? node.subtype;
 
+      // "When a ticket's status changes to Resolved" — or to anything.
+      if (node.subtype === 'TICKET_STATUS_CHANGED') {
+        const status = config['status'];
+        return typeof status === 'string' && status !== ''
+          ? [
+              { text: 'When a ticket’s status changes to' },
+              { text: humanizeEnum(status), chip: true },
+            ]
+          : [{ text: label }];
+      }
+
       // The clock's triggers say when; a manual one says what the menu calls it.
       if (node.subtype === 'SCHEDULED_TIME') {
         const schedule = readSchedule(config);
@@ -275,8 +293,12 @@ export function summariseParts(
         : parts;
     }
 
-    case 'DELAY':
-      return [{ text: 'Wait' }];
+    case 'DELAY': {
+      const length = delayLength(config);
+      return length
+        ? [{ text: 'Wait' }, { text: length, chip: true }]
+        : [{ text: describeDelay(config) }];
+    }
 
     default:
       return [{ text: 'Choose a step' }];
@@ -302,6 +324,14 @@ function conditionSummary(
   const operator = config['operator'];
 
   if (typeof field !== 'string' || field === '') return [{ text: 'Choose what to check' }];
+
+  // "AI: is it about a repair?" — the question is the value.
+  if (field === AI_CHECK_FIELD) {
+    const question = typeof config['question'] === 'string' ? config['question'].trim() : '';
+    return question
+      ? [{ text: 'AI:' }, { text: clipWords(question, 60), chip: true }]
+      : [{ text: 'AI — ask a yes-or-no question' }];
+  }
 
   const definition = metadata?.conditionFields.find((entry) => entry.field === field);
 
@@ -535,6 +565,15 @@ function actionSummary(
         : [{ text: 'Set status — choose one' }];
     }
 
+    case 'SET_TICKET_STATUS':
+    case 'SET_TICKET_PRIORITY': {
+      const what = subtype === 'SET_TICKET_STATUS' ? 'status' : 'priority';
+      const value = config[what];
+      return typeof value === 'string' && value !== ''
+        ? [{ text: `Set ticket ${what} to` }, { text: humanizeEnum(value), chip: true }]
+        : [{ text: `Set ticket ${what} — choose one` }];
+    }
+
     case 'UPDATE_PRIORITY': {
       const priority = config['priority'] ?? config['priorityDefinitionId'];
       const found = metadata?.priorities.find((entry) => entry.id === priority);
@@ -608,6 +647,15 @@ function actionSummary(
             { text: `“${body.slice(0, 40)}${body.length > 40 ? '…' : ''}”`, chip: true },
           ]
         : [{ text: 'Comment — write what it says' }];
+    }
+
+    // "Use AI: Triage the request…" — the instructions, cut to a card's width.
+    case 'AI_ACTION': {
+      const instructions =
+        typeof config['instructions'] === 'string' ? config['instructions'].trim() : '';
+      return instructions
+        ? [{ text: 'Use AI:' }, { text: clipWords(instructions, 60), chip: true }]
+        : [{ text: 'Use AI — write the instructions' }];
     }
 
     case 'SEND_EMAIL': {
@@ -725,6 +773,9 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
      */
     if (isFallbackBranch(config)) return false;
 
+    // An AI check needs its question, and no comparison.
+    if (config['field'] === AI_CHECK_FIELD) return aiCheckProblem(config) !== null;
+
     if (!has('field') || !has('operator')) return true;
 
     const value = config['value'];
@@ -743,6 +794,9 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
 
     return value === undefined || value === null || value === '';
   }
+
+  // A Wait step needs to know how long.
+  if (node.type === 'DELAY') return delayProblem(config) !== null;
 
   if (node.type !== 'ACTION') return false;
 
@@ -766,6 +820,12 @@ export function isNodeIncomplete(node: CanvasNode): boolean {
       return !has('endpointId') && !has('url');
     case 'SEND_EMAIL':
       return emailRecipientsOf(config).length === 0 || !has('subject');
+    case 'AI_ACTION':
+      return aiActionProblem(config) !== null;
+    case 'SET_TICKET_STATUS':
+      return !has('status');
+    case 'SET_TICKET_PRIORITY':
+      return !has('priority');
     case 'CREATE_SUBTASK':
       // No titles, or a row still waiting for its date: a step that reads as
       // ready and would create something other than what it says.
@@ -795,4 +855,12 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** The first `max` characters, ending on a whole word, with an ellipsis if cut. */
+function clipWords(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }

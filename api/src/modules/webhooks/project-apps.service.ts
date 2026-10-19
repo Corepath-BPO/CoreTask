@@ -4,6 +4,8 @@ import {
   DEFAULT_PROJECT_APP_EVENTS,
   MAX_APPS_PER_PROJECT,
   PROJECT_APP_INFO,
+  ProjectApp as ProjectAppValue,
+  slackChannelUrl,
   WorkspaceRole,
   appAcceptsUrl,
   type ProjectApp,
@@ -15,17 +17,23 @@ import type {
   ProjectAppConnection,
   UpdateProjectAppPayload,
 } from '@coretask/types';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import type { ActorContext } from '../../common/types/api.types';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
+import { SlackApiClient, SlackApiError } from '../../integrations/slack/slack-api.client';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
-import { deriveKey, encryptSecret, generateWebhookSecret } from './lib/secret-cipher';
+import {
+  decryptSecret,
+  deriveKey,
+  encryptSecret,
+  generateWebhookSecret,
+} from './lib/secret-cipher';
 import { assertDeliverableUrl } from './lib/url-policy';
 import { WebhookDeliveryService } from './webhook-delivery.service';
 
@@ -47,11 +55,15 @@ function urlHint(url: string): string {
 }
 
 function toDto(row: AppRow): ProjectAppConnection {
+  const slackChannel = row.slackChannelId
+    ? { id: row.slackChannelId, name: row.slackChannelName ?? row.slackChannelId }
+    : null;
   return {
     id: row.id,
     app: row.app as ProjectApp,
     name: row.name,
-    urlHint: urlHint(row.url),
+    urlHint: slackChannel ? `#${slackChannel.name}` : urlHint(row.url),
+    slackChannel,
     events: row.events as ProjectAppEvent[],
     enabled: row.enabled,
     disabledReason: row.disabledReason,
@@ -71,10 +83,13 @@ function toDto(row: AppRow): ProjectAppConnection {
  * after repeated failures — and shows in the admin's webhook list too. The
  * project's editors manage its apps; they can already read what is posted.
  * The URL must be the tool's own webhook address, so an app cannot be used
- * to send the project's goings-on anywhere else.
+ * to send the project's goings-on anywhere else. With the CoreTask Slack app
+ * installed, a Slack app can name a channel instead, and the bot posts there
+ * itself — with buttons, which a webhook's message cannot carry.
  */
 @Injectable()
 export class ProjectAppsService {
+  private readonly logger = new Logger(ProjectAppsService.name);
   private readonly key: Buffer;
 
   constructor(
@@ -83,6 +98,7 @@ export class ProjectAppsService {
     private readonly access: ProjectAccessService,
     private readonly activity: ActivityLogsService,
     private readonly deliveries: WebhookDeliveryService,
+    private readonly slack: SlackApiClient,
   ) {
     this.key = deriveKey(config.webhooks.encryptionKeyMaterial);
   }
@@ -109,7 +125,13 @@ export class ProjectAppsService {
   ): Promise<ProjectAppConnection> {
     const project = await this.requireEditor(workspaceId, projectId, actor);
     const info = PROJECT_APP_INFO[payload.app];
-    const url = payload.url.trim();
+    if (payload.slackChannelId) {
+      return this.createSlackChannelApp(workspaceId, project, actor, payload);
+    }
+    const url = payload.url?.trim() ?? '';
+    if (!url) {
+      throw AppException.badRequest('BAD_REQUEST', `Paste the ${info.label} webhook URL.`);
+    }
 
     // A local catcher may stand in for the real tool where private URLs are
     // allowed (development); anywhere else it must be the tool's address.
@@ -175,9 +197,14 @@ export class ProjectAppsService {
     payload: UpdateProjectAppPayload,
   ): Promise<ProjectAppConnection> {
     await this.requireEditor(workspaceId, projectId, actor);
-    await this.requireApp(projectId, appId);
+    const existing = await this.requireApp(projectId, appId);
     if (payload.events !== undefined && payload.events.length === 0) {
       throw AppException.badRequest('BAD_REQUEST', 'Choose at least one thing to post.');
+    }
+    if (payload.enabled === true && existing.slackChannelId) {
+      // Switched on with no app to post as, it would only fail its way off again.
+      const installed = await this.prisma.slackInstallation.count({ where: { workspaceId } });
+      if (installed === 0) throw AppException.badRequest('SLACK_NOT_CONNECTED');
     }
     const row = await this.prisma.webhookEndpoint.update({
       where: { id: appId },
@@ -233,6 +260,95 @@ export class ProjectAppsService {
   }
 
   // -------------------------------------------------------------------------
+
+  /** A Slack channel the CoreTask bot posts to, checked with Slack first. */
+  private async createSlackChannelApp(
+    workspaceId: string,
+    project: { id: string; name: string },
+    actor: ActorContext,
+    payload: CreateProjectAppPayload,
+  ): Promise<ProjectAppConnection> {
+    const channelId = payload.slackChannelId as string;
+    if (payload.app !== ProjectAppValue.SLACK) {
+      throw AppException.badRequest('BAD_REQUEST', 'Only Slack posts to a channel by its id.');
+    }
+    const installation = await this.prisma.slackInstallation.findUnique({
+      where: { workspaceId },
+      select: { botToken: true },
+    });
+    if (!installation) throw AppException.badRequest('SLACK_NOT_CONNECTED');
+
+    let channel;
+    try {
+      channel = await this.slack.channelInfo(
+        decryptSecret(installation.botToken, this.key),
+        channelId,
+      );
+    } catch (error) {
+      if (error instanceof SlackApiError && !error.retryable) {
+        throw AppException.badRequest(
+          'BAD_REQUEST',
+          'The CoreTask app cannot see that channel. For a private channel, invite the app to it first.',
+        );
+      }
+      this.logger.warn({ err: String(error) }, 'Could not check a Slack channel');
+      throw AppException.serviceUnavailable('SLACK_UNAVAILABLE');
+    }
+
+    const [count, duplicate] = await Promise.all([
+      this.prisma.webhookEndpoint.count({ where: { projectId: project.id, app: { not: null } } }),
+      this.prisma.webhookEndpoint.findFirst({
+        where: { projectId: project.id, slackChannelId: channel.id },
+        select: { id: true },
+      }),
+    ]);
+    if (duplicate) {
+      throw AppException.conflict(
+        'RESOURCE_CONFLICT',
+        `${project.name} already posts to #${channel.name}.`,
+      );
+    }
+    if (count >= MAX_APPS_PER_PROJECT) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        `A project holds up to ${MAX_APPS_PER_PROJECT} apps.`,
+      );
+    }
+
+    const row = await this.prisma.webhookEndpoint.create({
+      data: {
+        workspaceId,
+        projectId: project.id,
+        app: ProjectAppValue.SLACK,
+        name: payload.name?.trim() || `#${channel.name}`,
+        url: slackChannelUrl(channel.id),
+        slackChannelId: channel.id,
+        slackChannelName: channel.name.slice(0, 120),
+        secret: encryptSecret(generateWebhookSecret(), this.key),
+        events: [...new Set(payload.events?.length ? payload.events : DEFAULT_PROJECT_APP_EVENTS)],
+        createdById: actor.userId,
+      },
+      include: appInclude,
+    });
+
+    await this.activity.record({
+      workspaceId,
+      actorId: actor.userId,
+      action: ActivityAction.CREATED,
+      entity: ActivityEntity.WEBHOOK_ENDPOINT,
+      entityId: row.id,
+      projectId: project.id,
+      summary: `Connected Slack (#${channel.name}) to ${project.name}`,
+      metadata: { app: ProjectAppValue.SLACK, events: row.events, channel: channel.id },
+    });
+
+    await this.deliveries.createPing(
+      row,
+      actor.userId,
+      `CoreTask will post updates from ${project.name} here.`,
+    );
+    return toDto(row);
+  }
 
   private async requireEditor(workspaceId: string, projectId: string, actor: ActorContext) {
     const access = await this.access.requireAccess(

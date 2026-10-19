@@ -1,0 +1,153 @@
+# =============================================================================
+# CoreTask — continuous integration
+# =============================================================================
+#   gates             format, lint, typecheck, the unit suites and the build.
+#                     No services; safe on a bare checkout.
+#   api-integration   the Supertest specs under api/test/e2e, against real
+#                     PostgreSQL, Redis and RustFS.
+#
+# The Playwright browser suite is deliberately not here — see the note at the
+# foot of this file.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch makes the earlier run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      # `.prettierrc.json` pins `endOfLine: lf` and `.gitattributes` normalises
+      # on checkout, so this gate is only meaningful on Linux. On a Windows
+      # working tree CRLF alone makes prettier flag files that are LF in the
+      # repository and perfectly fine here, which is noise rather than signal.
+      - name: Format
+        run: pnpm format:check
+
+      # `--no-bail`, rather than the root scripts' plain `pnpm --recursive`,
+      # which stops at the first failing package. That ordering once hid the
+      # entire API suite behind a web failure: the result was not red, it was
+      # absent. --no-bail runs every package and still exits non-zero.
+      #
+      # `!cancelled()` so one red gate does not mask the others. A run should
+      # report everything that is wrong, not just the first thing.
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: pnpm --recursive --no-bail lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: pnpm --recursive --no-bail typecheck
+
+      - name: Unit tests
+        if: ${{ !cancelled() }}
+        run: pnpm --recursive --no-bail test
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: pnpm build
+
+  api-integration:
+    name: API integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Compose interpolates every service in the file before it starts any of
+    # them, and docker-compose.yml declares the JWT secrets on coretask-api and
+    # coretask-worker as required (`${JWT_ACCESS_SECRET:?...}`). This job never
+    # starts either service, yet without these the whole file fails to parse.
+    # A developer never notices, because their .env supplies both.
+    #
+    # They are throwaway values for an ephemeral runner, not secrets — the same
+    # kind api/test/setup-env.ts already commits. The integration suite picks
+    # them up as well, in place of setup-env's own defaults; both clear the 32
+    # characters env.schema.ts requires, and they differ.
+    env:
+      JWT_ACCESS_SECRET: ci_only_access_secret_for_an_ephemeral_runner
+      JWT_REFRESH_SECRET: ci_only_refresh_secret_for_an_ephemeral_runner
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      # Compose, not `services:`, so CI starts the same storage server, versions
+      # and health checks a developer runs, from the one definition. A second
+      # copy here would drift — and when MinIO's images vanished, it would have
+      # been one more place to find and fix.
+      #
+      # It also has to run the bucket job. Nothing in api/ calls CreateBucket;
+      # `coretask-storage-init` makes it, and attachments.e2e-spec.ts PUTs to a
+      # real presigned URL, so a missing bucket fails the suite.
+      #
+      # The dev overlay is what publishes 5432 / 6379 / 9000 to the host, which
+      # is where the suite connects from.
+      - name: Start PostgreSQL, Redis and RustFS
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+            up -d --wait coretask-postgres coretask-redis coretask-storage
+
+      - name: Create the storage bucket
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+            run --rm -T coretask-storage-init
+
+      # DATABASE_URL matches the compose defaults (coretask /
+      # coretask_dev_password / coretask); the JWT secrets come from the job's
+      # env above.
+      #
+      # Nothing else is set, because it is already handled and setting it here
+      # would be noise or a lie:
+      #   - api/test/setup-env.ts forces NODE_ENV=test and raises
+      #     RATE_LIMIT_MAX / AUTH_RATE_LIMIT_MAX to 100000, so the throttler is
+      #     exercised only by the spec that means to.
+      #   - api/test/e2e/global-setup.ts runs `prisma migrate deploy` itself,
+      #     against the dedicated `coretask_e2e` schema that
+      #     test-database.ts rewrites this URL to. A `db:deploy` step here would
+      #     migrate `public` instead — the wrong schema.
+      #   - STORAGE_* defaults in env.schema.ts already point at localhost:9000
+      #     with the compose credentials.
+      - name: Integration suite
+        env:
+          DATABASE_URL: postgresql://coretask:coretask_dev_password@localhost:5432/coretask?schema=public
+        run: pnpm test:e2e
+
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+            logs --no-color --tail 200
+
+# =============================================================================
+# Not covered here: the browser suite (web/e2e, 13 Playwright specs)
+# =============================================================================
+# Playwright drives a browser against a *running* stack — API, web, PostgreSQL,
+# Redis and RustFS together — rather than importing the app the way the Supertest
+# specs do. Standing that up means building the dev images and waiting for the
+# whole compose stack, which is a different and much slower shape of job than
+# either of the two above.
+#
+# It is left out rather than half-wired, because a browser job that flakes gets
+# ignored and then tells you nothing. Run it locally:
+#
+#   pnpm --filter @coretask/web test:e2e:install
+#   pnpm dev
+#   pnpm test:e2e:web
+#
+# Set AUTH_RATE_LIMIT_MAX=100 in .env and restart the API first: the suite signs
+# in far more often in a minute than a person would, and the default ceiling of
+# 10 is tuned for credential guessing. See the testing section of README.md.
+# =============================================================================

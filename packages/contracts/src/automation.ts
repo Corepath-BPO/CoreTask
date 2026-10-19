@@ -148,6 +148,11 @@ export const AutomationAction = {
   SET_TASK_TYPE: 'SET_TASK_TYPE',
   /** E-mails people on the task — never an address typed into the rule. */
   SEND_EMAIL: 'SEND_EMAIL',
+  /** A ticket rule's own: its status and priority are a ticket's, not a project's. */
+  SET_TICKET_STATUS: 'SET_TICKET_STATUS',
+  SET_TICKET_PRIORITY: 'SET_TICKET_PRIORITY',
+  /** "Use AI…": a model makes the changes the step allows — see automation-ai.ts. */
+  AI_ACTION: 'AI_ACTION',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -177,6 +182,9 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SET_TASK_DESCRIPTION: 'Set the task description',
   SET_TASK_TYPE: 'Set the task type',
   SEND_EMAIL: 'Send an email',
+  SET_TICKET_STATUS: 'Set the ticket status',
+  SET_TICKET_PRIORITY: 'Set the ticket priority',
+  AI_ACTION: 'Use AI',
 };
 
 /**
@@ -230,7 +238,7 @@ export function emailRecipientsOf(
  * them and leaving someone to wonder, and so adding one later is a change in
  * one place.
  */
-export const PLANNED_ACTIONS = ['DELAY', 'CREATE_CHECKLIST', 'ASSIGN_TEAM', 'AI_ACTION'] as const;
+export const PLANNED_ACTIONS = ['CREATE_CHECKLIST', 'ASSIGN_TEAM'] as const;
 
 // ---------------------------------------------------------------------------
 // The rule library

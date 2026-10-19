@@ -23,7 +23,10 @@ export const filenameSchema = z
   .trim()
   .min(1, 'A filename is required.')
   .max(FILENAME_MAX_LENGTH, `Must be at most ${FILENAME_MAX_LENGTH} characters.`)
-  .refine((name) => !name.includes('/') && !name.includes('\\'), 'Filenames cannot contain slashes.')
+  .refine(
+    (name) => !name.includes('/') && !name.includes('\\'),
+    'Filenames cannot contain slashes.',
+  )
   .refine((name) => name !== '.' && name !== '..', 'That is not a filename.')
   .refine((name) => !hasControlCharacter(name), 'Filenames cannot contain control characters.');
 

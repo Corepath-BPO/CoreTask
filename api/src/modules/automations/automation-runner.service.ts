@@ -39,6 +39,14 @@ import {
   AutomationEmailRecipient,
   MAX_EMAIL_RECIPIENTS,
   emailRecipientsOf,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  isTicketTrigger,
+  ticketConditionHolds,
+  isTicketConditionField,
+  delayMs,
+  describeDelay,
+  AI_CHECK_FIELD,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -56,6 +64,7 @@ import { appendPosition } from '../../common/utils/position.util';
 import { plainTextToHtml } from '../../common/utils/rich-text.util';
 import { toCalendarDate } from '../../common/utils/schedule.util';
 import { PrismaService } from '../../database/prisma.service';
+import { AiUnavailableError } from '../../integrations/ai/ai-client';
 import { RealtimeRelayPublisher } from '../../websocket/realtime-relay.publisher';
 import { diffItemStories, snapshotFromTask } from '../activity-logs/item-stories';
 import { toValueDto } from '../custom-fields/custom-field-value.mapper';
@@ -64,10 +73,12 @@ import { labelValue } from '../custom-fields/lib/value-labels';
 import { completionData, priorityData, readActionId, statusData } from './action-config';
 import type { RuleEmailRequest, RuleWebhookRequest } from '../../jobs/queue-names';
 
+import { AutomationAiService } from './automation-ai.service';
 import type { AutomationEvent } from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
+import { ticketLifecycle } from '../tickets/ticket-lifecycle';
 
 import { fieldChangeTriggers } from './task-field-triggers';
 
@@ -115,6 +126,20 @@ export interface AutomationRunResult {
  * loaded together so evaluation never reaches for the database mid-walk.
  */
 type EvaluableTask = Task & { customFieldValues?: TaskCustomFieldValue[]; facts?: TaskFacts };
+
+/**
+ * What a rule's words can name: the task — or ticket — it acted on. A ticket
+ * fills `task.name` with its title, so one set of variables serves both.
+ */
+interface TextSource {
+  title: string;
+  assigneeId: string | null;
+  dueDate: Date | null;
+  startDate?: Date | null;
+  createdById?: string | null;
+}
+
+type TicketRow = Prisma.TicketGetPayload<object>;
 
 /**
  * What a condition can ask about the task beyond its own columns — "has an
@@ -168,6 +193,14 @@ interface TaskContext {
   live: EvaluableTask;
 }
 
+/** What one "Check with AI" answered in a run, or why it could not. */
+interface AiCheckRecord {
+  node: AutomationNode;
+  holds: boolean;
+  reason?: string;
+  error?: string;
+}
+
 /**
  * Evaluates and runs automation rules.
  *
@@ -182,6 +215,8 @@ export class AutomationRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly relay: RealtimeRelayPublisher,
+    /** The AI steps. Absent, as in a test that builds the runner by hand, they fail with a reason. */
+    private readonly ai?: AutomationAiService,
   ) {}
 
   /**
@@ -192,6 +227,18 @@ export class AutomationRunnerService {
    * next rule in a chain gets its turn.
    */
   async handle(event: AutomationEvent): Promise<AutomationRunResult> {
+    /*
+     * A ticket's event is for ticket rules, and a task's for task rules.
+     *
+     * Moving or re-prioritising a ticket on a board raises the task trigger
+     * of the same name with a ticket as its subject; a task rule has no ticket
+     * to act on, so those events are not for it, and a ticket rule never hears
+     * a task's.
+     */
+    if ((event.entityType === 'TICKET') !== isTicketTrigger(event.trigger)) {
+      return { executed: 0, skipped: 0, events: [], webhooks: [], emails: [] };
+    }
+
     /*
      * Depth is checked before anything is read.
      *
@@ -496,6 +543,12 @@ export class AutomationRunnerService {
       }
     }
 
+    // "Ticket status changes to…": left blank, any change.
+    if (event.trigger === AutomationTrigger.TICKET_STATUS_CHANGED) {
+      const wanted = (config as { status?: unknown } | null)?.status;
+      return typeof wanted !== 'string' || wanted === '' || event.after?.['status'] === wanted;
+    }
+
     // Matched on the id, never the name: the name is somebody's to rename.
     if (scope.fieldId && event.trigger === 'CUSTOM_FIELD_CHANGED') {
       return event.after?.['fieldId'] === scope.fieldId;
@@ -585,6 +638,11 @@ export class AutomationRunnerService {
       return this.runTaskless(rule, event, execution.id, started);
     }
 
+    // A ticket rule acts on the ticket. See `runTicketRule`.
+    if (event.entityType === 'TICKET') {
+      return this.runTicketRule(rule, event, execution.id, started);
+    }
+
     if (!context) {
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
         skippedReason: 'The task no longer exists.',
@@ -599,11 +657,34 @@ export class AutomationRunnerService {
     // Conditions are all-or-nothing: a rule whose conditions do not hold has
     // not failed, it simply does not apply. Recorded as SKIPPED with a reason
     // so the history distinguishes "did not match" from "went wrong".
-    const plan = this.plan(rule.nodes, asFound, event);
+    const checks: AiCheckRecord[] = [];
+    const plan = await this.plan(
+      rule.nodes,
+      (node) => this.holdsAsked(node, asFound, event, rule, checks),
+      event.resumeFromNodeId,
+    );
+    await this.recordAiChecks(execution.id, checks);
 
     if (plan.skippedBy) {
+      const stopping = checks.find((check) => check.node.id === plan.stoppedBy?.id);
+
+      // An AI check that could not be asked has not answered no: the rule went
+      // wrong rather than not applying, and the history should say which.
+      if (stopping?.error) {
+        await this.finish(execution.id, AutomationExecutionStatus.FAILED, started, {
+          error: `The AI check could not run: ${stopping.error}`,
+        });
+        await this.bumpRule(rule.id, AutomationExecutionStatus.FAILED, true);
+        return { ran: false, events: [], webhooks: [], emails: [] };
+      }
+
       await this.finish(execution.id, AutomationExecutionStatus.SKIPPED, started, {
-        skippedReason: `Condition not met: ${plan.skippedBy}.`,
+        skippedReason:
+          plan.skippedBy === 'the rule changed while it was waiting'
+            ? 'The rule changed while this run was waiting.'
+            : stopping
+              ? `AI answered no: ${stopping.reason || 'no reason given'}`.slice(0, 500)
+              : `Condition not met: ${plan.skippedBy}.`,
       });
       await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
       return { ran: false, events: [], webhooks: [], emails: [] };
@@ -653,6 +734,7 @@ export class AutomationRunnerService {
           ? AutomationExecutionStatus.FAILED
           : AutomationExecutionStatus.PARTIALLY_FAILED;
 
+    await this.scheduleDelays(rule, event, plan.delays, execution.id, started);
     await this.finish(execution.id, status, started, {});
     await this.bumpRule(rule.id, status, failures > 0);
 
@@ -827,31 +909,75 @@ export class AutomationRunnerService {
    * judged on the event it was given, not on what a sibling rule on the same
    * event has since written. See `TaskContext`.
    */
-  private plan(
+  private async plan(
     nodes: AutomationNode[],
-    task: EvaluableTask,
-    event: AutomationEvent,
-  ): { actions: AutomationNode[]; skippedBy: string | null } {
+    /*
+     * Asynchronous because "Check with AI" asks a model. Only the conditions
+     * the walk reaches are asked — a row below the one that matched, or an
+     * arm not taken, costs nothing.
+     */
+    holds: (node: AutomationNode) => boolean | Promise<boolean>,
+    /** A Wait step to pick up after, when the clock resumes a run. */
+    resumeFrom?: string | null,
+  ): Promise<{
+    actions: AutomationNode[];
+    delays: AutomationNode[];
+    skippedBy: string | null;
+    /** The condition that stopped the run, when one did. */
+    stoppedBy?: AutomationNode;
+  }> {
     const isTree = nodes.some((node) => node.parentNodeId !== null);
 
     if (!isTree) {
-      const unmet = nodes
-        .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
-        .find((node) => !this.conditionHolds(node, task, event));
+      // Every condition, again on a resumed run: the task may have changed
+      // while the run waited.
+      let unmet: AutomationNode | undefined;
+      for (const node of nodes.filter((row) => row.nodeType === AutomationNodeType.CONDITION)) {
+        if (!(await holds(node))) {
+          unmet = node;
+          break;
+        }
+      }
 
-      if (unmet) return { actions: [], skippedBy: unmet.subtype };
+      if (unmet) return { actions: [], delays: [], skippedBy: unmet.subtype, stoppedBy: unmet };
 
-      return {
-        actions: nodes.filter((node) => node.nodeType === AutomationNodeType.ACTION),
-        skippedBy: null,
-      };
+      // In order, up to the next Wait step — or from just after the one a
+      // resumed run waited at.
+      const steps = nodes
+        .filter(
+          (node) =>
+            node.nodeType === AutomationNodeType.ACTION ||
+            node.nodeType === AutomationNodeType.DELAY,
+        )
+        .sort((a, b) => a.position - b.position);
+      const from = resumeFrom ? steps.findIndex((node) => node.id === resumeFrom) + 1 : 0;
+      if (resumeFrom && from === 0) {
+        return { actions: [], delays: [], skippedBy: 'the rule changed while it was waiting' };
+      }
+      const actions: AutomationNode[] = [];
+      const delays: AutomationNode[] = [];
+      for (const node of steps.slice(from)) {
+        if (node.nodeType === AutomationNodeType.DELAY) {
+          delays.push(node);
+          break;
+        }
+        actions.push(node);
+      }
+      return { actions, delays, skippedBy: null };
     }
 
     const trigger = nodes.find((node) => node.nodeType === AutomationNodeType.TRIGGER);
-    if (!trigger) return { actions: [], skippedBy: 'no trigger' };
+    if (!trigger) return { actions: [], delays: [], skippedBy: 'no trigger' };
+    // A run resumed after a Wait step the rule no longer has: it was edited
+    // while the run waited, and what followed that step is gone with it.
+    if (resumeFrom && !nodes.some((node) => node.id === resumeFrom)) {
+      return { actions: [], delays: [], skippedBy: 'the rule changed while it was waiting' };
+    }
 
     const actions: AutomationNode[] = [];
+    const delays: AutomationNode[] = [];
     let skippedBy: string | null = null;
+    let stoppedBy: AutomationNode | undefined;
 
     const childrenOf = (parentId: string, arm: string | null) =>
       nodes
@@ -870,7 +996,12 @@ export class AutomationRunnerService {
      * condition further down still governs what follows it, and a rule that
      * checks two things in sequence must go on doing both.
      */
-    const walk = (nodeId: string, arm: string | null, depth: number, rows = false): void => {
+    const walk = async (
+      nodeId: string,
+      arm: string | null,
+      depth: number,
+      rows = false,
+    ): Promise<void> => {
       if (depth > 50) return;
 
       // Which is to say: a row has already claimed this event. Ordering is by
@@ -883,36 +1014,102 @@ export class AutomationRunnerService {
 
           // A condition governs what follows it, not the whole rule. Its
           // siblings on another path are unaffected.
-          if (!this.conditionHolds(node, task, event)) {
+          if (!(await holds(node))) {
             skippedBy ??= node.subtype;
+            stoppedBy ??= node;
             continue;
           }
 
           if (rows) matched = true;
 
-          walk(node.id, null, depth + 1);
+          await walk(node.id, null, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.BRANCH) {
-          const holds = this.conditionHolds(node, task, event);
+          const branchHolds = await holds(node);
 
-          walk(node.id, holds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
+          await walk(node.id, branchHolds ? BranchKey.MATCH : BranchKey.ELSE, depth + 1);
           continue;
         }
 
         if (node.nodeType === AutomationNodeType.ACTION) {
           actions.push(node);
-          walk(node.id, null, depth + 1);
+          await walk(node.id, null, depth + 1);
         }
+
+        // A Wait step: what follows it runs later, when the clock resumes the
+        // run from here — not now.
+        if (node.nodeType === AutomationNodeType.DELAY) delays.push(node);
       }
     };
 
-    walk(trigger.id, null, 0, true);
+    if (resumeFrom) await walk(resumeFrom, null, 0);
+    else await walk(trigger.id, null, 0, true);
 
     // "Nothing ran" is only a skip when something stopped it. A rule whose
-    // branch legitimately led nowhere has run and done nothing.
-    return { actions, skippedBy: actions.length === 0 ? skippedBy : null };
+    // branch legitimately led nowhere has run and done nothing — and one that
+    // reached a Wait step has made progress.
+    const stopped = actions.length === 0 && delays.length === 0;
+    return {
+      actions,
+      delays,
+      skippedBy: stopped ? skippedBy : null,
+      ...(stopped && stoppedBy ? { stoppedBy } : {}),
+    };
+  }
+
+  /**
+   * Whether a condition holds, asking the model when it is "Check with AI".
+   *
+   * Every other condition is `conditionHolds`, judged on the task as the event
+   * found it. An AI check reads the task as it is now — the model is handed a
+   * fresh read — and what it answered goes into `checks` for the log.
+   */
+  private async holdsAsked(
+    node: AutomationNode,
+    task: EvaluableTask,
+    event: AutomationEvent,
+    rule: RunnableRule,
+    checks: AiCheckRecord[],
+  ): Promise<boolean> {
+    const config = (node.configuration ?? {}) as Record<string, unknown>;
+    if (config['field'] !== AI_CHECK_FIELD) return this.conditionHolds(node, task, event);
+
+    try {
+      if (!this.ai?.available) throw new AiUnavailableError();
+      const answer = await this.ai.check(task.id, rule, String(config['question'] ?? ''));
+      checks.push({ node, holds: answer.holds, reason: answer.reason });
+      return answer.holds;
+    } catch (error) {
+      checks.push({
+        node,
+        holds: false,
+        error: error instanceof Error ? error.message : 'The AI check failed.',
+      });
+      return false;
+    }
+  }
+
+  /** One log row per AI check: what it answered and why, or why it could not. */
+  private async recordAiChecks(executionId: string, checks: AiCheckRecord[]): Promise<void> {
+    for (const check of checks) {
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: check.node.id,
+          nodeType: check.node.nodeType,
+          subtype: check.node.subtype,
+          succeeded: !check.error,
+          message: (check.error
+            ? `The AI check could not run: ${check.error}`
+            : `AI answered ${check.holds ? 'yes' : 'no'}: ${check.reason || 'no reason given'}`
+          ).slice(0, 500),
+          beforeValue: null as unknown as Prisma.InputJsonValue,
+          afterValue: (check.error ? null : { holds: check.holds }) as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 
   private conditionHolds(
@@ -1165,6 +1362,71 @@ export class AutomationRunnerService {
     const config = (node.configuration ?? {}) as Record<string, unknown>;
 
     switch (node.subtype) {
+      /*
+       * "Use AI…": the model chooses changes from what the step allows, and
+       * each runs here as the action it stands for — the same checks, history
+       * and follow-up events as if the rule's author had added it by hand.
+       */
+      case AutomationAction.AI_ACTION: {
+        if (!this.ai?.available) {
+          return { succeeded: false, message: 'AI isn’t set up on this server.' };
+        }
+
+        const decision = await this.ai.decide(task.id, rule, config, at);
+        const done: string[] = [];
+        const failed: string[] = [];
+        const before: unknown[] = [];
+        const after: unknown[] = [];
+        const events: AutomationEvent[] = [];
+        const webhooks: RuleWebhookRequest[] = [];
+        const emails: RuleEmailRequest[] = [];
+
+        for (const change of decision.changes) {
+          const outcome = await this.runAction(
+            {
+              ...node,
+              subtype: change.subtype,
+              configuration: change.configuration as Prisma.JsonObject,
+            },
+            task,
+            rule,
+            event,
+            at,
+          ).catch((error: unknown): ActionOutcome => ({
+            succeeded: false,
+            message: error instanceof Error ? error.message : 'Action failed.',
+          }));
+
+          if (outcome.succeeded) done.push(change.describe);
+          else failed.push(`could not ${change.describe} (${outcome.message ?? 'it failed'})`);
+          before.push({ action: change.subtype, value: outcome.before ?? null });
+          after.push({ action: change.subtype, value: outcome.after ?? null });
+          events.push(...(outcome.events ?? []));
+          webhooks.push(...(outcome.webhooks ?? []));
+          emails.push(...(outcome.emails ?? []));
+        }
+
+        const words = [
+          decision.changes.length === 0
+            ? 'AI made no changes.'
+            : `AI ${[...done, ...failed].join('; ')}.`,
+          decision.summary,
+          decision.ignored > 0
+            ? `Ignored ${decision.ignored} suggestion${decision.ignored === 1 ? '' : 's'} outside what the step allows.`
+            : '',
+        ];
+
+        return {
+          succeeded: failed.length === 0,
+          message: words.filter(Boolean).join(' '),
+          before: before.length > 0 ? before : null,
+          after: after.length > 0 ? after : null,
+          events,
+          webhooks,
+          emails,
+        };
+      }
+
       /*
        * Nothing is sent from here. The runner has no queue and no HTTP client
        * — deliberately, so a slow endpoint cannot hold a rule open mid-run —
@@ -2204,7 +2466,7 @@ export class AutomationRunnerService {
    */
   private async createTask(
     config: Record<string, unknown>,
-    source: EvaluableTask | null,
+    source: TextSource | null,
     rule: RunnableRule,
     event: AutomationEvent,
     at: Date,
@@ -2375,7 +2637,7 @@ export class AutomationRunnerService {
    * empty rather than the placeholder.
    */
   private async textValues(
-    task: EvaluableTask | null,
+    task: TextSource | null,
     rule: RunnableRule,
     event: AutomationEvent,
     at: Date,
@@ -2755,6 +3017,473 @@ export class AutomationRunnerService {
         finishedAt: new Date(),
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Ticket rules
+  // -------------------------------------------------------------------------
+
+  /**
+   * A rule set off by a ticket. The same plan, log and history as a task's,
+   * over the ticket: "Ticket is…" conditions, and the short list of actions a
+   * ticket takes (contracts' `TICKET_RULE_ACTIONS`). The validator refuses the
+   * rest at publish; anything that slips by fails here rather than guessing.
+   */
+  private async runTicketRule(
+    rule: RunnableRule,
+    event: AutomationEvent,
+    executionId: string,
+    started: number,
+  ): Promise<{
+    ran: boolean;
+    events: AutomationEvent[];
+    webhooks: RuleWebhookRequest[];
+    emails: RuleEmailRequest[];
+  }> {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: event.entityId, workspaceId: rule.workspaceId, archivedAt: null },
+    });
+    if (!ticket) {
+      await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
+        skippedReason: 'The ticket no longer exists.',
+      });
+      return { ran: false, events: [], webhooks: [], emails: [] };
+    }
+
+    // Judged on the ticket as the event found it.
+    const facts = {
+      type: ticket.type as string,
+      priority: ticket.priority as string,
+      severity: ticket.severity as string,
+      status: ticket.status as string,
+      assigneeId: ticket.assigneeId,
+    };
+    const plan = await this.plan(
+      rule.nodes,
+      (node) => {
+        const config = (node.configuration ?? {}) as Record<string, unknown>;
+        return (
+          isFallbackBranch(node.configuration) ||
+          (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
+        );
+      },
+      event.resumeFromNodeId,
+    );
+    if (plan.skippedBy) {
+      await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
+        skippedReason:
+          plan.skippedBy === 'the rule changed while it was waiting'
+            ? 'The rule changed while this run was waiting.'
+            : `Condition not met: ${plan.skippedBy}.`,
+      });
+      await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
+      return { ran: false, events: [], webhooks: [], emails: [] };
+    }
+
+    const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
+    const live: TicketRow = { ...ticket };
+    let failures = 0;
+    const events: AutomationEvent[] = [];
+    const emails: RuleEmailRequest[] = [];
+
+    for (const node of actions) {
+      const outcome = await this.runTicketAction(node, live, rule, event, new Date(started)).catch(
+        (error: unknown): ActionOutcome => ({
+          succeeded: false,
+          message: error instanceof Error ? error.message : 'Action failed.',
+        }),
+      );
+      if (!outcome.succeeded) failures += 1;
+      events.push(...(outcome.events ?? []));
+      emails.push(...(outcome.emails ?? []));
+
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: outcome.succeeded,
+          message: outcome.message?.slice(0, 500) ?? null,
+          beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
+          afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    const status =
+      failures === 0
+        ? AutomationExecutionStatus.COMPLETED
+        : failures === actions.length
+          ? AutomationExecutionStatus.FAILED
+          : AutomationExecutionStatus.PARTIALLY_FAILED;
+    await this.scheduleDelays(rule, event, plan.delays, executionId, started);
+    await this.finish(executionId, status, started, {});
+    await this.bumpRule(rule.id, status, failures > 0);
+
+    if (actions.length > failures) {
+      // The ticket's history says a rule did it, as a task's does.
+      await this.prisma.activityLog.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          actorId: event.actorId ?? null,
+          action: ActivityAction.UPDATED,
+          entity: ActivityEntity.TICKET,
+          entityId: ticket.id,
+          projectId: ticket.projectId,
+          summary: `Automation "${rule.name}" updated ${ticket.key}`,
+          metadata: { ruleId: rule.id, executionId, actions: actions.length, failures },
+        },
+      });
+      for (const projectId of new Set([event.projectId, live.projectId ?? event.projectId])) {
+        await this.relay.toProject(projectId, ServerEvent.WORK_ITEM_UPDATED, {
+          workspaceId: rule.workspaceId,
+          projectId,
+          occurredAt: new Date().toISOString(),
+          source: 'automation',
+        });
+      }
+      // The Tickets page lists the whole workspace and sits in no project
+      // room, so it is told too — that the list changed, and nothing else.
+      await this.relay.toWorkspace(rule.workspaceId, ServerEvent.TICKET_UPDATED, {
+        workspaceId: rule.workspaceId,
+        source: 'automation',
+      });
+    }
+
+    return { ran: true, events, webhooks: [], emails };
+  }
+
+  /** One action on a ticket. `ticket` is the live row, kept current across actions. */
+  private async runTicketAction(
+    node: AutomationNode,
+    ticket: TicketRow,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    at: Date,
+  ): Promise<ActionOutcome> {
+    const config = (node.configuration ?? {}) as Record<string, unknown>;
+    const write = async (data: Prisma.TicketUncheckedUpdateInput) => {
+      const updated = await this.prisma.ticket.update({ where: { id: ticket.id }, data });
+      Object.assign(ticket, updated);
+    };
+    const source: TextSource = {
+      title: `${ticket.key} ${ticket.title}`,
+      assigneeId: ticket.assigneeId,
+      dueDate: ticket.dueDate,
+      createdById: ticket.reporterId,
+    };
+    const link = `/tickets?ticket=${ticket.key}`;
+
+    switch (node.subtype) {
+      case AutomationAction.SET_TICKET_STATUS: {
+        const status = String(config['status'] ?? '');
+        if (!(TICKET_STATUSES as readonly string[]).includes(status)) {
+          return { succeeded: false, message: 'Choose a ticket status.' };
+        }
+        const before = ticket.status as string;
+        if (before === status) {
+          return { succeeded: true, message: 'The ticket already has that status.' };
+        }
+        await write({
+          status: status as TicketRow['status'],
+          ...ticketLifecycle(status, ticket.resolvedAt, ticket.closedAt, at),
+        });
+        // Raised for the next rule, as a person's change of status is.
+        return {
+          succeeded: true,
+          before,
+          after: status,
+          events: [
+            this.followTicket(
+              rule,
+              event,
+              AutomationTrigger.TICKET_STATUS_CHANGED,
+              ticket.id,
+              { status: before },
+              { status },
+            ),
+          ],
+        };
+      }
+
+      case AutomationAction.SET_TICKET_PRIORITY: {
+        const priority = String(config['priority'] ?? '');
+        if (!(TICKET_PRIORITIES as readonly string[]).includes(priority)) {
+          return { succeeded: false, message: 'Choose a ticket priority.' };
+        }
+        const before = ticket.priority as string;
+        if (before !== priority) await write({ priority: priority as TicketRow['priority'] });
+        return { succeeded: true, before, after: priority };
+      }
+
+      case AutomationAction.ASSIGN_USER: {
+        const userId = String(config['userId'] ?? config['assigneeId'] ?? '');
+        const member = await this.prisma.workspaceMember.findFirst({
+          where: { workspaceId: rule.workspaceId, userId },
+          select: { id: true },
+        });
+        if (!member) {
+          return { succeeded: false, message: 'That person is no longer in this workspace.' };
+        }
+        const before = ticket.assigneeId;
+        await write({ assigneeId: userId });
+        // An assignee follows what they are given, as on a task.
+        await this.prisma.follower.createMany({
+          data: [{ workspaceId: rule.workspaceId, userId, taskId: null, ticketId: ticket.id }],
+          skipDuplicates: true,
+        });
+        return { succeeded: true, before, after: userId };
+      }
+
+      case AutomationAction.UNASSIGN_USER: {
+        const before = ticket.assigneeId;
+        await write({ assigneeId: null });
+        return { succeeded: true, before, after: null };
+      }
+
+      case AutomationAction.MOVE_TO_SECTION: {
+        const sectionId = String(config['sectionId'] ?? '');
+        const section = await this.prisma.section.findFirst({
+          where: { id: sectionId, projectId: rule.projectId },
+          select: { id: true },
+        });
+        if (!section) return { succeeded: false, message: 'That section is not in this project.' };
+        const before = ticket.sectionId;
+        if (before !== sectionId) {
+          // Last in its new column, as a card dragged there lands.
+          const last = await this.prisma.ticket.findFirst({
+            where: { sectionId, archivedAt: null },
+            orderBy: { position: 'desc' },
+            select: { position: true },
+          });
+          await write({ sectionId, position: (last?.position ?? 0) + POSITION_STEP });
+        }
+        return { succeeded: true, before, after: sectionId };
+      }
+
+      case AutomationAction.SET_DUE_DATE: {
+        const days = Number(config['daysFromNow'] ?? 0);
+        const due = new Date(at);
+        due.setUTCDate(due.getUTCDate() + days);
+        const dueDate = toCalendarDate(due);
+        const before = ticket.dueDate?.toISOString() ?? null;
+        await write({ dueDate });
+        return { succeeded: true, before, after: dueDate.toISOString() };
+      }
+
+      case AutomationAction.CLEAR_DUE_DATE: {
+        const before = ticket.dueDate?.toISOString() ?? null;
+        await write({ dueDate: null });
+        return { succeeded: true, before, after: null };
+      }
+
+      case AutomationAction.ADD_COMMENT: {
+        const body = renderAutomationText(
+          String(config['body'] ?? ''),
+          await this.textValues(source, rule, event, at),
+        ).trim();
+        if (!body) return { succeeded: false, message: 'The comment is empty.' };
+        const authorId =
+          event.actorId ?? ticket.reporterId ?? rule.createdById ?? (await this.ownerOf(rule));
+        if (!authorId) return { succeeded: false, message: 'Nobody to write the comment as.' };
+        await this.prisma.comment.create({
+          data: { workspaceId: rule.workspaceId, authorId, body, ticketId: ticket.id },
+        });
+        return { succeeded: true, after: body.slice(0, 100) };
+      }
+
+      case AutomationAction.SEND_IN_APP_NOTIFICATION: {
+        const userId = String(config['userId'] ?? ticket.assigneeId ?? '');
+        if (!userId) return { succeeded: false, message: 'Nobody to notify.' };
+        await this.prisma.notification.create({
+          data: {
+            userId,
+            workspaceId: rule.workspaceId,
+            type: NotificationType.TICKET_UPDATED,
+            title: String(config['title'] ?? `Automation updated ${ticket.key}: ${ticket.title}`),
+            body: config['body'] ? String(config['body']) : null,
+            entity: 'TICKET',
+            entityId: ticket.id,
+            actionUrl: link,
+          },
+        });
+        return { succeeded: true, after: userId };
+      }
+
+      case AutomationAction.SEND_EMAIL: {
+        const values = await this.textValues(source, rule, event, at);
+        const subject = renderAutomationText(String(config['subject'] ?? ''), values)
+          .trim()
+          .slice(0, AUTOMATION_EMAIL_SUBJECT_MAX);
+        if (!subject) return { succeeded: false, message: 'The email has no subject.' };
+        const body = renderAutomationText(String(config['body'] ?? ''), values).trim();
+        const who = emailRecipientsOf(config);
+        if (who.length === 0) return { succeeded: false, message: 'Nobody is chosen to email.' };
+
+        // The ticket's people: whoever it is assigned to, its followers, and
+        // whoever reported it.
+        const ids = new Set<string>();
+        if (who.includes(AutomationEmailRecipient.ASSIGNEE) && ticket.assigneeId) {
+          ids.add(ticket.assigneeId);
+        }
+        if (who.includes(AutomationEmailRecipient.CREATOR) && ticket.reporterId) {
+          ids.add(ticket.reporterId);
+        }
+        if (who.includes(AutomationEmailRecipient.COLLABORATORS)) {
+          const followers = await this.prisma.follower.findMany({
+            where: { ticketId: ticket.id },
+            select: { userId: true },
+          });
+          for (const follower of followers) ids.add(follower.userId);
+        }
+        const members = await this.prisma.workspaceMember.findMany({
+          where: { workspaceId: rule.workspaceId, userId: { in: [...ids] } },
+          select: { user: { select: { email: true } } },
+          take: MAX_EMAIL_RECIPIENTS,
+        });
+        if (members.length === 0) {
+          return {
+            succeeded: true,
+            message: 'Nobody to email: the ticket has none of those people.',
+          };
+        }
+        return {
+          succeeded: true,
+          message: `Queued an email to ${members.length} ${members.length === 1 ? 'person' : 'people'}`,
+          after: { recipients: members.length },
+          emails: members.map((member) => ({
+            to: member.user.email,
+            subject,
+            body,
+            taskId: ticket.id,
+            taskTitle: `${ticket.key} ${ticket.title}`,
+            path: link,
+            ruleName: rule.name,
+          })),
+        };
+      }
+
+      case AutomationAction.ADD_REMOVE_COLLABORATORS: {
+        const people = (key: string): string[] =>
+          Array.isArray(config[key])
+            ? [
+                ...new Set(
+                  (config[key] as unknown[]).filter(
+                    (value): value is string => typeof value === 'string' && value !== '',
+                  ),
+                ),
+              ]
+            : [];
+        const add = people('add');
+        const remove = people('remove').filter((id) => !add.includes(id));
+        if (add.length === 0 && remove.length === 0) {
+          return { succeeded: false, message: 'Nobody was chosen to add or remove.' };
+        }
+        const members = add.length
+          ? await this.prisma.workspaceMember.findMany({
+              where: { workspaceId: rule.workspaceId, userId: { in: add } },
+              select: { userId: true },
+            })
+          : [];
+        if (members.length) {
+          await this.prisma.follower.createMany({
+            data: members.map((member) => ({
+              workspaceId: rule.workspaceId,
+              userId: member.userId,
+              taskId: null,
+              ticketId: ticket.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+        if (remove.length) {
+          await this.prisma.follower.deleteMany({
+            where: { ticketId: ticket.id, userId: { in: remove } },
+          });
+        }
+        return {
+          succeeded: true,
+          after: { added: members.map((member) => member.userId), removed: remove },
+        };
+      }
+
+      // "Investigate {{task.name}}": a task in this project, named from the ticket.
+      case AutomationAction.CREATE_TASK:
+        return this.createTask(config, source, rule, event, at);
+
+      default:
+        return { succeeded: false, message: 'A ticket rule cannot do this — it works on tasks.' };
+    }
+  }
+
+  /** A follow-up event about a ticket, for the next rule in the chain. */
+  private followTicket(
+    rule: { id: string; workspaceId: string },
+    event: AutomationEvent,
+    trigger: AutomationTrigger,
+    entityId: string,
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+  ): AutomationEvent {
+    return { ...this.follow(rule, event, trigger, entityId, before, after), entityType: 'TICKET' };
+  }
+
+  // -------------------------------------------------------------------------
+  // Wait steps
+  // -------------------------------------------------------------------------
+
+  /**
+   * The Wait steps a run reached: each becomes a row the clock picks up when
+   * its time has passed, and a line in this run's log saying until when.
+   */
+  private async scheduleDelays(
+    rule: RunnableRule,
+    event: AutomationEvent,
+    delays: readonly AutomationNode[],
+    executionId: string,
+    started: number,
+  ): Promise<void> {
+    for (const node of delays) {
+      const ms = delayMs((node.configuration ?? {}) as Record<string, unknown>);
+      if (ms === null) {
+        await this.prisma.automationExecutionLog.create({
+          data: {
+            executionId,
+            nodeId: node.id,
+            nodeType: node.nodeType,
+            subtype: node.subtype,
+            succeeded: false,
+            message: 'The wait has no length, so nothing after it ran.',
+          },
+        });
+        continue;
+      }
+      const runAt = new Date(started + ms);
+      // The event as it started, minus what made this run a resumption.
+      const { resumeFromNodeId: _resumed, ...original } = event;
+      await this.prisma.automationDelayedRun.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          ruleId: rule.id,
+          nodeId: node.id,
+          runAt,
+          event: original as unknown as Prisma.InputJsonValue,
+        },
+      });
+      await this.prisma.automationExecutionLog.create({
+        data: {
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: true,
+          message: `${describeDelay((node.configuration ?? {}) as Record<string, unknown>)} — continues at ${runAt.toISOString()}`,
+          afterValue: { runAt: runAt.toISOString() } as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 }
 

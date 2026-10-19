@@ -23,7 +23,7 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
-import { AutomationEventPublisher } from './automation-event.publisher';
+import { AutomationEventPublisher, type AutomationEvent } from './automation-event.publisher';
 
 /**
  * How late a scheduled run may start and still be worth running.
@@ -67,15 +67,62 @@ export class AutomationClockService {
   ) {}
 
   /** One look at the clock. Returns how many events it published, for the log. */
-  async tick(now = new Date()): Promise<{ scheduled: number; dated: number }> {
+  async tick(now = new Date()): Promise<{ scheduled: number; dated: number; resumed: number }> {
     const scheduled = await this.runSchedules(now);
     const dated = await this.runDateTriggers(now);
+    const resumed = await this.runDelays(now);
 
-    if (scheduled + dated > 0) {
-      this.logger.log({ scheduled, dated }, 'Time-driven automations came due');
+    if (scheduled + dated + resumed > 0) {
+      this.logger.log({ scheduled, dated, resumed }, 'Time-driven automations came due');
     }
 
-    return { scheduled, dated };
+    return { scheduled, dated, resumed };
+  }
+
+  // -------------------------------------------------------------------------
+  // Wait steps
+  // -------------------------------------------------------------------------
+
+  /**
+   * Runs that waited long enough, published again for their rule to pick up
+   * after the Wait step. Claimed one by one with a compare-and-set, like a
+   * schedule, so overlapping ticks cannot resume a run twice. A rule that has
+   * stopped since — paused, disabled — has its waiting runs cancelled rather
+   * than resumed later by surprise.
+   */
+  async runDelays(now: Date): Promise<number> {
+    const due = await this.prisma.automationDelayedRun.findMany({
+      where: { status: 'PENDING', runAt: { lte: now } },
+      orderBy: { runAt: 'asc' },
+      take: 200,
+      select: {
+        id: true,
+        ruleId: true,
+        nodeId: true,
+        event: true,
+        rule: { select: { status: true } },
+      },
+    });
+
+    let resumed = 0;
+    for (const run of due) {
+      const live = run.rule.status === AutomationRuleStatus.ACTIVE;
+      const claimed = await this.prisma.automationDelayedRun.updateMany({
+        where: { id: run.id, status: 'PENDING' },
+        data: { status: live ? 'DONE' : 'CANCELLED' },
+      });
+      if (claimed.count === 0 || !live) continue;
+
+      const event = asRecord(run.event) as unknown as AutomationEvent;
+      await this.publisher.publish({
+        ...event,
+        eventId: randomUUID(),
+        ruleId: run.ruleId,
+        resumeFromNodeId: run.nodeId,
+      });
+      resumed += 1;
+    }
+    return resumed;
   }
 
   // -------------------------------------------------------------------------

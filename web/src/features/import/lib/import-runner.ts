@@ -28,13 +28,7 @@ const DEFAULT_SECTION_COUNT = 4;
 const TEXT_VALUE_MAX = 2000;
 
 export type ImportPhase =
-  | 'project'
-  | 'cleanup'
-  | 'sections'
-  | 'fields'
-  | 'columns'
-  | 'tasks'
-  | 'values';
+  'project' | 'cleanup' | 'sections' | 'fields' | 'columns' | 'tasks' | 'values';
 
 export interface ImportProgress {
   phase: ImportPhase;
@@ -244,9 +238,8 @@ export async function runImport(args: {
 
   try {
     /* -- project --------------------------------------------------------- */
-    const project: ProjectDetail | null = await send(
-      `Creating project "${projectName}"…`,
-      () => deps.createProject(workspaceId, { name: projectName, defaultWorkItemType: 'TASK' }),
+    const project: ProjectDetail | null = await send(`Creating project "${projectName}"…`, () =>
+      deps.createProject(workspaceId, { name: projectName, defaultWorkItemType: 'TASK' }),
     );
     if (!project) {
       throw new ImportAborted('The project could not be created, so nothing was imported.');
@@ -334,7 +327,9 @@ export async function runImport(args: {
     // creating it is not enough. Without this step an import finishes with
     // every value stored and none of them visible.
     phase = 'columns';
-    const createdFieldIds = fields.filter((field): field is CustomField => !!field).map((f) => f.id);
+    const createdFieldIds = fields
+      .filter((field): field is CustomField => !!field)
+      .map((f) => f.id);
     const includedAny = includedColumns.some(Boolean);
     if (createdFieldIds.length > 0) {
       const views = await send('Adding the new fields to the List view…', () =>
@@ -393,8 +388,7 @@ export async function runImport(args: {
         continue;
       }
 
-      const sectionId =
-        task.sectionIndex === null ? undefined : sectionIds[task.sectionIndex];
+      const sectionId = task.sectionIndex === null ? undefined : sectionIds[task.sectionIndex];
 
       const created: ProjectWorkItem | null = await send(
         `Creating task "${task.title.slice(0, 60)}"…`,
@@ -472,9 +466,8 @@ export async function runImport(args: {
             payload = { text: raw.slice(0, TEXT_VALUE_MAX) };
         }
 
-        const set = await send(
-          `Setting "${column.header}" on "${task.title.slice(0, 40)}"…`,
-          () => deps.setCustomFieldValue(workspaceId, taskId, field.id, payload),
+        const set = await send(`Setting "${column.header}" on "${task.title.slice(0, 40)}"…`, () =>
+          deps.setCustomFieldValue(workspaceId, taskId, field.id, payload),
         );
         if (set !== null) {
           result.valuesSet++;

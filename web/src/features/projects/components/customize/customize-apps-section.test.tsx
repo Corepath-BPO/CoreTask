@@ -11,6 +11,7 @@ const update = vi.fn();
 const test = vi.fn();
 const disconnect = vi.fn();
 let apps: ProjectAppConnection[];
+let slackInstalled: boolean;
 
 vi.mock('../../hooks/use-project-apps', () => ({
   useProjectApps: () => ({ data: apps, isLoading: false }),
@@ -20,11 +21,44 @@ vi.mock('../../hooks/use-project-apps', () => ({
   useDisconnectProjectApp: () => ({ mutate: disconnect, isPending: false }),
 }));
 
+vi.mock('@/features/integrations/hooks/use-slack', () => ({
+  useSlackStatus: (workspaceId: string | undefined) => ({
+    isLoading: false,
+    data: workspaceId
+      ? {
+          configured: true,
+          installation: slackInstalled
+            ? {
+                teamId: 'T1',
+                teamName: 'Acme',
+                installedBy: null,
+                installedAt: '2026-10-17T00:00:00Z',
+                linkedPeople: 1,
+              }
+            : null,
+          me: { linked: false, slackUserId: null },
+          canManage: true,
+        }
+      : undefined,
+  }),
+  useSlackChannels: (_workspaceId: string | undefined, enabled: boolean) => ({
+    isLoading: false,
+    isError: false,
+    data: enabled
+      ? [
+          { id: 'G0BOARD', name: 'board', isPrivate: true },
+          { id: 'C0LEASING', name: 'leasing', isPrivate: false },
+        ]
+      : undefined,
+  }),
+}));
+
 const connection = (over: Partial<ProjectAppConnection> = {}): ProjectAppConnection => ({
   id: 'a-1',
   app: 'SLACK',
   name: '#maintenance',
   urlHint: 'hooks.slack.com/…/abcd',
+  slackChannel: null,
   events: ['task.created', 'task.completed', 'comment.created'],
   enabled: true,
   disabledReason: null,
@@ -46,6 +80,7 @@ const renderSection = (canEdit = true) =>
 beforeEach(() => {
   for (const mock of [connect, update, test, disconnect]) mock.mockReset();
   apps = [];
+  slackInstalled = false;
 });
 
 describe('CustomizeAppsSection', () => {
@@ -130,6 +165,48 @@ describe('CustomizeAppsSection', () => {
       },
       expect.anything(),
     );
+  });
+
+  it('posts as the CoreTask Slack app to a chosen channel when the workspace has it', async () => {
+    slackInstalled = true;
+    apps = [
+      connection({
+        id: 'a-2',
+        name: '#leasing',
+        urlHint: '#leasing',
+        slackChannel: { id: 'C0LEASING', name: 'leasing' },
+      }),
+    ];
+    const user = userEvent.setup();
+    renderSection();
+
+    expect(screen.getByRole('list', { name: 'Connected apps' })).toHaveTextContent(
+      '#leasing · CoreTask Slack app',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add Slack' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('radio', { name: /As the CoreTask app/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(within(dialog).queryByLabelText('Webhook URL')).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Connect' })).toBeDisabled();
+
+    await user.click(within(dialog).getByRole('combobox', { name: 'Channel' }));
+    await user.click(await screen.findByRole('option', { name: '#leasing' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(connect).toHaveBeenCalledWith(
+      {
+        app: 'SLACK',
+        slackChannelId: 'C0LEASING',
+        events: ['task.created', 'task.completed', 'comment.created', 'project.status_updated'],
+      },
+      expect.anything(),
+    );
+
+    await user.click(within(dialog).getByRole('radio', { name: /Incoming webhook/ }));
+    expect(within(dialog).getByLabelText('Webhook URL')).toBeInTheDocument();
   });
 
   it('sends people who cannot edit to an editor', () => {

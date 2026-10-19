@@ -13,7 +13,7 @@ src/
 ├── database/                PrismaService
 ├── redis/                   RedisService (also supplies BullMQ's connection)
 ├── modules/                 domain modules (controller → service → Prisma)
-├── integrations/            outbound systems: email, storage, notifications
+├── integrations/            outbound systems: email, storage, notifications, AI
 ├── jobs/                    BullMQ queues (producers) and processors (consumers)
 └── websocket/               Socket.IO gateway
 ```
@@ -129,18 +129,17 @@ something that leaks out with the next field on the model.
 
 ### Outbound e-mail
 
-Three transports, chosen in this order by `EmailService`:
+Two transports, chosen by `EmailService`:
 
 1. **Microsoft Graph**, when the `MICROSOFT_GRAPH_*` block is configured
-2. **SMTP**, when `SMTP_HOST` is set
-3. The **log transport**, which writes the rendered message out
+2. The **log transport** otherwise, which writes the rendered message out
 
-Graph wins over SMTP deliberately. It is the explicitly-credentialed choice,
-whereas SMTP settings are easy to leave pointing at a local catcher by accident.
-The log transport is not a stub: it keeps local development free of a mail
-container while still exercising the whole
+There is no SMTP transport: CoreTask sends through Graph, and keeping a second
+real transport would be one more set of settings to leave pointing somewhere by
+accident. The log transport is not a stub: it keeps local development free of a
+mail account while still exercising the whole
 queue → processor → template → integration path, so the only untested link is
-the socket.
+the call to Graph.
 
 The Graph transport is written against `fetch` rather than
 `@microsoft/microsoft-graph-client` plus MSAL. It needs exactly two calls —
@@ -600,10 +599,12 @@ listed or served, so an abandoned upload is invisible rather than a broken link.
 A worker job sweeps them hourly.
 
 **Confirm is the security boundary, not a formality.** A presigned PUT has no
-way to express a size limit — S3 and MinIO simply cannot — so a URL issued for
-a 2 KB image will accept a gigabyte. This was verified against MinIO rather than
-assumed. Re-reading the object is what makes the recorded size true; a mismatch
-deletes the bytes rather than leaving them to the sweeper.
+way to express a size limit — S3 and the servers modelled on it simply cannot —
+so a URL issued for a 2 KB image will accept a gigabyte. This was verified
+against the storage server rather than assumed, and attachments.e2e-spec.ts
+keeps checking it against whichever one runs. Re-reading the object is what
+makes the recorded size true; a mismatch deletes the bytes rather than leaving
+them to the sweeper.
 
 Content type _is_ enforceable, but only if it is signed. By default the AWS SDK
 signs `host` alone and `ContentType` degrades to a suggestion: a URL signed for
@@ -618,7 +619,7 @@ disposition at signing time means it cannot be dropped by whatever wrote the
 object.
 
 `STORAGE_PUBLIC_ENDPOINT` exists because SigV4 signs the Host header. In Docker
-the API reaches storage at `coretask-minio:9000`, a name that resolves only on
+the API reaches storage at `coretask-storage:9000`, a name that resolves only on
 the compose network, so a URL signed with it is useless to a browser — and the
 hostname cannot be patched in afterwards without invalidating the signature. A
 second S3 client, pointed at the address the client will actually connect to,

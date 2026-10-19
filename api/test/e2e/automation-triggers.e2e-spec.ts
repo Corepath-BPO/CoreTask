@@ -34,6 +34,7 @@ describe('Automation triggers and actions (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toWorkspace: async () => undefined,
     } as never);
     clock = new AutomationClockService(context.prisma, {
       publish: async (
@@ -193,6 +194,202 @@ describe('Automation triggers and actions (e2e)', () => {
   });
 
   const task = (id: string) => context.prisma.task.findUniqueOrThrow({ where: { id } });
+
+  describe('the Wait step', () => {
+    const DAY_MS = 86_400_000;
+
+    /** Waits two days after assigning, then comments if the task is still open. */
+    const waitingRule = async (scope: Scope) => {
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set(as(scope.owner))
+        .send({
+          name: 'Chase in two days',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.otherSectionId },
+          nodes: [
+            {
+              id: 't',
+              nodeType: 'TRIGGER',
+              subtype: 'TASK_MOVED_TO_SECTION',
+              parentId: null,
+              configuration: { sectionId: scope.otherSectionId },
+            },
+            {
+              id: 'a1',
+              nodeType: 'ACTION',
+              subtype: 'ASSIGN_USER',
+              parentId: 't',
+              configuration: { userId: scope.member.userId },
+            },
+            {
+              id: 'd',
+              nodeType: 'DELAY',
+              subtype: 'DELAY',
+              parentId: 'a1',
+              configuration: { amount: 2, unit: 'DAYS' },
+            },
+            {
+              id: 'c',
+              nodeType: 'CONDITION',
+              subtype: 'FIELD_COMPARISON',
+              parentId: 'd',
+              configuration: { field: 'completed', operator: 'IS_NOT_CHECKED' },
+            },
+            {
+              id: 'a2',
+              nodeType: 'ACTION',
+              subtype: 'ADD_COMMENT',
+              parentId: 'c',
+              configuration: { body: 'Still open after two days' },
+            },
+          ],
+        })
+        .expect(201);
+      const id = created.body.data.id as string;
+      await request(server())
+        .post(`${rulesUrl(scope)}/${id}/publish`)
+        .set(as(scope.owner))
+        .expect(200);
+      const wait = await context.prisma.automationNode.findFirstOrThrow({
+        where: { ruleId: id, nodeType: 'DELAY' },
+      });
+      return { id, waitId: wait.id };
+    };
+
+    const moved = (scope: Scope) =>
+      event(scope, {
+        trigger: 'TASK_MOVED_TO_SECTION',
+        after: { sectionId: scope.otherSectionId },
+      });
+    const comments = (scope: Scope) =>
+      context.prisma.comment.count({ where: { taskId: scope.taskId } });
+
+    it('does what comes before at once, and what follows once the clock says so', async () => {
+      const scope = await setupScope();
+      const { id, waitId } = await waitingRule(scope);
+      const started = Date.now();
+
+      expect((await runner.handle(moved(scope))).executed).toBe(1);
+      expect((await task(scope.taskId)).assigneeId).toBe(scope.member.userId);
+      expect(await comments(scope)).toBe(0);
+      const waiting = await context.prisma.automationDelayedRun.findFirstOrThrow({
+        where: { ruleId: id },
+      });
+      expect(waiting).toMatchObject({ nodeId: waitId, status: 'PENDING' });
+      expect(waiting.runAt.getTime() - started).toBeGreaterThanOrEqual(2 * DAY_MS - 60_000);
+
+      // A day in: not yet.
+      await clock.tick(new Date(started + DAY_MS));
+      expect(published).toEqual([]);
+
+      // Two days in: the run is published again, aimed at the rule, after the wait.
+      await clock.tick(new Date(started + 2 * DAY_MS + 60_000));
+      expect(published).toEqual([
+        expect.objectContaining({
+          ruleId: id,
+          resumeFromNodeId: waitId,
+          trigger: 'TASK_MOVED_TO_SECTION',
+          entityId: scope.taskId,
+        }),
+      ]);
+      expect(
+        (await context.prisma.automationDelayedRun.findUniqueOrThrow({ where: { id: waiting.id } }))
+          .status,
+      ).toBe('DONE');
+
+      // Picked up after the wait: still open, so the comment goes on; the
+      // assignment before the wait is not done again.
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { assigneeId: scope.owner.userId },
+      });
+      expect((await runner.handle(published[0]!)).executed).toBe(1);
+      expect(await comments(scope)).toBe(1);
+      expect((await task(scope.taskId)).assigneeId).toBe(scope.owner.userId);
+
+      // And a second tick finds nothing left to resume.
+      published = [];
+      await clock.tick(new Date(started + 3 * DAY_MS));
+      expect(published).toEqual([]);
+    });
+
+    it('judges what follows the wait on the task as it is by then', async () => {
+      const scope = await setupScope();
+      await waitingRule(scope);
+      const started = Date.now();
+      await runner.handle(moved(scope));
+
+      // Finished in the meantime: the condition after the wait no longer holds.
+      await context.prisma.task.update({
+        where: { id: scope.taskId },
+        data: { completedAt: new Date() },
+      });
+      await clock.tick(new Date(started + 2 * DAY_MS + 60_000));
+      expect(published).toHaveLength(1);
+      await runner.handle(published[0]!);
+      expect(await comments(scope)).toBe(0);
+    });
+
+    it('cancels a waiting run when the rule has stopped by then', async () => {
+      const scope = await setupScope();
+      const { id } = await waitingRule(scope);
+      const started = Date.now();
+      await runner.handle(moved(scope));
+
+      await context.prisma.automationRule.update({
+        where: { id },
+        data: { status: 'PAUSED' },
+      });
+      await clock.tick(new Date(started + 2 * DAY_MS + 60_000));
+      expect(published).toEqual([]);
+      expect(
+        (await context.prisma.automationDelayedRun.findFirstOrThrow({ where: { ruleId: id } }))
+          .status,
+      ).toBe('CANCELLED');
+    });
+
+    it('waits in a rule without paths too: in order, up to the wait', async () => {
+      const scope = await setupScope();
+      const id = await rule(scope, 'RUN_MANUALLY', { label: 'Later' }, [
+        action('ASSIGN_USER', { userId: scope.member.userId }),
+        { nodeType: 'DELAY', subtype: 'DELAY', configuration: { amount: 3, unit: 'HOURS' } },
+        action('ADD_COMMENT', { body: 'Three hours on' }),
+      ]);
+      const started = Date.now();
+
+      await runner.handle(event(scope, { ruleId: id }));
+      expect((await task(scope.taskId)).assigneeId).toBe(scope.member.userId);
+      expect(await comments(scope)).toBe(0);
+
+      await clock.tick(new Date(started + 3 * 3_600_000 + 60_000));
+      expect(published).toHaveLength(1);
+      await runner.handle(published[0]!);
+      expect(await comments(scope)).toBe(1);
+    });
+
+    it('refuses a wait with no length, or longer than 90 days', async () => {
+      const scope = await setupScope();
+      const save = (configuration: Record<string, unknown>) =>
+        rule(
+          scope,
+          'RUN_MANUALLY',
+          { label: 'Bad wait' },
+          [
+            { nodeType: 'DELAY', subtype: 'DELAY', configuration },
+            action('ADD_COMMENT', { body: 'Then' }),
+          ],
+          { publish: false },
+        );
+      for (const configuration of [{}, { amount: 91, unit: 'DAYS' }]) {
+        const id = await save(configuration);
+        await request(server())
+          .post(`${rulesUrl(scope)}/${id}/publish`)
+          .set(as(scope.owner))
+          .expect(400);
+      }
+    });
+  });
 
   describe('run manually', () => {
     it('runs the one rule it names, with variables filled in', async () => {

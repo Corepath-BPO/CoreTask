@@ -426,3 +426,147 @@ describe('sending an email', () => {
     expect(screen.queryByRole('textbox', { name: /address/i })).toBeNull();
   });
 });
+
+describe('ticket rules', () => {
+  function renderNode(type: string, subtype: string, configuration: Record<string, unknown>) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type,
+      subtype,
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+    return onChange;
+  }
+
+  it('sets a ticket status from the ticket’s own list', async () => {
+    const onChange = renderNode('ACTION', 'SET_TICKET_STATUS', {});
+
+    await userEvent.click(screen.getByLabelText('Ticket status'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Triaged' }));
+    expect(onChange).toHaveBeenLastCalledWith({ status: 'TRIAGED' });
+  });
+
+  it('narrows "ticket status changes" to one status, or back to any', async () => {
+    const onChange = renderNode('TRIGGER', 'TICKET_STATUS_CHANGED', {});
+
+    expect(screen.getByLabelText('When the status changes to')).toHaveTextContent('Any status');
+    await userEvent.click(screen.getByLabelText('When the status changes to'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Resolved' }));
+    expect(onChange).toHaveBeenLastCalledWith({ status: 'RESOLVED' });
+  });
+});
+
+describe('the Wait step', () => {
+  function renderWait(configuration: Record<string, unknown>) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type: 'DELAY',
+      subtype: 'DELAY',
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={metadata} onChange={onChange} />);
+    return onChange;
+  }
+
+  it('shows how long it waits and writes a new length back', () => {
+    const onChange = renderWait({ amount: 2, unit: 'DAYS' });
+
+    const amount = screen.getByLabelText('Wait for');
+    expect(amount).toHaveValue(2);
+    expect(screen.getByLabelText('Unit')).toHaveTextContent('Days');
+
+    fireEvent.change(amount, { target: { value: '5' } });
+    expect(onChange).toHaveBeenLastCalledWith({ amount: 5, unit: 'DAYS' });
+  });
+
+  it('changes the unit and keeps the number', async () => {
+    const onChange = renderWait({ amount: 3, unit: 'DAYS' });
+
+    await userEvent.click(screen.getByLabelText('Unit'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Hours' }));
+    expect(onChange).toHaveBeenLastCalledWith({ amount: 3, unit: 'HOURS' });
+  });
+
+  it('says what is wrong with a length it cannot wait', () => {
+    renderWait({ amount: 91, unit: 'DAYS' });
+    expect(screen.getByText('A rule waits 90 days at most.')).toBeInTheDocument();
+  });
+
+  it('clears the number when emptied, and asks for one', () => {
+    const onChange = renderWait({ amount: 2, unit: 'HOURS' });
+
+    fireEvent.change(screen.getByLabelText('Wait for'), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ amount: undefined, unit: 'HOURS' });
+  });
+});
+
+describe('the AI steps', () => {
+  function renderStep(
+    type: string,
+    subtype: string,
+    configuration: Record<string, unknown>,
+    customFields: unknown[] = [],
+  ) {
+    const onChange = vi.fn();
+    const node = {
+      id: 'n-1',
+      type,
+      subtype,
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(
+      <NodeConfigFields
+        node={node}
+        metadata={{ ...metadata, customFields } as AutomationMetadata}
+        onChange={onChange}
+      />,
+    );
+    return onChange;
+  }
+
+  it('writes the instructions for "Use AI…"', () => {
+    const onChange = renderStep('ACTION', 'AI_ACTION', { allow: ['COMMENT'] });
+
+    fireEvent.change(screen.getByLabelText('Instructions'), { target: { value: 'Triage it' } });
+    expect(onChange).toHaveBeenLastCalledWith({ allow: ['COMMENT'], instructions: 'Triage it' });
+  });
+
+  it('ticks what AI may change, offering only the fields it can fill in', async () => {
+    const onChange = renderStep('ACTION', 'AI_ACTION', { instructions: 'Triage', allow: [] }, [
+      { id: 'f-1', name: 'Request type', type: 'SINGLE_SELECT', options: [] },
+      { id: 'f-2', name: 'Lease ends', type: 'DATE', options: [] },
+    ]);
+
+    expect(screen.getByText('Choose at least one thing AI may change.')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Fill in Lease ends' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Change its priority' }));
+    expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['PRIORITY'] });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Fill in Request type' }));
+    expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['field:f-1'] });
+  });
+
+  it('asks the AI check for its question rather than a comparison', () => {
+    const onChange = renderStep('CONDITION', 'FIELD_COMPARISON', { field: 'ai.check' });
+
+    expect(screen.queryByLabelText('Choose an option')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Is it broken?' } });
+    expect(onChange).toHaveBeenLastCalledWith({ field: 'ai.check', question: 'Is it broken?' });
+  });
+});

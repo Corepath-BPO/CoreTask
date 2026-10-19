@@ -7,7 +7,7 @@ import type { MessageEmailJobData, RuleEmailRequest } from '../queue-names';
  * automated note from a person's, and find the rule to change it.
  */
 export function composeRuleEmail(request: RuleEmailRequest, webUrl: string): MessageEmailJobData {
-  const link = `${webUrl.replace(/\/$/, '')}/my-tasks?task=${request.taskId}`;
+  const link = `${webUrl.replace(/\/$/, '')}${request.path ?? `/my-tasks?task=${request.taskId}`}`;
   const footer = `Sent by the rule “${request.ruleName}”.`;
   const text = [request.body, `${request.taskTitle}\n${link}`, footer]
     .filter((part) => part.trim() !== '')

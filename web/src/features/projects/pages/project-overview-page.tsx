@@ -1,6 +1,6 @@
 import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import { Link, useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CalendarDays, CheckCircle2, Columns3, History, Target, Users } from 'lucide-react';
 
 import { PersonAvatar } from '@/components/data-display/person-avatar';
@@ -11,6 +11,7 @@ import { useProjectActivity } from '@/features/activity/hooks/use-activity';
 import { describeStory } from '@/features/activity/lib/story-text';
 import { ConnectedGoals } from '@/features/goals/components/connected-goals';
 import { TaskDetailDialog } from '@/features/tasks/components/task-detail-dialog';
+import { useProjectWorkItems } from '@/features/work-items/hooks/use-project-work-items';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { cn, formatDate, formatRelativeTime, humanizeEnum } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
@@ -41,6 +42,13 @@ export function ProjectOverviewPage() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   const recentActivity = (activity?.pages[0]?.items ?? []).slice(0, 5);
+  // Names for the lines, which otherwise read "created this task" with no task
+  // in sight — the same list the Activity tab and every view already hold.
+  const { data: workItems } = useProjectWorkItems(workspace?.id, projectId, {});
+  const titles = useMemo(
+    () => new Map((workItems?.items ?? []).map((item) => [item.id, item.title])),
+    [workItems],
+  );
 
   if (isLoading || !project) {
     return (
@@ -237,8 +245,21 @@ export function ProjectOverviewPage() {
                             itemWord: entry.entity === 'TICKET' ? 'ticket' : 'task',
                             meId: me?.id,
                           })
-                        : entry.summary}
+                        : // After a name, as the Activity tab does: "Ada posted a status update".
+                          entry.summary.charAt(0).toLowerCase() + entry.summary.slice(1)}
                     </span>
+                    {titles.has(entry.entityId) && (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          onClick={() => setOpenTaskId(entry.entityId)}
+                          className="cursor-pointer font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+                        >
+                          {titles.get(entry.entityId)}
+                        </button>
+                      </>
+                    )}
                     <span className="text-xs text-muted-foreground">
                       {' '}
                       · {formatRelativeTime(entry.createdAt)}

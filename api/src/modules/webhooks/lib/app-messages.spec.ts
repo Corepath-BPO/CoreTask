@@ -1,6 +1,6 @@
 import type { WebhookEventPayload } from '@coretask/types';
 
-import { renderAppMessage } from './app-messages';
+import { renderAppMessage, renderSlackChannelMessage } from './app-messages';
 
 const context = {
   projectName: 'Maintenance',
@@ -118,5 +118,54 @@ describe('renderAppMessage', () => {
       context,
     ) as { text: string };
     expect(ping.text).toBe('CoreTask will post Maintenance updates here.\nMaintenance · CoreTask');
+  });
+});
+
+describe('renderSlackChannelMessage', () => {
+  const ids = (blocks: unknown[]) =>
+    (blocks.at(-1) as { type: string; elements?: { action_id: string }[] }).elements?.map(
+      (element) => element.action_id,
+    );
+
+  it('puts the task buttons under a task’s post, linking to the task', () => {
+    const body = renderSlackChannelMessage(event({ type: 'task.created' }), context);
+    const actions = body.blocks.at(-1) as {
+      type: string;
+      elements: { action_id: string; value?: string; url?: string }[];
+    };
+    expect(body.text).toBe('Ada Owner added “Fix <!channel> leak”');
+    expect(actions.type).toBe('actions');
+    expect(ids(body.blocks)).toEqual([
+      'coretask_task_complete',
+      'coretask_task_assign_me',
+      'coretask_task_open',
+    ]);
+    expect(actions.elements[0]?.value).toBe('t-1');
+    expect(actions.elements[2]?.url).toBe('https://app.example.org/projects/p-1/list?task=t-1');
+  });
+
+  it('leaves a completed task only the link, and pings and status updates none', () => {
+    const done = renderSlackChannelMessage(
+      event({
+        data: {
+          task: {
+            id: 't-1',
+            title: 'Fix',
+            projectId: 'p-1',
+            dueDate: null,
+            assignee: null,
+            completedAt: '2026-10-14T00:00:00Z',
+          },
+        },
+      }),
+      context,
+    );
+    expect(ids(done.blocks)).toEqual(['coretask_task_open']);
+
+    const ping = renderSlackChannelMessage(
+      event({ type: 'ping', data: { message: 'Hi' } }),
+      context,
+    );
+    expect(ping.blocks.some((block) => (block as { type: string }).type === 'actions')).toBe(false);
   });
 });
