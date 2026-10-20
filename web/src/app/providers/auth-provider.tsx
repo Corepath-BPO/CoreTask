@@ -34,8 +34,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // This browser is known to be signed out, so there is no cookie to
     // exchange. Skipping avoids a guaranteed 401 on every anonymous page load.
-    // Anything less certain than "known signed out" still tries.
-    if (!shouldAttemptRestore()) {
+    // Anything less certain than "known signed out" still tries — and so does
+    // the page single sign-on returns to, where the API has just set a cookie
+    // the hint knows nothing about. Unless the account wants its second step:
+    // then the fragment carries a challenge, and there is no cookie yet.
+    const returningFromSso =
+      window.location.pathname === '/sso/complete' && !/[#&]challenge=/.test(window.location.hash);
+    if (!returningFromSso && !shouldAttemptRestore()) {
       markAnonymous();
       return;
     }

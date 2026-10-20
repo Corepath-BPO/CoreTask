@@ -24,6 +24,7 @@ import {
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import {
   CurrentWorkspace,
@@ -67,6 +68,7 @@ export class WorkspaceInvitationsController {
   }
 
   @Post()
+  @RequireVerifiedEmail()
   @RequireWorkspaceRole(WorkspaceRole.ADMIN)
   @ApiOperation({
     summary: 'Invite someone by e-mail',

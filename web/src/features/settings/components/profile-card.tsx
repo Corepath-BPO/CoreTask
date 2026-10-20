@@ -20,6 +20,8 @@ import { ymd } from '@/lib/utils';
 
 import { useUpdateProfile } from '../hooks/use-profile';
 
+import { ProfilePicture } from './profile-picture';
+
 interface Draft {
   name: string;
   pronouns: string;
@@ -86,6 +88,7 @@ export function ProfileCard({ user }: { user: AuthUser }) {
         <CardDescription>How people in your workspaces see you.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-1">
+        <ProfilePicture user={user} />
         <div className="space-y-1.5">
           <Label htmlFor="profile-name">Name</Label>
           <Input

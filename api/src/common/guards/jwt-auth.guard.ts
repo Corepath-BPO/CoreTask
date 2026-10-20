@@ -97,6 +97,9 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     info: unknown,
   ): TUser {
     if (err || !user) {
+      // The strategy's own verdicts — a session signed out elsewhere — keep
+      // their code, so the client knows to try a refresh before giving up.
+      if (err instanceof AppException && err.getStatus() === 401) throw err;
       const reason = info instanceof Error ? info.name : undefined;
 
       if (reason === 'TokenExpiredError') {

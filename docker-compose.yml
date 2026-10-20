@@ -99,6 +99,10 @@ services:
   # not have to change the next time the server behind it does. Path-style
   # addressing is set explicitly: virtual-host style would ask for a hostname
   # of `<bucket>.coretask-storage`, which exists nowhere.
+  #
+  # The CORS rule lets the web app's origin(s) PUT and GET objects directly:
+  # attachments and profile pictures go from the browser straight to storage
+  # on a presigned URL, and without the rule the browser refuses the preflight.
   coretask-storage-init:
     image: amazon/aws-cli:2.38.1
     container_name: coretask-storage-init
@@ -111,12 +115,16 @@ services:
       AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
       AWS_DEFAULT_REGION: ${STORAGE_REGION:-us-east-1}
       AWS_ENDPOINT_URL: http://coretask-storage:9000
+      CORS_ORIGINS: ${WEB_URL:-http://localhost:5173}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         aws configure set default.s3.addressing_style path &&
         { aws s3api head-bucket --bucket "${STORAGE_BUCKET:-coretask}" 2>/dev/null ||
           aws s3api create-bucket --bucket "${STORAGE_BUCKET:-coretask}"; } &&
+        origins=$$(printf '%s' "$$CORS_ORIGINS" | sed 's/[[:space:]]//g; s/,/","/g') &&
+        aws s3api put-bucket-cors --bucket "${STORAGE_BUCKET:-coretask}" --cors-configuration \
+          '{"CORSRules":[{"AllowedOrigins":["'"$$origins"'"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]}' &&
         echo "bucket ${STORAGE_BUCKET:-coretask} ready"
     networks: [coretask]
 

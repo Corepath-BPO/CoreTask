@@ -181,3 +181,94 @@ export function passwordResetEmail(params: {
     }),
   };
 }
+
+/**
+ * "Confirm your new address". Sent to the *new* address: the change happens
+ * only when that inbox proves it is theirs. The old address hears about it
+ * separately, from `securityNoticeEmail`.
+ */
+export function emailChangeEmail(params: {
+  to: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+  webUrl: string;
+}): EmailMessage {
+  const firstName = params.name.split(' ')[0] ?? params.name;
+  const link = `${params.webUrl.replace(/\/$/, '')}/confirm-email-change?token=${encodeURIComponent(params.token)}`;
+  const expires = new Date(params.expiresAt).toUTCString();
+
+  return {
+    to: params.to,
+    subject: 'Confirm your new e-mail address for CoreTask',
+    text: [
+      `Hi ${firstName},`,
+      '',
+      'You asked to sign in to CoreTask with this address from now on. Confirm it:',
+      link,
+      '',
+      `The link works once, until ${expires}. Until then your account keeps its old address.`,
+      'If you did not ask, ignore this e-mail.',
+      '',
+      '— The CoreTask team',
+    ].join('\n'),
+    html: renderEmailHtml({
+      preheader: 'Confirm the new address for your CoreTask account.',
+      heading: 'Confirm your new e-mail address',
+      bodyHtml: [
+        paragraph(`Hi ${escapeHtml(firstName)},`),
+        paragraph('You asked to sign in to CoreTask with this address from now on.'),
+      ].join(''),
+      cta: { label: 'Confirm this address', href: link },
+      note: `The link works once, until ${expires}. Until then your account keeps its old address. If you did not ask, ignore this e-mail.`,
+    }),
+  };
+}
+
+/**
+ * Something changed about how the account is protected: the address, two-step
+ * verification, the account itself. Always to the address that was on the
+ * account before the change, and always with what to do if it was not them.
+ */
+export function securityNoticeEmail(params: {
+  to: string;
+  name: string;
+  subject: string;
+  heading: string;
+  /** Plain sentences; escaped here. */
+  lines: string[];
+  webUrl: string;
+  /** Leave out when the account no longer exists to sign in to. */
+  showSettingsLink?: boolean;
+}): EmailMessage {
+  const firstName = params.name.split(' ')[0] ?? params.name;
+  const settings = `${params.webUrl.replace(/\/$/, '')}/settings`;
+  const warning =
+    'If this was not you, reset your password straight away and contact your workspace admin.';
+  const showLink = params.showSettingsLink ?? true;
+
+  return {
+    to: params.to,
+    subject: params.subject,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      ...params.lines,
+      '',
+      ...(showLink ? [`Review your account: ${settings}`, ''] : []),
+      warning,
+      '',
+      '— The CoreTask team',
+    ].join('\n'),
+    html: renderEmailHtml({
+      preheader: params.lines[0] ?? params.heading,
+      heading: params.heading,
+      bodyHtml: [
+        paragraph(`Hi ${escapeHtml(firstName)},`),
+        ...params.lines.map((line) => paragraph(escapeHtml(line))),
+      ].join(''),
+      ...(showLink ? { cta: { label: 'Review your account', href: settings } } : {}),
+      note: warning,
+    }),
+  };
+}

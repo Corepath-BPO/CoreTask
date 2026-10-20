@@ -39,6 +39,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { Actor, RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import type { ActorContext } from '../../common/types/api.types';
 import { parseBody } from '../../common/utils/zod-body.util';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
@@ -73,6 +74,7 @@ export class SlackController {
   }
 
   @Post('install')
+  @RequireVerifiedEmail()
   @HttpCode(HttpStatus.OK)
   @RequireWorkspaceRole(WorkspaceRole.ADMIN)
   @ApiOperation({

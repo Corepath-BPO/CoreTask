@@ -22,6 +22,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import {
   CurrentWorkspace,
@@ -64,6 +65,7 @@ export class ApiKeysController {
   }
 
   @Post()
+  @RequireVerifiedEmail()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create an API key',

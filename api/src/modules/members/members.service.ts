@@ -169,6 +169,38 @@ export class MembersService {
       this.assertOutranks(actor.role, target.role, false);
     }
 
+    return this.endMembership(target, actorId, leaving);
+  }
+
+  /**
+   * Leaves a workspace on the way out of CoreTask, exactly as "leave" would:
+   * deleting an account ends each membership it does not own this way, so
+   * open work is unassigned and rosters forget them. The owner's own
+   * workspaces are deleted or block the deletion before it gets here.
+   */
+  async leaveForAccountDeletion(workspaceId: string, userId: string): Promise<RemoveMemberResult> {
+    const membership = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+    });
+    if (!membership)
+      return { removed: true, tasksUnassigned: 0, ticketsUnassigned: 0, teamsLeft: 0 };
+    if (membership.role === WorkspaceRole.OWNER) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Transfer ownership before leaving the workspace.',
+      );
+    }
+    return this.endMembership(membership, userId, true);
+  }
+
+  /** Ends one membership, after whatever check the caller needed. */
+  private async endMembership(
+    target: WorkspaceMember,
+    actorId: string,
+    leaving: boolean,
+  ): Promise<RemoveMemberResult> {
+    const { workspaceId, id: memberId } = target;
+
     /*
      * Assignment points at a *user*, not a membership, so nothing in the schema
      * clears it — the board would keep showing work assigned to someone who can

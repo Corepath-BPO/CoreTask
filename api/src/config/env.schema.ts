@@ -64,6 +64,37 @@ export const envSchema = z
     COOKIE_DOMAIN: optionalString,
     COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
+    /**
+     * Days a new account may be used before its address has to be confirmed.
+     * Past that, the API answers EMAIL_NOT_VERIFIED to everything but the
+     * routes that confirm, change or resend — and the app shows a gate.
+     * Inviting people and connecting integrations need a confirmed address
+     * from the start, whatever this says.
+     */
+    EMAIL_VERIFICATION_GRACE_DAYS: z.coerce.number().int().min(0).max(365).default(7),
+
+    /*
+     * "Sign in with Google" and "Sign in with Microsoft": OpenID Connect apps
+     * whose redirect URI is `${API_URL}/api/v1/auth/sso/<google|microsoft>/callback`.
+     * Each pair is all or nothing; without one the button is not shown.
+     * MICROSOFT_SSO_TENANT is `common` (work and personal accounts),
+     * `organizations`, `consumers`, or one tenant's id. Secrets: .env only.
+     * The base URLs exist so tests can stand in for the providers.
+     */
+    GOOGLE_SSO_CLIENT_ID: optionalString,
+    GOOGLE_SSO_CLIENT_SECRET: optionalString,
+    GOOGLE_SSO_ISSUER: z.string().url().default('https://accounts.google.com'),
+    GOOGLE_SSO_AUTHORIZE_URL: z
+      .string()
+      .url()
+      .default('https://accounts.google.com/o/oauth2/v2/auth'),
+    GOOGLE_SSO_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+    MICROSOFT_SSO_CLIENT_ID: optionalString,
+    MICROSOFT_SSO_CLIENT_SECRET: optionalString,
+    MICROSOFT_SSO_TENANT: z.string().min(1).default('common'),
+    MICROSOFT_SSO_LOGIN_URL: z.string().url().default('https://login.microsoftonline.com'),
+    SSO_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(10_000),
+
     RATE_LIMIT_TTL: z.coerce.number().int().positive().default(60),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
@@ -188,6 +219,20 @@ export const envSchema = z
           code: 'custom',
           path: [key],
           message: 'Required when any other Microsoft Graph mail setting is present.',
+        });
+      }
+    }
+
+    // A client id without its secret shows a button that fails at the callback.
+    for (const [id, secret] of [
+      ['GOOGLE_SSO_CLIENT_ID', 'GOOGLE_SSO_CLIENT_SECRET'],
+      ['MICROSOFT_SSO_CLIENT_ID', 'MICROSOFT_SSO_CLIENT_SECRET'],
+    ] as const) {
+      if (Boolean(env[id]) !== Boolean(env[secret])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [env[id] ? secret : id],
+          message: 'Sign-in apps need both a client id and a client secret.',
         });
       }
     }

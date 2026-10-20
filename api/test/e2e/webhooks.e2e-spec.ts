@@ -21,6 +21,7 @@ import { WebhookDeliveryService } from '../../src/modules/webhooks/webhook-deliv
 
 import {
   closeTestContext,
+  confirmEmail,
   createTestContext,
   uniqueEmail,
   VALID_PASSWORD,
@@ -100,6 +101,7 @@ describe('Webhooks (e2e)', () => {
       .post(url('/auth/register'))
       .send({ name, email: uniqueEmail(), password: VALID_PASSWORD })
       .expect(201);
+    await confirmEmail(context, response.body.data.user.id as string);
 
     return {
       token: response.body.data.accessToken as string,

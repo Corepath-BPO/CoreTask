@@ -7,6 +7,9 @@ import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page';
 import { LoginPage } from '@/features/auth/pages/login-page';
 import { RegisterPage } from '@/features/auth/pages/register-page';
 import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page';
+import { SsoCompletePage } from '@/features/auth/pages/sso-complete-page';
+import { SsoPage } from '@/features/auth/pages/sso-page';
+import { ConfirmEmailChangePage } from '@/features/auth/pages/confirm-email-change-page';
 import { VerifyEmailPage } from '@/features/auth/pages/verify-email-page';
 import { CalendarPage } from '@/features/calendar/pages/calendar-page';
 import { GoalsPage } from '@/features/goals/pages/goals-page';
@@ -96,10 +99,39 @@ const validateRedirect = (search: Record<string, unknown>): { redirect?: string 
     : {};
 };
 
+/** An error code single sign-on sent the browser back with; the page says what it means. */
+const validateErrorCode = (value: unknown): string | undefined =>
+  typeof value === 'string' && /^[A-Z_]{1,64}$/.test(value) ? value : undefined;
+
 const loginRoute = createRoute({
   getParentRoute: () => guestRoute,
   path: '/login',
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; ssoError?: string } => {
+    const ssoError = validateErrorCode(search['ssoError']);
+    return { ...validateRedirect(search), ...(ssoError ? { ssoError } : {}) };
+  },
+});
+
+/** "Sign in with SSO": a workspace's own identity provider, found by work address or workspace. */
+const ssoRoute = createRoute({
+  getParentRoute: () => guestRoute,
+  path: '/sso',
+  component: SsoPage,
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; error?: string } => {
+    const error = validateErrorCode(search['error']);
+    return { ...validateRedirect(search), ...(error ? { error } : {}) };
+  },
+});
+
+/**
+ * Where single sign-on comes back to. Off the root, behind neither gate: the
+ * person is not signed in until the page has finished — see `SsoCompletePage`.
+ */
+const ssoCompleteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sso/complete',
+  component: SsoCompletePage,
   validateSearch: validateRedirect,
 });
 
@@ -435,6 +467,13 @@ const verifyEmailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/verify-email',
   component: VerifyEmailPage,
+});
+
+/** Where the link sent to a new address lands; off the root for the same reason. */
+const confirmEmailChangeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/confirm-email-change',
+  component: ConfirmEmailChangePage,
 });
 
 /**
@@ -790,9 +829,11 @@ const settingsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
+  guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute, ssoRoute]),
   resetPasswordRoute,
   verifyEmailRoute,
+  ssoCompleteRoute,
+  confirmEmailChangeRoute,
   acceptInvitationRoute,
   publicFormRoute,
   oauthAuthorizeRoute,

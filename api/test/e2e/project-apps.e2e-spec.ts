@@ -11,6 +11,7 @@ import { WebhookDeliveryService } from '../../src/modules/webhooks/webhook-deliv
 
 import {
   closeTestContext,
+  confirmEmail,
   createTestContext,
   uniqueEmail,
   VALID_PASSWORD,
@@ -67,6 +68,7 @@ describe('Project apps (e2e)', () => {
       .post(url('/auth/register'))
       .send({ name, email: uniqueEmail(), password: VALID_PASSWORD })
       .expect(201);
+    await confirmEmail(context, response.body.data.user.id as string);
     return {
       auth: { Authorization: `Bearer ${response.body.data.accessToken as string}` },
       userId: response.body.data.user.id as string,

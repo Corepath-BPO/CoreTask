@@ -11,6 +11,7 @@ import { WebhookDeliveryService } from '../../src/modules/webhooks/webhook-deliv
 
 import {
   closeTestContext,
+  confirmEmail,
   createTestContext,
   uniqueEmail,
   VALID_PASSWORD,
@@ -83,6 +84,7 @@ describe('Automation: send a webhook (e2e)', () => {
       .post(url('/auth/register'))
       .send({ name: 'Owner', email: uniqueEmail(), password: VALID_PASSWORD })
       .expect(201);
+    await confirmEmail(context, registered.body.data.user.id as string);
     const token = registered.body.data.accessToken as string;
     const auth = { Authorization: `Bearer ${token}` };
 
