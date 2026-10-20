@@ -424,7 +424,13 @@ export class ProjectUpdatesService {
     actor: ActorContext,
     text: string,
   ): Promise<ProjectMessage> {
-    const project = await this.requireEditor(workspaceId, projectId, actor);
+    // Replying is taking part: a project COMMENTER may, as on a task.
+    await this.requireVisible(workspaceId, projectId, actor);
+    await this.access.assertConversationRole({ projectId }, actor, WorkspaceRole.MEMBER);
+    const project = await this.prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+      select: { name: true },
+    });
 
     const message = await this.prisma.projectMessage.findFirst({
       where: { id: messageId, projectId, workspaceId },

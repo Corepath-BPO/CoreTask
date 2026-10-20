@@ -344,6 +344,87 @@ describe('Project members and privacy (e2e)', () => {
       void manager;
     });
 
+    it('lets a COMMENTER read and take part in the conversation, and change nothing', async () => {
+      const { owner, member, workspaceId, project } = await setup();
+      await addProjectMember(workspaceId, project.id, owner, member.userId, 'COMMENTER').expect(
+        201,
+      );
+      expect(await roleOf(workspaceId, project.id, owner, member.userId)).toBe('COMMENTER');
+      const tasksUrl = url(`/workspaces/${workspaceId}/tasks`);
+      const task = await request(server())
+        .post(tasksUrl)
+        .set(auth(owner))
+        .send({ title: 'Renewal notices', projectId: project.id })
+        .expect(201);
+      const taskId = task.body.data.id as string;
+
+      // Reads like a viewer.
+      await request(server()).get(`${tasksUrl}/${taskId}`).set(auth(member)).expect(200);
+      const edit = await request(server())
+        .patch(`${tasksUrl}/${taskId}`)
+        .set(auth(member))
+        .send({ title: 'Renamed' })
+        .expect(403);
+      expect(edit.body.error.code).toBe('INSUFFICIENT_PROJECT_ROLE');
+      await request(server())
+        .post(tasksUrl)
+        .set(auth(member))
+        .send({ title: 'Not mine to add', projectId: project.id })
+        .expect(403);
+
+      // Talks like an editor: comments, likes, replies to a message.
+      const ownerComment = await request(server())
+        .post(url(`/workspaces/${workspaceId}/tasks/${taskId}/comments`))
+        .set(auth(owner))
+        .send({ body: 'Draft is attached.' })
+        .expect(201);
+      await request(server())
+        .post(url(`/workspaces/${workspaceId}/tasks/${taskId}/comments`))
+        .set(auth(member))
+        .send({ body: 'Looks right to me.' })
+        .expect(201);
+      await request(server())
+        .post(url(`/workspaces/${workspaceId}/comments/${ownerComment.body.data.id}/like`))
+        .set(auth(member))
+        .expect(201);
+
+      const message = await request(server())
+        .post(url(`${projectUrl(workspaceId, project.id)}/messages`))
+        .set(auth(owner))
+        .send({ title: 'Kick-off', body: '<p>Agenda</p>' })
+        .expect(201);
+      await request(server())
+        .post(
+          url(`${projectUrl(workspaceId, project.id)}/messages/${message.body.data.id}/replies`),
+        )
+        .set(auth(member))
+        .send({ body: 'See you there' })
+        .expect(201);
+      // Starting a conversation for the whole project is still an editor's.
+      await request(server())
+        .post(url(`${projectUrl(workspaceId, project.id)}/messages`))
+        .set(auth(member))
+        .send({ title: 'Mine', body: '<p>No</p>' })
+        .expect(403);
+    });
+
+    it('keeps a workspace GUEST read-only even as a COMMENTER', async () => {
+      const { owner, guest, workspaceId, project } = await setup();
+      await addProjectMember(workspaceId, project.id, owner, guest.userId, 'COMMENTER').expect(201);
+      const task = await request(server())
+        .post(url(`/workspaces/${workspaceId}/tasks`))
+        .set(auth(owner))
+        .send({ title: 'Renewal notices', projectId: project.id })
+        .expect(201);
+
+      const refused = await request(server())
+        .post(url(`/workspaces/${workspaceId}/tasks/${task.body.data.id}/comments`))
+        .set(auth(guest))
+        .send({ body: 'Can I?' })
+        .expect(403);
+      expect(refused.body.error.code).toBe('INSUFFICIENT_WORKSPACE_ROLE');
+    });
+
     it('refuses to add someone who is not in the workspace', async () => {
       const { owner, workspaceId, project } = await setup();
       const stranger = await registerUser('Stranger');

@@ -45,8 +45,14 @@ Every `ProjectSummary` (list rows, detail, create and update responses) has:
 - `members` is a preview — the first five, admins first. Never derive "who is
   the last admin" from it; use the members list.
 - `access` is the **caller's** standing: `effectiveRole` is the workspace role
-  after the project role's cap (EDITOR → at most MEMBER, VIEWER → at most
-  GUEST, ADMIN → no cap) and is what every "can I edit this" check should read.
+  after the project role's cap (EDITOR → at most MEMBER, COMMENTER and VIEWER
+  → at most GUEST, ADMIN → no cap) and is what every "can I edit this" check
+  should read. A COMMENTER differs from a VIEWER only in the conversation:
+  they may comment on the project's tasks and tickets, like comments and
+  reply to its messages, as an EDITOR may (`effectiveConversationRole`). They
+  may not start a message, attach files or change anything. A workspace GUEST
+  stays read-only as a COMMENTER, because a project role never raises the
+  workspace role.
   `canManage` is whether the caller may change the roster and the privacy — a
   project ADMIN, or a workspace OWNER/ADMIN. It is per reader, so realtime
   payloads omit it.

@@ -65,6 +65,7 @@ enum ProjectVisibility {
 enum ProjectMemberRole {
   ADMIN
   EDITOR
+  COMMENTER
   VIEWER
 }
 

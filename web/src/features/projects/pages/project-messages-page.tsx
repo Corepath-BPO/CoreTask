@@ -42,7 +42,7 @@ export function ProjectMessagesPage({ projectId }: { projectId: string }) {
   const workspaceId = workspace?.id;
   const me = useCurrentUser();
   const { data: project } = useProject(workspaceId, projectId);
-  const { effectiveRole } = useProjectAccess(project);
+  const { effectiveRole, canComment } = useProjectAccess(project);
   const canPost = hasAtLeastRole(effectiveRole, WorkspaceRole.MEMBER);
   const canManage = hasAtLeastRole(effectiveRole, WorkspaceRole.MANAGER);
 
@@ -120,7 +120,7 @@ export function ProjectMessagesPage({ projectId }: { projectId: string }) {
                 <MessageCard
                   workspaceId={workspaceId}
                   message={entry.message}
-                  canReply={canPost}
+                  canReply={canComment}
                   canDelete={mayDelete(entry.message.author?.id)}
                   currentUserId={me?.id}
                   replying={reply.isPending}
