@@ -9,25 +9,25 @@ in [project-members.md](../api/project-members.md).
 
 ## Reference to component
 
-| Asana                                                   | Component today                                                    | State     |
-| ------------------------------------------------------- | ------------------------------------------------------------------ | --------- |
-| Padlock beside a private project's name                 | `sharing/project-privacy-badge.tsx` — header, browse row, card     | built     |
-| Members avatar stack in the header, opens Share         | `sharing/project-members-stack.tsx` (from the summary's preview)   | built     |
-| **Share** button                                        | `project-header.tsx` — primary, for everyone                       | built     |
-| **Join** on a public project you are not on             | `project-header.tsx`, browse row                                   | built     |
-| Leave project                                           | header caret menu; the Share dialog's own row                      | built     |
-| Share dialog: members list with a role per row          | `sharing/share-project-dialog.tsx` — Admin / Editor / Viewer       | built     |
-| Share dialog: add people                                | the same — a workspace-member picker plus a role for the additions | built     |
-| Share dialog: privacy ("Private to members")            | `sharing/project-visibility-select.tsx`, confirmed before private  | built     |
-| Share dialog: copy project link                         | the same                                                           | built     |
-| Share dialog: invite by e-mail                          | the same — type an address that is not in the workspace            | built     |
-| Share dialog: manage notifications                      | —                                                                  | not built |
-| Commenter role                                          | —                                                                  | not built |
-| Browse list: Members filter                             | `projects-page.tsx` — Anyone / I'm a member / Private to members   | built     |
-| Browse list: Members column                             | `projects-page.tsx` — the avatar stack                             | built     |
-| Create/edit project: privacy                            | `project-form-dialog.tsx` — read-only unless a project admin       | built     |
-| "Admin access" hint on a private project you are not on | `project-header.tsx` badge with a tooltip                          | built     |
-| Being removed while the project is open                 | `hooks/use-project-access-realtime.ts` — toast, back to Browse     | built     |
+| Asana                                                   | Component today                                                           | State |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- | ----- |
+| Padlock beside a private project's name                 | `sharing/project-privacy-badge.tsx` — header, browse row, card            | built |
+| Members avatar stack in the header, opens Share         | `sharing/project-members-stack.tsx` (from the summary's preview)          | built |
+| **Share** button                                        | `project-header.tsx` — primary, for everyone                              | built |
+| **Join** on a public project you are not on             | `project-header.tsx`, browse row                                          | built |
+| Leave project                                           | header caret menu; the Share dialog's own row                             | built |
+| Share dialog: members list with a role per row          | `sharing/share-project-dialog.tsx` — Admin / Editor / Viewer              | built |
+| Share dialog: add people                                | the same — a workspace-member picker plus a role for the additions        | built |
+| Share dialog: privacy ("Private to members")            | `sharing/project-visibility-select.tsx`, confirmed before private         | built |
+| Share dialog: copy project link                         | the same                                                                  | built |
+| Share dialog: invite by e-mail                          | the same — type an address that is not in the workspace                   | built |
+| Share dialog: manage notifications                      | `project-notifications-button.tsx` — a bell beside the star, members only | built |
+| Commenter role                                          | the same role pickers — reads, comments, likes, replies; edits nothing    | built |
+| Browse list: Members filter                             | `projects-page.tsx` — Anyone / I'm a member / Private to members          | built |
+| Browse list: Members column                             | `projects-page.tsx` — the avatar stack                                    | built |
+| Create/edit project: privacy                            | `project-form-dialog.tsx` — read-only unless a project admin              | built |
+| "Admin access" hint on a private project you are not on | `project-header.tsx` badge with a tooltip                                 | built |
+| Being removed while the project is open                 | `hooks/use-project-access-realtime.ts` — toast, back to Browse            | built |
 
 ### What "not built" means for each
 
@@ -40,13 +40,20 @@ admins may invite someone new, as on Members; a project admin who is not one
 sees the option greyed with that reason, and the hint under the picker says to
 ask one.
 
-**Manage notifications.** There is no per-project notification setting to
-manage. The row is left out rather than shown disabled, because a disabled
-control invites people to keep clicking it.
+**Manage notifications.** It is a bell beside the star rather than a row in
+the Share dialog. It is a person's own choice, made where they read the
+project, not where admins manage its people. Only members see it, because
+only members hear from a project: status updates, messages, tasks added and
+tasks completed, each a checkbox. The bell shows struck through once all of
+them are off.
 
-**Commenter.** The three roles map onto the workspace ladder that exists
-(EDITOR acts as at most a MEMBER, VIEWER as at most a GUEST). A comment-only
-tier would need a permission level between the two that nothing else has.
+**Commenter.** It is a fourth role, between Editor and Viewer. For the work it
+is capped like a viewer, at GUEST. For the conversation it counts as an
+editor (`effectiveConversationRole`), so the task panel stays read-only while
+its comment box stays open, and message replies are open too. No new rung on
+the workspace ladder was needed. The Share dialog says "can comment, not
+edit" on a commenter's row, or "a guest, so read-only here" when their
+workspace role is GUEST: a project role never raises the workspace one.
 
 ## Rules the UI states before the API does
 

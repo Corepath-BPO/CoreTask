@@ -26,6 +26,10 @@ Membership is a row in `project_members` with a role of `ADMIN`, `EDITOR` or
 `VIEWER`. **A project role only ever narrows the workspace role.** An EDITOR
 acts as at most a workspace MEMBER, a VIEWER as at most a GUEST, and an ADMIN
 keeps their workspace role and may also manage the roster and the privacy. The
+A fourth role, `COMMENTER`, came later. It is capped like a VIEWER for the
+work, and counts as an EDITOR in the conversation: comments, likes and message
+replies, checked with `ProjectAccessService.assertConversationRole`. It narrows
+the workspace role like the others, so a GUEST commenter stays read-only. The
 effective role is computed once per request by `ProjectAccessGuard`, which runs
 after `WorkspaceMemberGuard` on every route under a project and **rewrites the
 request's workspace role** to the effective one. Every existing role check —

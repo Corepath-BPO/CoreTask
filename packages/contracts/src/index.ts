@@ -24,6 +24,7 @@ export * from './project-apps.js';
 export * from './slack.js';
 export * from './project-email.js';
 export * from './project-templates.js';
+export * from './project-notifications.js';
 export * from './project-updates.js';
 export * from './reports.js';
 export * from './query.js';

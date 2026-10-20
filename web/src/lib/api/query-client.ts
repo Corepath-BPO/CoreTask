@@ -44,6 +44,8 @@ export const queryKeys = {
   /** A person's own: the apps they registered, and the apps they connected. */
   oauthApps: ['oauth-apps'] as const,
   connectedApps: ['connected-apps'] as const,
+  /** A workspace's: its approved apps and whether only those may act in it. */
+  appDirectory: (workspaceId: string) => ['app-directory', workspaceId] as const,
   slack: {
     all: (workspaceId: string) => ['slack', workspaceId] as const,
     status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
@@ -79,6 +81,9 @@ export const queryKeys = {
       [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
     invitations: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'invitations', projectId] as const,
+    /** The reader's own choice of what this project tells them about. */
+    notificationSettings: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'notification-settings', projectId] as const,
     note: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'note', projectId] as const,
     resources: (workspaceId: string, projectId: string) =>

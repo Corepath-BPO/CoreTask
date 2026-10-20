@@ -547,6 +547,12 @@ function MemberRow({
           {capped && actsAs && (
             <span className="ml-1.5">· acts as {humanizeEnum(actsAs).toLowerCase()} here</span>
           )}
+          {member.role === ProjectMemberRole.COMMENTER &&
+            (workspaceRole === WorkspaceRole.GUEST ? (
+              <span className="ml-1.5">· a guest, so read-only here</span>
+            ) : (
+              <span className="ml-1.5">· can comment, not edit</span>
+            ))}
         </p>
       </div>
 

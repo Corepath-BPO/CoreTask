@@ -1,4 +1,4 @@
-import { hasAtLeastRole, type WorkspaceRole } from '@coretask/contracts';
+import { OAuthAppPolicy, hasAtLeastRole, type WorkspaceRole } from '@coretask/contracts';
 import type { WorkspaceMember as WorkspaceMemberDto } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
 import type { Prisma, WorkspaceMember } from '@prisma/client';
@@ -44,6 +44,22 @@ export class WorkspaceMembersService {
     }
 
     return membership;
+  }
+
+  /**
+   * Whether an OAuth app may act in a workspace: any app, unless its admins
+   * allow only the apps in its app directory.
+   */
+  async oauthAppAllowed(workspaceId: string, appId: string): Promise<boolean> {
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { oauthAppPolicy: true, oauthApps: { where: { appId }, select: { id: true } } },
+    });
+    return (
+      !workspace ||
+      workspace.oauthAppPolicy === OAuthAppPolicy.ANY ||
+      workspace.oauthApps.length > 0
+    );
   }
 
   async requireRole(

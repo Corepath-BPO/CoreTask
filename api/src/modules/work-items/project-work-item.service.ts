@@ -31,6 +31,7 @@ import { planPlacement } from '../../common/utils/position.util';
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
+import { ProjectActivityNotifier } from '../../integrations/notifications/project-activity.notifier';
 import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -94,6 +95,7 @@ export class ProjectWorkItemService {
     private readonly formulas: FormulaValuesService,
     private readonly fieldMetadata: FieldMetadataService,
     private readonly order: WorkItemOrderRepository,
+    private readonly projectNotifier: ProjectActivityNotifier,
   ) {}
 
   /**
@@ -333,6 +335,10 @@ export class ProjectWorkItemService {
       userId,
       ...created.assignees.map((assignee) => assignee.id),
     ]);
+    // Members who asked to hear of new work; a subtask is its parent's business.
+    if (!created.parentId) {
+      await this.projectNotifier.itemAdded(this.refOf(created), projectId, userId);
+    }
 
     await this.mentions.notify({
       ...this.mentionTarget(created, userId),
@@ -447,7 +453,10 @@ export class ProjectWorkItemService {
         updated.assignees.map((assignee) => assignee.id),
       );
     }
-    await this.followerNotifier.notifyStories(this.refOf(updated), userId, stories);
+    const told = await this.followerNotifier.notifyStories(this.refOf(updated), userId, stories);
+    if (before.completedAt === null && updated.completedAt !== null) {
+      await this.projectNotifier.itemCompleted(this.refOf(updated), projectId, userId, told);
+    }
 
     if (changedFields.includes('description')) {
       await this.mentions.notify({

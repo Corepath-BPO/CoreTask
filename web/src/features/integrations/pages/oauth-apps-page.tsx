@@ -97,6 +97,11 @@ export function OAuthAppsPage() {
                             ? '1 person connected'
                             : `${app.connections} people connected`}
                         </Badge>
+                        {app.clientType === 'public' && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Mobile or desktop · PKCE
+                          </Badge>
+                        )}
                       </CardTitle>
                       {app.description && <CardDescription>{app.description}</CardDescription>}
                     </div>
@@ -112,15 +117,17 @@ export function OAuthAppsPage() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onSelect={() => openForm(app)}>Edit</DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            rotate.mutate(app.id, {
-                              onSuccess: (result) => setSecret(result.clientSecret),
-                            })
-                          }
-                        >
-                          Replace secret
-                        </DropdownMenuItem>
+                        {app.clientType !== 'public' && (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              rotate.mutate(app.id, {
+                                onSuccess: (result) => setSecret(result.clientSecret),
+                              })
+                            }
+                          >
+                            Replace secret
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
@@ -134,7 +141,13 @@ export function OAuthAppsPage() {
                   <CardContent className="space-y-3 text-sm">
                     <CopyField label="Client id" value={app.clientId} id={`client-id-${app.id}`} />
                     <p className="text-muted-foreground">
-                      Secret <span className="font-mono text-xs">{app.secretHint}…</span>
+                      {app.secretHint ? (
+                        <>
+                          Secret <span className="font-mono text-xs">{app.secretHint}…</span>
+                        </>
+                      ) : (
+                        'No secret — the app proves itself with PKCE.'
+                      )}
                     </p>
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-muted-foreground">Redirect URIs</p>

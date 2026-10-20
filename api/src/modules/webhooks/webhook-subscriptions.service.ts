@@ -2,6 +2,8 @@ import {
   ActivityAction,
   ActivityEntity,
   MAX_WEBHOOK_SUBSCRIPTIONS_PER_INTEGRATION,
+  WEBHOOK_HOOK_SECRET_HEADER,
+  WEBHOOK_USER_AGENT,
   type SubscribableWebhookEvent,
   type WorkspaceRole,
 } from '@coretask/contracts';
@@ -12,13 +14,14 @@ import type { Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import type { AuthenticatedUser } from '../../common/types/api.types';
+import { fetchWithTimeout } from '../../common/utils/http.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
 import { deriveKey, encryptSecret, generateWebhookSecret } from './lib/secret-cipher';
-import { assertDeliverableUrl } from './lib/url-policy';
+import { assertDeliverableUrl, assertResolvesToAllowedAddress } from './lib/url-policy';
 
 const subscriptionSelect = {
   id: true,
@@ -120,6 +123,7 @@ export class WebhookSubscriptionsService {
     });
     const integration = principal.oauth?.appName ?? principal.apiKey?.name ?? 'Integration';
     const secret = generateWebhookSecret();
+    await this.handshake(url, secret);
 
     const row = await this.prisma.webhookEndpoint.create({
       data: {
@@ -148,6 +152,50 @@ export class WebhookSubscriptionsService {
     this.logger.log({ workspaceId, subscriptionId: row.id }, 'Webhook subscription created');
 
     return { subscription: toSubscriptionDto(row), secret };
+  }
+
+  /**
+   * Asana's X-Hook-Secret handshake, before anything is saved: the URL is
+   * sent the new signing secret and must answer 2xx echoing it. Redirects are
+   * refused and the address is resolved first, exactly as a delivery is, so
+   * the handshake cannot reach anything a delivery could not.
+   */
+  private async handshake(url: URL, secret: string): Promise<void> {
+    let problem: string | null = null;
+    try {
+      await assertResolvesToAllowedAddress(url, {
+        allowPrivate: this.config.webhooks.allowPrivateUrls,
+      });
+      const response = await fetchWithTimeout(
+        url.toString(),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': WEBHOOK_USER_AGENT,
+            [WEBHOOK_HOOK_SECRET_HEADER]: secret,
+          },
+          body: '{}',
+          redirect: 'manual',
+        },
+        this.config.webhooks.timeoutMs,
+        'The webhook URL',
+      );
+      if (!response.ok) {
+        problem = `It answered HTTP ${response.status}.`;
+      } else if (response.headers.get(WEBHOOK_HOOK_SECRET_HEADER) !== secret) {
+        problem = 'It answered without echoing the X-Hook-Secret header.';
+      }
+    } catch (error) {
+      problem = error instanceof Error ? error.message : 'It could not be reached.';
+    }
+
+    if (problem) {
+      throw AppException.unprocessable(
+        'WEBHOOK_HANDSHAKE_FAILED',
+        `The URL did not confirm the subscription. ${problem} Answer the first request with 2xx and the same X-Hook-Secret header it carries.`,
+      );
+    }
   }
 
   async remove(

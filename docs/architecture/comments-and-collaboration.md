@@ -50,6 +50,15 @@ prior commenters. That set is now persisted as followers, and the rules are:
   moved together.
 - A custom field flagged "notify collaborators" sends `FIELD_CHANGED`
   (see [custom-field-system.md](custom-field-system.md)).
+- A project tells its **members** what each chose under the bell in its header
+  (`ProjectMember.notifyOn`, Asana's per-project settings). That is status
+  updates and messages until they choose, and tasks added and tasks completed
+  if they ask. `ProjectActivityNotifier` sends these as `PROJECT_UPDATE`.
+  Nobody hears about their own change, and a completion skips the followers
+  `FollowerNotifier` already told, so nobody hears it twice. Subtasks are their
+  parent's business and announce nothing to the project. A rule's own writes
+  run in the worker, which sends no notifications, so they are not announced
+  this way.
 
 ## Stories
 

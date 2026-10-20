@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -67,6 +68,11 @@ export function ConnectedAppsPage() {
                         </a>
                       ) : (
                         entry.app.name
+                      )}
+                      {!entry.scopes.includes('default') && (
+                        <Badge variant="outline" className="ml-2 align-middle text-[10px]">
+                          Read only
+                        </Badge>
                       )}
                     </p>
                     <p className="text-xs text-muted-foreground">

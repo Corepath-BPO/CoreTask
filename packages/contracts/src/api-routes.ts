@@ -266,6 +266,9 @@ export const ApiRoutes = {
     /** Invitations by e-mail that join the workspace and land in this project. */
     invitations: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/invitations`,
+    /** What this project tells the caller about, as one of its members. */
+    notificationSettings: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/notification-settings`,
   },
   /**
    * Workspace-scoped rather than nested under a project: a task may have no
@@ -449,6 +452,13 @@ export const ApiRoutes = {
     rotateSecret: (appId: string) => `/users/me/oauth-apps/${appId}/rotate-secret`,
     connectedApps: '/users/me/connected-apps',
     connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
+  },
+  /** A workspace's approved OAuth apps, and whether only those may act in it. */
+  appDirectory: {
+    root: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory`,
+    apps: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory/apps`,
+    app: (workspaceId: string, appId: string) =>
+      `/workspaces/${workspaceId}/app-directory/apps/${appId}`,
   },
   /**
    * The CoreTask Slack app. The workspace's own routes are for the

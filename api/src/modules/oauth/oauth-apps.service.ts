@@ -2,6 +2,8 @@ import {
   MAX_OAUTH_APPS_PER_USER,
   OAUTH_CLIENT_ID_PREFIX,
   OAUTH_CLIENT_SECRET_PREFIX,
+  OAuthClientType,
+  redirectUriProblem,
 } from '@coretask/contracts';
 import type { CreatedOAuthApp, OAuthApp, OAuthSecretRotation } from '@coretask/types';
 import type { CreateOAuthAppInput, UpdateOAuthAppInput } from '@coretask/validation';
@@ -28,6 +30,7 @@ function toOAuthAppDto(row: AppRow): OAuthApp {
     websiteUrl: row.websiteUrl,
     redirectUris: row.redirectUris,
     clientId: row.clientId,
+    clientType: row.isPublic ? OAuthClientType.PUBLIC : OAuthClientType.CONFIDENTIAL,
     secretHint: row.secretHint,
     connections: row._count.grants,
     createdAt: row.createdAt.toISOString(),
@@ -61,7 +64,9 @@ export class OAuthAppsService {
     const count = await this.prisma.oAuthApp.count({ where: { ownerId } });
     if (count >= MAX_OAUTH_APPS_PER_USER) throw AppException.conflict('OAUTH_APP_LIMIT_REACHED');
 
-    const clientSecret = generateToken(OAUTH_CLIENT_SECRET_PREFIX);
+    // A public client is given no secret: its code is in every copy of it.
+    const isPublic = input.clientType === OAuthClientType.PUBLIC;
+    const clientSecret = isPublic ? null : generateToken(OAUTH_CLIENT_SECRET_PREFIX);
     const row = await this.prisma.oAuthApp.create({
       data: {
         ownerId,
@@ -70,13 +75,14 @@ export class OAuthAppsService {
         websiteUrl: input.websiteUrl?.trim() || null,
         redirectUris: [...new Set(input.redirectUris.map((uri) => uri.trim()))],
         clientId: generateToken(OAUTH_CLIENT_ID_PREFIX),
-        clientSecretHash: hashToken(clientSecret),
-        secretHint: secretHint(clientSecret),
+        isPublic,
+        clientSecretHash: clientSecret ? hashToken(clientSecret) : null,
+        secretHint: clientSecret ? secretHint(clientSecret) : null,
       },
       include: appInclude,
     });
 
-    this.logger.log({ ownerId, appId: row.id }, 'OAuth app registered');
+    this.logger.log({ ownerId, appId: row.id, isPublic }, 'OAuth app registered');
     return { app: toOAuthAppDto(row), clientSecret };
   }
 
@@ -86,7 +92,12 @@ export class OAuthAppsService {
    * the URI that fetched its code.
    */
   async update(ownerId: string, appId: string, input: UpdateOAuthAppInput): Promise<OAuthApp> {
-    await this.requireOwned(ownerId, appId);
+    const app = await this.requireOwned(ownerId, appId);
+    // The schema allows an app scheme; only a public client may register one.
+    for (const uri of input.redirectUris ?? []) {
+      const problem = redirectUriProblem(uri, { publicClient: app.isPublic });
+      if (problem) throw AppException.unprocessable('VALIDATION_FAILED', problem);
+    }
     const row = await this.prisma.oAuthApp.update({
       where: { id: appId },
       data: {
@@ -106,7 +117,10 @@ export class OAuthAppsService {
 
   /** The old secret stops working at once, so the tool must be updated before its next refresh. */
   async rotateSecret(ownerId: string, appId: string): Promise<OAuthSecretRotation> {
-    await this.requireOwned(ownerId, appId);
+    const app = await this.requireOwned(ownerId, appId);
+    if (app.isPublic) {
+      throw AppException.badRequest('BAD_REQUEST', 'A public client has no secret to rotate.');
+    }
     const clientSecret = generateToken(OAUTH_CLIENT_SECRET_PREFIX);
     await this.prisma.oAuthApp.update({
       where: { id: appId },
@@ -126,11 +140,12 @@ export class OAuthAppsService {
     this.logger.log({ ownerId, appId }, 'OAuth app deleted');
   }
 
-  private async requireOwned(ownerId: string, appId: string): Promise<void> {
+  private async requireOwned(ownerId: string, appId: string): Promise<{ isPublic: boolean }> {
     const app = await this.prisma.oAuthApp.findFirst({
       where: { id: appId, ownerId },
-      select: { id: true },
+      select: { id: true, isPublic: true },
     });
     if (!app) throw AppException.notFound('RESOURCE_NOT_FOUND', 'OAuth app not found.');
+    return app;
   }
 }

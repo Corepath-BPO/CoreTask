@@ -1,4 +1,4 @@
-import type { ProjectMemberRole } from '@coretask/contracts';
+import type { ProjectMemberRole, ProjectNotificationKind } from '@coretask/contracts';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -146,5 +146,35 @@ export function useRevokeProjectInvitation(workspaceId: string | undefined, proj
       toast.success(`Invitation to ${variables.email} revoked`);
     },
     onError: (error) => reportError(error, 'Could not revoke that invitation.'),
+  });
+}
+
+/** What a project tells the reader about. Fetched only while its menu is open. */
+export function useProjectNotificationSettings(
+  workspaceId: string | undefined,
+  projectId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.projects.notificationSettings(workspaceId ?? '', projectId),
+    queryFn: () => projectMembersApi.notificationSettings(workspaceId as string, projectId),
+    enabled: enabled && Boolean(workspaceId),
+  });
+}
+
+export function useSetProjectNotificationSettings(
+  workspaceId: string | undefined,
+  projectId: string,
+) {
+  return useMutation({
+    mutationFn: (notifyOn: ProjectNotificationKind[]) =>
+      projectMembersApi.setNotificationSettings(workspaceId as string, projectId, { notifyOn }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(
+        queryKeys.projects.notificationSettings(workspaceId ?? '', projectId),
+        settings,
+      );
+    },
+    onError: (error) => reportError(error, 'Could not save your notification choice.'),
   });
 }

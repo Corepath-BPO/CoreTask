@@ -2,6 +2,7 @@ import {
   MAX_OAUTH_REDIRECT_URIS,
   OAUTH_APP_DESCRIPTION_MAX_LENGTH,
   OAUTH_APP_NAME_MAX_LENGTH,
+  OAuthClientType,
   redirectUriProblem,
 } from '@coretask/contracts';
 import type { CreatedOAuthApp, OAuthApp } from '@coretask/types';
@@ -38,42 +39,46 @@ const linesOf = (value: string) =>
     .map((line) => line.trim())
     .filter(Boolean);
 
-const formSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, 'Name the app — people see this name when they allow it.')
-    .max(OAUTH_APP_NAME_MAX_LENGTH),
-  description: z.string().trim().max(OAUTH_APP_DESCRIPTION_MAX_LENGTH),
-  websiteUrl: z
-    .string()
-    .trim()
-    .refine((value) => value === '' || /^https?:\/\/\S+$/.test(value), 'Enter a full URL.'),
-  redirectUris: z.string().superRefine((value, ctx) => {
-    const uris = linesOf(value);
-    if (uris.length === 0) {
-      ctx.addIssue({ code: 'custom', message: 'Add the URL CoreTask sends people back to.' });
-      return;
-    }
+const formSchema = z
+  .object({
+    clientType: z.enum([OAuthClientType.CONFIDENTIAL, OAuthClientType.PUBLIC]),
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Name the app — people see this name when they allow it.')
+      .max(OAUTH_APP_NAME_MAX_LENGTH),
+    description: z.string().trim().max(OAUTH_APP_DESCRIPTION_MAX_LENGTH),
+    websiteUrl: z
+      .string()
+      .trim()
+      .refine((value) => value === '' || /^https?:\/\/\S+$/.test(value), 'Enter a full URL.'),
+    redirectUris: z.string(),
+  })
+  // Against the app's type: an app scheme is a public client's to register.
+  .superRefine((value, ctx) => {
+    const uris = linesOf(value.redirectUris);
+    const issue = (message: string) =>
+      ctx.addIssue({ code: 'custom', message, path: ['redirectUris'] });
+    if (uris.length === 0) return issue('Add the URL CoreTask sends people back to.');
     if (uris.length > MAX_OAUTH_REDIRECT_URIS) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `At most ${MAX_OAUTH_REDIRECT_URIS} redirect URIs.`,
-      });
-      return;
+      return issue(`At most ${MAX_OAUTH_REDIRECT_URIS} redirect URIs.`);
     }
     for (const uri of uris) {
-      const problem = redirectUriProblem(uri);
-      if (problem) {
-        ctx.addIssue({ code: 'custom', message: `${uri}: ${problem}` });
-        return;
-      }
+      const problem = redirectUriProblem(uri, {
+        publicClient: value.clientType === OAuthClientType.PUBLIC,
+      });
+      if (problem) return issue(`${uri}: ${problem}`);
     }
-  }),
-});
+  });
 type FormInput = z.input<typeof formSchema>;
 
-const EMPTY: FormInput = { name: '', description: '', websiteUrl: '', redirectUris: '' };
+const EMPTY: FormInput = {
+  clientType: OAuthClientType.CONFIDENTIAL,
+  name: '',
+  description: '',
+  websiteUrl: '',
+  redirectUris: '',
+};
 
 interface OAuthAppDialogProps {
   open: boolean;
@@ -96,14 +101,17 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormInput>({ resolver: zodResolver(formSchema), defaultValues: EMPTY });
+  const isPublic = watch('clientType') === OAuthClientType.PUBLIC;
 
   useEffect(() => {
     if (!open) return;
     reset(
       app
         ? {
+            clientType: app.clientType,
             name: app.name,
             description: app.description ?? '',
             websiteUrl: app.websiteUrl ?? '',
@@ -117,10 +125,7 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, app, reset]);
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setCreated(null);
-    onOpenChange(next);
-  };
+  const handleOpenChange = (next: boolean) => onOpenChange(next);
 
   const onSubmit = handleSubmit((values) => {
     const payload = {
@@ -132,7 +137,10 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
     if (app) {
       update.mutate({ appId: app.id, payload }, { onSuccess: () => handleOpenChange(false) });
     } else {
-      create.mutate(payload, { onSuccess: (result) => setCreated(result) });
+      create.mutate(
+        { ...payload, clientType: values.clientType },
+        { onSuccess: (result) => setCreated(result) },
+      );
     }
   });
 
@@ -147,27 +155,38 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      {/* The secret is dropped once the dialog has finished closing, not as it
+          starts to: clearing it then flashed the form during the exit. */}
+      <DialogContent className="sm:max-w-lg" onCloseAutoFocus={() => setCreated(null)}>
         {created ? (
           <>
             <DialogHeader>
               <DialogTitle>“{created.app.name}” is registered</DialogTitle>
               <DialogDescription>
-                Put these in your tool. The client id goes in the authorization link; the secret
-                stays on your server.
+                {created.clientSecret
+                  ? 'Put these in your tool. The client id goes in the authorization link; the secret stays on your server.'
+                  : 'A mobile or desktop app has no secret. Put the client id in the app, and send a PKCE code challenge with every authorization.'}
               </DialogDescription>
             </DialogHeader>
 
             <CopyField label="Client id" value={created.app.clientId} id="created-client-id" />
-            <SecretReveal secret={created.clientSecret} label="Client secret" id="created-secret" />
+            {created.clientSecret && (
+              <>
+                <SecretReveal
+                  secret={created.clientSecret}
+                  label="Client secret"
+                  id="created-secret"
+                />
 
-            <p
-              role="note"
-              className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm"
-            >
-              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <span>Copy the secret now — it won’t be shown again.</span>
-            </p>
+                <p
+                  role="note"
+                  className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>Copy the secret now — it won’t be shown again.</span>
+                </p>
+              </>
+            )}
 
             <DialogFooter>
               <Button type="button" onClick={() => handleOpenChange(false)}>
@@ -188,6 +207,41 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
             <FormError message={submitError} />
 
             <form onSubmit={onSubmit} noValidate className="space-y-4">
+              {/* The type is fixed once registered: a secret cannot be taken
+                  back out of a published app, or given to one later. */}
+              <fieldset className="space-y-2" disabled={busy || app !== null}>
+                <legend className="text-sm font-medium">Kind of app</legend>
+                <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                  <input
+                    type="radio"
+                    value={OAuthClientType.CONFIDENTIAL}
+                    {...register('clientType')}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span>
+                    <span className="font-medium">Runs on a server</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Keeps a client secret. Zapier, Make, a back end of your own.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                  <input
+                    type="radio"
+                    value={OAuthClientType.PUBLIC}
+                    {...register('clientType')}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span>
+                    <span className="font-medium">Mobile or desktop app</span>
+                    <span className="block text-xs text-muted-foreground">
+                      No secret: it uses PKCE every time, and its refresh tokens are replaced on
+                      use. It may return to an app scheme such as com.example.app:/callback.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+
               <Field label="Name" htmlFor="oauth-app-name" error={errors.name?.message} required>
                 <Input
                   {...fieldAria('oauth-app-name', errors.name?.message)}
@@ -231,14 +285,20 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
                 label="Redirect URIs"
                 htmlFor="oauth-app-redirects"
                 error={errors.redirectUris?.message}
-                hint="One per line. https, or http on localhost while developing. Matched exactly."
+                hint={
+                  isPublic
+                    ? 'One per line. https, http on localhost, or an app scheme like com.example.app:/callback. Matched exactly.'
+                    : 'One per line. https, or http on localhost while developing. Matched exactly.'
+                }
                 required
               >
                 <Textarea
                   {...fieldAria(
                     'oauth-app-redirects',
                     errors.redirectUris?.message,
-                    'One per line. https, or http on localhost while developing. Matched exactly.',
+                    isPublic
+                      ? 'One per line. https, http on localhost, or an app scheme like com.example.app:/callback. Matched exactly.'
+                      : 'One per line. https, or http on localhost while developing. Matched exactly.',
                   )}
                   {...register('redirectUris')}
                   rows={3}

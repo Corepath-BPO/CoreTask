@@ -89,7 +89,10 @@ import {
   useSubtasks,
 } from '@/features/projects/hooks/use-project-views';
 import { useProject } from '@/features/projects/hooks/use-projects';
-import { roleForProjectItem } from '@/features/projects/lib/project-access';
+import {
+  conversationRoleForProjectItem,
+  roleForProjectItem,
+} from '@/features/projects/lib/project-access';
 import {
   useMoveProjectWorkItem,
   useProjectWorkItem,
@@ -570,6 +573,8 @@ function TaskDetailBody({
    * My Tasks or the inbox, this is what keeps a viewer's panel read-only.
    */
   const role = roleForProjectItem(task.projectId, project, workspaceRole);
+  // A project COMMENTER writes in the thread though the rest stays read-only.
+  const commentRole = conversationRoleForProjectItem(task.projectId, project, workspaceRole);
   const updateTask = useUpdateTask(workspaceId);
   const archiveTask = useArchiveTask(workspaceId);
   const createTask = useCreateTask(workspaceId);
@@ -1443,6 +1448,7 @@ function TaskDetailBody({
         workspaceId={workspaceId}
         parent={itemParent}
         role={role}
+        commentRole={commentRole}
         composerRef={composerRef}
         focusCommentId={linkedCommentId ?? null}
         // Where a copied link lands: the project's List when the task has a

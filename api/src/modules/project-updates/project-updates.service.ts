@@ -4,6 +4,7 @@ import {
   NotificationType,
   PROJECT_FEED_PAGE_SIZE,
   PROJECT_STATUS_LABEL,
+  ProjectNotificationKind,
   WorkspaceRole,
   hasAtLeastRole,
 } from '@coretask/contracts';
@@ -25,6 +26,7 @@ import type { ActorContext } from '../../common/types/api.types';
 import { htmlToText, normalizeRichText } from '../../common/utils/rich-text.util';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
+import { ProjectActivityNotifier } from '../../integrations/notifications/project-activity.notifier';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
@@ -114,6 +116,7 @@ export class ProjectUpdatesService {
     private readonly activity: ActivityLogsService,
     private readonly notifications: NotificationDispatcher,
     private readonly deliveries: WebhookDeliveryService,
+    private readonly projectNotifier: ProjectActivityNotifier,
   ) {}
 
   private readonly logger = new Logger(ProjectUpdatesService.name);
@@ -196,10 +199,16 @@ export class ProjectUpdatesService {
       metadata: { statusUpdateId: row.id, status: payload.status },
     });
 
-    await this.tellMembers(workspaceId, projectId, actor.userId, {
-      title: `${row.author?.name ?? 'Somebody'} set ${project.name} to ${label}`,
-      body: row.title,
-    });
+    await this.tellMembers(
+      workspaceId,
+      projectId,
+      actor.userId,
+      ProjectNotificationKind.STATUS_UPDATES,
+      {
+        title: `${row.author?.name ?? 'Somebody'} set ${project.name} to ${label}`,
+        body: row.title,
+      },
+    );
 
     // To the project's chat apps and the workspace's webhooks that asked. A
     // channel that cannot be reached must not stop the update being posted.
@@ -377,7 +386,7 @@ export class ProjectUpdatesService {
       metadata: { messageId: row.id },
     });
 
-    await this.tellMembers(workspaceId, projectId, actor.userId, {
+    await this.tellMembers(workspaceId, projectId, actor.userId, ProjectNotificationKind.MESSAGES, {
       title: `${row.author?.name ?? 'Somebody'} posted in ${project.name}: ${row.title}`,
       body: htmlToText(body).slice(0, 200),
     });
@@ -415,7 +424,13 @@ export class ProjectUpdatesService {
     actor: ActorContext,
     text: string,
   ): Promise<ProjectMessage> {
-    const project = await this.requireEditor(workspaceId, projectId, actor);
+    // Replying is taking part: a project COMMENTER may, as on a task.
+    await this.requireVisible(workspaceId, projectId, actor);
+    await this.access.assertConversationRole({ projectId }, actor, WorkspaceRole.MEMBER);
+    const project = await this.prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+      select: { name: true },
+    });
 
     const message = await this.prisma.projectMessage.findFirst({
       where: { id: messageId, projectId, workspaceId },
@@ -532,21 +547,19 @@ export class ProjectUpdatesService {
     }
   }
 
-  /** The project's roster, minus whoever posted. */
+  /** The project's members who want this kind of news, minus whoever posted. */
   private async tellMembers(
     workspaceId: string,
     projectId: string,
     authorId: string,
+    kind: ProjectNotificationKind,
     notice: { title: string; body: string },
   ): Promise<void> {
-    const members = await this.prisma.projectMember.findMany({
-      where: { projectId, userId: { not: authorId } },
-      select: { userId: true },
-    });
+    const members = await this.projectNotifier.audience(projectId, kind, [authorId]);
 
-    for (const member of members) {
+    for (const userId of members) {
       await this.notifications.dispatch({
-        userId: member.userId,
+        userId,
         workspaceId,
         type: NotificationType.PROJECT_UPDATE,
         title: notice.title.slice(0, 200),

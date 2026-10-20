@@ -18,4 +18,16 @@ describe('redirect URIs an OAuth app may register', () => {
     expect(redirectUriProblem('tool.example/cb')).toMatch(/full URL/);
     expect(redirectUriProblem('https://')).toMatch(/full URL/);
   });
+
+  it('takes an app scheme from a public client only, and only a reverse-domain one', () => {
+    const uri = 'com.example.leasing:/oauth/callback';
+    expect(redirectUriProblem(uri, { publicClient: true })).toBeNull();
+    expect(redirectUriProblem('com.example.leasing://callback', { publicClient: true })).toBeNull();
+    expect(redirectUriProblem(uri)).toMatch(/mobile and desktop/);
+    // A bare scheme is anybody's to claim on a phone; a dotted one is the app's.
+    expect(redirectUriProblem('myapp://callback', { publicClient: true })).toMatch(/https/);
+    expect(redirectUriProblem(`${uri}#x`, { publicClient: true })).toMatch(/fragment/);
+    // A public client still uses https or loopback the same way.
+    expect(redirectUriProblem('http://127.0.0.1:7777/cb', { publicClient: true })).toBeNull();
+  });
 });
