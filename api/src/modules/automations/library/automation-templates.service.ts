@@ -608,19 +608,29 @@ export class AutomationTemplatesService {
     const statusSelect = { id: true, name: true } as const;
 
     const [sections, ownStatuses, links] = await Promise.all([
-      this.prisma.section.findMany({ where: { projectId }, select: { id: true, name: true } }),
+      this.prisma.section.findMany({
+        where: { projectId },
+        orderBy: { position: 'asc' },
+        select: { id: true, name: true },
+      }),
       this.prisma.statusDefinition.findMany({
         where: { workspaceId, projectId, isArchived: false },
+        orderBy: { position: 'asc' },
         select: statusSelect,
       }),
       this.prisma.projectCustomField.findMany({
         where: { projectId, customField: { workspaceId, isArchived: false } },
+        orderBy: { position: 'asc' },
         select: {
           customField: {
             select: {
               id: true,
               name: true,
-              options: { where: { isArchived: false }, select: { id: true, label: true } },
+              options: {
+                where: { isArchived: false },
+                orderBy: { position: 'asc' },
+                select: { id: true, label: true },
+              },
             },
           },
         },
@@ -632,6 +642,7 @@ export class AutomationTemplatesService {
         ? ownStatuses
         : await this.prisma.statusDefinition.findMany({
             where: { workspaceId, projectId: null, isArchived: false },
+            orderBy: { position: 'asc' },
             select: statusSelect,
           });
 
@@ -643,8 +654,9 @@ export class AutomationTemplatesService {
 
     return {
       sectionById: new Map(sections.map((row) => [row.id, row.name])),
-      // First wins on a duplicate name, which is the top-most section — the
-      // one somebody reading the board from the top would also pick.
+      // First wins on a duplicate name: the rows come back in board order, so
+      // that is the top-most section — the one somebody reading the board from
+      // the top would also pick.
       sectionByName: firstByName(sections.map((row) => [row.name, row.id])),
       statusById: new Set(statuses.map((row) => row.id)),
       statusByName: firstByName(statuses.map((row) => [row.name, row.id])),
