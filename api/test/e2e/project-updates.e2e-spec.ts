@@ -318,7 +318,15 @@ describe('Project updates (e2e)', () => {
           'Ada Owner completed “Renewal notices” in Leasing',
         ]),
       );
-      expect(await titlesFor(scope.guest.userId)).toHaveLength(1);
+      // The guest kept the defaults: the update and the message, no task news.
+      const guestHeard = await titlesFor(scope.guest.userId);
+      expect(guestHeard).toHaveLength(2);
+      expect(guestHeard).toEqual(
+        expect.arrayContaining([
+          'Ada Owner set Leasing to On track',
+          'Ada Owner posted in Leasing: Kick-off',
+        ]),
+      );
     });
 
     it('tells a follower once when a task is completed, and never the person who did it', async () => {
