@@ -125,10 +125,7 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, app, reset]);
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setCreated(null);
-    onOpenChange(next);
-  };
+  const handleOpenChange = (next: boolean) => onOpenChange(next);
 
   const onSubmit = handleSubmit((values) => {
     const payload = {
@@ -158,7 +155,9 @@ export function OAuthAppDialog({ open, onOpenChange, app }: OAuthAppDialogProps)
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      {/* The secret is dropped once the dialog has finished closing, not as it
+          starts to: clearing it then flashed the form during the exit. */}
+      <DialogContent className="sm:max-w-lg" onCloseAutoFocus={() => setCreated(null)}>
         {created ? (
           <>
             <DialogHeader>

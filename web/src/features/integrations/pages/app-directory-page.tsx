@@ -93,26 +93,32 @@ export function AppDirectoryPage() {
                   />
                 </fieldset>
 
-                <form onSubmit={onApprove} noValidate className="flex flex-wrap items-end gap-2">
+                <form onSubmit={onApprove} noValidate>
                   <Field
                     label="Approve an app by client id"
                     htmlFor="directory-client-id"
                     hint="The developer finds it under Integrations › OAuth apps. It starts with ctc_."
-                    className="min-w-60 flex-1"
                   >
-                    <Input
-                      id="directory-client-id"
-                      value={clientId}
-                      onChange={(event) => setClientId(event.target.value)}
-                      placeholder="ctc_…"
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="font-mono"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="directory-client-id"
+                        aria-describedby="directory-client-id-hint"
+                        value={clientId}
+                        onChange={(event) => setClientId(event.target.value)}
+                        placeholder="ctc_…"
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="font-mono"
+                      />
+                      <Button
+                        type="submit"
+                        className="shrink-0"
+                        disabled={approve.isPending || clientId.trim() === ''}
+                      >
+                        Approve
+                      </Button>
+                    </div>
                   </Field>
-                  <Button type="submit" disabled={approve.isPending || clientId.trim() === ''}>
-                    Approve
-                  </Button>
                 </form>
               </CardContent>
             </Card>
@@ -149,7 +155,7 @@ export function AppDirectoryPage() {
                         <p className="text-xs text-muted-foreground">
                           By {entry.app.publisher} · approved{' '}
                           {entry.approvedBy ? `by ${entry.approvedBy.name} ` : ''}
-                          {dateFormat.format(new Date(entry.approvedAt))}
+                          on {dateFormat.format(new Date(entry.approvedAt))}
                         </p>
                       </div>
                       {canManage && (
