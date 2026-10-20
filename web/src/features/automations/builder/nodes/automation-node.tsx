@@ -9,6 +9,7 @@ import {
   ListFilter,
   MoreHorizontal,
   Plus,
+  Replace,
   Trash2,
   Zap,
   type LucideIcon,
@@ -40,6 +41,15 @@ export interface AutomationNodeData extends Record<string, unknown> {
   onDuplicate?: () => void;
   /** Absent on the trigger: a rule with nothing to start it is not a rule. */
   onDelete?: () => void;
+  /**
+   * Only on the trigger, and it is the counterpart of the missing delete.
+   *
+   * Every other step is changed by removing it and adding the one that was
+   * meant; the trigger cannot be removed, so without this there is no way to
+   * swap it at all once one has been chosen — pressing the card opens the
+   * trigger's own settings, which only ever offer that trigger's fields.
+   */
+  onChangeTrigger?: () => void;
 }
 
 const ICON: Record<string, LucideIcon> = {
@@ -198,7 +208,7 @@ export function AutomationNode({ data, selected }: NodeProps) {
         deleting it — three acts for one intention. Here it is where the step
         is, which is where somebody already is when they decide.
       */}
-      {(node.onDuplicate || node.onDelete) && (
+      {(node.onDuplicate || node.onDelete || node.onChangeTrigger) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -215,6 +225,14 @@ export function AutomationNode({ data, selected }: NodeProps) {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align="end">
+            {/* First, because on the trigger it is the one act somebody comes
+                to this menu for — the other entry here only copies it. */}
+            {node.onChangeTrigger && (
+              <DropdownMenuItem className="cursor-pointer" onSelect={node.onChangeTrigger}>
+                <Replace className="size-4" aria-hidden="true" />
+                Change trigger
+              </DropdownMenuItem>
+            )}
             {node.onDuplicate && (
               <DropdownMenuItem className="cursor-pointer" onSelect={node.onDuplicate}>
                 <Copy className="size-4" aria-hidden="true" />

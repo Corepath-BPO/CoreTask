@@ -4,7 +4,7 @@ import type {
   AutomationMetadata,
   AutomationRuleGraph,
 } from '@coretask/types';
-import { PanelRightClose, Search, Trash2 } from 'lucide-react';
+import { PanelRightClose, Replace, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,8 @@ interface Props {
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
   onChoose: (subtype: string) => void;
+  /** Offer the trigger catalogue again — see `ConfigurePanel`. */
+  onChangeTrigger: () => void;
   rule: AutomationRuleGraph;
   settings: RuleSettings;
   onSettingsChange: (next: Partial<RuleSettings>) => void;
@@ -70,6 +72,7 @@ export function NodeConfigRail({
   onChange,
   onDelete,
   onChoose,
+  onChangeTrigger,
   rule,
   settings,
   onSettingsChange,
@@ -156,10 +159,14 @@ export function NodeConfigRail({
          */
         <ConfigurePanel
           node={nodes.find((node) => node.id === mode.nodeId) ?? null}
+          /* First of its type, the same way the canvas and the page pick it, so
+             all three agree which node "change trigger" is talking about. */
+          primaryTriggerId={nodes.find((node) => node.type === 'TRIGGER')?.id ?? null}
           metadata={metadata}
           onClose={onClose}
           onChange={onChange}
           onDelete={onDelete}
+          onChangeTrigger={onChangeTrigger}
         />
       )}
     </aside>
@@ -172,6 +179,7 @@ function RailHeader({
   hint,
   onClose,
   onDelete,
+  onChangeTrigger,
 }: {
   /** Where this sits — the kind of step. Above the title, like a breadcrumb. */
   eyebrow?: string;
@@ -180,6 +188,8 @@ function RailHeader({
   hint?: string;
   onClose: () => void;
   onDelete?: () => void;
+  /** The trigger's stand-in for delete — see `ConfigurePanel`. */
+  onChangeTrigger?: () => void;
 }) {
   return (
     // `shrink-0`: it is the one part of the panel that must stay put, and a
@@ -190,6 +200,26 @@ function RailHeader({
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
       </div>
+
+      {/*
+        Spelled out rather than an icon on its own.
+
+        A trash can needs no label; nothing in the icon set says "swap this for a
+        different kind of thing", so an unlabelled button here would be a control
+        somebody has to hover to understand — on the one act in this panel that
+        is not otherwise reachable at all.
+      */}
+      {onChangeTrigger && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 cursor-pointer"
+          onClick={onChangeTrigger}
+        >
+          <Replace className="size-4" aria-hidden="true" />
+          Change trigger
+        </Button>
+      )}
 
       {onDelete && (
         <Button
@@ -218,16 +248,21 @@ function RailHeader({
 
 function ConfigurePanel({
   node,
+  primaryTriggerId,
   metadata,
   onClose,
   onChange,
   onDelete,
+  onChangeTrigger,
 }: {
   node: CanvasNode | null;
+  /** Which trigger node is the rule's own — see the header below. */
+  primaryTriggerId: string | null;
   metadata: AutomationMetadata | undefined;
   onClose: () => void;
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
+  onChangeTrigger: () => void;
 }) {
   const body = useRef<HTMLDivElement>(null);
 
@@ -254,11 +289,25 @@ function ConfigurePanel({
         title={summarise(node, metadata)}
         onClose={onClose}
         /*
-         * Every step but the trigger. A rule with no trigger is not a rule, and
-         * the way to change what starts one is to pick a different trigger
-         * rather than to be left holding a rule that cannot start at all.
+         * Delete on every step but the trigger. A rule with no trigger is not a
+         * rule, and the way to change what starts one is to pick a different
+         * trigger rather than to be left holding a rule that cannot start.
+         *
+         * Which is what goes in that slot instead. The fields below belong to
+         * the trigger that was already chosen — a section picker for "moved to
+         * a section" — so a panel with nothing here answered "how do I start
+         * this on something else?" with the settings of the answer somebody was
+         * trying to change, and pressing the card again only reopens this same
+         * panel. That left a saved rule's trigger fixed for good.
+         *
+         * A second trigger node keeps its delete, because it is not the rule's
+         * trigger and offering to change it here would silently retarget the one
+         * that is — `setTrigger` acts on the first of the type, not on whatever
+         * this panel happens to be showing.
          */
-        {...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDelete(node.id) })}
+        {...(node.type === 'TRIGGER' && node.id === primaryTriggerId
+          ? { onChangeTrigger }
+          : { onDelete: () => onDelete(node.id) })}
       />
 
       <div ref={body} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -335,11 +384,18 @@ function ChoosePanel({
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
           />
+          {/*
+            Not "Search actions", which this said whichever list it was showing.
+            The panel is generic over its entries and the trigger catalogue comes
+            through it too, so naming one of the two was wrong half the time. The
+            heading above and the list below both carry the title, so the plain
+            word is the one thing here that cannot contradict them.
+          */}
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search actions"
-            aria-label="Search actions"
+            placeholder="Search"
+            aria-label="Search"
             className="pl-8"
             autoFocus
           />

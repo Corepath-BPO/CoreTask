@@ -40,6 +40,8 @@ interface Props {
   onAddElseIf: (branchId: string) => void;
   onDuplicateNode: (nodeId: string) => void;
   onDeleteNode: (nodeId: string) => void;
+  /** Offer the trigger catalogue again, so the rule can start on something else. */
+  onChangeTrigger: () => void;
 }
 
 /**
@@ -73,6 +75,7 @@ function Canvas({
   onAddElseIf,
   onDuplicateNode,
   onDeleteNode,
+  onChangeTrigger,
 }: Props) {
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -86,6 +89,21 @@ function Canvas({
    */
   const hasFollower = useMemo(
     () => new Set(graph.nodes.map((node) => node.parentId).filter(Boolean) as string[]),
+    [graph.nodes],
+  );
+
+  /*
+   * The one trigger that is actually the rule's, picked the same way the page
+   * picks it — first of its type — so the card and `setTrigger` cannot disagree
+   * about which node "change trigger" is talking about.
+   *
+   * A rule should only ever have one. It could have more: duplicating the
+   * trigger used to be offered and wrote a second one, and a draft saves without
+   * being valid, so those rules are out there stored. Naming the real one is
+   * what lets the menu below treat any other as the debris it is.
+   */
+  const primaryTriggerId = useMemo(
+    () => graph.nodes.find((node) => node.type === 'TRIGGER')?.id ?? null,
     [graph.nodes],
   );
 
@@ -130,16 +148,35 @@ function Canvas({
           /*
            * No menu on a placeholder: there is nothing yet to copy or remove,
            * and the card already offers the only thing that applies to it.
+           *
+           * The rule's trigger gets its own menu rather than the ordinary one,
+           * because neither entry on that menu means anything for it. Delete is
+           * withheld for the obvious reason — a rule with nothing to start it is
+           * not a rule — and duplicate for a worse one: a rule has exactly one
+           * trigger, so the copy was a second `TRIGGER` that made the graph
+           * invalid ("a rule can only start one way") and that nothing could
+           * then remove, because delete was withheld from every node of that
+           * type, the copy included. One click, and the only way back was to
+           * abandon the draft.
+           *
+           * What it gets instead is the act that does apply: pick a different
+           * trigger, which is how this step is changed at all.
+           *
+           * Any *other* trigger node is not the rule's trigger — it is what that
+           * bug left behind in rules saved before this — so it is offered the
+           * delete that gets it out again rather than a second "change trigger"
+           * that would quietly retarget the real one.
            */
           ...(node.type === 'PLACEHOLDER'
             ? {}
-            : {
-                onDuplicate: () => onDuplicateNode(node.id),
-                // Every step but the trigger. A rule with nothing to start it
-                // is not a rule; the way to change what starts one is to pick a
-                // different trigger.
-                ...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDeleteNode(node.id) }),
-              }),
+            : node.type !== 'TRIGGER'
+              ? {
+                  onDuplicate: () => onDuplicateNode(node.id),
+                  onDelete: () => onDeleteNode(node.id),
+                }
+              : node.id === primaryTriggerId
+                ? { onChangeTrigger }
+                : { onDelete: () => onDeleteNode(node.id) }),
         },
       })),
     [
@@ -152,6 +189,8 @@ function Canvas({
       placement,
       onDuplicateNode,
       onDeleteNode,
+      onChangeTrigger,
+      primaryTriggerId,
     ],
   );
 

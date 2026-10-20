@@ -30,6 +30,8 @@ interface Api {
   projectId: string;
   sectionId: string;
   ruleId: string;
+  /** A rule already carrying the damage described in `twoTriggerRule` below. */
+  brokenRuleId: string;
 }
 
 async function connect(): Promise<Api> {
@@ -104,6 +106,31 @@ async function connect(): Promise<Api> {
   );
   expect(created.ok(), `could not create the rule: ${created.status()}`).toBe(true);
 
+  /*
+   * A rule with two triggers, which the builder must be able to get out of.
+   *
+   * Not a hypothetical shape. Duplicating the trigger used to be offered on its
+   * own card and wrote exactly this, and only `publish` validates — a draft is
+   * saved whatever state it is in — so rules like this are stored. Built through
+   * the API because the UI can no longer produce one, which is the point.
+   */
+  const broken = await request.post(
+    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/automations`,
+    {
+      headers,
+      data: {
+        name: `${RULE_NAME} broken`,
+        triggerType: 'TASK_CREATED',
+        triggerConfig: {},
+        nodes: [
+          { id: 't1', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null, order: 0 },
+          { id: 't2', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: 't1', order: 1 },
+        ],
+      },
+    },
+  );
+  expect(broken.ok(), `could not create the broken rule: ${broken.status()}`).toBe(true);
+
   return {
     request,
     headers,
@@ -111,6 +138,7 @@ async function connect(): Promise<Api> {
     projectId,
     sectionId,
     ruleId: (await created.json()).data.id as string,
+    brokenRuleId: (await broken.json()).data.id as string,
   };
 }
 
@@ -413,12 +441,74 @@ test.describe('the automation builder', () => {
     await expect.poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 }).toBe(before);
   });
 
-  test('the trigger has no delete in its menu', async ({ page }) => {
+  test('the trigger offers only the one act that applies to it', async ({ page }) => {
     await openBuilder(page);
 
     await page.getByRole('button', { name: /^More for: When a task/ }).click();
 
-    await expect(page.getByRole('menuitem', { name: /duplicate/i })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /change trigger/i })).toBeVisible();
+
+    // A rule with nothing to start it is not a rule.
+    await expect(page.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
+
+    /*
+     * And no duplicate either, which used to be the one entry here.
+     *
+     * A rule has exactly one trigger, so the copy was a second `TRIGGER` node —
+     * the graph then failed on "a rule can only start one way", and nothing
+     * could take the copy away again, because delete is withheld from every
+     * node of that type and that includes the copy. One click put the draft
+     * somewhere the UI could not get it out of.
+     */
+    await expect(page.getByRole('menuitem', { name: /duplicate/i })).toHaveCount(0);
+  });
+
+  test('lets a rule that already has two triggers be repaired', async ({ page }) => {
+    /*
+     * The other half of withdrawing duplicate: the rules it already broke.
+     *
+     * Delete was withheld from every node of type `TRIGGER`, so the spare one
+     * had no control that would remove it and the rule could not be published
+     * again from the builder at all. The spare is not the rule's trigger, so it
+     * gets the delete; the real one keeps "change trigger".
+     */
+    await page.goto(`/projects/${api.projectId}/automations/${api.brokenRuleId}`);
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+
+    const triggers = async () =>
+      (await nodeBoxes(page)).filter((box) => box.label.includes('When a task is created'));
+
+    await expect.poll(async () => (await triggers()).length, { timeout: 5000 }).toBe(2);
+
+    /*
+     * Exactly one of the two offers to be removed, and which one is decided by
+     * the data rather than by where it landed on screen — so the menus are
+     * asked rather than the positions.
+     */
+    const menus = page.getByRole('button', { name: /^More for: When a task is created/ });
+    await expect(menus).toHaveCount(2);
+
+    let removable = -1;
+
+    for (let index = 0; index < 2; index += 1) {
+      await menus.nth(index).click();
+
+      if ((await page.getByRole('menuitem', { name: /delete/i }).count()) > 0) {
+        removable = index;
+        break;
+      }
+
+      await page.keyboard.press('Escape');
+    }
+
+    expect(removable, 'neither trigger could be removed').toBeGreaterThanOrEqual(0);
+    await page.getByRole('menuitem', { name: /delete/i }).click();
+
+    await expect.poll(async () => (await triggers()).length, { timeout: 5000 }).toBe(1);
+
+    // And the one left is the rule's own, which is swapped rather than deleted.
+    await page.getByRole('button', { name: /^More for: When a task is created/ }).click();
+    await expect(page.getByRole('menuitem', { name: /change trigger/i })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
   });
 
@@ -493,6 +583,78 @@ test.describe('the automation builder', () => {
     const rail = page.getByRole('complementary', { name: /step settings/i });
     await expect(rail).toBeVisible();
     await expect(rail.getByRole('button', { name: /delete this step/i })).toHaveCount(0);
+  });
+
+  test('offers to change the trigger from the panel that opens on it', async ({ page }) => {
+    /*
+     * The regression this exists for.
+     *
+     * Pressing the trigger card opens its *settings*, which only ever hold the
+     * chosen trigger's own fields — a section picker, here. With the toolbar
+     * gone there was nothing in that panel offering a different trigger and
+     * nothing anywhere else either, so a saved rule started on whatever it was
+     * first created with, permanently.
+     */
+    await openBuilder(page);
+
+    await page.locator('.react-flow__node').filter({ hasText: /When/ }).first().click();
+
+    const rail = page.getByRole('complementary', { name: /step settings/i });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole('button', { name: /change trigger/i })).toBeVisible();
+  });
+
+  test('swaps the trigger, dropping the settings that belonged to the old one', async ({
+    page,
+  }) => {
+    await openBuilder(page);
+
+    // The rule is built on "moved to a section", scoped to one section — so the
+    // section it names is on the card, and is the thing that must not survive.
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '))
+      .toContain('When a task is moved to a section');
+
+    await page.getByRole('button', { name: /^More for: When a task/ }).click();
+    await page.getByRole('menuitem', { name: /change trigger/i }).click();
+
+    // The catalogue, offering triggers rather than actions.
+    await page.getByRole('option', { name: 'When a task is created', exact: true }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('When a task is created');
+
+    /*
+     * The section goes with the trigger that used it.
+     *
+     * "Incoming" means nothing to "when a task is created", and a rule carrying
+     * it across would be configured for a trigger it no longer has — scoped, on
+     * save, to a section the engine would never check.
+     */
+    const swapped = (await nodeBoxes(page)).map((box) => box.label).join(' | ');
+    expect(swapped).not.toContain('moved to a section');
+    expect(swapped).not.toContain('Incoming');
+
+    /*
+     * And it is the rule that changed, not just the drawing.
+     *
+     * The swap is held as an edit until something writes it, so a card that
+     * updates on its own proves only that the canvas re-rendered. The round trip
+     * is what says the trigger the engine will read actually moved.
+     */
+    await page.keyboard.press('Control+s');
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    await page.reload();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('When a task is created');
   });
 
   test('the rule settings panel edits the rule itself', async ({ page }) => {
@@ -616,10 +778,12 @@ test.describe('the automation builder', () => {
      * Archived projects are left out of every listing, so the row a run leaves
      * behind is inert rather than something the next run has to step around.
      */
-    await api.request.delete(
-      `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/${api.ruleId}`,
-      { headers: api.headers },
-    );
+    for (const ruleId of [api.ruleId, api.brokenRuleId]) {
+      await api.request.delete(
+        `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations/${ruleId}`,
+        { headers: api.headers },
+      );
+    }
     await api.request.delete(`/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}`, {
       headers: api.headers,
     });

@@ -350,13 +350,25 @@ export function AutomationBuilderPage({
     });
   };
 
-  const openTriggerPicker = () =>
+  /**
+   * Offering the trigger catalogue, whichever card asked for it.
+   *
+   * `addingAt` is cleared first, and it has to be: it is the only thing telling
+   * `chooseFromRail` below that a pick means an action rather than a trigger.
+   * Opening the action list and then reaching for the trigger instead — without
+   * closing the panel in between — left it pointing at somewhere on the canvas,
+   * so the trigger that was chosen was added there as an *action* with a trigger
+   * for a subtype, and the rule's actual trigger never changed.
+   */
+  const openTriggerPicker = () => {
+    setAddingAt(null);
     setRail({
       kind: 'choose',
       title: 'When this happens…',
       description: 'Choose what starts this rule.',
       entries: metadata?.triggers ?? [],
     });
+  };
 
   /*
    * One list, two meanings, decided by where it was opened from.
@@ -662,6 +674,7 @@ export function AutomationBuilderPage({
           onAddElseIf={addElseIf}
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
+          onChangeTrigger={openTriggerPicker}
           onInsertStep={(parentId) => insertAfter('ACTION', parentId)}
           onInsertBranch={(parentId) => insertAfter('BRANCH', parentId)}
         />
@@ -690,6 +703,7 @@ export function AutomationBuilderPage({
           }
           onDelete={deleteNode}
           onChoose={chooseFromRail}
+          onChangeTrigger={openTriggerPicker}
           rule={rule}
           settings={settings}
           onSettingsChange={(next) => setSettingsEdits((previous) => ({ ...previous, ...next }))}
