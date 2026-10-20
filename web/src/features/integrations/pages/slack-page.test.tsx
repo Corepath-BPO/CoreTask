@@ -1,7 +1,8 @@
 import type { SlackStatus } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { SlackPage } from './slack-page';
 
@@ -42,7 +43,7 @@ describe('SlackPage', () => {
   });
 
   it('lets an admin add it, and sends anyone else to an admin', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { unmount } = render(<SlackPage />);
     await user.click(screen.getByRole('button', { name: 'Add to Slack' }));
     expect(install).toHaveBeenCalledTimes(1);
@@ -65,7 +66,7 @@ describe('SlackPage', () => {
         linkedPeople: 3,
       },
     };
-    const user = userEvent.setup();
+    const user = setupUser();
     const { unmount } = render(<SlackPage />);
     expect(screen.getByText('Connected to Acme Slack')).toBeInTheDocument();
     expect(screen.getByText(/By Ada Owner, .* · 3 people linked/)).toBeInTheDocument();

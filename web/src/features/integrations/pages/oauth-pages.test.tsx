@@ -1,11 +1,11 @@
 import type { ConnectedApp, OAuthApp } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api/api-error';
+import { setupUser } from '@/test/test-utils';
 
 import { ConnectedAppsPage } from './connected-apps-page';
 import { OAuthAppsPage } from './oauth-apps-page';
@@ -81,21 +81,22 @@ describe('OAuth apps', () => {
     api.apps.mockResolvedValue([]);
     api.createApp.mockResolvedValue({ app: app(), clientSecret: 'cts_the_secret' });
     renderWith(<OAuthAppsPage />);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Register app' }));
+    await user.click(await screen.findByRole('button', { name: 'Register app' }));
     const dialog = screen.getByRole('dialog');
-    await userEvent.type(within(dialog).getByLabelText(/Name/), 'Leasing sync');
-    await userEvent.type(within(dialog).getByLabelText(/Redirect URIs/), 'http://tool.example/cb');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    await user.type(within(dialog).getByLabelText(/Name/), 'Leasing sync');
+    await user.type(within(dialog).getByLabelText(/Redirect URIs/), 'http://tool.example/cb');
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
     expect(await within(dialog).findByText(/Use https:\/\//)).toBeInTheDocument();
     expect(api.createApp).not.toHaveBeenCalled();
 
-    await userEvent.clear(within(dialog).getByLabelText(/Redirect URIs/));
-    await userEvent.type(
+    await user.clear(within(dialog).getByLabelText(/Redirect URIs/));
+    await user.type(
       within(dialog).getByLabelText(/Redirect URIs/),
       'https://tool.example/callback{enter}http://localhost:5678/cb',
     );
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
 
     await waitFor(() =>
       expect(api.createApp).toHaveBeenCalledWith({
@@ -122,11 +123,12 @@ describe('Connected apps', () => {
     api.connectedApps.mockResolvedValue([connected]);
     api.disconnect.mockResolvedValue(undefined);
     renderWith(<ConnectedAppsPage />);
+    const user = setupUser();
 
     expect(await screen.findByText('Leasing sync')).toBeInTheDocument();
     expect(screen.getByText(/By Ada Owner/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
-    await userEvent.click(
+    await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await user.click(
       within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }),
     );
     await waitFor(() => expect(api.disconnect).toHaveBeenCalledWith('app-1'));
@@ -164,6 +166,7 @@ describe('the consent page', () => {
       redirectTo: 'https://tool.example/callback?code=c&state=st-1',
     });
     renderWith(<OAuthConsentPage />);
+    const user = setupUser();
 
     expect(
       await screen.findByRole('heading', {
@@ -179,7 +182,7 @@ describe('the consent page', () => {
     );
     expect(screen.getByText('tool.example')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    await user.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() =>
       expect(assign).toHaveBeenCalledWith('https://tool.example/callback?code=c&state=st-1'),
     );
