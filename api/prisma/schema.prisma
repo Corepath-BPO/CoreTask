@@ -253,6 +253,7 @@ model User {
   createdGoals               Goal[]                   @relation("GoalCreatedBy")
   createdDependencies        TaskDependency[]         @relation("DependencyCreatedBy")
   sentInvitations            WorkspaceInvitation[]    @relation("InvitationSentBy")
+  approvedOAuthApps          WorkspaceOAuthApp[]      @relation("OAuthAppApprovedBy")
   teamMemberships            TeamMember[]
   ledTeams                   Team[]                   @relation("TeamLead")
   activityLogs               ActivityLog[]
@@ -369,12 +370,38 @@ model OAuthApp {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  owner  User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  codes  OAuthAuthorizationCode[]
-  grants OAuthGrant[]
+  owner      User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  codes      OAuthAuthorizationCode[]
+  grants     OAuthGrant[]
+  workspaces WorkspaceOAuthApp[]
 
   @@index([ownerId])
   @@map("oauth_apps")
+}
+
+/// Whether a workspace lets in any OAuth app its members connect, or only the
+/// ones its admins put in its app directory.
+enum OAuthAppPolicy {
+  ANY
+  APPROVED
+}
+
+/// An OAuth app a workspace's admins approved: its app directory. Under the
+/// APPROVED policy, an app's tokens act in the workspace only while it is here.
+model WorkspaceOAuthApp {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @db.Uuid
+  appId        String   @db.Uuid
+  approvedById String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  app        OAuthApp  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  approvedBy User?     @relation("OAuthAppApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, appId])
+  @@index([appId])
+  @@map("workspace_oauth_apps")
 }
 
 /// A code handed to an app's redirect URI, good once, for a few minutes.
@@ -553,16 +580,20 @@ model Workspace {
   /// transaction so keys stay gapless and collision-free.
   ticketCounter Int     @default(1000)
 
-  createdById String    @db.Uuid
-  archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdById    String         @db.Uuid
+  /// Which OAuth apps may act in this workspace: any a member connects, or
+  /// only those in its app directory (`WorkspaceOAuthApp`).
+  oauthAppPolicy OAuthAppPolicy @default(ANY)
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   createdBy               User                     @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members                 WorkspaceMember[]
   invitations             WorkspaceInvitation[]
   apiKeys                 ApiKey[]
   webhookEndpoints        WebhookEndpoint[]
+  oauthApps               WorkspaceOAuthApp[]
   webhookDeliveries       WebhookDelivery[]
   teams                   Team[]
   projects                Project[]

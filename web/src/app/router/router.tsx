@@ -13,6 +13,7 @@ import { GoalsPage } from '@/features/goals/pages/goals-page';
 import { DashboardPage } from '@/features/dashboard/pages/dashboard-page';
 import { InboxPage } from '@/features/inbox/pages/inbox-page';
 import { ApiKeysPage } from '@/features/integrations/pages/api-keys-page';
+import { AppDirectoryPage } from '@/features/integrations/pages/app-directory-page';
 import { ConnectedAppsPage } from '@/features/integrations/pages/connected-apps-page';
 import {
   IntegrationsIndex,
@@ -329,8 +330,8 @@ const teamDetailRoute = createRoute({
 /**
  * Integrations is a shell with tabs, like a project: the shell owns the header
  * and the admin gate for the workspace's tabs, the tabs are routes so a URL
- * names one of them. OAuth apps and Connected apps are a person's own, open to
- * every member.
+ * names one of them. OAuth apps and Connected apps are a person's own, and the
+ * App directory is every member's to read, so those three are open to everyone.
  */
 const integrationsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -361,6 +362,12 @@ const integrationsPlaygroundRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/playground',
   component: PlaygroundPage,
+});
+
+const integrationsAppDirectoryRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/app-directory',
+  component: AppDirectoryPage,
 });
 
 const integrationsOAuthAppsRoute = createRoute({
@@ -798,6 +805,7 @@ const routeTree = rootRoute.addChildren([
       integrationsApiKeysRoute,
       integrationsWebhooksRoute,
       integrationsPlaygroundRoute,
+      integrationsAppDirectoryRoute,
       integrationsOAuthAppsRoute,
       integrationsConnectedAppsRoute,
     ]),

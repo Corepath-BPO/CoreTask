@@ -441,6 +441,13 @@ export const ApiRoutes = {
     connectedApps: '/users/me/connected-apps',
     connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
   },
+  /** A workspace's approved OAuth apps, and whether only those may act in it. */
+  appDirectory: {
+    root: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory`,
+    apps: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory/apps`,
+    app: (workspaceId: string, appId: string) =>
+      `/workspaces/${workspaceId}/app-directory/apps/${appId}`,
+  },
   webhookSubscriptions: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,
     one: (workspaceId: string, subscriptionId: string) =>

@@ -44,6 +44,8 @@ export const queryKeys = {
   /** A person's own: the apps they registered, and the apps they connected. */
   oauthApps: ['oauth-apps'] as const,
   connectedApps: ['connected-apps'] as const,
+  /** A workspace's: its approved apps and whether only those may act in it. */
+  appDirectory: (workspaceId: string) => ['app-directory', workspaceId] as const,
   webhooks: {
     all: (workspaceId: string) => ['webhooks', workspaceId] as const,
     list: (workspaceId: string) => [...queryKeys.webhooks.all(workspaceId), 'list'] as const,

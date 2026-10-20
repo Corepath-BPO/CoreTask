@@ -4,6 +4,7 @@ import {
   OAUTH_CODE_TTL_SECONDS,
   OAUTH_REFRESH_TOKEN_PREFIX,
   OAUTH_SCOPE_DESCRIPTION,
+  OAuthAppPolicy,
   type OAuthScope,
 } from '@coretask/contracts';
 import type {
@@ -81,8 +82,18 @@ export class OAuthService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** What the consent page shows, after checking the request is one CoreTask will honour. */
-  async consent(input: AuthorizationRequest): Promise<OAuthConsent> {
+  async consent(userId: string, input: AuthorizationRequest): Promise<OAuthConsent> {
     const app = await this.checkRequest(input);
+    const blockedWorkspaces = await this.prisma.workspace.findMany({
+      where: {
+        archivedAt: null,
+        oauthAppPolicy: OAuthAppPolicy.APPROVED,
+        members: { some: { userId } },
+        oauthApps: { none: { appId: app.id } },
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
     return {
       app: {
         name: app.name,
@@ -97,6 +108,7 @@ export class OAuthService {
       // An app scheme has no host: name the scheme, which is the app.
       redirectHost:
         new URL(input.redirectUri).host || new URL(input.redirectUri).protocol.replace(/:$/, ''),
+      blockedWorkspaces,
     };
   }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  OAuthAppPolicy,
   type ProjectApp,
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
@@ -40,7 +41,7 @@ const endpointAudienceSelect = {
   url: true,
   projectId: true,
   apiKey: { select: { userId: true, revokedAt: true } },
-  oauthGrant: { select: { userId: true, revokedAt: true } },
+  oauthGrant: { select: { userId: true, revokedAt: true, appId: true } },
 } satisfies Prisma.WebhookEndpointSelect;
 
 type EndpointAudience = Prisma.WebhookEndpointGetPayload<{ select: typeof endpointAudienceSelect }>;
@@ -84,14 +85,35 @@ export class WebhookDeliveryService {
    * removed, silences it at once. One that lost its project (deleted, so the
    * column went null) or its owner (revoked) hears nothing, rather than
    * falling back to the whole workspace the way a null project means for an
-   * admin's endpoint.
+   * admin's endpoint. Nor does an OAuth app the workspace's admins have not
+   * approved, while they allow only approved ones.
    */
-  private async withinReach(rows: EndpointAudience[]): Promise<{ id: string; url: string }[]> {
+  private async withinReach(
+    workspaceId: string,
+    rows: EndpointAudience[],
+  ): Promise<{ id: string; url: string }[]> {
+    // Looked up once, and only when an app's subscription is among the rows.
+    let approved: Set<string> | 'any' | undefined;
+    const appAllowed = async (appId: string): Promise<boolean> => {
+      if (approved === undefined) {
+        const workspace = await this.prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { oauthAppPolicy: true, oauthApps: { select: { appId: true } } },
+        });
+        approved =
+          !workspace || workspace.oauthAppPolicy === OAuthAppPolicy.ANY
+            ? 'any'
+            : new Set(workspace.oauthApps.map((entry) => entry.appId));
+      }
+      return approved === 'any' || approved.has(appId);
+    };
+
     const reachable: { id: string; url: string }[] = [];
     for (const row of rows) {
       const owner = row.oauthGrant ?? row.apiKey;
       if (owner) {
         if (owner.revokedAt || !row.projectId) continue;
+        if (row.oauthGrant && !(await appAllowed(row.oauthGrant.appId))) continue;
         if (!(await this.projectAccess.canJoinProject(row.projectId, owner.userId))) continue;
       }
       reachable.push({ id: row.id, url: row.url });
@@ -118,7 +140,7 @@ export class WebhookDeliveryService {
         },
         select: endpointAudienceSelect,
       })
-      .then((rows) => this.withinReach(rows));
+      .then((rows) => this.withinReach(event.workspaceId, rows));
     if (endpoints.length === 0) return { deliveries: 0 };
 
     // Built once; every endpoint gets the same bytes.
@@ -181,7 +203,7 @@ export class WebhookDeliveryService {
         },
         select: endpointAudienceSelect,
       })
-      .then((rows) => this.withinReach(rows));
+      .then((rows) => this.withinReach(input.workspaceId, rows));
     if (endpoints.length === 0) return { deliveries: 0 };
 
     const payload: WebhookEventPayload = {

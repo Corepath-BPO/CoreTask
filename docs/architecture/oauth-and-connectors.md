@@ -111,7 +111,8 @@ own session gets `INTEGRATION_ONLY`; people use Settings › Webhooks.
   owned endpoint whose owner was revoked, whose project is gone (a deleted
   project nulls the column — which for an admin's endpoint means "every
   project", and must never mean that here), or whose owner can no longer open
-  the project (`ProjectAccessService.canJoinProject`).
+  the project (`ProjectAccessService.canJoinProject`), or whose app the
+  workspace no longer allows (see the app directory below).
 - Revoking the API key or ending the grant deletes its subscriptions; deleting
   the app cascades.
 - At most 50 per integration; they do not count against the 20 admin
@@ -122,8 +123,37 @@ The admin's webhook list in Settings shows subscriptions too, labelled
 "Added by <app or key>", so nothing receiving workspace data is invisible to
 an admin.
 
+## The app directory and the app policy
+
+Each workspace has an app directory (Integrations › App directory,
+`/workspaces/:workspaceId/app-directory`, session-only so an app can never
+approve itself) and an `oauthAppPolicy`:
+
+| Policy     | Which OAuth apps act in the workspace                    |
+| ---------- | -------------------------------------------------------- |
+| `ANY`      | Whatever a member connects. The default, as in Asana.    |
+| `APPROVED` | Only the apps in the directory (`workspace_oauth_apps`). |
+
+Every member sees the directory and which of its apps they use. Admins switch
+the policy, approve an app by its client id (public: it is in every
+authorization link), and take apps out again. They also see the apps members
+have connected that are not in the directory, with how many members use
+each, so switching to `APPROVED` is not a guess.
+
+The policy is checked where the workspace is, not where the person is:
+
+- `WorkspaceMemberGuard`, after membership, refuses an OAuth token with
+  `403 OAUTH_APP_NOT_APPROVED` in a workspace that does not allow its app.
+  Every workspace route runs that guard, so one check covers them all.
+- `GET /workspaces` leaves those workspaces out for the app.
+- Webhook fan-out drops the app's subscriptions there (`withinReach`).
+- The consent page names the person's workspaces the app would not reach.
+
+Nobody is disconnected. Approving the app again, or switching back to `ANY`,
+brings it back at once, subscriptions included. An app is approved per
+workspace, not per person: a member cannot approve an app for themselves.
+
 ## Not built
 
 - Per-resource scopes (tasks only, one project): `read` and `default` are the two kinds today.
-- An app directory: apps are found by being sent their authorize link.
-- Admin controls over which apps members may connect.
+- A public catalogue of apps across workspaces: a workspace's directory lists only what its admins approved, and apps are still found by being sent their authorize link.

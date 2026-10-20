@@ -73,6 +73,18 @@ export const OAuthClientType = { CONFIDENTIAL: 'confidential', PUBLIC: 'public' 
 export type OAuthClientType = (typeof OAuthClientType)[keyof typeof OAuthClientType];
 export const OAUTH_CLIENT_TYPES = Object.values(OAuthClientType);
 
+/**
+ * Which OAuth apps may act in a workspace. `ANY`: whatever its members
+ * connect, as Asana does by default. `APPROVED`: only the apps its admins put
+ * in its app directory. Anywhere else an app is refused with
+ * `OAUTH_APP_NOT_APPROVED`, hears none of the workspace's webhooks and does
+ * not see it listed. The person stays connected, so the app keeps working in
+ * the workspaces that allow it.
+ */
+export const OAuthAppPolicy = { ANY: 'ANY', APPROVED: 'APPROVED' } as const;
+export type OAuthAppPolicy = (typeof OAuthAppPolicy)[keyof typeof OAuthAppPolicy];
+export const OAUTH_APP_POLICIES = Object.values(OAuthAppPolicy);
+
 /** PKCE: only the hashed form. `plain` would protect nothing a TLS connection does not. */
 export const OAUTH_CODE_CHALLENGE_METHOD = 'S256';
 

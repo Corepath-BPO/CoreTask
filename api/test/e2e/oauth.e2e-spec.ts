@@ -584,6 +584,167 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
     });
   });
 
+  describe('the app directory', () => {
+    const directoryUrl = (scope: Scope) => url(`/workspaces/${scope.workspaceId}/app-directory`);
+    const projectsUrl = (scope: Scope) => url(`/workspaces/${scope.workspaceId}/projects`);
+    const setPolicy = (scope: Scope, policy: string) =>
+      request(server()).patch(directoryUrl(scope)).set(as(scope.owner)).send({ policy });
+    const blockedFor = async (person: Actor, app: App) => {
+      const consent = await request(server())
+        .post(url('/oauth/consent'))
+        .set(as(person))
+        .send({ clientId: app.clientId, redirectUri: REDIRECT })
+        .expect(200);
+      return consent.body.data.blockedWorkspaces as { id: string; name: string }[];
+    };
+
+    it('lets admins allow only approved apps, and refuses the rest there', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      // Any app, to begin with; a member sees the directory but not what knocks.
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(200);
+      const asMember = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.member))
+        .expect(200);
+      expect(asMember.body.data).toEqual({ policy: 'ANY', apps: [], unapproved: [] });
+      const notAdmin = await request(server())
+        .patch(directoryUrl(scope))
+        .set(as(scope.member))
+        .send({ policy: 'APPROVED' })
+        .expect(403);
+      expect(notAdmin.body.error.code).toBe('INSUFFICIENT_WORKSPACE_ROLE');
+
+      const asOwner = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.owner))
+        .expect(200);
+      expect(asOwner.body.data.unapproved).toEqual([
+        {
+          app: expect.objectContaining({
+            id: app.id,
+            clientId: app.clientId,
+            name: 'Leasing sync',
+            publisher: 'Ada Owner',
+          }),
+          members: 1,
+        },
+      ]);
+
+      // Approved apps only: this one is refused here, and does not see the workspace.
+      const switched = await setPolicy(scope, 'APPROVED').expect(200);
+      expect(switched.body.data.policy).toBe('APPROVED');
+      const refused = await request(server())
+        .get(projectsUrl(scope))
+        .set(as(token.access_token))
+        .expect(403);
+      expect(refused.body.error.code).toBe('OAUTH_APP_NOT_APPROVED');
+      const listed = await request(server())
+        .get(url('/workspaces'))
+        .set(as(token.access_token))
+        .expect(200);
+      expect(listed.body.data).toEqual([]);
+      expect(await blockedFor(scope.member, app)).toEqual([
+        { id: scope.workspaceId, name: 'Acme' },
+      ]);
+
+      // Approved by client id: the app reaches the workspace again.
+      const approved = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: app.clientId })
+        .expect(201);
+      expect(approved.body.data).toMatchObject({
+        app: { id: app.id, name: 'Leasing sync' },
+        approvedBy: { id: scope.owner.userId, name: 'Ada Owner' },
+        connectedByMe: false,
+      });
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(200);
+      expect(await blockedFor(scope.member, app)).toEqual([]);
+      const mine = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.member))
+        .expect(200);
+      expect(mine.body.data.apps).toEqual([
+        expect.objectContaining({
+          app: expect.objectContaining({ id: app.id }),
+          connectedByMe: true,
+        }),
+      ]);
+
+      // Taken out again: refused again. Nobody was disconnected.
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/app-directory/apps/${app.id}`))
+        .set(as(scope.owner))
+        .expect(204);
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(403);
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/app-directory/apps/${app.id}`))
+        .set(as(scope.owner))
+        .expect(404);
+      expect(
+        await context.prisma.oAuthGrant.count({ where: { appId: app.id, revokedAt: null } }),
+      ).toBe(1);
+    });
+
+    it('is for people: an app cannot read or approve itself, nor an unknown app be added', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.owner, app);
+
+      const asApp = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(token.access_token))
+        .send({ clientId: app.clientId })
+        .expect(403);
+      expect(asApp.body.error.code).toBe('OAUTH_TOKEN_NOT_ALLOWED');
+      await request(server()).get(directoryUrl(scope)).set(as(token.access_token)).expect(403);
+
+      const unknown = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: 'ctc_nobody' })
+        .expect(404);
+      expect(unknown.body.error.code).toBe('OAUTH_UNKNOWN_CLIENT');
+      await setPolicy(scope, 'SOMETIMES').expect(422);
+    });
+
+    it('silences an unapproved app’s webhook subscriptions until it is approved', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/webhook-subscriptions`))
+        .set(as(token.access_token))
+        .send({ projectId: scope.projectId, url: HOOK, events: ['task.created'] })
+        .expect(201);
+      const event = (): AutomationEvent => ({
+        eventId: randomUUID(),
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        trigger: AutomationTrigger.TASK_CREATED,
+        entityType: 'TASK',
+        entityId: randomUUID(),
+        actorId: scope.owner.userId,
+        after: {},
+        correlationId: randomUUID(),
+        depth: 0,
+      });
+
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 1 });
+      await setPolicy(scope, 'APPROVED').expect(200);
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 0 });
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: app.clientId })
+        .expect(201);
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 1 });
+    });
+  });
+
   describe('ending a connection', () => {
     it('lets the app revoke its refresh token, ending its access too', async () => {
       const scope = await setupScope();

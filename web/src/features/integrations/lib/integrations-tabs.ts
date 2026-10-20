@@ -12,6 +12,7 @@ export const INTEGRATIONS_TABS: IntegrationsTab[] = [
   { label: 'API keys', segment: 'api-keys', adminOnly: true },
   { label: 'Webhooks', segment: 'webhooks', adminOnly: true },
   { label: 'Playground', segment: 'playground', adminOnly: true },
+  { label: 'App directory', segment: 'app-directory' },
   { label: 'OAuth apps', segment: 'oauth-apps' },
   { label: 'Connected apps', segment: 'connected-apps' },
 ];

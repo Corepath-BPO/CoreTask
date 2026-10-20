@@ -1,6 +1,6 @@
 import type { OAuthAuthorizationRequest } from '@coretask/types';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { useAuthStore } from '@/stores/auth.store';
 import { ApiError } from '@/lib/api/api-error';
 
 import { oauthApi } from '../api/oauth.api';
+
+const LIST_FORMAT = new Intl.ListFormat(undefined, { style: 'long', type: 'conjunction' });
 
 /** The authorization request, read from the standard query parameters a tool sends. */
 function readRequest(search: string): OAuthAuthorizationRequest {
@@ -88,7 +90,7 @@ export function OAuthConsentPage() {
     );
   }
 
-  const { app, scopes, redirectHost } = consent.data;
+  const { app, scopes, redirectHost, blockedWorkspaces } = consent.data;
   const busy = decide.isPending || decide.isSuccess;
 
   return (
@@ -128,6 +130,20 @@ export function OAuthConsentPage() {
             ))}
           </ul>
         </div>
+        {blockedWorkspaces.length > 0 && (
+          <p
+            role="note"
+            className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5 text-xs"
+          >
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>
+              It won’t reach{' '}
+              {LIST_FORMAT.format(blockedWorkspaces.map((workspace) => workspace.name))}: the admins
+              there allow only the apps they approved. Ask one to add it under Integrations › App
+              directory.
+            </span>
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           Signed in as {user?.email}. You will be sent back to <strong>{redirectHost}</strong>. You
           can disconnect it any time under Integrations › Connected apps.

@@ -49,13 +49,13 @@ export class OAuthController {
   })
   @ApiEnvelopeResponse(OAuthConsentDto)
   @ApiErrorResponseDoc(400, 'Unknown app, unregistered redirect URI or unsupported request')
-  consent(@Body() body: unknown): Promise<OAuthConsent> {
+  consent(@CurrentUser('id') userId: string, @Body() body: unknown): Promise<OAuthConsent> {
     const input = parseBody(
       oauthAuthorizationSchema,
       body,
       'The authorization request is invalid.',
     );
-    return this.oauth.consent(input);
+    return this.oauth.consent(userId, input);
   }
 
   @Post('authorize')

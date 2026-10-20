@@ -15,7 +15,8 @@ import { INTEGRATIONS_TABS } from '../lib/integrations-tabs';
  *
  * The gate is here rather than in each tab so a member who deep-links to an
  * admin tab never mounts it — and so no admin-only query is ever started for
- * them. Their own tabs, OAuth apps and Connected apps, are open to everyone.
+ * them. Their own tabs, OAuth apps and Connected apps, and the App directory
+ * are open to everyone.
  * The API authorises independently; this is courtesy, not the boundary.
  */
 export function IntegrationsPage() {

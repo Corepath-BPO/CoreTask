@@ -2,9 +2,11 @@ import {
   MAX_OAUTH_REDIRECT_URIS,
   OAUTH_APP_DESCRIPTION_MAX_LENGTH,
   OAUTH_APP_NAME_MAX_LENGTH,
+  OAUTH_APP_POLICIES,
   OAUTH_CLIENT_TYPES,
   OAUTH_CODE_CHALLENGE_METHOD,
   OAUTH_REDIRECT_URI_MAX_LENGTH,
+  OAuthAppPolicy,
   OAuthClientType,
   OAUTH_SCOPES,
   OAuthScope,
@@ -143,3 +145,14 @@ export const createWebhookSubscriptionSchema = z.object({
   name: webhookNameSchema.optional(),
 });
 export type CreateWebhookSubscriptionInput = z.input<typeof createWebhookSubscriptionSchema>;
+
+/** An admin adds an app to the workspace's directory by its client id. */
+export const approveWorkspaceAppSchema = z.object({
+  clientId: z.string().trim().min(1, 'Enter the app’s client id.').max(200),
+});
+export type ApproveWorkspaceAppInput = z.input<typeof approveWorkspaceAppSchema>;
+
+export const updateAppPolicySchema = z.object({
+  policy: z.enum(OAUTH_APP_POLICIES as unknown as [OAuthAppPolicy, ...OAuthAppPolicy[]]),
+});
+export type UpdateAppPolicyInput = z.input<typeof updateAppPolicySchema>;
