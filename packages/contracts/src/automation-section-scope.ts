@@ -1,4 +1,5 @@
 import { AutomationNodeType } from './automation.js';
+import { conditionLeaves } from './automation-condition-groups.js';
 import { TRIGGER_CONFIG_FORM, toFilterOperator } from './automation-rule.js';
 import { FilterOperator } from './query.js';
 
@@ -91,7 +92,11 @@ export function sectionsWatchedByRule(rule: SectionScopedRule): string[] {
 
   for (const node of rule.nodes) {
     if (node.nodeType !== AutomationNodeType.CONDITION) continue;
-    for (const id of sectionsFromCondition(node.configuration)) found.add(id);
+    // Every comparison in a group counts, whichever way the group combines
+    // them: "section is Review, or it is urgent" is still a rule about Review.
+    for (const leaf of conditionLeaves(node.configuration)) {
+      for (const id of sectionsFromCondition(leaf.configuration)) found.add(id);
+    }
   }
 
   return [...found];

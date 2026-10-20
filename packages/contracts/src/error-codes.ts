@@ -26,6 +26,8 @@ export const ErrorCode = {
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   ACCOUNT_DISABLED: 'ACCOUNT_DISABLED',
   PASSWORD_RESET_INVALID: 'PASSWORD_RESET_INVALID',
+  CURRENT_PASSWORD_INCORRECT: 'CURRENT_PASSWORD_INCORRECT',
+  EMAIL_VERIFICATION_INVALID: 'EMAIL_VERIFICATION_INVALID',
 
   // API keys
   API_KEY_INVALID: 'API_KEY_INVALID',
@@ -39,12 +41,16 @@ export const ErrorCode = {
   OAUTH_TOKEN_INVALID: 'OAUTH_TOKEN_INVALID',
   OAUTH_TOKEN_EXPIRED: 'OAUTH_TOKEN_EXPIRED',
   OAUTH_TOKEN_NOT_ALLOWED: 'OAUTH_TOKEN_NOT_ALLOWED',
+  OAUTH_SCOPE_INSUFFICIENT: 'OAUTH_SCOPE_INSUFFICIENT',
+  OAUTH_APP_NOT_APPROVED: 'OAUTH_APP_NOT_APPROVED',
+  PROJECT_MEMBERSHIP_REQUIRED: 'PROJECT_MEMBERSHIP_REQUIRED',
   OAUTH_APP_LIMIT_REACHED: 'OAUTH_APP_LIMIT_REACHED',
   OAUTH_UNKNOWN_CLIENT: 'OAUTH_UNKNOWN_CLIENT',
   OAUTH_REDIRECT_URI_MISMATCH: 'OAUTH_REDIRECT_URI_MISMATCH',
   OAUTH_INVALID_REQUEST: 'OAUTH_INVALID_REQUEST',
   INTEGRATION_ONLY: 'INTEGRATION_ONLY',
   WEBHOOK_SUBSCRIPTION_LIMIT_REACHED: 'WEBHOOK_SUBSCRIPTION_LIMIT_REACHED',
+  WEBHOOK_HANDSHAKE_FAILED: 'WEBHOOK_HANDSHAKE_FAILED',
 
   // Webhooks
   WEBHOOK_URL_NOT_ALLOWED: 'WEBHOOK_URL_NOT_ALLOWED',
@@ -101,6 +107,9 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_ALREADY_REGISTERED: 'An account with this e-mail address already exists.',
   ACCOUNT_DISABLED: 'This account has been disabled.',
   PASSWORD_RESET_INVALID: 'This reset link is invalid, used or expired. Ask for a new one.',
+  CURRENT_PASSWORD_INCORRECT: 'Your current password is not right.',
+  EMAIL_VERIFICATION_INVALID:
+    'This confirmation link is invalid, used or expired. Send a new one from Settings.',
 
   API_KEY_INVALID: 'The API key is not recognised.',
   API_KEY_REVOKED: 'The API key has been revoked.',
@@ -112,6 +121,11 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   OAUTH_TOKEN_INVALID: 'The access token is not recognised, or the app was disconnected.',
   OAUTH_TOKEN_EXPIRED: 'The access token has expired. Use the refresh token for a new one.',
   OAUTH_TOKEN_NOT_ALLOWED: 'This action needs a signed-in person, not an app.',
+  OAUTH_SCOPE_INSUFFICIENT:
+    'This app was allowed to read only. Connect it again with the access it needs to make changes.',
+  OAUTH_APP_NOT_APPROVED:
+    'This workspace’s admins have not approved this app. Ask one to add it to the app directory.',
+  PROJECT_MEMBERSHIP_REQUIRED: 'Join the project first — only its members hear from it.',
   OAUTH_APP_LIMIT_REACHED: 'You already have the maximum number of OAuth apps.',
   OAUTH_UNKNOWN_CLIENT: 'This app is not registered with CoreTask.',
   OAUTH_REDIRECT_URI_MISMATCH: 'The app asked to send you somewhere it did not register.',
@@ -120,6 +134,8 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
     'Webhook subscriptions are made by API keys and OAuth apps. People add webhooks in Settings.',
   WEBHOOK_SUBSCRIPTION_LIMIT_REACHED:
     'This integration already has the maximum number of webhook subscriptions.',
+  WEBHOOK_HANDSHAKE_FAILED:
+    'The URL did not confirm the subscription: it must answer 2xx with the X-Hook-Secret header it was sent.',
 
   WEBHOOK_URL_NOT_ALLOWED: 'CoreTask cannot send webhooks to that address.',
   WEBHOOK_ENDPOINT_LIMIT_REACHED:

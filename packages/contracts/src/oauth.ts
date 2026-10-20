@@ -32,18 +32,58 @@ export const OAUTH_CODE_TTL_SECONDS = 600;
 export const OAUTH_AUTHORIZE_PATH = '/oauth/authorize';
 
 /**
- * What an app may ask for. One scope today, as Asana started: everything the
- * person can do outside the session-only routes. Named so a narrower one can
- * be added without changing what existing apps were granted.
+ * What an app may ask for, space-separated in the authorization link.
+ *
+ * `default` is everything the person can do outside the session-only routes,
+ * as Asana started. `read` is the same reach, looking only: an app granted it
+ * alone may read and may subscribe to webhooks — listening changes nothing —
+ * but every other write is refused with `OAUTH_SCOPE_INSUFFICIENT`. Asking for
+ * both is asking for `default`.
  */
-export const OAuthScope = { DEFAULT: 'default' } as const;
+export const OAuthScope = { DEFAULT: 'default', READ: 'read' } as const;
 export type OAuthScope = (typeof OAuthScope)[keyof typeof OAuthScope];
 export const OAUTH_SCOPES = Object.values(OAuthScope);
 
 export const OAUTH_SCOPE_DESCRIPTION: Record<OAuthScope, string> = {
   default:
     'See and change the tasks, projects, comments and fields you can reach, in every workspace you belong to. It cannot manage people, API keys or workspaces.',
+  read: 'See the tasks, projects, comments and fields you can reach, in every workspace you belong to, and hear about changes to them. It cannot change anything.',
 };
+
+/** Whether a grant's scopes let its tokens change anything. */
+export function oauthScopesAllowWrites(scopes: readonly string[]): boolean {
+  return scopes.includes(OAuthScope.DEFAULT);
+}
+
+/** One scope set per request: `default` covers `read`, so the two together are `default`. */
+export function normaliseOAuthScopes(scopes: readonly OAuthScope[]): OAuthScope[] {
+  return scopes.includes(OAuthScope.DEFAULT) ? [OAuthScope.DEFAULT] : [...new Set(scopes)];
+}
+
+/**
+ * What kind of client an app is (RFC 6749 §2.1).
+ *
+ * A confidential client runs on a server and keeps a secret. A public one is a
+ * mobile or desktop app, whose code anyone can read, so it is given no secret
+ * at all: it proves itself with PKCE on every authorization instead, and its
+ * refresh token is replaced each time it is used, so a stolen one works once.
+ * Chosen when the app is registered, and fixed from then on.
+ */
+export const OAuthClientType = { CONFIDENTIAL: 'confidential', PUBLIC: 'public' } as const;
+export type OAuthClientType = (typeof OAuthClientType)[keyof typeof OAuthClientType];
+export const OAUTH_CLIENT_TYPES = Object.values(OAuthClientType);
+
+/**
+ * Which OAuth apps may act in a workspace. `ANY`: whatever its members
+ * connect, as Asana does by default. `APPROVED`: only the apps its admins put
+ * in its app directory. Anywhere else an app is refused with
+ * `OAUTH_APP_NOT_APPROVED`, hears none of the workspace's webhooks and does
+ * not see it listed. The person stays connected, so the app keeps working in
+ * the workspaces that allow it.
+ */
+export const OAuthAppPolicy = { ANY: 'ANY', APPROVED: 'APPROVED' } as const;
+export type OAuthAppPolicy = (typeof OAuthAppPolicy)[keyof typeof OAuthAppPolicy];
+export const OAUTH_APP_POLICIES = Object.values(OAuthAppPolicy);
 
 /** PKCE: only the hashed form. `plain` would protect nothing a TLS connection does not. */
 export const OAUTH_CODE_CHALLENGE_METHOD = 'S256';
@@ -62,8 +102,26 @@ export const OAUTH_REDIRECT_URI_MAX_LENGTH = 2048;
  * and a fragment would be dropped by the browser before the tool saw it. The
  * match at authorization time is exact, so a registered URI is the only place
  * a code can ever be sent.
+ *
+ * A public client may also register a private-use scheme — reverse-domain,
+ * so it holds a dot: `com.example.app:/oauth/callback` (RFC 8252 §7.1) — which
+ * is how a mobile app gets the code back from the browser.
  */
-export function redirectUriProblem(value: string): string | null {
+export function redirectUriProblem(
+  value: string,
+  options: { publicClient?: boolean } = {},
+): string | null {
+  const privateUse = /^([a-z][a-z0-9+-]*(?:\.[a-z0-9+-]+)+):\/{1,3}([^#\s]*)(#.*)?$/i.exec(
+    value.trim(),
+  );
+  if (privateUse && !/^https?$/i.test(privateUse[1] ?? '')) {
+    if (!options.publicClient) {
+      return 'An app scheme like com.example.app:/ is for mobile and desktop apps. Register this app as one.';
+    }
+    if (privateUse[3] !== undefined) return 'A redirect URI cannot have a #fragment.';
+    return null;
+  }
+
   // No URL global here (this package runs anywhere), so the parts are read
   // with a pattern: scheme, authority, then whatever follows.
   const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^#]*)(#.*)?$/i.exec(value.trim());

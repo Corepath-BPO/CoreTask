@@ -20,6 +20,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AllowedForReadScope } from '../../common/decorators/read-scope.decorator';
 import { CurrentWorkspace } from '../../common/decorators/workspace.decorator';
 import type { AuthenticatedUser } from '../../common/types/api.types';
 import { parseBody } from '../../common/utils/zod-body.util';
@@ -58,6 +59,8 @@ export class WebhookSubscriptionsController {
   }
 
   @Post()
+  // Subscribing listens; it changes nobody's work, so a read-only app may.
+  @AllowedForReadScope()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Subscribe to a project’s events',
@@ -92,6 +95,7 @@ export class WebhookSubscriptionsController {
   }
 
   @Delete(':subscriptionId')
+  @AllowedForReadScope()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unsubscribe' })
   @ApiParam({ name: 'subscriptionId', format: 'uuid' })

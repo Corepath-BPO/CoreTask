@@ -2,11 +2,12 @@ import {
   PROJECT_MEMBER_ROLES,
   ProjectMemberRole,
   ProjectVisibility,
+  WorkspaceRole,
   effectiveWorkspaceRole,
-  type WorkspaceRole,
+  hasAtLeastRole,
 } from '@coretask/contracts';
 import type { ProjectMember, ProjectSummary } from '@coretask/types';
-import { Crown, Link2, UserPlus, X } from 'lucide-react';
+import { Crown, Link2, Mail, UserPlus, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -49,15 +50,21 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Link } from '@tanstack/react-router';
-import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
+import {
+  useActiveWorkspace,
+  useWorkspaceMembers,
+} from '@/features/workspaces/hooks/use-workspaces';
 import { humanizeEnum } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 
 import {
   useAddProjectMember,
+  useInviteToProject,
   useLeaveProject,
+  useProjectInvitations,
   useProjectMembers,
   useRemoveProjectMember,
+  useRevokeProjectInvitation,
   useUpdateProjectMemberRole,
 } from '../../hooks/use-project-members';
 import { useUpdateProject } from '../../hooks/use-projects';
@@ -74,6 +81,9 @@ interface ShareProjectDialogProps {
   /** Called after the reader leaves a private project, before it 404s on them. */
   onLeft?: (() => void) | undefined;
 }
+
+/** Enough to tell an address from a name; the server checks it properly. */
+const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Asana's "Share" dialog: who can see the project, who is on it and as what.
@@ -94,16 +104,29 @@ export function ShareProjectDialog({
 }: ShareProjectDialogProps) {
   const me = useCurrentUser();
   const projectId = project?.id;
+  const { workspace } = useActiveWorkspace();
+  const canManage = access.canManageMembers;
+  /*
+   * Inviting someone new is a workspace admin's call, as on Members: a guest
+   * still reads every public project, so a project admin who is not one could
+   * otherwise widen the workspace. The server holds the same line.
+   */
+  const canInvite =
+    canManage && (workspace ? hasAtLeastRole(workspace.role, WorkspaceRole.ADMIN) : false);
   const { data: members, isLoading } = useProjectMembers(workspaceId, projectId, open);
   const { data: workspaceMembers } = useWorkspaceMembers(open ? workspaceId : undefined);
+  const { data: invitations } = useProjectInvitations(workspaceId, projectId, open && canManage);
 
   const add = useAddProjectMember(workspaceId, projectId ?? '');
   const updateRole = useUpdateProjectMemberRole(workspaceId, projectId ?? '');
   const remove = useRemoveProjectMember(workspaceId, projectId ?? '');
   const leave = useLeaveProject(workspaceId);
   const updateProject = useUpdateProject(workspaceId);
+  const invite = useInviteToProject(workspaceId, projectId ?? '');
+  const revoke = useRevokeProjectInvitation(workspaceId, projectId ?? '');
 
   const [picking, setPicking] = useState(false);
+  const [search, setSearch] = useState('');
   const [newRole, setNewRole] = useState<ProjectMemberRole>(ProjectMemberRole.EDITOR);
   const [confirmPrivate, setConfirmPrivate] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -130,11 +153,19 @@ export function ShareProjectDialog({
   );
   const adminCount = list.filter((member) => member.role === ProjectMemberRole.ADMIN).length;
 
+  /** The typed address, when it is one and belongs to nobody in the workspace yet. */
+  const typedEmail = search.trim().toLowerCase();
+  const offerInvite =
+    LOOKS_LIKE_EMAIL.test(typedEmail) &&
+    !(workspaceMembers ?? []).some((member) => member.user.email.toLowerCase() === typedEmail);
+  const waiting = invitations ?? [];
+
   if (!project) return null;
 
   const isPrivate = project.visibility === ProjectVisibility.PRIVATE;
-  const canManage = access.canManageMembers;
   const busy =
+    invite.isPending ||
+    revoke.isPending ||
     add.isPending ||
     updateRole.isPending ||
     remove.isPending ||
@@ -199,7 +230,13 @@ export function ShareProjectDialog({
 
         {canManage && (
           <div className="flex gap-2">
-            <Popover open={picking} onOpenChange={setPicking}>
+            <Popover
+              open={picking}
+              onOpenChange={(next) => {
+                setPicking(next);
+                if (!next) setSearch('');
+              }}
+            >
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -213,9 +250,45 @@ export function ShareProjectDialog({
               </PopoverTrigger>
               <PopoverContent align="start" className="w-72 p-0">
                 <Command>
-                  <CommandInput placeholder="Find someone in the workspace…" />
+                  <CommandInput
+                    placeholder={
+                      canInvite
+                        ? 'Name, or an e-mail address to invite…'
+                        : 'Find someone in the workspace…'
+                    }
+                    value={search}
+                    onValueChange={setSearch}
+                  />
                   <CommandList>
-                    <CommandEmpty>Everyone in the workspace is already here.</CommandEmpty>
+                    <CommandEmpty>
+                      {search.trim()
+                        ? 'Nobody in the workspace matches.'
+                        : 'Everyone in the workspace is already here.'}
+                    </CommandEmpty>
+                    {offerInvite && (
+                      <CommandGroup heading="Not in the workspace">
+                        {canInvite ? (
+                          <CommandItem
+                            value={typedEmail}
+                            onSelect={() => {
+                              invite.mutate({ email: typedEmail, role: newRole });
+                              setPicking(false);
+                              setSearch('');
+                            }}
+                          >
+                            <Mail className="size-4" aria-hidden="true" />
+                            <span className="truncate">Invite {typedEmail}</span>
+                          </CommandItem>
+                        ) : (
+                          <CommandItem value={typedEmail} disabled>
+                            <Mail className="size-4" aria-hidden="true" />
+                            <span className="truncate">
+                              Only a workspace admin can invite someone new
+                            </span>
+                          </CommandItem>
+                        )}
+                      </CommandGroup>
+                    )}
                     <CommandGroup>
                       {candidates.map((member) => (
                         <CommandItem
@@ -265,11 +338,20 @@ export function ShareProjectDialog({
 
         {canManage && (
           <p className="-mt-2 text-xs text-muted-foreground">
-            Not in the workspace yet?{' '}
-            <Link to="/members" className="underline underline-offset-2 hover:text-foreground">
-              Invite them from Members
-            </Link>{' '}
-            first.
+            {canInvite ? (
+              <>
+                Not in the workspace yet? Type their e-mail address to invite them; they join the
+                workspace and this project when they accept.
+              </>
+            ) : (
+              <>
+                Not in the workspace yet? Ask a workspace admin to invite them, or to{' '}
+                <Link to="/members" className="underline underline-offset-2 hover:text-foreground">
+                  invite them from Members
+                </Link>
+                .
+              </>
+            )}
           </p>
         )}
 
@@ -328,6 +410,39 @@ export function ShareProjectDialog({
             </ul>
           )}
         </div>
+
+        {waiting.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Invited</p>
+            <ul aria-label="Invited" className="divide-y rounded-md border">
+              {waiting.map((invitation) => (
+                <li key={invitation.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <Mail className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{invitation.email}</span>
+                  <Badge variant={invitation.expired ? 'muted' : 'secondary'} className="shrink-0">
+                    {invitation.expired
+                      ? 'Expired'
+                      : humanizeEnum(invitation.project?.role ?? ProjectMemberRole.EDITOR)}
+                  </Badge>
+                  {canInvite && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7"
+                      aria-label={`Revoke the invitation to ${invitation.email}`}
+                      disabled={busy}
+                      onClick={() =>
+                        revoke.mutate({ invitationId: invitation.id, email: invitation.email })
+                      }
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <DialogFooter className="sm:justify-start">
           <Button type="button" variant="ghost" size="sm" onClick={() => void copyLink()}>
@@ -432,6 +547,12 @@ function MemberRow({
           {capped && actsAs && (
             <span className="ml-1.5">· acts as {humanizeEnum(actsAs).toLowerCase()} here</span>
           )}
+          {member.role === ProjectMemberRole.COMMENTER &&
+            (workspaceRole === WorkspaceRole.GUEST ? (
+              <span className="ml-1.5">· a guest, so read-only here</span>
+            ) : (
+              <span className="ml-1.5">· can comment, not edit</span>
+            ))}
         </p>
       </div>
 

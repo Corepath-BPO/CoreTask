@@ -72,6 +72,35 @@ export const resetPasswordFormSchema = z
   });
 export type ResetPasswordFormInput = z.input<typeof resetPasswordFormSchema>;
 
+/**
+ * Changing a password while signed in. The current one is checked by the
+ * server, not here — like login, its only rule is that it was typed.
+ */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Enter your current password.').max(PASSWORD_MAX_LENGTH),
+    newPassword: passwordSchema,
+  })
+  .refine((values) => values.newPassword !== values.currentPassword, {
+    message: 'Choose a password you are not using now.',
+    path: ['newPassword'],
+  });
+export type ChangePasswordInput = z.input<typeof changePasswordSchema>;
+
+export const changePasswordFormSchema = changePasswordSchema
+  .safeExtend({ confirmPassword: z.string().min(1, 'Confirm your new password.') })
+  .refine((values) => values.newPassword === values.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+export type ChangePasswordFormInput = z.input<typeof changePasswordFormSchema>;
+
+/** The token from a "confirm your e-mail address" link. */
+export const verifyEmailSchema = z.object({
+  token: z.string().trim().min(1, 'The confirmation link is incomplete.').max(200),
+});
+export type VerifyEmailInput = z.input<typeof verifyEmailSchema>;
+
 export const registerFormSchema = registerSchema
   .extend({
     confirmPassword: z.string().min(1, 'Confirm your password.'),

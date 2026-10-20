@@ -109,6 +109,36 @@ export function usePostStatusUpdate(workspaceId: string | undefined, projectId: 
   });
 }
 
+/**
+ * The update a rule's "Draft an update with AI…" step left for review. Only
+ * asked for by someone who may post one; a draft is not the project's status.
+ * Under the updates key, so posting an update — which spends it — refreshes it.
+ */
+export function useProjectStatusDraft(
+  workspaceId: string | undefined,
+  projectId: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.projectUpdates.statusDraft(workspaceId ?? '', projectId),
+    queryFn: () => projectUpdatesApi.statusDraft(workspaceId as string, projectId),
+    enabled: enabled && Boolean(workspaceId && projectId),
+  });
+}
+
+export function useDiscardStatusDraft(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: () => projectUpdatesApi.discardStatusDraft(workspaceId as string, projectId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projectUpdates.statusDraft(workspaceId as string, projectId),
+      });
+      toast.success('Draft discarded');
+    },
+    onError: (error) => report(error, 'Could not discard the draft.'),
+  });
+}
+
 /** "Request status update": asks the project's owner, and says who was asked. */
 export function useRequestProjectStatus(workspaceId: string | undefined) {
   return useMutation({

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { API_PREFIX, WorkspaceRole } from '@coretask/contracts';
+import { API_PREFIX, DEFAULT_SCHEDULE, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
 
 import { resetEnvCache } from '../../src/config/env';
@@ -56,7 +56,11 @@ describe('AI steps in rules (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(
       context.prisma,
-      { toProject: async () => undefined, toWorkspace: async () => undefined } as never,
+      {
+        toProject: async () => undefined,
+        toProjectAudience: async () => undefined,
+        toWorkspace: async () => undefined,
+      } as never,
       new AutomationAiService(context.prisma, model),
     );
   });
@@ -367,6 +371,7 @@ describe('AI steps in rules (e2e)', () => {
       const id = await rule([useAi({ instructions: 'Triage it.', allow: ['COMMENT'] })], scope);
       const bare = new AutomationRunnerService(context.prisma, {
         toProject: async () => undefined,
+        toProjectAudience: async () => undefined,
         toWorkspace: async () => undefined,
       } as never);
 
@@ -503,5 +508,208 @@ describe('AI steps in rules (e2e)', () => {
     expect(data.actions.find((entry) => entry.subtype === 'AI_ACTION')?.available).toBe(true);
     expect(data.conditions.find((entry) => entry.subtype === 'ai.check')?.available).toBe(true);
     expect(data.capabilities.ai).toBe(true);
+  });
+
+  describe('Let AI decide the number of subtasks', () => {
+    const subtasks = (titles: string[]): NodeInput => ({
+      nodeType: 'ACTION',
+      subtype: 'CREATE_SUBTASK',
+      configuration: { subtasks: titles.map((title) => ({ title })), aiDecides: true },
+    });
+    const children = (scope: Scope) =>
+      context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+        orderBy: { position: 'asc' },
+        select: { title: true },
+      });
+
+    it('creates only the rows the model kept, in the list’s order, and logs why', async () => {
+      const scope = await setupScope();
+      const id = await rule(
+        [subtasks(['Inspect the heating', 'Order parts', 'Renew {{task.name}}'])],
+        scope,
+      );
+      // Named out of order and with one repeated: neither changes what is made.
+      replies.push([
+        {
+          name: 'choose',
+          input: { keep: [3, 1, 3], reason: 'Heating is broken; no parts named.' },
+        },
+      ]);
+
+      await run(scope, id);
+
+      expect((await children(scope)).map((row) => row.title)).toEqual([
+        'Inspect the heating',
+        'Renew Renew lease for unit 4B',
+      ]);
+      // The model read the titles as they would be written.
+      expect(asked[0]?.prompt).toContain('3. Renew Renew lease for unit 4B');
+      expect(asked[0]?.prompt).toContain('Tenant says the heating is broken');
+      const log = (await execution(id)).logs[0];
+      expect(log?.succeeded).toBe(true);
+      expect(log?.message).toBe('AI chose 2 of 3 subtasks. Heating is broken; no parts named.');
+    });
+
+    it('may keep none, which is a quiet success', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating', 'Order parts'])], scope);
+      replies.push([{ name: 'choose', input: { keep: [], reason: 'Nothing to do.' } }]);
+
+      await run(scope, id);
+
+      expect(await children(scope)).toEqual([]);
+      expect((await execution(id)).logs[0]?.message).toBe(
+        'AI chose 0 of 2 subtasks. Nothing to do.',
+      );
+    });
+
+    it('drops numbers that are not on the list', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating'])], scope);
+      replies.push([{ name: 'choose', input: { keep: [0, 2, 9, 1], reason: 'Only one fits.' } }]);
+
+      await run(scope, id);
+
+      expect((await children(scope)).map((row) => row.title)).toEqual(['Inspect the heating']);
+    });
+
+    it('fails the step when the model cannot be asked, creating nothing', async () => {
+      const scope = await setupScope();
+      const id = await rule([subtasks(['Inspect the heating'])], scope);
+      replies.push(new Error('overloaded'));
+
+      await run(scope, id);
+
+      expect(await children(scope)).toEqual([]);
+      expect((await execution(id)).logs[0]?.succeeded).toBe(false);
+    });
+  });
+
+  describe('Draft an update with AI', () => {
+    const draftUpdate = (instructions?: string): NodeInput => ({
+      nodeType: 'ACTION',
+      subtype: 'AI_DRAFT_UPDATE',
+      configuration: instructions ? { instructions } : {},
+    });
+    const draftUrl = (scope: Scope) =>
+      url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/status-draft`);
+    const drafted = {
+      name: 'draft',
+      input: {
+        status: 'AT_RISK',
+        title: 'Heating repair is holding up 4B',
+        summary: 'The lease renewal waits on the heating repair.',
+        next_steps: 'Book the repair; send the renewal Friday.',
+      },
+    };
+
+    it('drafts the project’s update for review, and tells whoever would post it', async () => {
+      const scope = await setupScope();
+      const id = await rule([draftUpdate('Mention the heating repair.')], scope);
+      replies.push([drafted]);
+
+      await run(scope, id);
+
+      // The model read the project, not just the task that set the rule off.
+      expect(asked[0]?.prompt).toContain('Name: Leasing');
+      expect(asked[0]?.prompt).toContain('Tasks: 1, of which 0 complete and 1 open');
+      expect(asked[0]?.prompt).toContain('Mention the heating repair.');
+
+      const draft = await request(server()).get(draftUrl(scope)).set(as(scope.owner)).expect(200);
+      expect(draft.body.data).toMatchObject({
+        status: 'AT_RISK',
+        title: 'Heating repair is holding up 4B',
+        summary: 'The lease renewal waits on the heating repair.',
+        nextSteps: 'Book the repair; send the renewal Friday.',
+        rule: { id, name: 'Triage' },
+      });
+      // A draft is not the project's status.
+      expect(await context.prisma.projectStatusUpdate.count()).toBe(0);
+
+      const notice = await context.prisma.notification.findFirstOrThrow({
+        where: { userId: scope.owner.userId, title: { startsWith: 'AI drafted' } },
+      });
+      expect(notice.actionUrl).toBe(`/projects/${scope.projectId}`);
+      expect((await execution(id)).logs[0]?.message).toBe(
+        'AI drafted “Heating repair is holding up 4B” (At risk) for review.',
+      );
+    });
+
+    it('is cleared by posting any update, or discarded on request', async () => {
+      const scope = await setupScope();
+      const id = await rule([draftUpdate()], scope);
+      replies.push([drafted], [drafted]);
+
+      await run(scope, id);
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/status-updates`))
+        .set(as(scope.owner))
+        .send({ status: 'ON_TRACK', title: 'All good after all' })
+        .expect(201);
+      expect((await request(server()).get(draftUrl(scope)).set(as(scope.owner))).body.data).toBe(
+        null,
+      );
+
+      await run(scope, id);
+      await request(server()).delete(draftUrl(scope)).set(as(scope.owner)).expect(204);
+      expect((await request(server()).get(draftUrl(scope)).set(as(scope.owner))).body.data).toBe(
+        null,
+      );
+    });
+
+    it('runs on a schedule with no tasks', async () => {
+      const scope = await setupScope();
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set(as(scope.owner))
+        .send({
+          name: 'Friday update',
+          triggerType: 'SCHEDULED_TIME',
+          triggerConfig: { ...DEFAULT_SCHEDULE, scope: 'NONE' },
+          nodes: [
+            {
+              nodeType: 'TRIGGER',
+              subtype: 'SCHEDULED_TIME',
+              configuration: { ...DEFAULT_SCHEDULE, scope: 'NONE' },
+            },
+            draftUpdate(),
+          ],
+        })
+        .expect(201);
+      const id = created.body.data.id as string;
+      await request(server())
+        .post(`${rulesUrl(scope)}/${id}/publish`)
+        .set(as(scope.owner))
+        .expect(200);
+      replies.push([drafted]);
+
+      await runner.handle({
+        eventId: randomUUID(),
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        trigger: 'SCHEDULED_TIME',
+        entityType: 'PROJECT',
+        entityId: scope.projectId,
+        actorId: null,
+        correlationId: randomUUID(),
+        depth: 0,
+        ruleId: id,
+      } as AutomationEvent);
+
+      expect((await execution(id)).status).toBe('COMPLETED');
+      expect(await context.prisma.projectStatusDraft.count()).toBe(1);
+    });
+
+    it('refuses a status a draft may not take, keeping nothing', async () => {
+      const scope = await setupScope();
+      const id = await rule([draftUpdate()], scope);
+      replies.push([{ ...drafted, input: { ...drafted.input, status: 'COMPLETE' } }]);
+
+      await run(scope, id);
+
+      expect((await execution(id)).logs[0]?.succeeded).toBe(false);
+      expect(await context.prisma.projectStatusDraft.count()).toBe(0);
+    });
   });
 });

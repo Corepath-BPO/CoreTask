@@ -153,6 +153,16 @@ export const AutomationAction = {
   SET_TICKET_PRIORITY: 'SET_TICKET_PRIORITY',
   /** "Use AI…": a model makes the changes the step allows — see automation-ai.ts. */
   AI_ACTION: 'AI_ACTION',
+  /**
+   * "Draft an update with AI…": a status update for the project, written by a
+   * model and left as a draft for a person to review and post. Never posted
+   * by the rule. Runs in a rule with no tasks too — "every Friday, draft".
+   */
+  AI_DRAFT_UPDATE: 'AI_DRAFT_UPDATE',
+  /** A named checklist of items to tick off, added to the task. */
+  CREATE_CHECKLIST: 'CREATE_CHECKLIST',
+  /** Makes a team of the workspace responsible for the task, or clears it. */
+  ASSIGN_TEAM: 'ASSIGN_TEAM',
 } as const;
 export type AutomationAction = (typeof AutomationAction)[keyof typeof AutomationAction];
 export const AUTOMATION_ACTIONS = Object.values(AutomationAction);
@@ -185,6 +195,9 @@ export const ACTION_LABEL: Record<AutomationAction, string> = {
   SET_TICKET_STATUS: 'Set the ticket status',
   SET_TICKET_PRIORITY: 'Set the ticket priority',
   AI_ACTION: 'Use AI',
+  AI_DRAFT_UPDATE: 'Draft an update with AI',
+  CREATE_CHECKLIST: 'Add a checklist',
+  ASSIGN_TEAM: 'Assign a team',
 };
 
 /**
@@ -236,9 +249,47 @@ export function emailRecipientsOf(
  *
  * Named here so the builder can grey them out honestly rather than omitting
  * them and leaving someone to wonder, and so adding one later is a change in
- * one place.
+ * one place. Empty since checklists and teams were built.
  */
-export const PLANNED_ACTIONS = ['CREATE_CHECKLIST', 'ASSIGN_TEAM'] as const;
+export const PLANNED_ACTIONS: readonly string[] = [];
+
+// ---------------------------------------------------------------------------
+// Checklists
+// ---------------------------------------------------------------------------
+
+/** How many checklists one task holds. */
+export const MAX_CHECKLISTS_PER_TASK = 20;
+/** How many items one checklist holds — and one "Add a checklist" step writes. */
+export const MAX_CHECKLIST_ITEMS = 50;
+export const CHECKLIST_NAME_MAX = 200;
+export const CHECKLIST_ITEM_MAX = 500;
+
+/**
+ * The checklist an "Add a checklist" step adds: its name, and its items in
+ * order.
+ *
+ * Read the one way everywhere — the runner writing them, the validator
+ * refusing an empty step, the builder's card — so a step cannot publish with
+ * items the runner then reads as none. Blank rows are dropped rather than
+ * refused (the form keeps them while somebody types), and both the rows and
+ * their text are capped where the columns are.
+ */
+export function checklistOf(configuration: Record<string, unknown>): {
+  name: string;
+  items: string[];
+} {
+  const name = typeof configuration['name'] === 'string' ? configuration['name'].trim() : '';
+  const raw = Array.isArray(configuration['items']) ? configuration['items'] : [];
+
+  return {
+    name: name.slice(0, CHECKLIST_NAME_MAX),
+    items: raw
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => item !== '')
+      .map((item) => item.slice(0, CHECKLIST_ITEM_MAX))
+      .slice(0, MAX_CHECKLIST_ITEMS),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The rule library
@@ -285,8 +336,26 @@ export const AUTOMATION_TEMPLATE_REFERENCE_KIND_LABEL: Record<
  */
 export const MAX_AUTOMATION_DEPTH = 5;
 
-/** How many actions one execution may perform. */
+/**
+ * How many actions one execution may perform.
+ *
+ * Publishing refuses a rule that could reach more in one go, and a run that
+ * still gets here — a rule written before the check — runs the first this many
+ * and logs every step after them as not run, rather than dropping them quietly.
+ */
 export const MAX_ACTIONS_PER_EXECUTION = 25;
+
+/**
+ * How many actions one chain of rules may perform between them.
+ *
+ * A chain is everything descended from one event: the rules it set off, the
+ * rules their changes set off, and so on. `MAX_AUTOMATION_DEPTH` bounds how
+ * deep that goes and `MAX_ACTIONS_PER_EXECUTION` how much one run does, and
+ * neither bounds the total — five hops of twenty-five actions each is 125
+ * writes from one click, within both. This does. Steps past it are logged as
+ * not run, and a run with none left is skipped with the reason.
+ */
+export const MAX_ACTIONS_PER_CHAIN = 100;
 
 /** The most subtasks one CREATE_SUBTASK action creates per run. */
 export const MAX_SUBTASKS_PER_ACTION = 20;
@@ -377,6 +446,17 @@ export function subtaskEntries(configuration: Record<string, unknown>): SubtaskE
 /** The titles alone, for the places that only count or name them. */
 export function subtaskTitles(configuration: Record<string, unknown>): string[] {
   return subtaskEntries(configuration).map((entry) => entry.title);
+}
+
+/**
+ * Asana's "Let AI decide the number of subtasks to create".
+ *
+ * The step's list stays the author's: AI reads the task and keeps the rows it
+ * needs, in the list's order, with their own assignees and dates. It never
+ * writes a subtask of its own — that is what a "Use AI…" step may do.
+ */
+export function aiDecidesSubtasks(configuration: Record<string, unknown>): boolean {
+  return configuration['aiDecides'] === true;
 }
 
 /** Something wrong with a subtask row, and whether it is merely unfinished. */

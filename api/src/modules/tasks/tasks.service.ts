@@ -11,6 +11,7 @@ import {
   APPROVAL_STATUS_LABEL,
   TASK_KIND_LABEL,
   approvalCompletes,
+  type StoryRef,
 } from '@coretask/contracts';
 import type {
   Task,
@@ -46,6 +47,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
+import { ProjectActivityNotifier } from '../../integrations/notifications/project-activity.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -98,6 +100,7 @@ export class TasksService {
     private readonly followers: FollowersService,
     private readonly followerNotifier: FollowerNotifier,
     private readonly formulas: FormulaValuesService,
+    private readonly projectNotifier: ProjectActivityNotifier,
   ) {}
 
   async list(
@@ -154,6 +157,7 @@ export class TasksService {
       archivedAt: null,
       // Subtasks belong under their parent, not as sibling rows in a list.
       parentTaskId: null,
+      parentTicketId: null,
       ...(query.search
         ? { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }
         : {}),
@@ -241,11 +245,20 @@ export class TasksService {
       },
       select: { id: true },
     });
+    // A ticket row expands the same way: its subtasks are tasks too.
+    const ticket = parent
+      ? null
+      : await this.prisma.ticket.findFirst({
+          where: { id: parentTaskId, workspaceId, projectId },
+          select: { id: true },
+        });
 
-    if (!parent) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
+    if (!parent && !ticket) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
 
     const subtasks = await this.prisma.task.findMany({
-      where: { parentTaskId, workspaceId, archivedAt: null },
+      where: ticket
+        ? { parentTicketId: ticket.id, workspaceId, archivedAt: null }
+        : { parentTaskId, workspaceId, archivedAt: null },
       include: taskInclude,
       // The same tail the view uses, so an expanded row is ordered the way its
       // siblings are and two equal positions never swap between reads.
@@ -344,7 +357,21 @@ export class TasksService {
 
   async create(workspaceId: string, actor: ActorContext, dto: CreateTaskDto): Promise<Task> {
     const { userId } = actor;
-    const placement = await this.resolvePlacement(workspaceId, actor, dto);
+    if (dto.parentTaskId && dto.parentTicketId) {
+      throw AppException.badRequest('BAD_REQUEST', 'A subtask has one parent: a task or a ticket.');
+    }
+
+    /*
+     * A ticket's subtask lives where the ticket does — its project, so a
+     * private project's ticket keeps its checklist private — in no section,
+     * since it is not a card on the board but a line under the ticket.
+     */
+    const parentTicket = dto.parentTicketId
+      ? await this.requireTicketForSubtask(workspaceId, dto.parentTicketId, actor)
+      : null;
+    const placement = parentTicket
+      ? { projectId: parentTicket.projectId, sectionId: null }
+      : await this.resolvePlacement(workspaceId, actor, dto);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
     await this.assertAssigneeCanSee(workspaceId, placement.projectId, dto.assigneeId);
 
@@ -363,6 +390,7 @@ export class TasksService {
       placement.sectionId,
       placement.projectId,
       dto.parentTaskId ?? null,
+      parentTicket?.id ?? null,
     );
 
     if (dto.afterTaskId) {
@@ -383,6 +411,7 @@ export class TasksService {
           projectId: placement.projectId,
           sectionId: placement.sectionId,
           parentTaskId: dto.parentTaskId ?? null,
+          parentTicketId: parentTicket?.id ?? null,
           title: dto.title,
           description: normalizeRichText(dto.description) ?? null,
           status,
@@ -414,6 +443,19 @@ export class TasksService {
       summary: `Created task "${created.title}"`,
       metadata: { projectId: created.projectId, sectionId: created.sectionId },
     });
+
+    if (parentTicket) {
+      await this.activity.record({
+        workspaceId,
+        actorId: userId,
+        action: ActivityAction.UPDATED,
+        entity: ActivityEntity.TICKET,
+        entityId: parentTicket.id,
+        projectId: parentTicket.projectId,
+        summary: `Added subtask "${created.title}"`,
+        metadata: { subtaskId: created.id },
+      });
+    }
 
     // The parent's feed says a subtask arrived; the subtask's own line above
     // says it was created. Two readers, two lines.
@@ -448,6 +490,15 @@ export class TasksService {
       });
     }
 
+    // Members who asked to hear of new tasks; a subtask is its parent's business.
+    if (created.projectId && !parent) {
+      await this.projectNotifier.itemAdded(
+        taskRef(workspaceId, created),
+        created.projectId,
+        userId,
+      );
+    }
+
     await this.notifyAssignment(workspaceId, userId, created, null);
     await this.mentions.notify({
       workspaceId,
@@ -474,6 +525,7 @@ export class TasksService {
     const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
     await this.assertAssigneeCanSee(workspaceId, existing.projectId, dto.assigneeId);
+    await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const data: Prisma.TaskUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
@@ -510,6 +562,9 @@ export class TasksService {
     if (due.at !== undefined) data.dueAt = due.at;
     if (dto.assigneeId !== undefined) {
       data.assignee = dto.assigneeId ? { connect: { id: dto.assigneeId } } : { disconnect: true };
+    }
+    if (dto.teamId !== undefined) {
+      data.team = dto.teamId ? { connect: { id: dto.teamId } } : { disconnect: true };
     }
 
     if (dto.status !== undefined) {
@@ -566,8 +621,14 @@ export class TasksService {
      * cannot describe — the estimate, say — still leaves the plain line.
      */
     const stories = diffItemStories(
-      snapshotFromTask(existing, await this.refsFor(existing.assigneeId, updated.assignee)),
-      snapshotFromTask(updated, { assignee: this.assigneeRef(updated.assignee) }),
+      snapshotFromTask(existing, {
+        ...(await this.refsFor(existing.assigneeId, updated.assignee)),
+        team: await this.teamRef(existing.teamId, updated.team),
+      }),
+      snapshotFromTask(updated, {
+        assignee: this.assigneeRef(updated.assignee),
+        team: updated.team ? { id: updated.team.id, label: updated.team.name } : null,
+      }),
       'task',
     );
     const context = {
@@ -623,7 +684,19 @@ export class TasksService {
     if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
       await this.followers.ensure(workspaceId, taskLink(updated.id), [updated.assigneeId]);
     }
-    await this.followerNotifier.notifyStories(taskRef(workspaceId, updated), userId, stories);
+    const told = await this.followerNotifier.notifyStories(
+      taskRef(workspaceId, updated),
+      userId,
+      stories,
+    );
+    if (updated.projectId && existing.completedAt === null && updated.completedAt !== null) {
+      await this.projectNotifier.itemCompleted(
+        taskRef(workspaceId, updated),
+        updated.projectId,
+        userId,
+        told,
+      );
+    }
 
     /*
      * Announced after the write has landed, never before: a rule must react to
@@ -1118,7 +1191,7 @@ export class TasksService {
           : []),
       ],
       ...(query.includeArchived ? {} : { archivedAt: null }),
-      ...(query.includeSubtasks ? {} : { parentTaskId: null }),
+      ...(query.includeSubtasks ? {} : { parentTaskId: null, parentTicketId: null }),
       ...(query.sectionId ? { sectionId: query.sectionId } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(assigneeId ? { assigneeId } : {}),
@@ -1206,13 +1279,20 @@ export class TasksService {
     sectionId: string | null | undefined,
     projectId: string | null,
     parentTaskId: string | null,
+    parentTicketId: string | null = null,
   ): Promise<OrderedItem[]> {
     return this.prisma.task.findMany({
       where: {
         workspaceId,
         archivedAt: null,
-        parentTaskId,
-        ...(sectionId ? { sectionId } : { sectionId: null, projectId }),
+        // A ticket's subtasks are one list, whatever project or section.
+        ...(parentTicketId
+          ? { parentTicketId }
+          : {
+              parentTaskId,
+              parentTicketId: null,
+              ...(sectionId ? { sectionId } : { sectionId: null, projectId }),
+            }),
       },
       orderBy: { position: 'asc' },
       select: { id: true, position: true },
@@ -1269,6 +1349,25 @@ export class TasksService {
     return task;
   }
 
+  /**
+   * The ticket a new subtask goes under: in this workspace, visible to the
+   * caller, open, and in a project the caller may add work to.
+   */
+  private async requireTicketForSubtask(
+    workspaceId: string,
+    ticketId: string,
+    actor: ActorContext,
+  ): Promise<{ id: string; projectId: string | null }> {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId, archivedAt: null, AND: [this.access.scopedWhere(actor)] },
+      select: { id: true, projectId: true },
+    });
+    if (!ticket) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Ticket not found.');
+
+    await this.access.assertEffectiveRole(ticket.projectId, actor, WorkspaceRole.MEMBER);
+    return ticket;
+  }
+
   private async requireSection(workspaceId: string, sectionId: string) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, workspaceId },
@@ -1310,6 +1409,40 @@ export class TasksService {
     return {
       assignee: user ? this.assigneeRef(user) : { id: previousAssigneeId, label: 'Someone' },
     };
+  }
+
+  /** A team as a story names it — the one just loaded when it is the same team. */
+  private async teamRef(
+    teamId: string | null,
+    current: { id: string; name: string } | null,
+  ): Promise<StoryRef | null> {
+    if (!teamId) return null;
+    if (current?.id === teamId) return { id: current.id, label: current.name };
+
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true, name: true },
+    });
+    return { id: teamId, label: team?.name ?? 'a team that was removed' };
+  }
+
+  /**
+   * A team of this workspace, or nothing. An id from another workspace is
+   * refused as missing, not as forbidden — the same as every other lookup.
+   */
+  private async assertTeamInWorkspace(
+    workspaceId: string,
+    teamId: string | null | undefined,
+  ): Promise<void> {
+    if (!teamId) return;
+
+    const team = await this.prisma.team.findFirst({
+      where: { id: teamId, workspaceId },
+      select: { id: true },
+    });
+    if (!team) {
+      throw AppException.badRequest('BAD_REQUEST', 'That team is not in this workspace.');
+    }
   }
 
   private async assertAssigneeIsMember(

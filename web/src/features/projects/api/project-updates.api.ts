@@ -4,6 +4,7 @@ import type {
   PostStatusUpdatePayload,
   ProjectFile,
   ProjectMessage,
+  ProjectStatusDraft,
   ProjectStatusUpdate,
   StatusRequestResult,
 } from '@coretask/types';
@@ -21,6 +22,13 @@ export const projectUpdatesApi = {
 
   requestStatusUpdate: (workspaceId: string, projectId: string): Promise<StatusRequestResult> =>
     apiClient.post<StatusRequestResult>(routes.requestStatus(workspaceId, projectId)),
+
+  /** The update a rule's AI step drafted, waiting to be posted; null for none. */
+  statusDraft: (workspaceId: string, projectId: string): Promise<ProjectStatusDraft | null> =>
+    apiClient.get<ProjectStatusDraft | null>(routes.statusDraft(workspaceId, projectId)),
+
+  discardStatusDraft: (workspaceId: string, projectId: string): Promise<void> =>
+    apiClient.delete<void>(routes.statusDraft(workspaceId, projectId)),
   postStatusUpdate: (
     workspaceId: string,
     projectId: string,

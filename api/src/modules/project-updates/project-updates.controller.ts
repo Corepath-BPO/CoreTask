@@ -1,6 +1,7 @@
 import type {
   ProjectFile,
   ProjectMessage,
+  ProjectStatusDraft,
   ProjectStatusUpdate,
   StatusRequestResult,
 } from '@coretask/types';
@@ -99,6 +100,33 @@ export class ProjectUpdatesController {
     @Actor() actor: ActorContext,
   ): Promise<StatusRequestResult> {
     return this.updates.requestStatusUpdate(workspaceId, projectId, actor);
+  }
+
+  @Get('projects/:projectId/status-draft')
+  @ApiParam({ name: 'projectId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'The status update a rule’s AI step drafted, waiting to be posted',
+    description:
+      'Null when there is none. For those who may post an update. Posting any update clears it.',
+  })
+  getStatusDraft(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<ProjectStatusDraft | null> {
+    return this.updates.getStatusDraft(workspaceId, projectId, actor);
+  }
+
+  @Delete('projects/:projectId/status-draft')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiParam({ name: 'projectId', format: 'uuid' })
+  @ApiOperation({ summary: 'Discard the drafted status update without posting it' })
+  discardStatusDraft(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<void> {
+    return this.updates.discardStatusDraft(workspaceId, projectId, actor);
   }
 
   @Delete('projects/:projectId/status-updates/:updateId')

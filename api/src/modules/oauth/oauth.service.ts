@@ -4,6 +4,7 @@ import {
   OAUTH_CODE_TTL_SECONDS,
   OAUTH_REFRESH_TOKEN_PREFIX,
   OAUTH_SCOPE_DESCRIPTION,
+  OAuthAppPolicy,
   type OAuthScope,
 } from '@coretask/contracts';
 import type {
@@ -56,7 +57,8 @@ export interface TokenRequest {
 
 export interface ClientCredentials {
   clientId: string;
-  clientSecret: string;
+  /** Null when only the id was sent — which only a public client may do. */
+  clientSecret: string | null;
 }
 
 const text = (value: unknown): string | null =>
@@ -65,11 +67,13 @@ const text = (value: unknown): string | null =>
 /**
  * The OAuth 2.0 authorization server: consent, codes, tokens and revocation.
  *
- * Confidential clients only — every exchange presents the client secret — with
- * PKCE on top when the app sends a challenge. Refresh tokens are long-lived and
- * not rotated, as Asana's are, so a connector that loses a refresh response is
- * not locked out; they end when the person disconnects the app, the developer
- * deletes it, or the app revokes them.
+ * A confidential client presents its secret on every exchange, with PKCE on
+ * top when it sends a challenge; its refresh tokens are long-lived and not
+ * rotated, as Asana's are, so a connector that loses a refresh response is not
+ * locked out. A public client has no secret: it must send a PKCE challenge on
+ * every authorization, and each refresh replaces its refresh token (RFC 9700
+ * §4.14), so a stolen one is good once. Either way they end when the person
+ * disconnects the app, the developer deletes it, or the app revokes them.
  */
 @Injectable()
 export class OAuthService {
@@ -78,8 +82,18 @@ export class OAuthService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** What the consent page shows, after checking the request is one CoreTask will honour. */
-  async consent(input: AuthorizationRequest): Promise<OAuthConsent> {
+  async consent(userId: string, input: AuthorizationRequest): Promise<OAuthConsent> {
     const app = await this.checkRequest(input);
+    const blockedWorkspaces = await this.prisma.workspace.findMany({
+      where: {
+        archivedAt: null,
+        oauthAppPolicy: OAuthAppPolicy.APPROVED,
+        members: { some: { userId } },
+        oauthApps: { none: { appId: app.id } },
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
     return {
       app: {
         name: app.name,
@@ -91,7 +105,10 @@ export class OAuthService {
         scope,
         description: OAUTH_SCOPE_DESCRIPTION[scope],
       })),
-      redirectHost: new URL(input.redirectUri).host,
+      // An app scheme has no host: name the scheme, which is the app.
+      redirectHost:
+        new URL(input.redirectUri).host || new URL(input.redirectUri).protocol.replace(/:$/, ''),
+      blockedWorkspaces,
     };
   }
 
@@ -136,9 +153,9 @@ export class OAuthService {
 
     switch (text(body.grant_type)) {
       case 'authorization_code':
-        return this.exchangeCode(app.id, body);
+        return this.exchangeCode(app, body);
       case 'refresh_token':
-        return this.refresh(app.id, body);
+        return this.refresh(app, body);
       case null:
         throw new OAuthProtocolError('invalid_request', 'grant_type is required.');
       default:
@@ -249,7 +266,11 @@ export class OAuthService {
     ]);
   }
 
-  private async exchangeCode(appId: string, body: TokenRequest): Promise<OAuthTokenResponse> {
+  private async exchangeCode(
+    app: { id: string; isPublic: boolean },
+    body: TokenRequest,
+  ): Promise<OAuthTokenResponse> {
+    const appId = app.id;
     const code = text(body.code);
     const redirectUri = text(body.redirect_uri);
     if (!code || !redirectUri) {
@@ -283,6 +304,11 @@ export class OAuthService {
         'invalid_grant',
         'redirect_uri must be the one the code was sent to.',
       );
+    }
+    // A public client's only proof is the verifier; its codes always carry a
+    // challenge, so one without is refused rather than trusted.
+    if (app.isPublic && !row.codeChallenge) {
+      throw new OAuthProtocolError('invalid_grant', 'A public client must use PKCE.');
     }
     if (row.codeChallenge) {
       const verifier = text(body.code_verifier);
@@ -327,7 +353,11 @@ export class OAuthService {
     };
   }
 
-  private async refresh(appId: string, body: TokenRequest): Promise<OAuthTokenResponse> {
+  private async refresh(
+    app: { id: string; isPublic: boolean },
+    body: TokenRequest,
+  ): Promise<OAuthTokenResponse> {
+    const appId = app.id;
     const refreshToken = text(body.refresh_token);
     if (!refreshToken)
       throw new OAuthProtocolError('invalid_request', 'refresh_token is required.');
@@ -357,8 +387,23 @@ export class OAuthService {
       where: { grantId: grant.id, expiresAt: { lte: new Date() } },
     });
 
+    // A public client's refresh token is replaced on use, compare-and-swap so
+    // two refreshes racing the same token cannot both get a new one.
+    let rotated: string | null = null;
+    if (app.isPublic) {
+      rotated = generateToken(OAUTH_REFRESH_TOKEN_PREFIX);
+      const swapped = await this.prisma.oAuthGrant.updateMany({
+        where: { id: grant.id, refreshTokenHash: hashToken(refreshToken), revokedAt: null },
+        data: { refreshTokenHash: hashToken(rotated) },
+      });
+      if (swapped.count === 0) {
+        throw new OAuthProtocolError('invalid_grant', 'The refresh token was already used.');
+      }
+    }
+
     return {
       ...(await this.issueAccessToken(grant.id)),
+      ...(rotated ? { refresh_token: rotated } : {}),
       scope: grant.scopes.join(' '),
       user: { id: grant.user.id, name: grant.user.name, email: grant.user.email },
     };
@@ -382,8 +427,14 @@ export class OAuthService {
     };
   }
 
-  /** The client id and secret, checked in constant time. 401 `invalid_client` otherwise. */
-  private async authenticateClient(client: ClientCredentials | null): Promise<{ id: string }> {
+  /**
+   * The client id and, for a confidential client, its secret, checked in
+   * constant time. A public client sends its id alone — it has no secret —
+   * and proves itself with PKCE instead. 401 `invalid_client` otherwise.
+   */
+  private async authenticateClient(
+    client: ClientCredentials | null,
+  ): Promise<{ id: string; isPublic: boolean }> {
     if (!client) {
       throw new OAuthProtocolError(
         'invalid_client',
@@ -393,12 +444,17 @@ export class OAuthService {
     }
     const app = await this.prisma.oAuthApp.findUnique({
       where: { clientId: client.clientId },
-      select: { id: true, clientSecretHash: true },
+      select: { id: true, isPublic: true, clientSecretHash: true },
     });
-    if (!app || !sameHash(app.clientSecretHash, hashToken(client.clientSecret))) {
+    if (app?.isPublic) return { id: app.id, isPublic: true };
+    if (
+      !app?.clientSecretHash ||
+      !client.clientSecret ||
+      !sameHash(app.clientSecretHash, hashToken(client.clientSecret))
+    ) {
       throw new OAuthProtocolError('invalid_client', 'The client id or secret is wrong.', 401);
     }
-    return { id: app.id };
+    return { id: app.id, isPublic: false };
   }
 
   /**
@@ -415,6 +471,7 @@ export class OAuthService {
         description: true,
         websiteUrl: true,
         redirectUris: true,
+        isPublic: true,
         owner: { select: { name: true } },
       },
     });
@@ -426,6 +483,12 @@ export class OAuthService {
       throw AppException.badRequest(
         'OAUTH_INVALID_REQUEST',
         'Only the authorization-code flow (response_type=code) is supported.',
+      );
+    }
+    if (app.isPublic && !input.codeChallenge) {
+      throw AppException.badRequest(
+        'OAUTH_INVALID_REQUEST',
+        'This app is a public client: send a PKCE code_challenge with code_challenge_method=S256.',
       );
     }
     if (input.codeChallenge && input.codeChallengeMethod !== 'S256') {

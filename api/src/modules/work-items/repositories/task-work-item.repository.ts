@@ -98,6 +98,7 @@ export class TaskWorkItemRepository {
       // project of two hundred tasks would otherwise ship every child nobody
       // looked at.
       parentTaskId: null,
+      parentTicketId: null,
       ...(query.includeArchived ? {} : { archivedAt: null }),
       ...(query.showCompleted === false ? { completedAt: null } : {}),
       ...(query.search

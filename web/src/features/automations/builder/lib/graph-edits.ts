@@ -3,6 +3,7 @@ import {
   FALLBACK_CONFIG_KEY,
   PLACEHOLDER_NODE_TYPE,
   defaultPosition,
+  isConditionGroup,
   isFallbackBranch,
 } from '@coretask/contracts';
 import type { AutomationNodeType } from '@coretask/contracts';
@@ -53,6 +54,11 @@ export interface GraphEdits {
    * step lands.
    */
   reparented: Record<string, { parentId: string | null; branchKey: string | null }>;
+  /**
+   * Steps given a new place among their siblings — branch rows dragged into a
+   * different order. Only `order` changes; what follows what is untouched.
+   */
+  reordered: Record<string, number>;
 }
 
 /**
@@ -90,7 +96,65 @@ export const NO_EDITS: GraphEdits = {
   configured: {},
   retyped: {},
   reparented: {},
+  reordered: {},
 };
+
+/**
+ * The id a step has once saved.
+ *
+ * A step the builder adds is `new-<uuid>`, and the server stores it as the
+ * uuid — so the panel open on it, and any edit made to it while the save was
+ * out, can follow it across the save instead of naming a step that is gone.
+ */
+export function savedId(id: string): string {
+  return id.startsWith('new-') ? id.slice('new-'.length) : id;
+}
+
+/**
+ * The edits still unsaved once a save has landed.
+ *
+ * Autosave runs while somebody is typing, so a save often lands with newer
+ * edits on top of the ones it sent. Keeping everything would add the sent new
+ * steps a second time over the saved copies; dropping everything would lose
+ * the keystrokes after the snapshot. So what the save carried is taken out —
+ * an entry still equal to what was sent is now on the server — and what
+ * changed since stays, with the steps the save created called by their saved
+ * ids.
+ */
+export function rebaseEdits(current: GraphEdits, sent: GraphEdits): GraphEdits {
+  if (current === sent) return NO_EDITS;
+
+  const created = new Set(sent.added.map((node) => node.id));
+  const rename = (id: string) => (created.has(id) ? savedId(id) : id);
+  const renameParent = (id: string | null) => (id === null ? null : rename(id));
+
+  const newer = <T>(entries: Record<string, T>, before: Record<string, T>, same = sameValue) =>
+    Object.fromEntries(
+      Object.entries(entries)
+        .filter(([id, value]) => !(id in before) || !same(before[id], value))
+        .map(([id, value]) => [rename(id), value]),
+    );
+
+  return {
+    added: current.added
+      .filter((node) => !created.has(node.id))
+      .map((node) => ({ ...node, parentId: renameParent(node.parentId) })),
+    removed: current.removed.filter((id) => !sent.removed.includes(id)).map(rename),
+    configured: newer(current.configured, sent.configured, (a, b) => a === b),
+    retyped: newer(current.retyped, sent.retyped),
+    reparented: Object.fromEntries(
+      Object.entries(newer(current.reparented, sent.reparented)).map(([id, place]) => [
+        id,
+        { ...place, parentId: renameParent(place.parentId) },
+      ]),
+    ),
+    reordered: newer(current.reordered, sent.reordered),
+  };
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 export function hasEdits(edits: GraphEdits): boolean {
   return (
@@ -98,7 +162,8 @@ export function hasEdits(edits: GraphEdits): boolean {
     edits.removed.length > 0 ||
     Object.keys(edits.configured).length > 0 ||
     Object.keys(edits.retyped).length > 0 ||
-    Object.keys(edits.reparented).length > 0
+    Object.keys(edits.reparented).length > 0 ||
+    Object.keys(edits.reordered).length > 0
   );
 }
 
@@ -111,6 +176,7 @@ export function applyEdits(serverNodes: readonly CanvasNode[], edits: GraphEdits
     subtype: edits.retyped[node.id] ?? node.subtype,
     configuration: edits.configured[node.id] ?? node.configuration,
     ...(edits.reparented[node.id] ?? {}),
+    order: edits.reordered[node.id] ?? node.order,
   });
 
   const kept = serverNodes.filter((node) => !removed.has(node.id)).map(overlay);
@@ -247,6 +313,48 @@ export function branchRows(nodes: readonly CanvasNode[]): CanvasNode[] {
     .sort((a, b) => a.order - b.order);
 }
 
+/**
+ * The order values that put one branch row at a new place among the others.
+ *
+ * The rows are the trigger's alternatives, tried top to bottom with the first
+ * that holds winning, so their order is what the rule means — and dragging one
+ * is how somebody changes which question is asked first. The fallback is not
+ * among them: it runs when nothing above it held, so it stays last, and a row
+ * cannot be moved below it.
+ *
+ * The rows' existing order values are dealt out again in the new sequence
+ * rather than renumbered, so a row keeps its place relative to anything else
+ * hanging off the trigger. Only the rows whose value changes are returned.
+ */
+export function moveBranchRow(
+  nodes: readonly CanvasNode[],
+  rowId: string,
+  toIndex: number,
+): GraphEdits['reordered'] {
+  const fallback = fallbackRow(nodes);
+  const rows = branchRows(nodes).filter((row) => row.id !== fallback?.id);
+
+  const from = rows.findIndex((row) => row.id === rowId);
+  if (from < 0) return {};
+
+  const target = Math.max(0, Math.min(rows.length - 1, toIndex));
+  if (target === from) return {};
+
+  const sequence = [...rows];
+  const [moved] = sequence.splice(from, 1);
+  sequence.splice(target, 0, moved as CanvasNode);
+
+  const slots = rows.map((row) => row.order).sort((a, b) => a - b);
+  const result: GraphEdits['reordered'] = {};
+
+  sequence.forEach((row, index) => {
+    const order = slots[index] as number;
+    if (row.order !== order) result[row.id] = order;
+  });
+
+  return result;
+}
+
 /** The row that runs when nothing else matched, if the rule has one. */
 export function fallbackRow(nodes: readonly CanvasNode[]): CanvasNode | null {
   return branchRows(nodes).find((node) => isFallbackBranch(node.configuration)) ?? null;
@@ -265,6 +373,9 @@ export function fallbackRow(nodes: readonly CanvasNode[]): CanvasNode | null {
  */
 export function isUnansweredRow(node: CanvasNode): boolean {
   if (node.type !== 'CONDITION' || isFallbackBranch(node.configuration)) return false;
+  // A group has been answered with more than one question; what each asks is
+  // the panel's to show, not the catalogue's.
+  if (isConditionGroup(node.configuration)) return false;
 
   const field = node.configuration['field'];
 

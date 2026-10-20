@@ -15,6 +15,20 @@ export interface AuthUser {
   outOfOffice: OutOfOffice | null;
 }
 
+/**
+ * The answer to "send me a new confirmation link". `sent` is false when the
+ * address is already confirmed, or when a link went out under a minute ago.
+ */
+export interface ResendVerificationResult {
+  sent: boolean;
+  emailVerified: boolean;
+}
+
+/** The address a confirmation link confirmed. */
+export interface VerifyEmailResult {
+  email: string;
+}
+
 /** Calendar days, both ends inclusive, as `yyyy-mm-dd`. */
 export interface OutOfOffice {
   from: string;

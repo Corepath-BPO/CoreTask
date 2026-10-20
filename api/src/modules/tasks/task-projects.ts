@@ -38,11 +38,22 @@ export async function taskSiblingsIn(
 ): Promise<{ id: string; position: number; linked: boolean }[]> {
   const [home, linked] = await Promise.all([
     db.task.findMany({
-      where: { workspaceId, projectId, sectionId, archivedAt: null, parentTaskId: null },
+      where: {
+        workspaceId,
+        projectId,
+        sectionId,
+        archivedAt: null,
+        parentTaskId: null,
+        parentTicketId: null,
+      },
       select: { id: true, position: true },
     }),
     db.taskProject.findMany({
-      where: { projectId, sectionId, task: { workspaceId, archivedAt: null, parentTaskId: null } },
+      where: {
+        projectId,
+        sectionId,
+        task: { workspaceId, archivedAt: null, parentTaskId: null, parentTicketId: null },
+      },
       select: { taskId: true, position: true },
     }),
   ]);

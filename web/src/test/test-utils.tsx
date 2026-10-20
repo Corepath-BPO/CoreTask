@@ -116,12 +116,26 @@ export async function renderWithRouter(
     path: '/reset-password',
     component,
   });
+  // Where a confirmation link lands, and where its failure page sends a
+  // signed-in person for a new one.
+  const verifyEmailRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/verify-email',
+    component,
+  });
+  const settingsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/settings',
+    component: () => <div>settings</div>,
+  });
 
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
       guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
       resetPasswordRoute,
+      verifyEmailRoute,
+      settingsRoute,
       projectsRoute,
       projectDetailRoute,
       acceptInvitationRoute,

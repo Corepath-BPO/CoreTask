@@ -38,6 +38,7 @@ import {
   type DefinitionReference,
   type ReferenceKind,
 } from './automation-definition.references';
+import { compileDefinition } from './automation-definition.compiler';
 import { convertLegacyRule } from './automation-legacy.converter';
 
 /**
@@ -247,6 +248,27 @@ export class AutomationDefinitionService {
 
     this.refuseIf(issues, 'This rule is not ready to publish.');
 
+    /*
+     * The runner executes one shape, the node tree a version keeps, so the
+     * draft is compiled into it here and the version carries both. Without
+     * this the rule would go live pointing at a version with nothing in it to
+     * run. What cannot be compiled faithfully is refused rather than run as
+     * something else.
+     */
+    const compiled = compileDefinition(definition, randomUUID);
+    if (compiled.problems.length > 0) {
+      this.refuseIf(
+        compiled.problems.map((message) => ({
+          level: GraphIssueLevel.ERROR,
+          nodeId: null,
+          path: null,
+          message,
+          blocksDraft: false,
+        })),
+        'This rule is not ready to publish.',
+      );
+    }
+
     const published = await this.prisma
       .$transaction(async (tx) => {
         const fresh = await tx.automationRule.findUniqueOrThrow({ where: { id: rule.id } });
@@ -258,10 +280,25 @@ export class AutomationDefinitionService {
           );
         }
 
+        await tx.automationRuleVersion.update({
+          where: { id: draft.id },
+          data: { nodes: compiled.nodes as unknown as Prisma.InputJsonValue, name: rule.name },
+        });
+
+        /*
+         * The next number free, rather than the draft's plus one: the builder
+         * publishes versions of its own between these, and the two must not
+         * reach for the same number.
+         */
+        const latest = await tx.automationRuleVersion.aggregate({
+          where: { ruleId: rule.id },
+          _max: { version: true },
+        });
+
         const nextDraft = await tx.automationRuleVersion.create({
           data: {
             ruleId: rule.id,
-            version: draft.version + 1,
+            version: (latest._max.version ?? draft.version) + 1,
             triggerType: draft.triggerType,
             triggerConfig: draft.triggerConfig as Prisma.InputJsonValue,
             createdById: userId,
