@@ -6,7 +6,7 @@ import {
   OAUTH_CLIENT_TYPES,
   OAUTH_CODE_CHALLENGE_METHOD,
   OAUTH_REDIRECT_URI_MAX_LENGTH,
-  OAuthAppPolicy,
+  type OAuthAppPolicy,
   OAuthClientType,
   OAUTH_SCOPES,
   OAuthScope,
