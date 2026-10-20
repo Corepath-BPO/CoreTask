@@ -98,6 +98,12 @@ export const envSchema = z
     MICROSOFT_GRAPH_CLIENT_SECRET: optionalString,
     MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
     MAIL_FROM_ADDRESS: optionalString,
+    /*
+     * The display name beside the address. Defaulted rather than required, so
+     * it stays out of the all-or-nothing group below: a missing name is a
+     * cosmetic problem, not a broken transport.
+     */
+    MAIL_FROM_NAME: z.string().min(1).default('CoreTask'),
     MAIL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
 
     /*

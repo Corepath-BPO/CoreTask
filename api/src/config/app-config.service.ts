@@ -183,6 +183,8 @@ export class AppConfigService {
       baseUrl: normalizeGraphBaseUrl(this.env.MICROSOFT_GRAPH_BASE_URL),
       /** The mailbox mail is sent as. Must exist in the tenant. */
       fromAddress: this.env.MAIL_FROM_ADDRESS,
+      /** The display name shown beside it in an inbox. */
+      fromName: this.env.MAIL_FROM_NAME,
       timeoutMs: this.env.MAIL_CONNECTION_TIMEOUT_MS,
       enabled: Boolean(this.env.MICROSOFT_GRAPH_TENANT_ID),
     } as const;
