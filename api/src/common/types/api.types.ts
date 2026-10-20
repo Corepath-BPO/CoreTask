@@ -14,6 +14,8 @@ export interface OAuthPrincipal {
   grantId: string;
   appId: string;
   appName: string;
+  /** What the person allowed — see `OAuthScope`. */
+  scopes: string[];
 }
 
 /** Identity attached to the request by `JwtAuthGuard` — a session, an API key or an OAuth token. */

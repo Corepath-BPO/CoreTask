@@ -8,6 +8,7 @@ import {
   OAuthClientType,
   OAUTH_SCOPES,
   OAuthScope,
+  normaliseOAuthScopes,
   redirectUriProblem,
 } from '@coretask/contracts';
 import { z } from 'zod';
@@ -113,7 +114,7 @@ export const oauthAuthorizationSchema = z.object({
       z
         .array(z.enum(OAUTH_SCOPES as unknown as [string, ...string[]], 'Unknown scope.'))
         .min(1)
-        .transform((scopes) => [...new Set(scopes)]),
+        .transform((scopes) => normaliseOAuthScopes(scopes as OAuthScope[])),
     ),
   state: z.string().max(1024).nullable().optional(),
   codeChallenge: z

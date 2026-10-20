@@ -1,3 +1,4 @@
+import { oauthScopesAllowWrites } from '@coretask/contracts';
 import { type ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
@@ -7,9 +8,13 @@ import { readApiKeyHeader } from '../../modules/api-keys/lib/api-key-token';
 import { readOAuthBearer } from '../../modules/oauth/lib/oauth-token';
 import { OAuthTokenAuthService } from '../../modules/oauth/oauth-token-auth.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { READ_SCOPE_OK_KEY } from '../decorators/read-scope.decorator';
 import { SESSION_ONLY_KEY } from '../decorators/session-only.decorator';
 import { AppException } from '../exceptions/app.exception';
 import type { AuthenticatedUser, RequestWithUser } from '../types/api.types';
+
+/** What a read-only app may do: the methods that change nothing. */
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * Registered globally as `APP_GUARD`, so authentication is the default and
@@ -63,6 +68,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
       if (this.reflector.getAllAndOverride<boolean>(SESSION_ONLY_KEY, targets)) {
         throw AppException.forbidden('OAUTH_TOKEN_NOT_ALLOWED');
+      }
+
+      // A read-only app reads. Its writes are refused here, once, rather than
+      // in every handler that changes something.
+      const scopes = request.user.oauth?.scopes ?? [];
+      if (
+        !oauthScopesAllowWrites(scopes) &&
+        !READ_METHODS.has(request.method.toUpperCase()) &&
+        !this.reflector.getAllAndOverride<boolean>(READ_SCOPE_OK_KEY, targets)
+      ) {
+        throw AppException.forbidden('OAUTH_SCOPE_INSUFFICIENT');
       }
 
       return true;

@@ -74,9 +74,19 @@ refresh token; `oauth_access_tokens` hang off it.
   the webhooks it subscribed are deleted.
 - A deactivated person's tokens stop working.
 
-Scopes: one, `default`, as Asana started — everything the person can do outside
-the session-only routes. The column is an array so narrower scopes can be added
-without touching what existing apps were granted.
+Scopes, space-separated in the authorization link (`default` when absent):
+
+| Scope     | What the token may do                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `default` | Everything the person can do outside the session-only routes, as Asana started.                                           |
+| `read`    | The same reach, looking only: GET, HEAD and OPTIONS, plus subscribing and unsubscribing webhooks. Anything else is `403`. |
+
+Asking for both is asking for `default`. The read-only check is one line in
+`JwtAuthGuard`, after the session-only one, so no handler has to remember it;
+a write a read-only app may still make (only the webhook subscriptions today)
+is marked `@AllowedForReadScope()`. The consent page shows each scope's words,
+and Connected apps marks a read-only connection. The column is an array so
+further scopes can be added without touching what existing apps were granted.
 
 ## Webhook subscriptions (REST hooks)
 
@@ -114,6 +124,6 @@ an admin.
 
 ## Not built
 
-- Narrower scopes (read-only, per resource).
+- Per-resource scopes (tasks only, one project): `read` and `default` are the two kinds today.
 - An app directory: apps are found by being sent their authorize link.
 - Admin controls over which apps members may connect.

@@ -32,18 +32,33 @@ export const OAUTH_CODE_TTL_SECONDS = 600;
 export const OAUTH_AUTHORIZE_PATH = '/oauth/authorize';
 
 /**
- * What an app may ask for. One scope today, as Asana started: everything the
- * person can do outside the session-only routes. Named so a narrower one can
- * be added without changing what existing apps were granted.
+ * What an app may ask for, space-separated in the authorization link.
+ *
+ * `default` is everything the person can do outside the session-only routes,
+ * as Asana started. `read` is the same reach, looking only: an app granted it
+ * alone may read and may subscribe to webhooks — listening changes nothing —
+ * but every other write is refused with `OAUTH_SCOPE_INSUFFICIENT`. Asking for
+ * both is asking for `default`.
  */
-export const OAuthScope = { DEFAULT: 'default' } as const;
+export const OAuthScope = { DEFAULT: 'default', READ: 'read' } as const;
 export type OAuthScope = (typeof OAuthScope)[keyof typeof OAuthScope];
 export const OAUTH_SCOPES = Object.values(OAuthScope);
 
 export const OAUTH_SCOPE_DESCRIPTION: Record<OAuthScope, string> = {
   default:
     'See and change the tasks, projects, comments and fields you can reach, in every workspace you belong to. It cannot manage people, API keys or workspaces.',
+  read: 'See the tasks, projects, comments and fields you can reach, in every workspace you belong to, and hear about changes to them. It cannot change anything.',
 };
+
+/** Whether a grant's scopes let its tokens change anything. */
+export function oauthScopesAllowWrites(scopes: readonly string[]): boolean {
+  return scopes.includes(OAuthScope.DEFAULT);
+}
+
+/** One scope set per request: `default` covers `read`, so the two together are `default`. */
+export function normaliseOAuthScopes(scopes: readonly OAuthScope[]): OAuthScope[] {
+  return scopes.includes(OAuthScope.DEFAULT) ? [OAuthScope.DEFAULT] : [...new Set(scopes)];
+}
 
 /**
  * What kind of client an app is (RFC 6749 §2.1).

@@ -514,6 +514,76 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
     });
   });
 
+  describe('the read scope', () => {
+    const connectFor = async (person: Actor, app: App, scope: string) => {
+      const code = await allow(person, app, { scope });
+      const response = await exchange(app, code).expect(200);
+      return response.body as { access_token: string; scope: string };
+    };
+
+    it('reads and listens, and is refused every other change', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const consent = await request(server())
+        .post(url('/oauth/consent'))
+        .set(as(scope.member))
+        .send({ clientId: app.clientId, redirectUri: REDIRECT, scope: 'read' })
+        .expect(200);
+      expect(consent.body.data.scopes).toEqual([
+        { scope: 'read', description: expect.stringMatching(/cannot change anything/) },
+      ]);
+
+      const token = await connectFor(scope.member, app, 'read');
+      expect(token.scope).toBe('read');
+
+      await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set(as(token.access_token))
+        .expect(200);
+      const refused = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set(as(token.access_token))
+        .send({ title: 'Should not exist', projectId: scope.projectId })
+        .expect(403);
+      expect(refused.body.error.code).toBe('OAUTH_SCOPE_INSUFFICIENT');
+      expect(await context.prisma.task.count({ where: { title: 'Should not exist' } })).toBe(0);
+
+      // Subscribing to hear about changes is reading.
+      const subscribed = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/webhook-subscriptions`))
+        .set(as(token.access_token))
+        .send({ projectId: scope.projectId, url: HOOK, events: ['task.created'] })
+        .expect(201);
+      await request(server())
+        .delete(
+          url(
+            `/workspaces/${scope.workspaceId}/webhook-subscriptions/${subscribed.body.data.subscription.id}`,
+          ),
+        )
+        .set(as(token.access_token))
+        .expect(204);
+
+      const listed = await request(server())
+        .get(url('/users/me/connected-apps'))
+        .set(as(scope.member))
+        .expect(200);
+      expect(listed.body.data[0].scopes).toEqual(['read']);
+    });
+
+    it('takes read and default together as default', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connectFor(scope.member, app, 'read default');
+      expect(token.scope).toBe('default');
+
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set(as(token.access_token))
+        .send({ title: 'Allowed', projectId: scope.projectId })
+        .expect(201);
+    });
+  });
+
   describe('ending a connection', () => {
     it('lets the app revoke its refresh token, ending its access too', async () => {
       const scope = await setupScope();

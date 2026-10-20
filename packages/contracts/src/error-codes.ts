@@ -41,6 +41,7 @@ export const ErrorCode = {
   OAUTH_TOKEN_INVALID: 'OAUTH_TOKEN_INVALID',
   OAUTH_TOKEN_EXPIRED: 'OAUTH_TOKEN_EXPIRED',
   OAUTH_TOKEN_NOT_ALLOWED: 'OAUTH_TOKEN_NOT_ALLOWED',
+  OAUTH_SCOPE_INSUFFICIENT: 'OAUTH_SCOPE_INSUFFICIENT',
   OAUTH_APP_LIMIT_REACHED: 'OAUTH_APP_LIMIT_REACHED',
   OAUTH_UNKNOWN_CLIENT: 'OAUTH_UNKNOWN_CLIENT',
   OAUTH_REDIRECT_URI_MISMATCH: 'OAUTH_REDIRECT_URI_MISMATCH',
@@ -110,6 +111,8 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   OAUTH_TOKEN_INVALID: 'The access token is not recognised, or the app was disconnected.',
   OAUTH_TOKEN_EXPIRED: 'The access token has expired. Use the refresh token for a new one.',
   OAUTH_TOKEN_NOT_ALLOWED: 'This action needs a signed-in person, not an app.',
+  OAUTH_SCOPE_INSUFFICIENT:
+    'This app was allowed to read only. Connect it again with the access it needs to make changes.',
   OAUTH_APP_LIMIT_REACHED: 'You already have the maximum number of OAuth apps.',
   OAUTH_UNKNOWN_CLIENT: 'This app is not registered with CoreTask.',
   OAUTH_REDIRECT_URI_MISMATCH: 'The app asked to send you somewhere it did not register.',
