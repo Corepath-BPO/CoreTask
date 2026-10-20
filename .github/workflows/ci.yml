@@ -115,9 +115,11 @@ jobs:
       #     RATE_LIMIT_MAX / AUTH_RATE_LIMIT_MAX to 100000, so the throttler is
       #     exercised only by the spec that means to.
       #   - api/test/e2e/global-setup.ts runs `prisma migrate deploy` itself,
-      #     against the dedicated `coretask_e2e` schema that
+      #     against the checkout's own `coretask_e2e_…` schema that
       #     test-database.ts rewrites this URL to. A `db:deploy` step here would
-      #     migrate `public` instead — the wrong schema.
+      #     migrate `public` instead — the wrong schema. It also empties the
+      #     checkout's queue prefix, which test-app.ts sets, so QUEUE_PREFIX is
+      #     not set here either.
       #   - STORAGE_* defaults in env.schema.ts already point at localhost:9000
       #     with the compose credentials.
       - name: Integration suite

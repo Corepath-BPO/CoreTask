@@ -577,8 +577,13 @@ pipes, guards, filters and interceptors production runs — because that stack i
 exactly where the envelope and tenant isolation live. A trimmed-down testing
 module would prove nothing about either.
 
-It runs against a dedicated `coretask_e2e` PostgreSQL _schema_, so truncation
-between specs can never reach development data.
+It runs against a dedicated PostgreSQL _schema_, so truncation between specs can
+never reach development data, and queues under its own BullMQ prefix, so it
+neither drains the development worker's queues nor feeds it jobs. Both are
+named for the checkout (`coretask_e2e_<folder>_<hash>`, or `E2E_SCHEMA`): every
+spec truncates every table, and two runs sharing a schema — from two git
+worktrees at once — wiped each other's rows mid-test. Global setup empties the
+checkout's queues before each run, as nothing consumes them.
 
 `test/unit/enum-parity.spec.ts` asserts that the enums in `@coretask/contracts`
 still match Prisma's. The shared package cannot import Prisma, so the enums are

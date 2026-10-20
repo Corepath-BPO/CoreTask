@@ -369,8 +369,11 @@ pnpm test:e2e
 ```
 
 These boot the real Nest application (same pipes, guards, filters and
-interceptors as production) with Supertest, against a dedicated `coretask_e2e`
-PostgreSQL **schema** — your development data is never touched.
+interceptors as production) with Supertest, against a dedicated PostgreSQL
+**schema** and BullMQ queue prefix — your development data is never touched.
+Both are named for the checkout (`coretask_e2e_<folder>_<hash>`), so runs in two
+git worktrees at once keep apart; set `E2E_SCHEMA` to give a second run in the
+same checkout its own.
 
 Covered: health and dependency checks, registration, login, invalid login,
 account enumeration resistance, `/auth/me`, refresh-token rotation, replay
