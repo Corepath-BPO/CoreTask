@@ -1,4 +1,8 @@
-import type { ProjectMember, WorkspaceInvitation } from '@coretask/types';
+import type {
+  ProjectMember,
+  ProjectNotificationSettings,
+  WorkspaceInvitation,
+} from '@coretask/types';
 import {
   Body,
   Controller,
@@ -10,6 +14,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
@@ -32,12 +37,14 @@ import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guar
 import {
   LeaveProjectResultDto,
   ProjectMemberDto,
+  ProjectNotificationSettingsDto,
   RemoveProjectMemberResultDto,
 } from './dto/project-member-response.dto';
 import {
   AddProjectMemberDto,
   InviteToProjectDto,
   UpdateProjectMemberRoleDto,
+  UpdateProjectNotificationSettingsDto,
 } from './dto/project-member.dto';
 import { ProjectMembersService } from './project-members.service';
 
@@ -99,6 +106,33 @@ export class ProjectMembersController {
   ): Promise<{ left: boolean }> {
     const { removed } = await this.members.remove(access, actor, actor.userId);
     return { left: removed };
+  }
+
+  @Get('notification-settings')
+  @ApiOperation({
+    summary: 'What this project tells you about',
+    description:
+      'Status updates and messages until you choose. Only members hear from a project; for anyone else `member` is false and `notifyOn` is what joining starts with.',
+  })
+  @ApiEnvelopeResponse(ProjectNotificationSettingsDto)
+  notificationSettings(
+    @CurrentProject() access: ProjectAccessContext,
+    @Actor() actor: ActorContext,
+  ): Promise<ProjectNotificationSettings> {
+    return this.members.notificationSettings(access, actor);
+  }
+
+  @Put('notification-settings')
+  @ApiOperation({ summary: 'Choose what this project tells you about' })
+  @ApiEnvelopeResponse(ProjectNotificationSettingsDto)
+  @ApiErrorResponseDoc(409, 'The caller is not a member of this project')
+  @ApiErrorResponseDoc(422, 'Validation failed')
+  setNotificationSettings(
+    @CurrentProject() access: ProjectAccessContext,
+    @Actor() actor: ActorContext,
+    @Body() dto: UpdateProjectNotificationSettingsDto,
+  ): Promise<ProjectNotificationSettings> {
+    return this.members.setNotificationSettings(access, actor, dto.notifyOn);
   }
 
   @Get('members')

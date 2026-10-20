@@ -1,7 +1,22 @@
-import { EMAIL_MAX_LENGTH, PROJECT_MEMBER_ROLES, ProjectMemberRole } from '@coretask/contracts';
+import {
+  EMAIL_MAX_LENGTH,
+  PROJECT_MEMBER_ROLES,
+  PROJECT_NOTIFICATION_KINDS,
+  ProjectMemberRole,
+  type ProjectNotificationKind,
+} from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsOptional, IsUUID, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEmail,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class AddProjectMemberDto {
   @ApiProperty({ format: 'uuid', description: 'Must already be a member of this workspace.' })
@@ -37,4 +52,17 @@ export class InviteToProjectDto {
   })
   @IsEnum(ProjectMemberRole)
   role!: ProjectMemberRole;
+}
+
+export class UpdateProjectNotificationSettingsDto {
+  @ApiProperty({
+    enum: PROJECT_NOTIFICATION_KINDS,
+    isArray: true,
+    example: ['STATUS_UPDATES', 'MESSAGES'],
+    description: 'Everything this project should tell you about. An empty list silences it.',
+  })
+  @IsArray()
+  @ArrayMaxSize(PROJECT_NOTIFICATION_KINDS.length)
+  @IsIn(PROJECT_NOTIFICATION_KINDS, { each: true })
+  notifyOn!: ProjectNotificationKind[];
 }

@@ -8,6 +8,7 @@ import { DescriptionMentionNotifier } from './description-mention.notifier';
 import { FieldChangeNotifier } from './field-change.notifier';
 import { FollowerNotifier } from './follower.notifier';
 import { NotificationDispatcher } from './notification.dispatcher';
+import { ProjectActivityNotifier } from './project-activity.notifier';
 
 @Module({
   imports: [NotificationsModule, FollowersModule, ProjectAccessModule],
@@ -16,12 +17,14 @@ import { NotificationDispatcher } from './notification.dispatcher';
     DescriptionMentionNotifier,
     FollowerNotifier,
     FieldChangeNotifier,
+    ProjectActivityNotifier,
   ],
   exports: [
     NotificationDispatcher,
     DescriptionMentionNotifier,
     FollowerNotifier,
     FieldChangeNotifier,
+    ProjectActivityNotifier,
   ],
 })
 export class NotificationsIntegrationModule {}

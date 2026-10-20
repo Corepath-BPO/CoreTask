@@ -22,7 +22,7 @@ export const NOTIFICATION_EMAIL_GROUP_LABEL: Record<NotificationEmailGroup, stri
   MENTIONED: 'Someone @mentions me',
   COMMENTS: 'Someone comments on something I follow',
   TASK_CHANGES: 'Something I follow is completed or changes',
-  PROJECT_UPDATES: 'A project I’m on posts an update or a message, or adds me',
+  PROJECT_UPDATES: 'A project I’m on adds me, or has news I chose to hear about',
   DUE_SOON: 'Something of mine is due soon',
 };
 

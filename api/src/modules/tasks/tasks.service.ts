@@ -46,6 +46,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { DescriptionMentionNotifier } from '../../integrations/notifications/description-mention.notifier';
 import { FollowerNotifier } from '../../integrations/notifications/follower.notifier';
+import { ProjectActivityNotifier } from '../../integrations/notifications/project-activity.notifier';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { ProjectBroadcastService } from '../../websocket/project-broadcast.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -98,6 +99,7 @@ export class TasksService {
     private readonly followers: FollowersService,
     private readonly followerNotifier: FollowerNotifier,
     private readonly formulas: FormulaValuesService,
+    private readonly projectNotifier: ProjectActivityNotifier,
   ) {}
 
   async list(
@@ -487,6 +489,15 @@ export class TasksService {
       });
     }
 
+    // Members who asked to hear of new tasks; a subtask is its parent's business.
+    if (created.projectId && !parent) {
+      await this.projectNotifier.itemAdded(
+        taskRef(workspaceId, created),
+        created.projectId,
+        userId,
+      );
+    }
+
     await this.notifyAssignment(workspaceId, userId, created, null);
     await this.mentions.notify({
       workspaceId,
@@ -662,7 +673,19 @@ export class TasksService {
     if (updated.assigneeId && updated.assigneeId !== existing.assigneeId) {
       await this.followers.ensure(workspaceId, taskLink(updated.id), [updated.assigneeId]);
     }
-    await this.followerNotifier.notifyStories(taskRef(workspaceId, updated), userId, stories);
+    const told = await this.followerNotifier.notifyStories(
+      taskRef(workspaceId, updated),
+      userId,
+      stories,
+    );
+    if (updated.projectId && existing.completedAt === null && updated.completedAt !== null) {
+      await this.projectNotifier.itemCompleted(
+        taskRef(workspaceId, updated),
+        updated.projectId,
+        userId,
+        told,
+      );
+    }
 
     /*
      * Announced after the write has landed, never before: a rule must react to

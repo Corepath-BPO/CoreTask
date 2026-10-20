@@ -55,16 +55,18 @@ Every `ProjectSummary` (list rows, detail, create and update responses) has:
 
 Base: `/api/v1/workspaces/:workspaceId/projects/:projectId`
 
-| Method   | Path               | Purpose                                                     | Who                                  |
-| -------- | ------------------ | ----------------------------------------------------------- | ------------------------------------ |
-| `GET`    | `/members`         | the roster, admins first, then in the order added           | anyone who can see the project       |
-| `POST`   | `/members`         | add a workspace member `{ userId, role? }` (default EDITOR) | project admin, or workspace admin    |
-| `PATCH`  | `/members/:userId` | change a role `{ role }`                                    | project admin, or workspace admin    |
-| `DELETE` | `/members/:userId` | remove someone, or yourself                                 | self, project admin, workspace admin |
-| `POST`   | `/join`            | join a public project as EDITOR (a GUEST joins as VIEWER)   | anyone; idempotent                   |
-| `POST`   | `/leave`           | remove yourself                                             | anyone; idempotent                   |
-| `GET`    | `/invitations`     | invitations still waiting that land someone here            | project admin, or workspace admin    |
-| `POST`   | `/invitations`     | invite someone new by e-mail `{ email, role }`              | workspace admin who can manage it    |
+| Method   | Path                     | Purpose                                                     | Who                                  |
+| -------- | ------------------------ | ----------------------------------------------------------- | ------------------------------------ |
+| `GET`    | `/members`               | the roster, admins first, then in the order added           | anyone who can see the project       |
+| `POST`   | `/members`               | add a workspace member `{ userId, role? }` (default EDITOR) | project admin, or workspace admin    |
+| `PATCH`  | `/members/:userId`       | change a role `{ role }`                                    | project admin, or workspace admin    |
+| `DELETE` | `/members/:userId`       | remove someone, or yourself                                 | self, project admin, workspace admin |
+| `POST`   | `/join`                  | join a public project as EDITOR (a GUEST joins as VIEWER)   | anyone; idempotent                   |
+| `POST`   | `/leave`                 | remove yourself                                             | anyone; idempotent                   |
+| `GET`    | `/invitations`           | invitations still waiting that land someone here            | project admin, or workspace admin    |
+| `POST`   | `/invitations`           | invite someone new by e-mail `{ email, role }`              | workspace admin who can manage it    |
+| `GET`    | `/notification-settings` | what the project tells the caller about                     | anyone who can see the project       |
+| `PUT`    | `/notification-settings` | choose it `{ notifyOn }`                                    | members only (`409` otherwise)       |
 
 Rules the API enforces:
 
@@ -90,6 +92,15 @@ Rules the API enforces:
   (the project is skipped if it was deleted meanwhile) and answers with its
   `projectId`, which the web app opens. Revoke one with the workspace's
   `DELETE /invitations/:id`.
+- `notification-settings` is Asana's per-project notification choice, kept on
+  the caller's own membership row (`notifyOn`). The kinds are
+  `STATUS_UPDATES`, `MESSAGES`, `TASKS_ADDED` and `TASKS_COMPLETED`. A member
+  starts with the first two; an empty list silences the project. Only members
+  hear from a project, so a non-member's `GET` answers `member: false` with
+  the defaults that joining starts with, and their `PUT` is
+  `409 PROJECT_MEMBERSHIP_REQUIRED`. All four kinds arrive as `PROJECT_UPDATE`
+  notifications. The email setting for project news decides which of them
+  also come by email.
 
 ### `ProjectMember`
 
@@ -112,6 +123,7 @@ Rules the API enforces:
 | `INSUFFICIENT_PROJECT_ROLE`   | 403    | visible, but the caller's role _inside the project_ is too low              |
 | `INSUFFICIENT_WORKSPACE_ROLE` | 403    | the workspace role itself is too low (checked first)                        |
 | `LAST_PROJECT_ADMIN`          | 409    | demoting, removing or leaving as the only admin of a private project        |
+| `PROJECT_MEMBERSHIP_REQUIRED` | 409    | choosing a project's notifications without being on it                      |
 | `BAD_REQUEST`                 | 400    | adding a non-member; an assignee or collaborator who cannot see the project |
 | `PROJECT_ACCESS_DENIED`       | socket | `project:join` refused                                                      |
 

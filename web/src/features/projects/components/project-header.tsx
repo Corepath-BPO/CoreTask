@@ -35,6 +35,7 @@ import type { ProjectStatusUpdateValue } from '@/features/projects/hooks/use-pro
 
 import type { ProjectAccess } from '../lib/project-access';
 
+import { ProjectNotificationsButton } from './project-notifications-button';
 import { ProjectStarButton } from './project-star-button';
 import { ProjectMembersStack } from './sharing/project-members-stack';
 import { ProjectPrivacyBadge } from './sharing/project-privacy-badge';
@@ -197,6 +198,15 @@ export function ProjectHeader({
           projectId={project.id}
           projectName={project.name}
         />
+
+        {/* Only members hear from a project, so only they choose what. */}
+        {access.isMember && (
+          <ProjectNotificationsButton
+            workspaceId={project.workspaceId}
+            projectId={project.id}
+            projectName={project.name}
+          />
+        )}
 
         {/* Asana's "Set status" — the portfolios status machinery, from the
             project itself. Picking a status opens the composer. */}

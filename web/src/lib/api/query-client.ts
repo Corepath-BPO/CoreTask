@@ -76,6 +76,9 @@ export const queryKeys = {
       [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
     invitations: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'invitations', projectId] as const,
+    /** The reader's own choice of what this project tells them about. */
+    notificationSettings: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'notification-settings', projectId] as const,
     note: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'note', projectId] as const,
     resources: (workspaceId: string, projectId: string) =>

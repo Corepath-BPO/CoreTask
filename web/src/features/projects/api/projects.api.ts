@@ -8,12 +8,14 @@ import type {
   PaginationMeta,
   ProjectDetail,
   ProjectMember,
+  ProjectNotificationSettings,
   ProjectSummary,
   Section,
   UpdateProjectMemberRolePayload,
   UpdateProjectPayload,
   UpdateSectionPayload,
   WorkspaceInvitation,
+  UpdateProjectNotificationSettingsPayload,
 } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
@@ -86,6 +88,25 @@ export const projectMembersApi = {
 
   leave: (workspaceId: string, projectId: string): Promise<{ left: boolean }> =>
     apiClient.post<{ left: boolean }>(ApiRoutes.projectMembers.leave(workspaceId, projectId)),
+
+  /** What the project tells the caller about. */
+  notificationSettings: (
+    workspaceId: string,
+    projectId: string,
+  ): Promise<ProjectNotificationSettings> =>
+    apiClient.get<ProjectNotificationSettings>(
+      ApiRoutes.projectMembers.notificationSettings(workspaceId, projectId),
+    ),
+
+  setNotificationSettings: (
+    workspaceId: string,
+    projectId: string,
+    payload: UpdateProjectNotificationSettingsPayload,
+  ): Promise<ProjectNotificationSettings> =>
+    apiClient.put<ProjectNotificationSettings>(
+      ApiRoutes.projectMembers.notificationSettings(workspaceId, projectId),
+      payload,
+    ),
 
   /** Invitations still waiting that would land someone in this project. */
   invitations: (workspaceId: string, projectId: string): Promise<WorkspaceInvitation[]> =>

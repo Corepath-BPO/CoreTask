@@ -5,10 +5,13 @@ import {
   ProjectMemberRole,
   ProjectVisibility,
   ServerEvent,
+  DEFAULT_PROJECT_NOTIFICATIONS,
+  type ProjectNotificationKind,
   defaultJoinRole,
+  readProjectNotifications,
   hasProjectAdminOverride,
 } from '@coretask/contracts';
-import type { ProjectMember } from '@coretask/types';
+import type { ProjectMember, ProjectNotificationSettings } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
@@ -266,6 +269,34 @@ export class ProjectMembersService {
    * invitation — that is what private means — unless the caller reaches it as
    * a workspace admin, who may put themselves on any roster.
    */
+  /** What this project tells the caller about. Only its members hear from it. */
+  async notificationSettings(
+    access: ProjectAccessContext,
+    actor: ActorContext,
+  ): Promise<ProjectNotificationSettings> {
+    const row = await this.prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId: access.projectId, userId: actor.userId } },
+      select: { notifyOn: true },
+    });
+    return row
+      ? { member: true, notifyOn: readProjectNotifications(row.notifyOn) }
+      : { member: false, notifyOn: [...DEFAULT_PROJECT_NOTIFICATIONS] };
+  }
+
+  async setNotificationSettings(
+    access: ProjectAccessContext,
+    actor: ActorContext,
+    notifyOn: ProjectNotificationKind[],
+  ): Promise<ProjectNotificationSettings> {
+    const kinds = readProjectNotifications(notifyOn);
+    const { count } = await this.prisma.projectMember.updateMany({
+      where: { projectId: access.projectId, userId: actor.userId },
+      data: { notifyOn: kinds },
+    });
+    if (count === 0) throw AppException.conflict('PROJECT_MEMBERSHIP_REQUIRED');
+    return { member: true, notifyOn: kinds };
+  }
+
   async join(access: ProjectAccessContext, actor: ActorContext): Promise<ProjectMember> {
     // An existing member calling again is the idempotent case, not a
     // self-invitation: only a stranger is turned away from a private project.

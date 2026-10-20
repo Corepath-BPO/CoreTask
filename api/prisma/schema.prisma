@@ -1444,6 +1444,10 @@ model ProjectMember {
   /// is one indexed statement (see the schema conventions).
   workspaceId String            @db.Uuid
   role        ProjectMemberRole @default(EDITOR)
+  /// What this project tells them about: ProjectNotificationKind values
+  /// (contracts' project-notifications.ts). Status updates and messages
+  /// until they choose.
+  notifyOn    String[]          @default(["STATUS_UPDATES", "MESSAGES"])
   /// Who added them. Null for the creator's own row and for backfilled leads.
   addedById   String?           @db.Uuid
   createdAt   DateTime          @default(now())

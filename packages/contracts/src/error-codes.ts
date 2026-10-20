@@ -43,6 +43,7 @@ export const ErrorCode = {
   OAUTH_TOKEN_NOT_ALLOWED: 'OAUTH_TOKEN_NOT_ALLOWED',
   OAUTH_SCOPE_INSUFFICIENT: 'OAUTH_SCOPE_INSUFFICIENT',
   OAUTH_APP_NOT_APPROVED: 'OAUTH_APP_NOT_APPROVED',
+  PROJECT_MEMBERSHIP_REQUIRED: 'PROJECT_MEMBERSHIP_REQUIRED',
   OAUTH_APP_LIMIT_REACHED: 'OAUTH_APP_LIMIT_REACHED',
   OAUTH_UNKNOWN_CLIENT: 'OAUTH_UNKNOWN_CLIENT',
   OAUTH_REDIRECT_URI_MISMATCH: 'OAUTH_REDIRECT_URI_MISMATCH',
@@ -116,6 +117,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
     'This app was allowed to read only. Connect it again with the access it needs to make changes.',
   OAUTH_APP_NOT_APPROVED:
     'This workspace’s admins have not approved this app. Ask one to add it to the app directory.',
+  PROJECT_MEMBERSHIP_REQUIRED: 'Join the project first — only its members hear from it.',
   OAUTH_APP_LIMIT_REACHED: 'You already have the maximum number of OAuth apps.',
   OAUTH_UNKNOWN_CLIENT: 'This app is not registered with CoreTask.',
   OAUTH_REDIRECT_URI_MISMATCH: 'The app asked to send you somewhere it did not register.',
