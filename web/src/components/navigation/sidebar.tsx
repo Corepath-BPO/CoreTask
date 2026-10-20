@@ -71,25 +71,30 @@ export function Sidebar() {
 }
 
 /**
- * The CoreTask mark, rendered as an app-icon tile.
+ * The CoreTask mark.
  *
- * The artwork is dark navy on white with no alpha, so it needs a light backdrop
- * to stay legible — keeping the white tile in both themes reads as deliberate
- * (and matches how the icon appears on a home screen) rather than as a stray
- * white box on the dark sidebar.
+ * Inline rather than an <img> so the artwork paints in `currentColor`: the mark
+ * is monochrome, so it rides the surrounding text colour across a theme switch
+ * instead of needing a second asset — and with no fixed ink it no longer needs
+ * the white tile the old navy-on-white artwork was mounted on.
+ *
+ * The geometry is the brand mark at its native 64-unit grid; the 8-unit inset
+ * is the lockup's own padding, so it stays optically centred at any size.
  */
 export function BrandMark({ className }: { className?: string }) {
   return (
-    <img
-      src="/logo-mark-96.png"
-      alt=""
+    <svg
+      viewBox="0 0 64 64"
       aria-hidden="true"
-      width={28}
-      height={28}
-      className={cn(
-        'size-8 shrink-0 rounded-xl bg-white object-contain shadow-[0_4px_12px_rgba(20,35,60,0.08)] ring-1 ring-black/5 dark:ring-white/10',
-        className,
-      )}
-    />
+      focusable="false"
+      className={cn('size-8 shrink-0', className)}
+    >
+      <g fill="none" stroke="currentColor" strokeWidth={4}>
+        <rect x="8" y="8" width="18" height="18" />
+        <rect x="38" y="8" width="18" height="18" />
+        <rect x="8" y="38" width="18" height="18" />
+      </g>
+      <rect x="36" y="36" width="22" height="22" fill="currentColor" />
+    </svg>
   );
 }

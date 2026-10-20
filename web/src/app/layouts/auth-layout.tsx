@@ -29,14 +29,27 @@ export function AuthLayout() {
         <div className="absolute inset-x-0 bottom-0 h-2/5 bg-[linear-gradient(to_top,color-mix(in_oklch,var(--primary)_7%,transparent),transparent)]" />
 
         <div className="relative flex h-full flex-col justify-center px-16">
-          {/* The full lockup gets its one legible showing here — at this width
-              the tagline still reads, which it never would in the sidebar. */}
+          {/* The stacked lockup gets its one showing here — the wordmark needs
+              this much width to read, which the sidebar never has.
+
+              Two ink variants swapped by CSS rather than one asset: the lockup
+              is monochrome, so each theme shows the variant drawn for it and
+              the panel's own gradient stays visible behind it. The hidden one
+              is `display:none`, so only the painted variant reaches the
+              accessibility tree. */}
           <img
-            src="/logo-full.png"
-            alt="CoreTask: plan, track, achieve"
-            width={224}
-            height={191}
-            className="mb-10 w-56 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10"
+            src="/logo-stacked-black.svg"
+            alt="CoreTask"
+            width={219}
+            height={183}
+            className="mb-10 w-48 dark:hidden"
+          />
+          <img
+            src="/logo-stacked-white.svg"
+            alt="CoreTask"
+            width={219}
+            height={183}
+            className="mb-10 hidden w-48 dark:block"
           />
 
           <blockquote className="max-w-md space-y-6">
