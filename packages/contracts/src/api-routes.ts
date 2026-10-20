@@ -293,14 +293,23 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies`,
     dependency: (workspaceId: string, taskId: string, dependencyId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies/${dependencyId}`,
-    /** Time logged against a task. */
     /** "Mark as duplicate": POST names the original, DELETE undoes it. */
     duplicateOf: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/duplicate-of`,
+    /** Time logged against a task. */
     timeEntries: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries`,
     timeEntry: (workspaceId: string, taskId: string, entryId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries/${entryId}`,
+    /** A task's checklists, each with its items. */
+    checklists: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists`,
+    checklist: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}`,
+    checklistItems: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items`,
+    checklistItem: (workspaceId: string, taskId: string, checklistId: string, itemId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items/${itemId}`,
     /** Multi-homing: the other projects a task is in. */
     projects: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/projects`,
@@ -450,6 +459,23 @@ export const ApiRoutes = {
     apps: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory/apps`,
     app: (workspaceId: string, appId: string) =>
       `/workspaces/${workspaceId}/app-directory/apps/${appId}`,
+  },
+  /**
+   * The CoreTask Slack app. The workspace's own routes are for the
+   * Integrations page; `complete` and the link pair are posted by web pages
+   * Slack sends people to; `commands` and `interactions` are Slack's, signed
+   * with the app's signing secret rather than signed in.
+   */
+  slack: {
+    status: (workspaceId: string) => `/workspaces/${workspaceId}/slack`,
+    install: (workspaceId: string) => `/workspaces/${workspaceId}/slack/install`,
+    channels: (workspaceId: string) => `/workspaces/${workspaceId}/slack/channels`,
+    myLink: (workspaceId: string) => `/workspaces/${workspaceId}/slack/me`,
+    complete: '/integrations/slack/install',
+    linkPreview: '/integrations/slack/link/preview',
+    link: '/integrations/slack/link',
+    commands: '/integrations/slack/commands',
+    interactions: '/integrations/slack/interactions',
   },
   webhookSubscriptions: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,

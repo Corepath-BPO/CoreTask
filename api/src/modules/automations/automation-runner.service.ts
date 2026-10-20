@@ -10,7 +10,7 @@ import {
   BLOCK_SELF_RETRIGGER,
   BranchKey,
   FilterOperator,
-  isFallbackBranch,
+  MAX_ACTIONS_PER_CHAIN,
   MAX_ACTIONS_PER_EXECUTION,
   MAX_AUTOMATION_DEPTH,
   AUTOMATION_VALUE_TOKEN,
@@ -49,15 +49,19 @@ import {
   delayMs,
   describeDelay,
   AI_CHECK_FIELD,
+  evaluateCondition,
+  CHECKLIST_NAME_MAX,
+  MAX_CHECKLISTS_PER_TASK,
+  checklistOf,
+  WorkItemType,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  Prisma,
   StatusCategory,
   TaskStatus,
   WorkspaceRole,
-  type AutomationNode,
-  type Prisma,
   type Task,
   type TaskCustomFieldValue,
 } from '@prisma/client';
@@ -76,13 +80,25 @@ import { completionData, priorityData, readActionId, statusData } from './action
 import type { RuleEmailRequest, RuleWebhookRequest } from '../../jobs/queue-names';
 
 import { AutomationAiService } from './automation-ai.service';
-import type { AutomationEvent } from './automation-event.publisher';
+import {
+  chainOf,
+  derivedEventId,
+  runKey,
+  type AutomationEvent,
+} from './automation-event.publisher';
 import { directComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { ticketLifecycle } from '../tickets/ticket-lifecycle';
 
 import { fieldChangeTriggers } from './task-field-triggers';
+import { readSnapshot, type SnapshotNode } from './versions/rule-snapshot';
+
+/**
+ * A step as the runner reads it: from the published version's copy of the
+ * rule, never from the rows the builder is editing.
+ */
+type AutomationNode = SnapshotNode;
 
 /** What one action attempt produced, for the log. */
 interface ActionOutcome {
@@ -99,6 +115,38 @@ interface ActionOutcome {
   /** What a "Send a webhook" action wants delivered; queued by the caller like `events`. */
   webhooks?: RuleWebhookRequest[];
   /** What a "Send an email" action wants sent; queued by the caller like `webhooks`. */
+  emails?: RuleEmailRequest[];
+}
+
+/** What one rule's run hands back for the processor to send once it is over. */
+interface RuleRun {
+  ran: boolean;
+  events: AutomationEvent[];
+  webhooks: RuleWebhookRequest[];
+  emails: RuleEmailRequest[];
+}
+
+/** A run's action steps, performed: what happened, and what is to be sent. */
+interface StepsResult {
+  /** Steps run, whether or not they succeeded. */
+  attempted: number;
+  failures: number;
+  /** Steps not run because a cap was reached, each logged as such. */
+  cut: number;
+  /** Which cap, in words, when `cut` is above zero. */
+  cutReason: string | null;
+  events: AutomationEvent[];
+  webhooks: RuleWebhookRequest[];
+  emails: RuleEmailRequest[];
+}
+
+/**
+ * What a step asked to have sent, as its log row keeps it — so a retried job
+ * that finds the run already made can send the same things again.
+ */
+interface FollowUps {
+  events?: AutomationEvent[];
+  webhooks?: RuleWebhookRequest[];
   emails?: RuleEmailRequest[];
 }
 
@@ -162,9 +210,16 @@ interface RunnableRule {
   workspaceId: string;
   projectId: string;
   createdById: string | null;
-  /** Read for the timezone a clock rule was set in, which dates in its text use. */
+  /**
+   * The running version's trigger configuration — what the event is matched
+   * against, and the timezone a clock rule was set in, which dates in its text
+   * use.
+   */
   triggerConfig: Prisma.JsonValue;
+  /** The running version's steps. */
   nodes: AutomationNode[];
+  /** The version they came from, recorded on the run. */
+  versionId: string;
 }
 
 /** A calendar date as the text variables print it: "Oct 20, 2026". */
@@ -257,21 +312,7 @@ export class AutomationRunnerService {
       return { executed: 0, skipped: 1, events: [], webhooks: [], emails: [] };
     }
 
-    const rules = await this.prisma.automationRule.findMany({
-      where: {
-        projectId: { in: await this.ruleProjects(event) },
-        status: AutomationRuleStatus.ACTIVE,
-        triggerType: event.trigger,
-        // A run somebody asked for by name, or one the clock found due, is
-        // for that rule alone — not every rule that shares its trigger.
-        ...(event.ruleId ? { id: event.ruleId } : {}),
-      },
-      include: { nodes: { orderBy: { position: 'asc' } } },
-      // Oldest first, ids as the tie-break: two rules writing the same column
-      // on one event must resolve the same way every time, not however the
-      // table happened to be laid out.
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
+    const rules = await this.runnableRules(event);
 
     const context = rules.length > 0 ? await this.loadTask(event) : null;
 
@@ -335,6 +376,85 @@ export class AutomationRunnerService {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * The live rules this event is for, each with the version it runs.
+   *
+   * Matched on the *published* version's trigger and run from its steps — the
+   * draft somebody is editing is never read here, so a half-finished edit to a
+   * live rule cannot act on a task, and a trigger changed in the builder takes
+   * effect when it is published rather than when it is typed.
+   *
+   * A run resuming after a Wait step finishes on the version it started on,
+   * named in the event: republishing a rule while a run waits does not change
+   * what that run does next. Such a run is found by its rule alone — its
+   * trigger is the one it started with, which a later version may not share.
+   */
+  private async runnableRules(
+    event: AutomationEvent,
+  ): Promise<(RunnableRule & { allowChaining: boolean })[]> {
+    const resuming = Boolean(event.resumeFromNodeId && event.ruleId);
+
+    const rows = await this.prisma.automationRule.findMany({
+      where: {
+        projectId: { in: await this.ruleProjects(event) },
+        status: AutomationRuleStatus.ACTIVE,
+        ...(resuming ? {} : { publishedVersion: { is: { triggerType: event.trigger } } }),
+        // A run somebody asked for by name, or one the clock found due, is
+        // for that rule alone — not every rule that shares its trigger.
+        ...(event.ruleId ? { id: event.ruleId } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true,
+        projectId: true,
+        createdById: true,
+        allowChaining: true,
+        publishedVersionId: true,
+      },
+      // Oldest first, ids as the tie-break: two rules writing the same column
+      // on one event must resolve the same way every time, not however the
+      // table happened to be laid out.
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    const wanted = new Map(
+      rows.map((rule) => [rule.id, (resuming && event.resumeVersionId) || rule.publishedVersionId]),
+    );
+    const versions = await this.prisma.automationRuleVersion.findMany({
+      where: { id: { in: [...wanted.values()].filter((id): id is string => Boolean(id)) } },
+      select: { id: true, ruleId: true, triggerConfig: true, nodes: true },
+    });
+    const byId = new Map(versions.map((version) => [version.id, version]));
+
+    return rows.flatMap((rule) => {
+      const version = byId.get(wanted.get(rule.id) ?? '');
+      const nodes = version && version.ruleId === rule.id ? readSnapshot(version.nodes) : null;
+
+      // Live with nothing published is not a state publishing can leave, so a
+      // rule here was switched on some other way. It runs nothing rather than
+      // its draft, and says so where somebody looking will see it.
+      if (!version || !nodes) {
+        this.logger.warn({ ruleId: rule.id }, 'Active rule has no published version to run');
+        return [];
+      }
+
+      return [
+        {
+          id: rule.id,
+          name: rule.name,
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          createdById: rule.createdById,
+          allowChaining: rule.allowChaining,
+          triggerConfig: version.triggerConfig,
+          nodes,
+          versionId: version.id,
+        },
+      ];
+    });
+  }
 
   /**
    * Whose rules hear an event — multi-homing.
@@ -438,7 +558,8 @@ export class AutomationRunnerService {
     return {
       ...event,
       // Its own event, not the subtask's: webhooks key deliveries on the id.
-      eventId: randomUUID(),
+      // Derived from the subtask's, so a retried run raises the same one.
+      eventId: derivedEventId(event.eventId, `rollup:${parent.id}`),
       entityType: 'TASK',
       entityId: parent.id,
       before: { allSubtasksCompleted: false },
@@ -496,7 +617,7 @@ export class AutomationRunnerService {
       )
       .map((task) => ({
         ...event,
-        eventId: randomUUID(),
+        eventId: derivedEventId(event.eventId, `unblocked:${task.id}`),
         projectId: task.projectId,
         trigger: AutomationTrigger.TASK_NO_LONGER_BLOCKED,
         entityType: 'TASK' as const,
@@ -612,28 +733,12 @@ export class AutomationRunnerService {
     rule: RunnableRule,
     event: AutomationEvent,
     context: TaskContext | null,
-  ): Promise<{
-    ran: boolean;
-    events: AutomationEvent[];
-    webhooks: RuleWebhookRequest[];
-    emails: RuleEmailRequest[];
-  }> {
+  ): Promise<RuleRun> {
     const started = Date.now();
 
-    const execution = await this.prisma.automationExecution.create({
-      data: {
-        workspaceId: rule.workspaceId,
-        projectId: rule.projectId,
-        ruleId: rule.id,
-        status: AutomationExecutionStatus.RUNNING,
-        triggerType: event.trigger,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        actorId: event.actorId ?? null,
-        correlationId: event.correlationId,
-        depth: event.depth,
-      },
-    });
+    const begun = await this.begin(rule, event);
+    if ('replay' in begun) return begun.replay;
+    const execution = begun.execution;
 
     // A scheduled rule with no tasks in scope: it can only make new ones.
     if (!context && event.entityType === 'PROJECT') {
@@ -692,53 +797,23 @@ export class AutomationRunnerService {
       return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
-    const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
+    // One failing action does not abandon the rest: a rule that assigns
+    // someone and adds a comment should still comment if the assignment
+    // fails, and the log says which did what.
+    const steps = await this.perform(execution.id, event, plan.actions, (node) =>
+      this.runAction(node, task, rule, event, new Date(started)),
+    );
+    const { failures, events, webhooks, emails } = steps;
 
-    let failures = 0;
-    const events: AutomationEvent[] = [];
-    const webhooks: RuleWebhookRequest[] = [];
-    const emails: RuleEmailRequest[] = [];
-
-    for (const node of actions) {
-      // One failing action does not abandon the rest: a rule that assigns
-      // someone and adds a comment should still comment if the assignment
-      // fails, and the log says which did what.
-      const outcome = await this.runAction(node, task, rule, event, new Date(started)).catch(
-        (error: unknown): ActionOutcome => ({
-          succeeded: false,
-          message: error instanceof Error ? error.message : 'Action failed.',
-        }),
-      );
-
-      if (!outcome.succeeded) failures += 1;
-      events.push(...(outcome.events ?? []));
-      webhooks.push(...(outcome.webhooks ?? []));
-      emails.push(...(outcome.emails ?? []));
-
-      await this.prisma.automationExecutionLog.create({
-        data: {
-          executionId: execution.id,
-          nodeId: node.id,
-          nodeType: node.nodeType,
-          subtype: node.subtype,
-          succeeded: outcome.succeeded,
-          message: outcome.message?.slice(0, 500) ?? null,
-          beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
-          afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
-        },
-      });
+    if (await this.stoppedByChain(rule, execution.id, steps, started)) {
+      return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
-    const status =
-      failures === 0
-        ? AutomationExecutionStatus.COMPLETED
-        : failures === actions.length
-          ? AutomationExecutionStatus.FAILED
-          : AutomationExecutionStatus.PARTIALLY_FAILED;
+    const status = runStatus(steps);
 
     await this.scheduleDelays(rule, event, plan.delays, execution.id, started);
-    await this.finish(execution.id, status, started, {});
-    await this.bumpRule(rule.id, status, failures > 0);
+    await this.finish(execution.id, status, started, cutNote(steps));
+    await this.bumpRule(rule.id, status, failures > 0 || steps.cut > 0);
 
     /*
      * The activity feed has to say a rule did this.
@@ -751,7 +826,7 @@ export class AutomationRunnerService {
      * for people, and the per-action detail already lives in the execution log
      * for anyone debugging.
      */
-    if (actions.length > failures) {
+    if (steps.attempted > failures) {
       await this.prisma.activityLog.create({
         data: {
           workspaceId: rule.workspaceId,
@@ -765,7 +840,7 @@ export class AutomationRunnerService {
           metadata: {
             ruleId: rule.id,
             executionId: execution.id,
-            actions: actions.length,
+            actions: steps.attempted,
             failures,
           },
         },
@@ -783,6 +858,10 @@ export class AutomationRunnerService {
        * user's original mutation, and echoing it would make exactly the tab
        * that caused the trigger — the one looking at the stale row — skip the
        * refetch as its "own" change. A rule's write is nobody's own change.
+       *
+       * Sent to everyone who may see the project rather than to its room: a
+       * task panel open from My Tasks, the inbox or search is in no project
+       * room, and kept showing the fields and checklists from before the rule.
        */
       // Both projects when the rule moved the task out of this one: the tab on
       // the old board has to drop the row, and the tab on the new one has to
@@ -790,12 +869,19 @@ export class AutomationRunnerService {
       const projectIds = new Set([event.projectId, task.projectId ?? event.projectId]);
 
       for (const projectId of projectIds) {
-        await this.relay.toProject(projectId, ServerEvent.WORK_ITEM_UPDATED, {
-          workspaceId: rule.workspaceId,
+        await this.relay.toProjectAudience(
+          rule.workspaceId,
           projectId,
-          occurredAt: new Date().toISOString(),
-          source: 'automation',
-        });
+          ServerEvent.WORK_ITEM_UPDATED,
+          {
+            workspaceId: rule.workspaceId,
+            projectId,
+            workItemId: task.id,
+            workItemType: WorkItemType.TASK,
+            occurredAt: new Date().toISOString(),
+            source: 'automation',
+          },
+        );
       }
     }
 
@@ -815,37 +901,194 @@ export class AutomationRunnerService {
     event: AutomationEvent,
     executionId: string,
     started: number,
-  ): Promise<{
-    ran: boolean;
-    events: AutomationEvent[];
-    webhooks: RuleWebhookRequest[];
-    emails: RuleEmailRequest[];
-  }> {
-    const actions = rule.nodes
-      .filter((node) => node.nodeType === AutomationNodeType.ACTION)
-      .slice(0, MAX_ACTIONS_PER_EXECUTION);
+  ): Promise<RuleRun> {
+    const actions = rule.nodes.filter((node) => node.nodeType === AutomationNodeType.ACTION);
 
-    let failures = 0;
-    const events: AutomationEvent[] = [];
-
-    for (const node of actions) {
+    const steps = await this.perform(executionId, event, actions, async (node) => {
       const config = (node.configuration ?? {}) as Record<string, unknown>;
-      const failed = (error: unknown): ActionOutcome => ({
+
+      return node.subtype === AutomationAction.CREATE_TASK
+        ? this.createTask(config, null, rule, event, new Date(started))
+        : node.subtype === AutomationAction.AI_DRAFT_UPDATE
+          ? this.draftStatusUpdate(rule, config, new Date(started))
+          : {
+              succeeded: false,
+              message: 'This step needs a task, and this run had none in scope.',
+            };
+    });
+    const { failures, events } = steps;
+
+    if (await this.stoppedByChain(rule, executionId, steps, started)) {
+      return { ran: false, events: [], webhooks: [], emails: [] };
+    }
+
+    const status = runStatus(steps);
+
+    await this.finish(executionId, status, started, cutNote(steps));
+    await this.bumpRule(rule.id, status, failures > 0 || steps.cut > 0);
+
+    if (steps.attempted > failures) {
+      // Beyond the project's room for the same reason as a task run: the new
+      // task may be somebody's, and their My Tasks is in no project room.
+      await this.relay.toProjectAudience(
+        rule.workspaceId,
+        rule.projectId,
+        ServerEvent.WORK_ITEM_UPDATED,
+        {
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          occurredAt: new Date().toISOString(),
+          source: 'automation',
+        },
+      );
+    }
+
+    return { ran: true, events, webhooks: [], emails: [] };
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Runs, once each                                                           */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * The run this rule makes of this event — or, when it has already made it,
+   * what that run asked to have sent.
+   *
+   * A queue job that throws is retried from the beginning, and every rule
+   * before the one that threw has already acted. Keyed on the rule and the
+   * event (`runKey`), the second attempt finds those runs and leaves their
+   * work alone; it hands back the events, webhooks and e-mails their steps
+   * recorded, so the chain they started is not lost with the attempt that
+   * raised it. The queue drops a repeated event too, but only while it still
+   * holds the first one — this is the answer that does not expire.
+   *
+   * A run found still RUNNING stopped part-way. Its steps are not attempted
+   * again: which of them took effect is not knowable from here, and a comment
+   * posted twice or a second set of subtasks is the harm this exists to
+   * prevent. It is closed as FAILED with that said, and what its finished
+   * steps raised still goes out.
+   */
+  private async begin(
+    rule: RunnableRule,
+    event: AutomationEvent,
+  ): Promise<{ execution: { id: string } } | { replay: RuleRun }> {
+    const key = runKey(event);
+    const where = { ruleId_idempotencyKey: { ruleId: rule.id, idempotencyKey: key } };
+
+    const prior = await this.prisma.automationExecution.findUnique({
+      where,
+      select: { id: true, status: true, startedAt: true },
+    });
+    if (prior) return { replay: await this.replay(prior) };
+
+    try {
+      const execution = await this.prisma.automationExecution.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          ruleId: rule.id,
+          status: AutomationExecutionStatus.RUNNING,
+          triggerType: event.trigger,
+          entityType: event.entityType,
+          entityId: event.entityId,
+          actorId: event.actorId ?? null,
+          correlationId: event.correlationId,
+          chainId: chainOf(event),
+          idempotencyKey: key,
+          depth: event.depth,
+          ruleVersionId: rule.versionId,
+        },
+        select: { id: true },
+      });
+
+      return { execution };
+    } catch (error) {
+      // Another attempt got there between the read and the write.
+      if (!isUniqueViolation(error)) throw error;
+
+      const rival = await this.prisma.automationExecution.findUniqueOrThrow({
+        where,
+        select: { id: true, status: true, startedAt: true },
+      });
+      return { replay: await this.replay(rival) };
+    }
+  }
+
+  /** What an earlier attempt's run raised, to be sent again. See `begin`. */
+  private async replay(prior: { id: string; status: string; startedAt: Date }): Promise<RuleRun> {
+    if (prior.status === AutomationExecutionStatus.RUNNING) {
+      await this.finish(prior.id, AutomationExecutionStatus.FAILED, prior.startedAt.getTime(), {
+        error:
+          'This run stopped part-way and was not repeated, so none of its steps happens twice.',
+      });
+    }
+
+    const logs = await this.prisma.automationExecutionLog.findMany({
+      where: { executionId: prior.id, followUps: { not: Prisma.DbNull } },
+      orderBy: { createdAt: 'asc' },
+      select: { followUps: true },
+    });
+
+    const replayed: RuleRun = { ran: false, events: [], webhooks: [], emails: [] };
+    for (const log of logs) {
+      const sent = (log.followUps ?? {}) as FollowUps;
+      replayed.events.push(...(sent.events ?? []));
+      replayed.webhooks.push(...(sent.webhooks ?? []));
+      replayed.emails.push(...(sent.emails ?? []));
+    }
+
+    return replayed;
+  }
+
+  /**
+   * Runs a plan's action steps, as many as the caps allow, logging each.
+   *
+   * Two caps, and whichever is lower applies: `MAX_ACTIONS_PER_EXECUTION` for
+   * this run, and what is left of `MAX_ACTIONS_PER_CHAIN` once every other run
+   * descended from the same event is counted. The steps past it are not
+   * dropped quietly — each gets a log row saying it did not run and why, and
+   * the run is not reported as COMPLETED. A rule that does less than it says
+   * while claiming success is the failure this engine refuses everywhere else.
+   *
+   * Each step's log row keeps what the step asked to have sent, which is what
+   * a retried job reads back — see `begin`.
+   */
+  private async perform(
+    executionId: string,
+    event: AutomationEvent,
+    steps: readonly AutomationNode[],
+    run: (node: AutomationNode) => Promise<ActionOutcome>,
+  ): Promise<StepsResult> {
+    const result: StepsResult = {
+      attempted: 0,
+      failures: 0,
+      cut: 0,
+      cutReason: null,
+      events: [],
+      webhooks: [],
+      emails: [],
+    };
+    if (steps.length === 0) return result;
+
+    const { limit, reason } = await this.allowance(event, executionId);
+
+    for (const node of steps.slice(0, limit)) {
+      const outcome = await run(node).catch((error: unknown): ActionOutcome => ({
         succeeded: false,
         message: error instanceof Error ? error.message : 'Action failed.',
-      });
-      const outcome: ActionOutcome =
-        node.subtype === AutomationAction.CREATE_TASK
-          ? await this.createTask(config, null, rule, event, new Date(started)).catch(failed)
-          : node.subtype === AutomationAction.AI_DRAFT_UPDATE
-            ? await this.draftStatusUpdate(rule, config, new Date(started)).catch(failed)
-            : {
-                succeeded: false,
-                message: 'This step needs a task, and this run had none in scope.',
-              };
+      }));
 
-      if (!outcome.succeeded) failures += 1;
-      events.push(...(outcome.events ?? []));
+      result.attempted += 1;
+      if (!outcome.succeeded) result.failures += 1;
+      result.events.push(...(outcome.events ?? []));
+      result.webhooks.push(...(outcome.webhooks ?? []));
+      result.emails.push(...(outcome.emails ?? []));
+
+      const followUps: FollowUps = {
+        ...(outcome.events?.length ? { events: outcome.events } : {}),
+        ...(outcome.webhooks?.length ? { webhooks: outcome.webhooks } : {}),
+        ...(outcome.emails?.length ? { emails: outcome.emails } : {}),
+      };
 
       await this.prisma.automationExecutionLog.create({
         data: {
@@ -857,30 +1100,88 @@ export class AutomationRunnerService {
           message: outcome.message?.slice(0, 500) ?? null,
           beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
           afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
+          ...(Object.keys(followUps).length > 0
+            ? { followUps: followUps as unknown as Prisma.InputJsonValue }
+            : {}),
         },
       });
     }
 
-    const status =
-      failures === 0
-        ? AutomationExecutionStatus.COMPLETED
-        : failures === actions.length
-          ? AutomationExecutionStatus.FAILED
-          : AutomationExecutionStatus.PARTIALLY_FAILED;
+    const cut = steps.slice(limit);
+    if (cut.length > 0) {
+      result.cut = cut.length;
+      result.cutReason = reason;
 
-    await this.finish(executionId, status, started, {});
-    await this.bumpRule(rule.id, status, failures > 0);
-
-    if (actions.length > failures) {
-      await this.relay.toProject(rule.projectId, ServerEvent.WORK_ITEM_UPDATED, {
-        workspaceId: rule.workspaceId,
-        projectId: rule.projectId,
-        occurredAt: new Date().toISOString(),
-        source: 'automation',
+      await this.prisma.automationExecutionLog.createMany({
+        data: cut.map((node) => ({
+          executionId,
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          subtype: node.subtype,
+          succeeded: false,
+          message: `Not run: ${reason}.`,
+        })),
       });
     }
 
-    return { ran: true, events, webhooks: [], emails: [] };
+    await this.prisma.automationExecution.update({
+      where: { id: executionId },
+      data: { actionsRun: result.attempted },
+    });
+
+    return result;
+  }
+
+  /**
+   * How many actions this run may perform, and the cap that says so.
+   *
+   * The chain's total is summed from the runs already recorded under its id,
+   * this one aside. A run in progress beside this one has not recorded its
+   * count yet, so the sum can be short by one run's worth — a backstop against
+   * a runaway, which this is, does not need to be exact to the action.
+   */
+  private async allowance(
+    event: AutomationEvent,
+    executionId: string,
+  ): Promise<{ limit: number; reason: string }> {
+    const spent = await this.prisma.automationExecution.aggregate({
+      where: { chainId: chainOf(event), id: { not: executionId } },
+      _sum: { actionsRun: true },
+    });
+    const left = Math.max(0, MAX_ACTIONS_PER_CHAIN - (spent._sum.actionsRun ?? 0));
+
+    return left < MAX_ACTIONS_PER_EXECUTION
+      ? {
+          limit: left,
+          reason: `the rules this change set off had made ${MAX_ACTIONS_PER_CHAIN} changes between them, which is as many as one change may cause`,
+        }
+      : {
+          limit: MAX_ACTIONS_PER_EXECUTION,
+          reason: `a rule does at most ${MAX_ACTIONS_PER_EXECUTION} actions in one run`,
+        };
+  }
+
+  /**
+   * A run whose every step the chain cap refused: closed as SKIPPED, with the
+   * reason, rather than as a run that did nothing successfully.
+   */
+  private async stoppedByChain(
+    rule: RunnableRule,
+    executionId: string,
+    steps: StepsResult,
+    started: number,
+  ): Promise<boolean> {
+    if (steps.attempted > 0 || steps.cut === 0) return false;
+
+    await this.finish(executionId, AutomationExecutionStatus.SKIPPED, started, {
+      skippedReason: `Stopped: ${steps.cutReason ?? 'a limit was reached'}. This looks like a loop.`,
+    });
+    await this.bumpRule(rule.id, AutomationExecutionStatus.SKIPPED);
+    this.logger.warn(
+      { ruleId: rule.id, executionId, cut: steps.cut },
+      'Automation chain stopped at the action limit',
+    );
+    return true;
   }
 
   /**
@@ -1113,28 +1414,43 @@ export class AutomationRunnerService {
     }
   }
 
+  /**
+   * Whether a condition step holds: one comparison, or a group of them.
+   *
+   * A group is `ALL` or `ANY` of its entries, each judged the same way and a
+   * nested group by recursion — `evaluateCondition` in the contracts is the one
+   * reading of that shape, shared with the builder and the validator.
+   *
+   * The fallback row holds, always. "If all other conditions are not met" is
+   * what makes it the last row rather than a comparison of its own — it has no
+   * field and no operator, so every branch below would read it as an unknown
+   * operator and return false, and the one row somebody added to catch
+   * everything would catch nothing.
+   */
   private conditionHolds(
     node: AutomationNode,
     task: EvaluableTask,
     event: AutomationEvent,
   ): boolean {
-    const config = (node.configuration ?? {}) as {
+    return evaluateCondition(node.configuration, (comparison) =>
+      this.comparisonHolds(comparison, node.subtype, task, event),
+    );
+  }
+
+  /** One comparison. `subtype` is the field a rule from before the canvas named. */
+  private comparisonHolds(
+    configuration: Record<string, unknown>,
+    subtype: string,
+    task: EvaluableTask,
+    event: AutomationEvent,
+  ): boolean {
+    const config = configuration as {
       field?: string;
       operator?: string;
       value?: unknown;
     };
 
-    /*
-     * The fallback row holds, always.
-     *
-     * "If all other conditions are not met" is what makes it the last row
-     * rather than a comparison of its own — it has no field and no operator, so
-     * every branch below would read it as an unknown operator and return false,
-     * and the one row somebody added to catch everything would catch nothing.
-     */
-    if (isFallbackBranch(node.configuration)) return true;
-
-    const actual = this.readField(config.field ?? node.subtype, task, event);
+    const actual = this.readField(config.field ?? subtype, task, event);
     const expected = config.value;
 
     /*
@@ -1534,6 +1850,95 @@ export class AutomationRunnerService {
         const before = task.assigneeId;
         const events = await this.updateTask(task, { assigneeId: null }, rule, event);
         return { succeeded: true, before, after: null, events };
+      }
+
+      /*
+       * The team responsible for the task — or none, for "clear the team".
+       *
+       * Re-checked as an assignee is: a team chosen months ago may have been
+       * deleted since, and a team id from another workspace is not one this
+       * rule can hand the task to. Written through `updateTask`, so it raises
+       * TASK_UPDATED and records the change in the task's history like any
+       * other field a rule sets.
+       */
+      case AutomationAction.ASSIGN_TEAM: {
+        const teamId = typeof config['teamId'] === 'string' ? config['teamId'] : '';
+
+        if (teamId !== '') {
+          const team = await this.prisma.team.findFirst({
+            where: { id: teamId, workspaceId: rule.workspaceId },
+            select: { id: true },
+          });
+          if (!team) {
+            return { succeeded: false, message: 'That team is no longer in this workspace.' };
+          }
+        } else if (config['clear'] !== true) {
+          return { succeeded: false, message: 'This step has no team to assign.' };
+        }
+
+        const before = task.teamId;
+        const events = await this.updateTask(
+          task,
+          { teamId: teamId === '' ? null : teamId },
+          rule,
+          event,
+        );
+        return { succeeded: true, before, after: teamId === '' ? null : teamId, events };
+      }
+
+      /*
+       * A named checklist, added to the task with its items unticked.
+       *
+       * The name is text with variables, as a comment's body is; the items are
+       * the step's own lines. A task holds a bounded number of checklists, and
+       * a rule that has already added one to it adds another — a rule firing
+       * twice is a rule configured to, and the log says what it did each time.
+       */
+      case AutomationAction.CREATE_CHECKLIST: {
+        const { name: template, items } = checklistOf(config);
+        const name = renderAutomationText(template, await this.textValues(task, rule, event, at))
+          .trim()
+          .slice(0, CHECKLIST_NAME_MAX);
+
+        if (!name) return { succeeded: false, message: 'The checklist’s name came out empty.' };
+        if (items.length === 0) {
+          return { succeeded: false, message: 'This step has no items to add.' };
+        }
+
+        const existing = await this.prisma.taskChecklist.aggregate({
+          where: { taskId: task.id },
+          _count: { _all: true },
+          _max: { position: true },
+        });
+        if (existing._count._all >= MAX_CHECKLISTS_PER_TASK) {
+          return {
+            succeeded: false,
+            message: `The task already has ${MAX_CHECKLISTS_PER_TASK} checklists, which is as many as one holds.`,
+          };
+        }
+
+        const checklist = await this.prisma.taskChecklist.create({
+          data: {
+            workspaceId: rule.workspaceId,
+            taskId: task.id,
+            name,
+            position: (existing._max.position ?? 0) + POSITION_STEP,
+            createdById: event.actorId ?? null,
+            items: {
+              create: items.map((title, index) => ({
+                title,
+                position: (index + 1) * POSITION_STEP,
+              })),
+            },
+          },
+          select: { id: true },
+        });
+
+        return {
+          succeeded: true,
+          message: `Added the checklist “${name}” with ${items.length} item${items.length === 1 ? '' : 's'}`,
+          after: { checklistId: checklist.id, name, items: items.length },
+        };
       }
 
       case AutomationAction.MOVE_TO_SECTION: {
@@ -2972,8 +3377,9 @@ export class AutomationRunnerService {
   ): Promise<void> {
     const ids = [before.assigneeId, updated.assigneeId].filter((id): id is string => !!id);
     const sectionIds = [before.sectionId, updated.sectionId].filter((id): id is string => !!id);
+    const teamIds = [before.teamId, updated.teamId].filter((id): id is string => !!id);
 
-    const [users, sections] = await Promise.all([
+    const [users, sections, teams] = await Promise.all([
       ids.length > 0
         ? this.prisma.user.findMany({
             where: { id: { in: ids } },
@@ -2983,6 +3389,12 @@ export class AutomationRunnerService {
       sectionIds.length > 0
         ? this.prisma.section.findMany({
             where: { id: { in: sectionIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      teamIds.length > 0
+        ? this.prisma.team.findMany({
+            where: { id: { in: teamIds } },
             select: { id: true, name: true },
           })
         : Promise.resolve([]),
@@ -2996,15 +3408,22 @@ export class AutomationRunnerService {
       const section = sections.find((row) => row.id === id);
       return section ? { id: section.id, label: section.name } : null;
     };
+    const teamRef = (id: string | null) => {
+      if (!id) return null;
+      const team = teams.find((row) => row.id === id);
+      return { id, label: team?.name ?? 'a team that was removed' };
+    };
 
     const stories = diffItemStories(
       snapshotFromTask(before, {
         assignee: userRef(before.assigneeId),
         section: sectionRef(before.sectionId),
+        team: teamRef(before.teamId),
       }),
       snapshotFromTask(updated, {
         assignee: userRef(updated.assigneeId),
         section: sectionRef(updated.sectionId),
+        team: teamRef(updated.teamId),
       }),
       'task',
     );
@@ -3060,6 +3479,7 @@ export class AutomationRunnerService {
       ...(before ? { before } : {}),
       ...(after ? { after } : {}),
       correlationId: event.correlationId,
+      chainId: chainOf(event),
       depth: event.depth + 1,
       causedByRuleId: rule.id,
     };
@@ -3111,28 +3531,35 @@ export class AutomationRunnerService {
       where: {
         projectId: event.projectId,
         status: AutomationRuleStatus.ACTIVE,
-        triggerType: event.trigger,
+        publishedVersion: { is: { triggerType: event.trigger } },
       },
       select: { id: true, workspaceId: true },
     });
 
     if (!rule) return;
 
-    await this.prisma.automationExecution.create({
-      data: {
-        workspaceId: rule.workspaceId,
-        projectId: event.projectId,
-        ruleId: rule.id,
-        status: AutomationExecutionStatus.SKIPPED,
-        triggerType: event.trigger,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        correlationId: event.correlationId,
-        depth: event.depth,
-        skippedReason: reason,
-        finishedAt: new Date(),
-      },
-    });
+    try {
+      await this.prisma.automationExecution.create({
+        data: {
+          workspaceId: rule.workspaceId,
+          projectId: event.projectId,
+          ruleId: rule.id,
+          status: AutomationExecutionStatus.SKIPPED,
+          triggerType: event.trigger,
+          entityType: event.entityType,
+          entityId: event.entityId,
+          correlationId: event.correlationId,
+          chainId: chainOf(event),
+          // Keyed like a run, so a retried job does not record the stop twice.
+          idempotencyKey: runKey(event),
+          depth: event.depth,
+          skippedReason: reason,
+          finishedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -3150,12 +3577,7 @@ export class AutomationRunnerService {
     event: AutomationEvent,
     executionId: string,
     started: number,
-  ): Promise<{
-    ran: boolean;
-    events: AutomationEvent[];
-    webhooks: RuleWebhookRequest[];
-    emails: RuleEmailRequest[];
-  }> {
+  ): Promise<RuleRun> {
     const ticket = await this.prisma.ticket.findFirst({
       where: { id: event.entityId, workspaceId: rule.workspaceId, archivedAt: null },
     });
@@ -3176,13 +3598,14 @@ export class AutomationRunnerService {
     };
     const plan = await this.plan(
       rule.nodes,
-      (node) => {
-        const config = (node.configuration ?? {}) as Record<string, unknown>;
-        return (
-          isFallbackBranch(node.configuration) ||
-          (isTicketConditionField(config['field']) && ticketConditionHolds(config, facts))
-        );
-      },
+      (node) =>
+        // Grouped like a task's — the fallback included — with each
+        // comparison about the ticket's own fields.
+        evaluateCondition(
+          node.configuration,
+          (comparison) =>
+            isTicketConditionField(comparison['field']) && ticketConditionHolds(comparison, facts),
+        ),
       event.resumeFromNodeId,
     );
     if (plan.skippedBy) {
@@ -3196,48 +3619,22 @@ export class AutomationRunnerService {
       return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
-    const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
     const live: TicketRow = { ...ticket };
-    let failures = 0;
-    const events: AutomationEvent[] = [];
-    const emails: RuleEmailRequest[] = [];
+    const steps = await this.perform(executionId, event, plan.actions, (node) =>
+      this.runTicketAction(node, live, rule, event, new Date(started)),
+    );
+    const { failures, events, emails } = steps;
 
-    for (const node of actions) {
-      const outcome = await this.runTicketAction(node, live, rule, event, new Date(started)).catch(
-        (error: unknown): ActionOutcome => ({
-          succeeded: false,
-          message: error instanceof Error ? error.message : 'Action failed.',
-        }),
-      );
-      if (!outcome.succeeded) failures += 1;
-      events.push(...(outcome.events ?? []));
-      emails.push(...(outcome.emails ?? []));
-
-      await this.prisma.automationExecutionLog.create({
-        data: {
-          executionId,
-          nodeId: node.id,
-          nodeType: node.nodeType,
-          subtype: node.subtype,
-          succeeded: outcome.succeeded,
-          message: outcome.message?.slice(0, 500) ?? null,
-          beforeValue: (outcome.before ?? null) as Prisma.InputJsonValue,
-          afterValue: (outcome.after ?? null) as Prisma.InputJsonValue,
-        },
-      });
+    if (await this.stoppedByChain(rule, executionId, steps, started)) {
+      return { ran: false, events: [], webhooks: [], emails: [] };
     }
 
-    const status =
-      failures === 0
-        ? AutomationExecutionStatus.COMPLETED
-        : failures === actions.length
-          ? AutomationExecutionStatus.FAILED
-          : AutomationExecutionStatus.PARTIALLY_FAILED;
+    const status = runStatus(steps);
     await this.scheduleDelays(rule, event, plan.delays, executionId, started);
-    await this.finish(executionId, status, started, {});
-    await this.bumpRule(rule.id, status, failures > 0);
+    await this.finish(executionId, status, started, cutNote(steps));
+    await this.bumpRule(rule.id, status, failures > 0 || steps.cut > 0);
 
-    if (actions.length > failures) {
+    if (steps.attempted > failures) {
       // The ticket's history says a rule did it, as a task's does.
       await this.prisma.activityLog.create({
         data: {
@@ -3248,7 +3645,7 @@ export class AutomationRunnerService {
           entityId: ticket.id,
           projectId: ticket.projectId,
           summary: `Automation "${rule.name}" updated ${ticket.key}`,
-          metadata: { ruleId: rule.id, executionId, actions: actions.length, failures },
+          metadata: { ruleId: rule.id, executionId, actions: steps.attempted, failures },
         },
       });
       for (const projectId of new Set([event.projectId, live.projectId ?? event.projectId])) {
@@ -3584,6 +3981,7 @@ export class AutomationRunnerService {
           projectId: rule.projectId,
           ruleId: rule.id,
           nodeId: node.id,
+          ruleVersionId: rule.versionId,
           runAt,
           event: original as unknown as Prisma.InputJsonValue,
         },
@@ -3601,6 +3999,34 @@ export class AutomationRunnerService {
       });
     }
   }
+}
+
+/**
+ * How a run that got as far as its actions ended.
+ *
+ * Every step it ran failed: FAILED. Some failed, or some were cut off by a cap:
+ * PARTIALLY_FAILED — a run that did less than its rule says is not COMPLETED,
+ * whatever the steps it did run made of it. A run with no action steps at all
+ * (a Wait and nothing before it) has not failed at anything.
+ */
+function runStatus(steps: StepsResult): AutomationExecutionStatus {
+  if (steps.attempted > 0 && steps.failures === steps.attempted) {
+    return AutomationExecutionStatus.FAILED;
+  }
+  if (steps.failures > 0 || steps.cut > 0) return AutomationExecutionStatus.PARTIALLY_FAILED;
+  return AutomationExecutionStatus.COMPLETED;
+}
+
+/** The run's own line about steps a cap cut off — each also has a log row. */
+function cutNote(steps: StepsResult): { error?: string } {
+  if (steps.cut === 0) return {};
+
+  const count = steps.cut === 1 ? '1 step was' : `${steps.cut} steps were`;
+  return { error: `${count} not run: ${steps.cutReason ?? 'a limit was reached'}.` };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
 /** Maps a configured value onto the column its field type uses. */

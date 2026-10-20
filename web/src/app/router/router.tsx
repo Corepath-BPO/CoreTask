@@ -22,6 +22,8 @@ import {
 import { OAuthAppsPage } from '@/features/integrations/pages/oauth-apps-page';
 import { OAuthConsentPage } from '@/features/integrations/pages/oauth-consent-page';
 import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
+import { SlackPage } from '@/features/integrations/pages/slack-page';
+import { SlackCallbackPage, SlackLinkPage } from '@/features/integrations/pages/slack-return-pages';
 import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
 import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation-page';
 import { MembersPage } from '@/features/members/pages/members-page';
@@ -382,6 +384,12 @@ const integrationsConnectedAppsRoute = createRoute({
   component: ConnectedAppsPage,
 });
 
+const integrationsSlackRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/slack',
+  component: SlackPage,
+});
+
 /**
  * Where a reset link lands. Off the root rather than the guest gate: someone
  * still signed in on this device may be the one who forgot, and the guest gate
@@ -391,6 +399,32 @@ const resetPasswordRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/reset-password',
   component: ResetPasswordPage,
+});
+
+/** The gate the pages outside the app's shell share: signed in, or off to sign in and back. */
+const requireSignIn = ({ location }: { location: { href: string } }) => {
+  if (useAuthStore.getState().status !== 'authenticated') {
+    throw redirect({ to: '/login', search: { redirect: location.href } });
+  }
+};
+
+/**
+ * Where Slack sends an admin back after they allow the app, and where a
+ * "Link your account" button in Slack lands. Signed in and outside the shell,
+ * like the OAuth consent page: each is one step and nothing else.
+ */
+const slackCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/integrations/slack/callback',
+  component: SlackCallbackPage,
+  beforeLoad: requireSignIn,
+});
+
+const slackLinkRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/integrations/slack/link',
+  component: SlackLinkPage,
+  beforeLoad: requireSignIn,
 });
 
 /**
@@ -762,6 +796,8 @@ const routeTree = rootRoute.addChildren([
   acceptInvitationRoute,
   publicFormRoute,
   oauthAuthorizeRoute,
+  slackCallbackRoute,
+  slackLinkRoute,
   protectedRoute.addChildren([
     dashboardRoute,
     workspaceLinkRoute,
@@ -808,6 +844,7 @@ const routeTree = rootRoute.addChildren([
       integrationsAppDirectoryRoute,
       integrationsOAuthAppsRoute,
       integrationsConnectedAppsRoute,
+      integrationsSlackRoute,
     ]),
     goalsRoute,
     calendarRoute,

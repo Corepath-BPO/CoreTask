@@ -118,7 +118,13 @@ export class WebhooksService {
     endpointId: string,
     input: UpdateWebhookInput,
   ): Promise<WebhookEndpointDto> {
-    await this.requireEndpoint(workspaceId, endpointId);
+    const existing = await this.requireEndpoint(workspaceId, endpointId);
+    if (input.url !== undefined && existing.slackChannelId) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'This posts through the CoreTask Slack app, to a channel. Change it in the project’s Customize › Apps.',
+      );
+    }
 
     const url = input.url === undefined ? undefined : this.checkUrl(input.url);
     if (input.projectId !== undefined) {

@@ -17,18 +17,20 @@ Read [the rule builder rebuild](./asana-parity-rule-builder.md) first — it say
 why the previous model is being replaced. This document says what replaces it
 and what the replacement costs.
 
-## Status: the tables exist, nothing uses them yet
+## Status: an API-only second editor
 
 `automation_rule_versions`, `automation_branches`,
 `automation_condition_groups`, `automation_conditions` and `automation_actions`
-were created by `20260807160000_automation_structured_rules`. They are declared
-in `schema.prisma` and generated into the Prisma client.
+were created by `20260807160000_automation_structured_rules`.
 
-**No code reads or writes any of them.** The runner still walks
-`automation_nodes`, the API still saves and returns nodes, and the builder still
-edits a node graph. Everything below describes the model the tables encode, not
-behaviour you can observe today. Where a section describes something that
-already runs, it says so.
+`AutomationDefinitionService` reads and writes them through the
+`/:ruleId/definition` routes: a structured draft, saved whole, and a publish.
+No client uses those routes yet — the builder edits the node tree — and the
+runner does not read branches. It reads the node tree a version keeps
+(`AutomationRuleVersion.nodes`), so the structured publish **compiles** the
+branches into that shape on the way out; see
+[versioning](./automation-versioning.md#the-structured-definition). Everything
+below describes the model the tables encode.
 
 ## Why ordering is an integer column and not parentage
 

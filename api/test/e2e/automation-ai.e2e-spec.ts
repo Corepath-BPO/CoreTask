@@ -56,7 +56,11 @@ describe('AI steps in rules (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(
       context.prisma,
-      { toProject: async () => undefined, toWorkspace: async () => undefined } as never,
+      {
+        toProject: async () => undefined,
+        toProjectAudience: async () => undefined,
+        toWorkspace: async () => undefined,
+      } as never,
       new AutomationAiService(context.prisma, model),
     );
   });
@@ -367,6 +371,7 @@ describe('AI steps in rules (e2e)', () => {
       const id = await rule([useAi({ instructions: 'Triage it.', allow: ['COMMENT'] })], scope);
       const bare = new AutomationRunnerService(context.prisma, {
         toProject: async () => undefined,
+        toProjectAudience: async () => undefined,
         toWorkspace: async () => undefined,
       } as never);
 

@@ -135,7 +135,10 @@ parentage. That asymmetry is why the migration is phased forward and never back
 - The `+ Add branch` menu with its two named entries. The builder today offers
   `Add branch` / `Otherwise if…` on an edge control
   (`automation-edge.tsx`), which splits the **node tree**, not a branch list.
-- Branch reordering, and the drag handle reference 13 shows.
+- Branch reordering in this model. The builder reorders the **node tree's**
+  rows — the trigger's conditions, tried top to bottom — by dragging a row's
+  handle or from its menu; the order is the rows' `position`, which the runner
+  reads. See [the builder parity notes](../ui/automation-builder-parity.md).
 - Branch duplication and deletion as branch-level operations.
 
 ## Related

@@ -389,7 +389,11 @@ describe('Automation templates (e2e)', () => {
 
       const manager = await registerUser('Manager');
       await context.prisma.workspaceMember.create({
-        data: { workspaceId: scope.workspaceId, userId: manager.userId, role: WorkspaceRole.MANAGER },
+        data: {
+          workspaceId: scope.workspaceId,
+          userId: manager.userId,
+          role: WorkspaceRole.MANAGER,
+        },
       });
 
       return manager;

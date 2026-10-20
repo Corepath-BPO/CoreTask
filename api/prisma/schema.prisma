@@ -226,6 +226,8 @@ model User {
   emailVerificationTokens    EmailVerificationToken[]
   oauthCodes                 OAuthAuthorizationCode[]
   oauthGrants                OAuthGrant[]
+  slackInstallations         SlackInstallation[]
+  slackLinks                 SlackUserLink[]
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -234,6 +236,8 @@ model User {
   projectMembersAdded        ProjectMember[]          @relation("ProjectMemberAddedBy")
   createdTasks               Task[]                   @relation("TaskCreatedBy")
   assignedTasks              Task[]                   @relation("TaskAssignee")
+  createdChecklists          TaskChecklist[]          @relation("TaskChecklistCreatedBy")
+  completedChecklistItems    TaskChecklistItem[]      @relation("ChecklistItemCompletedBy")
   reportedTickets            Ticket[]                 @relation("TicketReporter")
   assignedTickets            Ticket[]                 @relation("TicketAssignee")
   comments                   Comment[]
@@ -508,6 +512,11 @@ model WebhookEndpoint {
   apiKeyId            String?                @db.Uuid
   /// Subscribed through the API by an OAuth app — gone when it is disconnected.
   oauthGrantId        String?                @db.Uuid
+  /// A Slack app posting through the installed CoreTask bot rather than an
+  /// incoming webhook: the channel, and its name as it was when chosen. Such
+  /// a post carries buttons, which a webhook's cannot.
+  slackChannelId      String?                @db.VarChar(32)
+  slackChannelName    String?                @db.VarChar(120)
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -596,6 +605,7 @@ model Workspace {
   webhookEndpoints        WebhookEndpoint[]
   oauthApps               WorkspaceOAuthApp[]
   webhookDeliveries       WebhookDelivery[]
+  slackInstallation       SlackInstallation?
   teams                   Team[]
   projects                Project[]
   projectMembers          ProjectMember[]
@@ -1490,6 +1500,8 @@ model Team {
   goals       Goal[]
   invitations WorkspaceInvitation[]
   messages    TeamMessage[]
+  /// Tasks this team has been made responsible for.
+  tasks       Task[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
@@ -1587,6 +1599,10 @@ model Task {
   /// Set by "Mark as duplicate": the task this one repeats. It is completed,
   /// and its collaborators join the original.
   duplicateOfId        String?         @db.Uuid
+  /// The team responsible for the task, beside the one person assigned to it —
+  /// "assign to the facilities team". A team of this workspace; cleared, not
+  /// cascaded, when the team is deleted.
+  teamId               String?         @db.Uuid
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
@@ -1598,6 +1614,8 @@ model Task {
   subtasks           Task[]                  @relation("TaskSubtasks")
   assignee           User?                   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  team               Team?                   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  checklists         TaskChecklist[]
   comments           Comment[]
   attachments        Attachment[]
   followers          Follower[]
@@ -1627,7 +1645,50 @@ model Task {
   @@index([workspaceId, dueDate])
   @@index([parentTaskId])
   @@index([parentTicketId])
+  @@index([teamId])
   @@map("tasks")
+}
+
+/// A named list of things to tick off, on one task.
+///
+/// Lighter than subtasks on purpose: an item is a line and a checkbox — no
+/// assignee, dates, comments or place on a board of its own. "Move-in
+/// inspection: keys, meter readings, smoke alarms" is a checklist; work that
+/// somebody owns and schedules is a subtask.
+model TaskChecklist {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  taskId      String   @db.Uuid
+  name        String   @db.VarChar(200)
+  position    Float    @default(0)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task      Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy User?               @relation("TaskChecklistCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     TaskChecklistItem[]
+
+  @@index([taskId, position])
+  @@map("task_checklists")
+}
+
+/// One line of a checklist. Done when `completedAt` is set.
+model TaskChecklistItem {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  checklistId   String    @db.Uuid
+  title         String    @db.VarChar(500)
+  position      Float     @default(0)
+  completedAt   DateTime?
+  completedById String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  checklist   TaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  completedBy User?         @relation("ChecklistItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([checklistId, position])
+  @@map("task_checklist_items")
 }
 
 /// One person's like on one task — Asana's thumbs-up in the pane. The pair is
@@ -2386,15 +2447,30 @@ model AutomationRuleVersion {
   triggerType   String @db.VarChar(60)
   triggerConfig Json   @default("{}")
 
+  /// The steps this version runs: the rule's node tree as it stood when it was
+  /// published, in the row shape `automation_nodes` has (id, nodeType, subtype,
+  /// configuration, parentNodeId, branchKey, position).
+  ///
+  /// JSON rather than a second set of node rows, for the reason a template is: a
+  /// published version is never edited, validated in place or partly read — the
+  /// runner reads it whole and a revert copies it whole — so rows would be
+  /// structure with no query to serve, and every reader of `automation_nodes`
+  /// would have to remember to leave them out. Null on a draft the structured
+  /// definition endpoints are still editing; set when that draft is published.
+  nodes Json?
+  /// What the rule was called when this version was published, for the history.
+  name  String? @db.VarChar(120)
+
   createdById String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  rule        AutomationRule     @relation("RuleVersions", fields: [ruleId], references: [id], onDelete: Cascade)
-  createdBy   User?              @relation("AutomationVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  rule        AutomationRule        @relation("RuleVersions", fields: [ruleId], references: [id], onDelete: Cascade)
+  createdBy   User?                 @relation("AutomationVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   branches    AutomationBranch[]
-  draftOf     AutomationRule?    @relation("RuleDraft")
-  publishedOf AutomationRule?    @relation("RulePublished")
+  draftOf     AutomationRule?       @relation("RuleDraft")
+  publishedOf AutomationRule?       @relation("RulePublished")
+  executions  AutomationExecution[]
 
   @@unique([ruleId, version])
   @@index([ruleId])
@@ -2569,37 +2645,56 @@ model AutomationClockFiring {
 
 /// One run of one rule.
 model AutomationExecution {
-  id            String                    @id @default(uuid(7)) @db.Uuid
-  workspaceId   String                    @db.Uuid
-  projectId     String                    @db.Uuid
-  ruleId        String                    @db.Uuid
-  status        AutomationExecutionStatus @default(RUNNING)
-  triggerType   String                    @db.VarChar(60)
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                    @db.Uuid
+  projectId      String                    @db.Uuid
+  ruleId         String                    @db.Uuid
+  status         AutomationExecutionStatus @default(RUNNING)
+  triggerType    String                    @db.VarChar(60)
   /// What the run was about — usually a task.
-  entityType    String?                   @db.VarChar(40)
-  entityId      String?                   @db.Uuid
+  entityType     String?                   @db.VarChar(40)
+  entityId       String?                   @db.Uuid
   /// Who or what caused the triggering change. Null when a rule caused it.
-  actorId       String?                   @db.Uuid
+  actorId        String?                   @db.Uuid
   /// Shared by every execution descended from one original user action, which
   /// is what makes a loop detectable rather than merely suspected.
-  correlationId String                    @db.Uuid
+  correlationId  String                    @db.Uuid
+  /// The event this chain of rules started from. Narrower than the correlation
+  /// id, which a manual or scheduled run shares across every task in the batch:
+  /// the per-chain action cap counts within this, so a batch of fifty tasks is
+  /// fifty chains rather than one long one.
+  chainId        String?                   @db.Uuid
+  /// The event this run answered, plus the Wait step it resumed after, if any.
+  /// Unique per rule, so a queue retry of the same event finds the run it
+  /// already made instead of making the same changes twice.
+  idempotencyKey String?                   @db.VarChar(120)
+  /// How many action steps this run performed — what the chain cap sums.
+  actionsRun     Int                       @default(0)
   /// How many rules deep this is. The original action is 0.
-  depth         Int                       @default(0)
+  depth          Int                       @default(0)
   /// Set when conditions did not match, so a no-op is distinguishable from a
   /// failure in the history.
-  skippedReason String?                   @db.VarChar(200)
-  error         String?
-  durationMs    Int?
-  startedAt     DateTime                  @default(now())
-  finishedAt    DateTime?
+  skippedReason  String?                   @db.VarChar(200)
+  error          String?
+  durationMs     Int?
+  /// The published version this run executed — what the rule said at the
+  /// time, which its current definition may no longer. Null for runs from
+  /// before versions were kept, and for a stop recorded before a rule ran.
+  ruleVersionId  String?                   @db.Uuid
+  startedAt      DateTime                  @default(now())
+  finishedAt     DateTime?
 
-  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  rule      AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  logs      AutomationExecutionLog[]
+  workspace   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule        AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  ruleVersion AutomationRuleVersion?   @relation(fields: [ruleVersionId], references: [id], onDelete: SetNull)
+  logs        AutomationExecutionLog[]
 
+  @@unique([ruleId, idempotencyKey])
   @@index([ruleId, startedAt])
   @@index([projectId, status])
   @@index([correlationId])
+  @@index([chainId])
+  @@index([ruleVersionId])
   @@map("automation_executions")
 }
 
@@ -2618,6 +2713,10 @@ model AutomationExecutionLog {
   message     String?  @db.VarChar(500)
   beforeValue Json?
   afterValue  Json?
+  /// What this step asked to be sent once the run was over — the events its
+  /// write amounts to, webhooks, e-mails. Kept so a queue retry that finds the
+  /// run already made can send them again rather than losing the chain.
+  followUps   Json?
   createdAt   DateTime @default(now())
 
   execution AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
@@ -2774,19 +2873,22 @@ model PortfolioStatusUpdate {
 /// A rule run waiting at a Wait step. The clock publishes `event` again, aimed
 /// at the rule and marked to resume from `nodeId`, once `runAt` has passed.
 model AutomationDelayedRun {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  workspaceId String   @db.Uuid
-  projectId   String   @db.Uuid
-  ruleId      String   @db.Uuid
+  id            String   @id @default(uuid(7)) @db.Uuid
+  workspaceId   String   @db.Uuid
+  projectId     String   @db.Uuid
+  ruleId        String   @db.Uuid
   /// The Wait step the run resumes after.
-  nodeId      String   @db.Uuid
-  runAt       DateTime
+  nodeId        String   @db.Uuid
+  /// The version the run started on, which it finishes on: a rule republished
+  /// while a run waits does not change what that run does next.
+  ruleVersionId String?  @db.Uuid
+  runAt         DateTime
   /// The event the run started from, to be published again.
-  event       Json
+  event         Json
   /// PENDING until the clock takes it; DONE once republished; CANCELLED when
   /// the rule had stopped by then.
-  status      String   @default("PENDING") @db.VarChar(16)
-  createdAt   DateTime @default(now())
+  status        String   @default("PENDING") @db.VarChar(16)
+  createdAt     DateTime @default(now())
 
   rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
@@ -2827,4 +2929,46 @@ model EmailVerificationToken {
 
   @@index([userId, createdAt])
   @@map("email_verification_tokens")
+}
+
+/// The CoreTask Slack app installed in a Slack workspace, for one CoreTask
+/// workspace: one each way, so a slash command always knows where it is.
+model SlackInstallation {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  workspaceId   String   @unique @db.Uuid
+  /// Slack's team id (`T…`).
+  teamId        String   @unique @db.VarChar(32)
+  teamName      String   @db.VarChar(200)
+  /// The app's bot user there (`U…`), so its own posts can be told apart.
+  botUserId     String   @db.VarChar(32)
+  /// `xoxb-…`, encrypted like a webhook signing secret.
+  botToken      String
+  scopes        String[]
+  installedById String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installedBy User?           @relation(fields: [installedById], references: [id], onDelete: SetNull)
+  links       SlackUserLink[]
+
+  @@map("slack_installations")
+}
+
+/// A Slack user who has said which CoreTask person they are. What they do
+/// from Slack is done as that person, with that person's access.
+model SlackUserLink {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  installationId String   @db.Uuid
+  slackUserId    String   @db.VarChar(32)
+  userId         String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  installation SlackInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([installationId, slackUserId])
+  @@unique([installationId, userId])
+  @@index([userId])
+  @@map("slack_user_links")
 }

@@ -11,7 +11,7 @@ import {
 } from '@coretask/contracts';
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { AutomationRule, Prisma } from '@prisma/client';
+import { Prisma as PrismaNamespace, type AutomationRule, type Prisma } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PaginatedResult, type ActorContext } from '../../common/types/api.types';
@@ -27,7 +27,15 @@ import { ProjectsService } from '../projects/projects.service';
 import { AutomationEventPublisher } from './automation-event.publisher';
 
 import { AutomationGraphValidatorService } from './builder/automation-graph-validator.service';
+import { toGraph } from './builder/automation-graph.mapper';
 import type { CreateRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import {
+  readSnapshot,
+  sameConfig,
+  sameGraph,
+  snapshotOf,
+  type SnapshotNode,
+} from './versions/rule-snapshot';
 
 /** One node as the builder sends it. Mirrors `SaveAutomationGraphNode`. */
 export interface GraphNodeInput {
@@ -45,6 +53,62 @@ const ruleInclude = {
   nodes: { orderBy: { position: 'asc' } },
   createdBy: { select: { id: true, name: true, email: true, avatarUrl: true } },
 } satisfies Prisma.AutomationRuleInclude;
+
+/** The most versions the history lists. A rule republished more than this keeps the rest. */
+const MAX_LISTED_VERSIONS = 100;
+
+const versionSelect = {
+  id: true,
+  version: true,
+  name: true,
+  triggerType: true,
+  triggerConfig: true,
+  nodes: true,
+  createdAt: true,
+  createdBy: { select: { id: true, name: true, avatarUrl: true } },
+} satisfies Prisma.AutomationRuleVersionSelect;
+
+type VersionRow = Prisma.AutomationRuleVersionGetPayload<{ select: typeof versionSelect }>;
+
+/** A published version, as the history and the builder's header show it. */
+export interface VersionSummary {
+  id: string;
+  version: number;
+  name: string | null;
+  triggerType: string;
+  /** When it was published — a version is created by publishing it. */
+  publishedAt: string;
+  publishedBy: { id: string; name: string; avatarUrl: string | null } | null;
+  /** Whether this is the version the rule is running now. */
+  isPublished: boolean;
+  /** How many steps it has after its trigger, so a list can tell versions apart. */
+  stepCount: number;
+}
+
+function toVersionSummary(row: VersionRow, publishedVersionId: string | null): VersionSummary {
+  return {
+    id: row.id,
+    version: row.version,
+    name: row.name,
+    triggerType: row.triggerType,
+    publishedAt: row.createdAt.toISOString(),
+    publishedBy: row.createdBy,
+    isPublished: row.id === publishedVersionId,
+    stepCount: (readSnapshot(row.nodes) ?? []).filter((node) => node.nodeType !== 'TRIGGER').length,
+  };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The id a client's node may keep: a uuid as it stands, or the uuid inside the
+ * `new-<uuid>` a builder names a step it has not saved yet. See `replaceNodes`.
+ */
+function keepableId(id: string | undefined): string | null {
+  if (!id) return null;
+  const candidate = id.startsWith('new-') ? id.slice('new-'.length) : id;
+  return UUID.test(candidate) ? candidate.toLowerCase() : null;
+}
 
 @Injectable()
 export class AutomationsService {
@@ -66,7 +130,12 @@ export class AutomationsService {
         projectId,
         status: { not: AutomationRuleStatus.ARCHIVED },
       },
-      include: ruleInclude,
+      include: {
+        ...ruleInclude,
+        // What is running, which the draft's trigger columns may have moved on
+        // from — a task's "Run rule" menu lists rules by the trigger that runs.
+        publishedVersion: { select: { version: true, triggerType: true, triggerConfig: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -202,27 +271,50 @@ export class AutomationsService {
    * as it now stands, and reconciling that against stored rows means guessing
    * which node is "the same" one. Guessing wrong silently rewires a rule.
    *
-   * The ids are kept because `parentNodeId` points at them: rewriting them on
-   * every save would break every parent link in the same statement that wrote
-   * it. Ids from the client are accepted only after being mapped through the
-   * ones this call creates, so a caller cannot smuggle in a row it does not own.
+   * A step keeps its id from one save to the next. Every save used to give
+   * every step a new one, so a builder that autosaves while somebody is typing
+   * into a step lost the step from under the cursor: the panel it was open in
+   * named an id the rule no longer had. So an id is kept when it is one of this
+   * rule's own steps, and a new step's `new-<uuid>` becomes that uuid — the
+   * builder makes the same translation, so its selection survives the save.
+   * Anything else is given a fresh id: an id that is another rule's step, or
+   * not a uuid at all, is a name the caller chose, never a row it may claim.
    *
    * Two passes, because a parent may appear after its child in the array and a
    * self-referencing insert cannot resolve forward.
    */
   private async replaceNodes(ruleId: string, nodes: GraphNodeInput[]): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      const own = new Set(
+        (await tx.automationNode.findMany({ where: { ruleId }, select: { id: true } })).map(
+          (node) => node.id,
+        ),
+      );
       await tx.automationNode.deleteMany({ where: { ruleId } });
 
-      // Client ids are opaque strings — a new node has never been to the
-      // database. Mapping them to real ones keeps `parentId` meaningful without
-      // trusting anything the client says about identity.
+      const wanted = nodes.map((node) => keepableId(node.id)).filter(Boolean) as string[];
+      const taken = new Set(
+        (
+          await tx.automationNode.findMany({
+            where: { id: { in: wanted.filter((id) => !own.has(id)) } },
+            select: { id: true },
+          })
+        ).map((node) => node.id),
+      );
+
+      // Client ids are opaque strings until mapped here, so `parentId` stays
+      // meaningful without trusting anything the client says about identity.
       const realId = new Map<string, string>();
+      const used = new Set<string>();
       // Only nodes that named themselves go in the map. One that did not came
       // from the old flat API, has no children, and needs no entry — nothing
       // will ever look it up.
       for (const node of nodes) {
-        if (node.id) realId.set(node.id, randomUUID());
+        if (!node.id || realId.has(node.id)) continue;
+        const kept = keepableId(node.id);
+        const id = kept && !taken.has(kept) && !used.has(kept) ? kept : randomUUID();
+        used.add(id);
+        realId.set(node.id, id);
       }
 
       await tx.automationNode.createMany({
@@ -277,7 +369,14 @@ export class AutomationsService {
    * is published the request that wrote it is long gone, and the rule that goes
    * live is the one in the table.
    */
-  async publish(workspaceId: string, projectId: string, role: WorkspaceRole, ruleId: string) {
+  async publish(
+    workspaceId: string,
+    projectId: string,
+    role: WorkspaceRole,
+    ruleId: string,
+    /** Who published, recorded on the version. Absent for a bundle writing rules. */
+    userId?: string,
+  ) {
     const rule = await this.requireRule(workspaceId, projectId, ruleId);
     this.assertMayManage(role);
 
@@ -316,11 +415,216 @@ export class AutomationsService {
       });
     }
 
-    return this.prisma.automationRule.update({
-      where: { id: ruleId },
-      data: { status: AutomationRuleStatus.ACTIVE, publishedAt: new Date() },
-      include: ruleInclude,
+    /*
+     * The steps go live as a version, not as the rows somebody edits.
+     *
+     * The runner reads the published version and nothing else, so a save after
+     * this changes the draft and leaves what is running alone until the next
+     * publish. A draft that says exactly what the running version says — a
+     * paused rule being resumed, a second press of Publish — points back at that
+     * version rather than adding a copy of it to the history.
+     */
+    const draft = snapshotOf(rule.nodes);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const current = rule.publishedVersionId
+          ? await tx.automationRuleVersion.findUnique({
+              where: { id: rule.publishedVersionId },
+              select: { id: true, nodes: true, triggerType: true, triggerConfig: true },
+            })
+          : null;
+        const running = current ? readSnapshot(current.nodes) : null;
+
+        const unchanged =
+          current !== null &&
+          running !== null &&
+          current.triggerType === rule.triggerType &&
+          sameConfig(current.triggerConfig, rule.triggerConfig) &&
+          sameGraph(running, draft);
+
+        const versionId = unchanged
+          ? current.id
+          : (
+              await tx.automationRuleVersion.create({
+                data: {
+                  ruleId,
+                  version: (await this.latestVersion(tx, ruleId)) + 1,
+                  triggerType: rule.triggerType,
+                  triggerConfig: rule.triggerConfig as Prisma.InputJsonValue,
+                  nodes: draft as unknown as Prisma.InputJsonValue,
+                  name: rule.name,
+                  createdById: userId ?? null,
+                },
+                select: { id: true },
+              })
+            ).id;
+
+        return tx.automationRule.update({
+          where: { id: ruleId },
+          data: {
+            status: AutomationRuleStatus.ACTIVE,
+            publishedAt: new Date(),
+            publishedVersionId: versionId,
+          },
+          include: ruleInclude,
+        });
+      });
+    } catch (error) {
+      // Two publishes at once both reach for the next number; one wins.
+      if (
+        error instanceof PrismaNamespace.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw AppException.conflict(
+          'RESOURCE_CONFLICT',
+          'This rule was published by someone else at the same moment. Reload it and try again.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async latestVersion(tx: Prisma.TransactionClient, ruleId: string): Promise<number> {
+    const latest = await tx.automationRuleVersion.aggregate({
+      where: { ruleId },
+      _max: { version: true },
     });
+    return latest._max.version ?? 0;
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Versions                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * What is running, and whether the draft says anything different.
+   *
+   * The builder's header reads this: a live rule whose draft matches what runs
+   * has nothing to publish, and one that does not says so and offers to.
+   */
+  async versionState(rule: {
+    publishedVersionId: string | null;
+    triggerType: string;
+    triggerConfig: Prisma.JsonValue;
+    nodes: SnapshotNode[];
+  }): Promise<{
+    publishedVersion: VersionSummary | null;
+    hasUnpublishedChanges: boolean;
+  }> {
+    if (!rule.publishedVersionId) return { publishedVersion: null, hasUnpublishedChanges: false };
+
+    const published = await this.prisma.automationRuleVersion.findUnique({
+      where: { id: rule.publishedVersionId },
+      select: versionSelect,
+    });
+    if (!published) return { publishedVersion: null, hasUnpublishedChanges: false };
+
+    const running = readSnapshot(published.nodes);
+    const hasUnpublishedChanges =
+      running === null ||
+      published.triggerType !== rule.triggerType ||
+      !sameConfig(published.triggerConfig, rule.triggerConfig) ||
+      !sameGraph(running, snapshotOf(rule.nodes));
+
+    return {
+      publishedVersion: toVersionSummary(published, rule.publishedVersionId),
+      hasUnpublishedChanges,
+    };
+  }
+
+  /** Every version this rule has published, newest first. */
+  async versions(workspaceId: string, projectId: string, ruleId: string) {
+    const rule = await this.requireRule(workspaceId, projectId, ruleId);
+
+    const rows = await this.prisma.automationRuleVersion.findMany({
+      // A draft the structured endpoints hold has no steps of this kind yet,
+      // and has never run — it is not history.
+      where: { ruleId, nodes: { not: PrismaNamespace.DbNull } },
+      orderBy: { version: 'desc' },
+      take: MAX_LISTED_VERSIONS,
+      select: versionSelect,
+    });
+
+    return rows.map((row) => toVersionSummary(row, rule.publishedVersionId));
+  }
+
+  /** One version, with its steps drawn as the canvas draws a rule. */
+  async version(workspaceId: string, projectId: string, ruleId: string, versionId: string) {
+    const rule = await this.requireRule(workspaceId, projectId, ruleId);
+    const row = await this.requireVersion(ruleId, versionId);
+    const nodes = readSnapshot(row.nodes) ?? [];
+
+    return {
+      ...toVersionSummary(row, rule.publishedVersionId),
+      triggerConfig: row.triggerConfig,
+      graph: toGraph(nodes),
+    };
+  }
+
+  /**
+   * Puts a published version back into the draft — and live, when asked.
+   *
+   * Into the draft first, because that is where every change to a rule goes:
+   * the person sees the old steps on the canvas and decides. Restoring is then
+   * one Publish away, which validates the steps against the project as it is
+   * now — the section an old version moved tasks into may be gone. `publish`
+   * does both in one call, for a rollback that cannot wait for a review; it is
+   * refused exactly as a publish is.
+   *
+   * History is not rewritten. Publishing a restored version adds a new version
+   * with the old steps, so the record still says that something else ran in
+   * between, and when.
+   */
+  async revert(
+    workspaceId: string,
+    projectId: string,
+    role: WorkspaceRole,
+    ruleId: string,
+    versionId: string,
+    userId: string,
+    publish = false,
+  ) {
+    await this.requireRule(workspaceId, projectId, ruleId);
+    this.assertMayManage(role);
+
+    const row = await this.requireVersion(ruleId, versionId);
+    const nodes = readSnapshot(row.nodes) ?? [];
+
+    await this.replaceNodes(
+      ruleId,
+      nodes.map((node) => ({
+        id: node.id,
+        nodeType: node.nodeType,
+        subtype: node.subtype,
+        configuration: (node.configuration ?? {}) as Record<string, unknown>,
+        parentId: node.parentNodeId,
+        branchKey: node.branchKey,
+        order: node.position,
+      })),
+    );
+    await this.prisma.automationRule.update({
+      where: { id: ruleId },
+      data: {
+        triggerType: row.triggerType,
+        triggerConfig: row.triggerConfig as Prisma.InputJsonValue,
+        version: { increment: 1 },
+      },
+    });
+
+    return publish
+      ? this.publish(workspaceId, projectId, role, ruleId, userId)
+      : this.get(workspaceId, projectId, ruleId);
+  }
+
+  private async requireVersion(ruleId: string, versionId: string) {
+    const row = await this.prisma.automationRuleVersion.findFirst({
+      where: { id: versionId, ruleId, nodes: { not: PrismaNamespace.DbNull } },
+      select: { ...versionSelect, triggerConfig: true },
+    });
+
+    if (!row) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Version not found.');
+    return row;
   }
 
   /**
@@ -464,7 +768,11 @@ export class AutomationsService {
       this.prisma.automationExecution.count({ where: { ruleId } }),
       this.prisma.automationExecution.findMany({
         where: { ruleId },
-        include: { logs: { orderBy: { createdAt: 'asc' } } },
+        include: {
+          logs: { orderBy: { createdAt: 'asc' } },
+          // Which version ran, so an old run reads against what the rule said then.
+          ruleVersion: { select: { version: true } },
+        },
         // The id breaks ties between runs that started in the same instant,
         // so a row cannot appear on two pages.
         orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
@@ -493,7 +801,15 @@ export class AutomationsService {
   ): Promise<{ queued: number }> {
     const rule = await this.requireRule(workspaceId, projectId, ruleId);
 
-    if (rule.triggerType !== AutomationTrigger.RUN_MANUALLY) {
+    // The trigger that counts is the one running, not the one in the draft.
+    const running = rule.publishedVersionId
+      ? await this.prisma.automationRuleVersion.findUnique({
+          where: { id: rule.publishedVersionId },
+          select: { triggerType: true },
+        })
+      : null;
+
+    if ((running?.triggerType ?? rule.triggerType) !== AutomationTrigger.RUN_MANUALLY) {
       throw AppException.badRequest(
         'BAD_REQUEST',
         'This rule runs on its own trigger, not by hand.',

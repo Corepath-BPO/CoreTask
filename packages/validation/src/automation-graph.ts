@@ -5,6 +5,7 @@ import {
   BranchKey,
   GraphIssueLevel,
   isFallbackBranch,
+  MAX_ACTIONS_PER_EXECUTION,
   DIRECT_OPERATOR_VALUE_KIND,
   isDirectOperator,
   OPERATORS_BY_VALUE_KIND,
@@ -17,6 +18,9 @@ import {
   type ConditionValueKind,
   AI_CHECK_FIELD,
   aiCheckProblem,
+  conditionGroupProblems,
+  conditionLeaves,
+  joinConditionPath,
 } from '@coretask/contracts';
 import { z } from 'zod';
 
@@ -259,23 +263,35 @@ export function validateGraphStructure(
      */
     if (isFallbackBranch(configuration)) continue;
 
-    const field = configuration['field'];
-    const operator = configuration['operator'];
-
-    if (typeof field !== 'string' || field.trim() === '') {
-      error('Choose what this step checks.', node.id, 'field');
-      continue;
+    /*
+     * A group is checked twice over: its shape — not empty, not too deep, no
+     * AI check inside — and then every comparison in it, exactly as a step
+     * that is one comparison is checked, named by its place in the group.
+     */
+    for (const problem of conditionGroupProblems(configuration)) {
+      error(problem.message, node.id, problem.path || null);
     }
 
-    // "Check with AI" asks a question rather than comparing a value.
-    if (field === AI_CHECK_FIELD) {
-      const problem = aiCheckProblem(configuration);
-      if (problem) error(problem, node.id, 'question');
-      continue;
-    }
+    for (const leaf of conditionLeaves(configuration)) {
+      const at = (key: string) => joinConditionPath(leaf.path, key);
+      const field = leaf.configuration['field'];
+      const operator = leaf.configuration['operator'];
 
-    if (typeof operator !== 'string' || operator.trim() === '') {
-      error('Choose how to compare it.', node.id, 'operator');
+      if (typeof field !== 'string' || field.trim() === '') {
+        error('Choose what this step checks.', node.id, at('field'));
+        continue;
+      }
+
+      // "Check with AI" asks a question rather than comparing a value.
+      if (field === AI_CHECK_FIELD) {
+        const problem = aiCheckProblem(leaf.configuration);
+        if (problem) error(problem, node.id, at('question'));
+        continue;
+      }
+
+      if (typeof operator !== 'string' || operator.trim() === '') {
+        error('Choose how to compare it.', node.id, at('operator'));
+      }
     }
   }
 
@@ -319,8 +335,65 @@ export function validateGraphStructure(
   for (const issue of detectCycles(nodes)) issues.push(issue);
   for (const issue of validateBranches(nodes)) issues.push(issue);
   for (const issue of validateFallback(nodes)) issues.push(issue);
+  for (const issue of validateActionRuns(nodes)) issues.push(issue);
 
   return issues;
+}
+
+/**
+ * More actions in a row than one run performs.
+ *
+ * The runner does at most `MAX_ACTIONS_PER_EXECUTION` in one run and logs the
+ * rest as not run, so a path longer than that publishes a rule that can never
+ * do what it says. A Wait step starts the count again — what follows it runs
+ * later, as a run of its own.
+ *
+ * Counted along each path from the trigger, which is every shape the builder
+ * draws: a branch's actions are one chain. A step with two children of its
+ * own — only an API can write one — runs both, and the runner's log is the
+ * backstop for that rather than this.
+ */
+function validateActionRuns(nodes: readonly ValidatableNode[]): GraphIssue[] {
+  const over = new Set<string>();
+  const step = (node: ValidatableNode, count: number): number => {
+    if (node.type === AutomationNodeType.DELAY) return 0;
+    if (node.type !== AutomationNodeType.ACTION) return count;
+    // The first one past the cap on this path is the one the message is about.
+    if (count === MAX_ACTIONS_PER_EXECUTION) over.add(node.id);
+    return count + 1;
+  };
+
+  const byOrder = (a: ValidatableNode, b: ValidatableNode) => (a.order ?? 0) - (b.order ?? 0);
+
+  if (!nodes.some((node) => node.parentId !== null)) {
+    // A rule from before the canvas: every step, in order, is one path.
+    let count = 0;
+    for (const node of [...nodes].sort(byOrder)) count = step(node, count);
+  } else {
+    const children = new Map<string, ValidatableNode[]>();
+    for (const node of nodes) {
+      if (node.parentId === null) continue;
+      children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
+    }
+
+    // Depth-limited, as every walk of a stored graph is: a cycle is reported
+    // above, and must not hang this one.
+    const walk = (id: string, count: number, depth: number): void => {
+      if (depth > 100) return;
+      for (const child of children.get(id) ?? []) walk(child.id, step(child, count), depth + 1);
+    };
+
+    for (const root of nodes.filter((node) => node.parentId === null)) {
+      walk(root.id, step(root, 0), 0);
+    }
+  }
+
+  return [...over].map((nodeId) => ({
+    level: GraphIssueLevel.ERROR,
+    nodeId,
+    path: null,
+    message: `A rule does at most ${MAX_ACTIONS_PER_EXECUTION} actions in one run, and this is one more. Move some of them into another rule.`,
+  }));
 }
 
 /**
@@ -373,6 +446,10 @@ const ACTION_REQUIREMENTS: Readonly<
     path: 'endpointId',
     message: 'Choose a webhook endpoint or enter a URL.',
   },
+  // A team, or the explicit choice to clear it.
+  ASSIGN_TEAM: { keys: ['teamId', 'clear'], path: 'teamId', message: 'Choose a team.' },
+  // The items are counted by the server, as a subtask step's titles are.
+  CREATE_CHECKLIST: { keys: ['name'], path: 'name', message: 'Name the checklist.' },
 };
 
 /**
@@ -390,7 +467,10 @@ export function missingActionSetting(
 
   const present = requirement.keys.some((key) => {
     const value = configuration[key];
-    return typeof value === 'string' ? value.trim() !== '' : value !== undefined && value !== null;
+    // A flag set to false has not been chosen — "clear the team: no" is no answer.
+    return typeof value === 'string'
+      ? value.trim() !== ''
+      : value !== undefined && value !== null && value !== false;
   });
 
   return present ? null : { path: requirement.path, message: requirement.message };
@@ -551,6 +631,8 @@ export function validateCondition(
   configuration: Record<string, unknown>,
   kind: ConditionValueKind | undefined,
   nodeId: string,
+  /** Where in the step this comparison is — inside a group, its path there. */
+  at = '',
 ): GraphIssue[] {
   const issues: GraphIssue[] = [];
   const field = configuration['field'];
@@ -560,7 +642,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'field',
+      path: joinConditionPath(at, 'field'),
       message: 'Choose what to check.',
     });
     return issues;
@@ -570,7 +652,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'operator',
+      path: joinConditionPath(at, 'operator'),
       message: 'Choose how to compare it.',
     });
     return issues;
@@ -580,7 +662,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'field',
+      path: joinConditionPath(at, 'field'),
       message: 'That field is no longer available on this project.',
     });
     return issues;
@@ -590,7 +672,7 @@ export function validateCondition(
     issues.push({
       level: GraphIssueLevel.ERROR,
       nodeId,
-      path: 'operator',
+      path: joinConditionPath(at, 'operator'),
       message: `“${operator}” cannot be used with this kind of field.`,
     });
   }
@@ -613,7 +695,7 @@ export function validateCondition(
       issues.push({
         level: GraphIssueLevel.ERROR,
         nodeId,
-        path: 'value',
+        path: joinConditionPath(at, 'value'),
         message: 'Give it something to compare against.',
       });
     }

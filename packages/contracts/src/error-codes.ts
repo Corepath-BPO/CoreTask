@@ -56,6 +56,14 @@ export const ErrorCode = {
   WEBHOOK_URL_NOT_ALLOWED: 'WEBHOOK_URL_NOT_ALLOWED',
   WEBHOOK_ENDPOINT_LIMIT_REACHED: 'WEBHOOK_ENDPOINT_LIMIT_REACHED',
 
+  // Slack
+  SLACK_NOT_CONFIGURED: 'SLACK_NOT_CONFIGURED',
+  SLACK_NOT_CONNECTED: 'SLACK_NOT_CONNECTED',
+  SLACK_ALREADY_CONNECTED: 'SLACK_ALREADY_CONNECTED',
+  SLACK_INSTALL_INVALID: 'SLACK_INSTALL_INVALID',
+  SLACK_LINK_INVALID: 'SLACK_LINK_INVALID',
+  SLACK_UNAVAILABLE: 'SLACK_UNAVAILABLE',
+
   // Idempotent creates
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   IDEMPOTENCY_IN_PROGRESS: 'IDEMPOTENCY_IN_PROGRESS',
@@ -132,6 +140,15 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   WEBHOOK_URL_NOT_ALLOWED: 'CoreTask cannot send webhooks to that address.',
   WEBHOOK_ENDPOINT_LIMIT_REACHED:
     'This workspace already has the maximum number of webhook endpoints.',
+
+  SLACK_NOT_CONFIGURED: 'This CoreTask server has no Slack app set up.',
+  SLACK_NOT_CONNECTED: 'Slack is not connected to this workspace.',
+  SLACK_ALREADY_CONNECTED: 'That Slack workspace is already connected to CoreTask.',
+  SLACK_INSTALL_INVALID:
+    'This Slack install link is invalid or expired. Start again from CoreTask.',
+  SLACK_LINK_INVALID:
+    'This link is invalid or expired. Ask for a new one in Slack with /coretask link.',
+  SLACK_UNAVAILABLE: 'Slack did not answer as expected. Try again in a moment.',
 
   IDEMPOTENCY_KEY_REUSED: 'This Idempotency-Key was already used for a different request.',
   IDEMPOTENCY_IN_PROGRESS: 'A request with this Idempotency-Key is still being processed.',

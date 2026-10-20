@@ -182,7 +182,9 @@ test.describe('accepting an invitation', () => {
     // so drive the signup link directly and check what it carries.
     const anon = await browser.newContext();
     const page = await anon.newPage();
-    await page.goto(`/register?redirect=${encodeURIComponent('/invitations/abc123')}&email=${encodeURIComponent(email)}`);
+    await page.goto(
+      `/register?redirect=${encodeURIComponent('/invitations/abc123')}&email=${encodeURIComponent(email)}`,
+    );
 
     await expect(page.getByLabel(/work email/i)).toHaveValue(email);
 

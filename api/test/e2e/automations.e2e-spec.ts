@@ -32,6 +32,7 @@ describe('Automations (e2e)', () => {
     // and the broadcast to open tabs is fire-and-forget by design.
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toProjectAudience: async () => undefined,
       toWorkspace: async () => undefined,
     } as never);
   });
@@ -2446,9 +2447,19 @@ describe('Automations (e2e)', () => {
       // Published with a valid member, then the target is swapped for someone
       // outside the workspace — which is what happens when a person leaves.
       const ruleId = await publishedRule(scope);
-      await context.prisma.automationNode.updateMany({
-        where: { ruleId, subtype: 'ASSIGN_USER' },
-        data: { configuration: { userId: stranger.userId } },
+      const live = await context.prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } });
+      const version = await context.prisma.automationRuleVersion.findUniqueOrThrow({
+        where: { id: live.publishedVersionId ?? '' },
+      });
+      await context.prisma.automationRuleVersion.update({
+        where: { id: version.id },
+        data: {
+          nodes: (version.nodes as { subtype: string }[]).map((node) =>
+            node.subtype === 'ASSIGN_USER'
+              ? { ...node, configuration: { userId: stranger.userId } }
+              : node,
+          ),
+        },
       });
 
       await runner.handle(moveEvent(scope));

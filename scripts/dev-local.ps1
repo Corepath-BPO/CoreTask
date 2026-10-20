@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Run CoreTask on the host with only PostgreSQL, Redis and MinIO in Docker.
+  Run CoreTask on the host with only PostgreSQL, Redis and RustFS in Docker.
 
 .DESCRIPTION
   A lighter alternative to `pnpm dev` for small laptops. The API, worker and
@@ -91,8 +91,8 @@ if (Test-Docker) {
   Wait-Until 'Docker daemon' { Test-Docker } 150
 }
 
-Write-Host '2/5 Infra containers (postgres, redis, minio)' -ForegroundColor Cyan
-& docker @compose up -d coretask-postgres coretask-redis coretask-minio
+Write-Host '2/5 Infra containers (postgres, redis, storage)' -ForegroundColor Cyan
+& docker @compose up -d coretask-postgres coretask-redis coretask-storage coretask-storage-init
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Wait-Until 'PostgreSQL' { Test-Healthy 'coretask-postgres' } 90
 Wait-Until 'Redis' { Test-Healthy 'coretask-redis' } 60

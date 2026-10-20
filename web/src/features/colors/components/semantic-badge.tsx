@@ -18,13 +18,7 @@ interface ColorSource {
  * keeps the UI usable for anyone who cannot separate two hues — the colour is
  * an accent on the name, never the thing carrying the meaning.
  */
-export function ColorDot({
-  color,
-  className,
-}: {
-  color: ColorSource;
-  className?: string;
-}) {
+export function ColorDot({ color, className }: { color: ColorSource; className?: string }) {
   const { resolvedTheme } = useTheme();
   const swatch = resolveColor(color, resolvedTheme);
 

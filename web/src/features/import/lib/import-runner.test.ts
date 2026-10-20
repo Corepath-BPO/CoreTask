@@ -36,7 +36,10 @@ function makePlan(overrides: Partial<ImportPlan> = {}): ImportPlan {
   return {
     projectName: 'Imported',
     sections: ['First'],
-    tasks: [task({ title: 'Parent' }), task({ title: 'Child', parentIndex: 0, sectionIndex: null })],
+    tasks: [
+      task({ title: 'Parent' }),
+      task({ title: 'Child', parentIndex: 0, sectionIndex: null }),
+    ],
     customFieldColumns: [],
     warnings: [],
     blockingError: null,
@@ -121,7 +124,12 @@ function makeDeps(behaviour: {
       calls.push({ kind: 'list-views' });
       return [
         { id: 'view-board', type: 'BOARD', isDefault: true, settings: { columns: [] } },
-        { id: 'view-list', type: 'LIST', isDefault: true, settings: { columns: [{ field: 'title' }] } },
+        {
+          id: 'view-list',
+          type: 'LIST',
+          isDefault: true,
+          settings: { columns: [{ field: 'title' }] },
+        },
       ] as never;
     },
     updateView: async (_ws, _project, viewId, payload) => {
@@ -141,7 +149,11 @@ function makeDeps(behaviour: {
 function run(
   plan: ImportPlan,
   deps: ImportRunnerDeps,
-  options: { includedColumns?: boolean[]; signal?: AbortSignal; onProgress?: (p: ImportProgress) => void } = {},
+  options: {
+    includedColumns?: boolean[];
+    signal?: AbortSignal;
+    onProgress?: (p: ImportProgress) => void;
+  } = {},
 ) {
   return runImport({
     plan,
@@ -238,7 +250,8 @@ describe('runImport', () => {
   });
 
   it('aborts with partial results when 429 persists past the ladder', async () => {
-    const always429 = () => new ApiError({ code: 'RATE_LIMIT_EXCEEDED', message: 'slow down', status: 429 });
+    const always429 = () =>
+      new ApiError({ code: 'RATE_LIMIT_EXCEEDED', message: 'slow down', status: 429 });
     const { deps } = makeDeps({
       workItemErrors: [always429, always429, always429, always429, always429],
     });

@@ -24,6 +24,8 @@ export interface ItemSnapshot {
   dueAt: Date | string | null;
   startDate: Date | string | null;
   startAt: Date | string | null;
+  /** A task's team. Absent from a ticket, and from a snapshot that did not look. */
+  team?: StoryRef | null;
 }
 
 export interface StoryDraft {
@@ -190,6 +192,16 @@ export function diffItemStories(
     );
   }
 
+  if (!sameRef(before.team ?? null, after.team ?? null)) {
+    stories.push({
+      action: ActivityAction.UPDATED,
+      summary: after.team
+        ? `Assigned to the team ${after.team.label}`
+        : `Removed the team ${label(before.team ?? null, '')}`.trim(),
+      metadata: { field: StoryField.TEAM, before: before.team ?? null, after: after.team ?? null },
+    });
+  }
+
   return stories;
 }
 
@@ -209,6 +221,8 @@ export function enumRef(value: string | null | undefined, none = 'NONE'): StoryR
 export interface SnapshotRefs {
   assignee?: StoryRef | null;
   section?: StoryRef | null;
+  /** Left out by a caller that is not about the team, which then tells no team story. */
+  team?: StoryRef | null;
 }
 
 /** A task row from Prisma, as a snapshot. Status and priority are the legacy enums. */
@@ -238,6 +252,7 @@ export function snapshotFromTask(
     dueAt: task.dueAt,
     startDate: task.startDate,
     startAt: task.startAt,
+    team: refs.team ?? null,
   };
 }
 

@@ -65,9 +65,40 @@ export interface AutomationRuleGraph {
   allowChaining: boolean;
   createdBy: { id: string; name: string; email: string; avatarUrl: string | null } | null;
   publishedAt: string | null;
+  /**
+   * The version the rule runs, null until it is first published.
+   *
+   * `graph` below is the draft — what the builder edits and saves. The rule
+   * runs this version until the draft is published again.
+   */
+  publishedVersion: AutomationRuleVersionSummary | null;
+  /** Whether the draft says something the running version does not. */
+  hasUnpublishedChanges: boolean;
   graph: AutomationGraph;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One published version of a rule, as its history lists it. */
+export interface AutomationRuleVersionSummary {
+  id: string;
+  /** Counts up from 1 within the rule. */
+  version: number;
+  /** What the rule was called when this was published. */
+  name: string | null;
+  triggerType: string;
+  publishedAt: string;
+  publishedBy: { id: string; name: string; avatarUrl: string | null } | null;
+  /** Whether this is the version running now. */
+  isPublished: boolean;
+  /** Steps after the trigger. */
+  stepCount: number;
+}
+
+/** A version with its steps, drawn as the canvas draws a rule. */
+export interface AutomationRuleVersionDetail extends AutomationRuleVersionSummary {
+  triggerConfig: Record<string, unknown>;
+  graph: AutomationGraph;
 }
 
 /**
@@ -156,6 +187,12 @@ export interface AutomationMetadata {
   statuses: { id: string; name: string; colorToken: string }[];
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
+  /**
+   * The workspace's teams, for the step that makes one responsible for the
+   * task. Optional only so a client built before teams were offered keeps
+   * reading the response.
+   */
+  teams?: { id: string; name: string; color: string }[];
   /**
    * The project's own fields, with the values each one offers.
    *

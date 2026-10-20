@@ -15,4 +15,6 @@ export const INTEGRATIONS_TABS: IntegrationsTab[] = [
   { label: 'App directory', segment: 'app-directory' },
   { label: 'OAuth apps', segment: 'oauth-apps' },
   { label: 'Connected apps', segment: 'connected-apps' },
+  // Everyone links their own account; connecting the workspace is gated inside.
+  { label: 'Slack', segment: 'slack' },
 ];

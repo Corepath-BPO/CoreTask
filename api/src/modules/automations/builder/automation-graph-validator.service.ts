@@ -33,6 +33,9 @@ import {
   isTicketConditionField,
   delayProblem,
   AI_CHECK_FIELD,
+  checklistOf,
+  conditionLeaves,
+  joinConditionPath,
   aiDecidesSubtasks,
   aiDraftUpdateProblem,
   AI_FIELD_TYPES,
@@ -200,14 +203,18 @@ export class AutomationGraphValidatorService {
       const checks =
         node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH;
       if (!checks || isFallbackBranch(config)) continue;
-      const aboutTicket = isTicketConditionField(config['field']);
-      if (ticketRule && !aboutTicket) {
-        error(node.id, 'field', 'A ticket rule checks the ticket’s own fields.');
-      } else if (!ticketRule && aboutTicket) {
-        error(node.id, 'field', 'This checks a ticket, and this rule is about tasks.');
-      } else if (aboutTicket) {
-        const problem = ticketConditionProblem(config);
-        if (problem) error(node.id, 'field', problem);
+      // Each comparison, grouped or not, is about the rule's own subject.
+      for (const leaf of conditionLeaves(config)) {
+        const at = joinConditionPath(leaf.path, 'field');
+        const aboutTicket = isTicketConditionField(leaf.configuration['field']);
+        if (ticketRule && !aboutTicket) {
+          error(node.id, at, 'A ticket rule checks the ticket’s own fields.');
+        } else if (!ticketRule && aboutTicket) {
+          error(node.id, at, 'This checks a ticket, and this rule is about tasks.');
+        } else if (aboutTicket) {
+          const problem = ticketConditionProblem(leaf.configuration);
+          if (problem) error(node.id, at, problem);
+        }
       }
     }
     return issues;
@@ -247,6 +254,17 @@ export class AutomationGraphValidatorService {
             nodeId: node.id,
             path: 'subtype',
             message: `“${node.subtype}” is not an action the engine can run.`,
+          });
+        } else if (
+          node.subtype === AutomationAction.CREATE_CHECKLIST &&
+          checklistOf(node.configuration).items.length === 0
+        ) {
+          // A checklist with nothing on it would publish and fail every run.
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'items',
+            message: 'Give the checklist at least one item.',
           });
         } else if (node.subtype === AutomationAction.CREATE_SUBTASK) {
           // A subtask step with nothing to create would publish cleanly and
@@ -539,6 +557,7 @@ export class AutomationGraphValidatorService {
     const targetProjectIds = new Set<string>();
     const targetSectionIds = new Set<string>();
     const webhookEndpointIds = new Set<string>();
+    const teamIds = new Set<string>();
 
     const read = (value: unknown): string | null =>
       typeof value === 'string' && value !== '' ? value : null;
@@ -577,6 +596,12 @@ export class AutomationGraphValidatorService {
         for (const id of peopleIn(config['add'])) userIds.add(id);
       }
 
+      // A team step hands the task to a team of this workspace, not another's.
+      if (node.subtype === AutomationAction.ASSIGN_TEAM) {
+        const teamId = read(config['teamId']);
+        if (teamId) teamIds.add(teamId);
+      }
+
       // A webhook step names a workspace endpoint; a rule may not send to
       // another workspace's, so the lookup is scoped like every other.
       if (node.subtype === AutomationAction.SEND_WEBHOOK) {
@@ -611,8 +636,13 @@ export class AutomationGraphValidatorService {
 
       // A condition about a custom field carries the id inside its field key
       // rather than under `fieldId`; its type decides which comparisons fit.
-      const conditionFieldId = customFieldConditionId(config['field']);
-      if (conditionFieldId) fieldIds.add(conditionFieldId);
+      // In a group, every comparison may name one.
+      if (node.type === AutomationNodeType.CONDITION || node.type === AutomationNodeType.BRANCH) {
+        for (const leaf of conditionLeaves(config)) {
+          const conditionFieldId = customFieldConditionId(leaf.configuration['field']);
+          if (conditionFieldId) fieldIds.add(conditionFieldId);
+        }
+      }
 
       // So are the fields a "Use AI…" step may fill in.
       if (node.subtype === AutomationAction.AI_ACTION) {
@@ -632,6 +662,7 @@ export class AutomationGraphValidatorService {
       targetProjects,
       targetSections,
       webhookEndpoints,
+      teams,
     ] = await Promise.all([
       sectionIds.size
         ? this.prisma.section.findMany({
@@ -699,7 +730,14 @@ export class AutomationGraphValidatorService {
             select: { id: true, enabled: true },
           })
         : [],
+      teamIds.size
+        ? this.prisma.team.findMany({
+            where: { id: { in: [...teamIds] }, workspaceId },
+            select: { id: true },
+          })
+        : [],
     ]);
+    const liveTeams = new Set(teams.map((row) => row.id));
 
     const liveEndpoints = new Map(webhookEndpoints.map((row) => [row.id, row.enabled]));
     const liveTargetProjects = new Set(targetProjects.map((row) => row.id));
@@ -763,6 +801,18 @@ export class AutomationGraphValidatorService {
           path: 'userId',
           message: 'That person is no longer a member of this workspace.',
         });
+      }
+
+      if (node.subtype === AutomationAction.ASSIGN_TEAM) {
+        const teamId = read(config['teamId']);
+        if (teamId && !liveTeams.has(teamId)) {
+          issues.push({
+            level: GraphIssueLevel.ERROR,
+            nodeId: node.id,
+            path: 'teamId',
+            message: 'That team is no longer in this workspace.',
+          });
+        }
       }
 
       if (node.subtype === AutomationAction.ADD_REMOVE_COLLABORATORS) {
@@ -931,27 +981,32 @@ export class AutomationGraphValidatorService {
         }
       }
 
-      if (
-        node.type === AutomationNodeType.CONDITION &&
-        !isFallbackBranch(config) &&
-        !isTicketConditionField(config['field']) &&
-        // Asks a question rather than comparing a field; checked in `checkSettings`.
-        config['field'] !== AI_CHECK_FIELD
-      ) {
+      for (const leaf of node.type === AutomationNodeType.CONDITION
+        ? conditionLeaves(config)
+        : []) {
+        const field = leaf.configuration['field'];
+        if (
+          isTicketConditionField(field) ||
+          // Asks a question rather than comparing a field; checked in `checkSettings`.
+          field === AI_CHECK_FIELD
+        ) {
+          continue;
+        }
+
         /*
          * A generated key's kind comes from the field's own type — and from
          * the *live* field, so a condition about a deleted one falls to
          * `undefined` and the shared check refuses it as no longer available,
          * which is exactly what happened to it.
          */
-        const conditionFieldId = customFieldConditionId(config['field']);
+        const conditionFieldId = customFieldConditionId(field);
         const kind = conditionFieldId
           ? kindForCustomFieldType(
               liveFields.has(conditionFieldId) ? fieldType.get(conditionFieldId) : undefined,
             )
-          : conditionFieldKind(config['field']);
+          : conditionFieldKind(field);
 
-        issues.push(...validateCondition(config, kind, node.id));
+        issues.push(...validateCondition(leaf.configuration, kind, node.id, leaf.path));
       }
     }
 
@@ -985,6 +1040,7 @@ export class AutomationGraphValidatorService {
         'SET_START_DATE',
         'CLEAR_START_DATE',
         'SET_ESTIMATE',
+        'ASSIGN_TEAM',
       ],
       TASK_DUE_DATE_CHANGED: ['SET_DUE_DATE', 'CLEAR_DUE_DATE'],
       TASK_START_DATE_CHANGED: ['SET_START_DATE', 'CLEAR_START_DATE'],

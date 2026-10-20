@@ -12,6 +12,10 @@ import {
   type ConditionOperator,
   type ConditionValueType,
   AI_CHECK_FIELD,
+  ConditionMatch,
+  conditionLeaves,
+  groupMatch,
+  isConditionGroup,
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
@@ -348,6 +352,13 @@ export function summariseCondition(
    */
   withValue = true,
 ): string {
+  // A group's heading counts what it asks; the panel below lists each one.
+  if (isConditionGroup(configuration)) {
+    const count = conditionLeaves(configuration).length;
+    const mode = groupMatch(configuration) === ConditionMatch.ANY ? 'Any' : 'All';
+    return `${mode} of ${count} condition${count === 1 ? '' : 's'}`;
+  }
+
   const field = configuration['field'];
   if (typeof field !== 'string' || field === '') return 'Choose what to check';
   if (field === AI_CHECK_FIELD) return 'Check with AI';

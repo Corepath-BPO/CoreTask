@@ -46,6 +46,11 @@ export const queryKeys = {
   connectedApps: ['connected-apps'] as const,
   /** A workspace's: its approved apps and whether only those may act in it. */
   appDirectory: (workspaceId: string) => ['app-directory', workspaceId] as const,
+  slack: {
+    all: (workspaceId: string) => ['slack', workspaceId] as const,
+    status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
+    channels: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'channels'] as const,
+  },
   webhooks: {
     all: (workspaceId: string) => ['webhooks', workspaceId] as const,
     list: (workspaceId: string) => [...queryKeys.webhooks.all(workspaceId), 'list'] as const,
@@ -100,6 +105,9 @@ export const queryKeys = {
     /** Logged time; under `tasks` so an estimate change refreshes its total line. */
     time: (workspaceId: string, taskId: string) =>
       [...queryKeys.tasks.all(workspaceId), 'time', taskId] as const,
+    /** Under `tasks` so an automation that adds one refreshes the open panel. */
+    checklists: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'checklists', taskId] as const,
   },
   tickets: {
     all: (workspaceId: string) => ['tickets', workspaceId] as const,

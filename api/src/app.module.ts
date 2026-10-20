@@ -58,6 +58,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
+import { SlackModule } from './modules/slack/slack.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { MembersModule } from './modules/members/members.module';
@@ -102,6 +103,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     ApiKeysModule,
     OAuthModule,
     WebhooksModule,
+    SlackModule,
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,

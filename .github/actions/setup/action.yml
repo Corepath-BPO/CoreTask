@@ -1,0 +1,73 @@
+# =============================================================================
+# Bring a clean checkout to a state where the gates can run
+# =============================================================================
+# Shared by every job in ci.yml. The two build steps at the end are not
+# optional conveniences — see the comments on each.
+# =============================================================================
+
+name: Set up CoreTask
+description: Node, pnpm, a warm store, dependencies, built packages and the Prisma client.
+
+inputs:
+  node-version:
+    description: Node version. Matches the node:24-alpine both Dockerfiles build on.
+    required: false
+    default: "24"
+  pnpm-version:
+    description: >-
+      pnpm version. Pinned to the `corepack prepare` line in both Dockerfiles;
+      package.json carries no `packageManager` field, so this must be explicit.
+    required: false
+    default: "11.13.1"
+
+runs:
+  using: composite
+  steps:
+    # Node first, then corepack: enabling corepack against the runner's
+    # preinstalled Node and then swapping Node out leaves a shim pointing at
+    # the wrong runtime.
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Enable pnpm
+      shell: bash
+      run: |
+        corepack enable
+        corepack prepare "pnpm@${{ inputs.pnpm-version }}" --activate
+
+    # setup-node's own `cache: pnpm` needs pnpm on PATH before it runs, which
+    # it is not when corepack installs pnpm afterwards. Caching the store by
+    # hand keeps the ordering above intact.
+    - name: Resolve the pnpm store path
+      id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-node${{ inputs.node-version }}-
+
+    - name: Install
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    # Each packages/* entry resolves through its `dist/`, and `dist/` is
+    # gitignored. On a clean checkout there is therefore nothing for api/ and
+    # web/ to import from `@coretask/contracts` until the shared packages are
+    # built. Both Dockerfiles build them first for exactly this reason, and it
+    # is why the root `pnpm verify` script — which builds last — cannot serve
+    # as the CI gate.
+    - name: Build shared packages
+      shell: bash
+      run: pnpm --filter "./packages/*" build
+
+    # api/ imports the generated Prisma client. `pnpm --filter @coretask/api
+    # build` generates it, but lint, typecheck and the test suites all run
+    # before anything builds api/.
+    - name: Generate the Prisma client
+      shell: bash
+      run: pnpm db:generate
