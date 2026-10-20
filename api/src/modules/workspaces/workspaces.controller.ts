@@ -19,6 +19,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
+import type { AuthenticatedUser } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { WorkspaceSummaryDto } from './dto/workspace-response.dto';
@@ -38,8 +39,8 @@ export class WorkspacesController {
   })
   @ApiEnvelopeResponse(WorkspaceSummaryDto, { isArray: true })
   @ApiErrorResponseDoc(401, 'Missing or invalid access token')
-  list(@CurrentUser('id') userId: string): Promise<WorkspaceSummary[]> {
-    return this.workspaces.listForUser(userId);
+  list(@CurrentUser() principal: AuthenticatedUser): Promise<WorkspaceSummary[]> {
+    return this.workspaces.listForUser(principal.id, principal.oauth?.appId);
   }
 
   @Post()

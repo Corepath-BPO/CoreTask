@@ -91,7 +91,7 @@ export class AutomationMetadataService {
   ): Promise<AutomationMetadataResponse> {
     await this.projects.requireProject(workspaceId, projectId);
 
-    const [sections, projects, statuses, priorities, members, fieldLinks, webhookEndpoints] =
+    const [sections, projects, statuses, priorities, members, fieldLinks, webhookEndpoints, teams] =
       await Promise.all([
         /*
          * This project's own sections, in the order the board shows them.
@@ -179,6 +179,13 @@ export class AutomationMetadataService {
           orderBy: { name: 'asc' },
           select: { id: true, name: true, url: true, enabled: true },
         }),
+        // The workspace's teams, for "Change team to…". Every member sees
+        // every team — a team is not a permission boundary.
+        this.prisma.team.findMany({
+          where: { workspaceId },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, color: true },
+        }),
       ]);
 
     const customFields = fieldLinks.map((link) => link.customField);
@@ -201,6 +208,7 @@ export class AutomationMetadataService {
       statuses,
       priorities,
       members: members.map((row) => row.user),
+      teams,
       customFields,
       capabilities: capabilities(ai),
       permissions: permissionsFor(role, hasAtLeastRole(role, WorkspaceRole.MANAGER)),

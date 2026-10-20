@@ -254,6 +254,15 @@ export class TicketsService {
       include: ticketInclude,
     });
 
+    // Its subtasks live where it does, so a private project's checklist does
+    // not stay behind in the project it left.
+    if (updated.projectId !== existing.projectId) {
+      await this.prisma.task.updateMany({
+        where: { parentTicketId: existing.id },
+        data: { projectId: updated.projectId, sectionId: null },
+      });
+    }
+
     const previousAssignee =
       existing.assigneeId && existing.assigneeId !== updated.assigneeId
         ? await this.prisma.user.findUnique({

@@ -1,4 +1,4 @@
-import { WORKSPACE_ROLES } from '@coretask/contracts';
+import { PROJECT_MEMBER_ROLES, WORKSPACE_ROLES } from '@coretask/contracts';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class InvitationInviterDto {
@@ -26,6 +26,17 @@ export class InvitationTeamDto {
   color!: string;
 }
 
+export class InvitationProjectDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Website relaunch' })
+  name!: string;
+
+  @ApiProperty({ enum: PROJECT_MEMBER_ROLES, example: 'EDITOR' })
+  role!: string;
+}
+
 /** Note the absence of a token: it exists in the e-mail link and nowhere else. */
 export class WorkspaceInvitationDto {
   @ApiProperty({ format: 'uuid' })
@@ -49,6 +60,13 @@ export class WorkspaceInvitationDto {
     description: 'Team they join on acceptance, if the invitation named one.',
   })
   team!: InvitationTeamDto | null;
+
+  @ApiProperty({
+    type: InvitationProjectDto,
+    nullable: true,
+    description: "Project they join on acceptance, from a project's Share dialog.",
+  })
+  project!: InvitationProjectDto | null;
 
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;
@@ -83,6 +101,9 @@ export class WorkspaceInvitationPreviewDto {
   })
   teamName!: string | null;
 
+  @ApiProperty({ nullable: true, example: 'Website relaunch', description: 'Name only.' })
+  projectName!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;
 }
@@ -96,4 +117,11 @@ export class AcceptInvitationResultDto {
 
   @ApiProperty({ enum: WORKSPACE_ROLES, example: 'MEMBER' })
   role!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description: 'The project they were added to, when the invitation named one.',
+  })
+  projectId!: string | null;
 }

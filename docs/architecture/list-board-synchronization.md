@@ -56,6 +56,18 @@ no `board:*` or `list:*` event: both views react to the same fact, and an event
 per screen is how they drift apart again. The legacy `task:*` and `ticket:*`
 events still fire so nothing already listening breaks.
 
+**A rule's change goes wider than the room.** The automation runner lives in
+the worker and reaches browsers over the Redis relay. A task run addresses
+everyone who may see the project: the workspace room for a public project, the
+members' and admins' own rooms for a private one. A task panel opened from My
+Tasks, the inbox or search sits in no project room, and before this it kept the
+pre-rule fields and checklists. The event is the same `work-item:updated`, with
+`source: 'automation'` and the task's id. `useAutomationRealtime`, mounted with
+the socket provider, refreshes the task's caches on any screen: everything under
+`tasks`, plus comments, collaborators and history. For that event
+`useProjectRealtime` refreshes only the project's lists, so the open panel is
+fetched once.
+
 **Joined on every `connect`, not once on mount.** A socket.io room is
 per-connection: a reconnect after a dropped network silently leaves every room,
 and a tab that joined once would go quiet for the rest of its life while looking

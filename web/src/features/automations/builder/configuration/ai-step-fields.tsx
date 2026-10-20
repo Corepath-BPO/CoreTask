@@ -6,6 +6,7 @@ import {
   AI_QUESTION_MAX,
   aiActionProblem,
   aiCheckProblem,
+  aiDraftUpdateProblem,
   aiFieldPermission,
   aiPermissionsOf,
 } from '@coretask/contracts';
@@ -89,6 +90,49 @@ export function AiActionFields({
       <p className="text-xs text-muted-foreground">
         AI reads the task — its fields, description, subtasks and recent comments — and makes only
         the changes ticked here. The rule’s history says what it changed and why.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * "Draft an update with AI…": what the update should dwell on, if anything.
+ * The model reads the project's own numbers and recent work either way.
+ */
+export function AiDraftUpdateFields({
+  configuration,
+  onChange,
+}: {
+  configuration: Record<string, unknown>;
+  onChange: Configure;
+}) {
+  const instructions =
+    typeof configuration['instructions'] === 'string' ? configuration['instructions'] : '';
+
+  return (
+    <div className="space-y-4">
+      <Field
+        label="What the update should cover (optional)"
+        htmlFor="step-ai-draft-instructions"
+        error={aiDraftUpdateProblem(configuration) ?? undefined}
+      >
+        <Textarea
+          id="step-ai-draft-instructions"
+          value={instructions}
+          maxLength={AI_INSTRUCTIONS_MAX}
+          rows={4}
+          placeholder="e.g. Lead with move-ins this week, and call out any lease that is late."
+          onChange={(event) =>
+            onChange({ ...configuration, instructions: event.target.value || undefined })
+          }
+        />
+      </Field>
+
+      <p className="text-xs text-muted-foreground">
+        AI reads the project — its progress, what was finished this week, what is late and what is
+        due next — and drafts a status update. Nothing is posted: the project’s owner is told a
+        draft is waiting, and reviews and posts it from the project’s header. A newer draft replaces
+        an older one. On a schedule with no tasks, this drafts every time it runs.
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 import {
   AUTOMATION_ACTIONS,
   AUTOMATION_TRIGGERS,
+  AutomationAction,
   AutomationTrigger,
   CONDITION_VALUE_TYPE,
   TRIGGER_CONFIG_FORM,
@@ -89,9 +90,10 @@ describe('the automation catalogue', () => {
   describe('actions match what the runner implements', () => {
     it('marks an action available exactly when the engine can perform it', () => {
       // The Wait step is a step of its own that the runner takes, not an action.
-      // "Use AI…" also needs a model, and this catalogue was built without one.
+      // The AI steps also need a model, and this catalogue was built without one.
       const executable = new Set<string>([...AUTOMATION_ACTIONS, DELAY_SUBTYPE]);
       executable.delete(AI_ACTION_SUBTYPE);
+      executable.delete(AutomationAction.AI_DRAFT_UPDATE);
 
       for (const action of actions) {
         expect({ subtype: action.subtype, available: action.available }).toEqual({
@@ -104,6 +106,14 @@ describe('the automation catalogue', () => {
     it('offers "Use AI…" and the AI check only with a model behind them', () => {
       const without = actions.find((action) => action.subtype === AI_ACTION_SUBTYPE);
       expect(without).toMatchObject({ available: false, reason: AI_UNAVAILABLE_REASON });
+      expect(
+        actions.find((action) => action.subtype === AutomationAction.AI_DRAFT_UPDATE),
+      ).toMatchObject({ available: false, reason: AI_UNAVAILABLE_REASON });
+      expect(
+        actionCatalogue(fields, true).find(
+          (action) => action.subtype === AutomationAction.AI_DRAFT_UPDATE,
+        ),
+      ).toMatchObject({ available: true, reason: null, subjects: ['TASK'] });
 
       expect(
         actionCatalogue(fields, true).find((action) => action.subtype === AI_ACTION_SUBTYPE),
@@ -127,10 +137,13 @@ describe('the automation catalogue', () => {
     it('offers every executable action somewhere', () => {
       const offered = new Set(actions.filter((action) => action.available).map((a) => a.subtype));
 
-      // "Use AI…" is offered whenever the server has a model — see the test above.
+      // The AI steps are offered whenever the server has a model — see the test above.
       expect(
         [...AUTOMATION_ACTIONS].filter(
-          (action) => !offered.has(action) && action !== AI_ACTION_SUBTYPE,
+          (action) =>
+            !offered.has(action) &&
+            action !== AI_ACTION_SUBTYPE &&
+            action !== AutomationAction.AI_DRAFT_UPDATE,
         ),
       ).toEqual([]);
     });

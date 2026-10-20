@@ -53,6 +53,15 @@ export class WorkspaceMemberGuard implements CanActivate {
 
     const membership = await this.members.requireMembership(workspaceId, request.user.id);
 
+    // After membership, so a workspace the person is not in still reads as
+    // "no access" rather than revealing its policy.
+    if (
+      request.user.oauth &&
+      !(await this.members.oauthAppAllowed(workspaceId, request.user.oauth.appId))
+    ) {
+      throw AppException.forbidden('OAUTH_APP_NOT_APPROVED');
+    }
+
     const requiredRole = this.reflector.getAllAndOverride<WorkspaceRole | undefined>(
       WORKSPACE_ROLES_KEY,
       [context.getHandler(), context.getClass()],

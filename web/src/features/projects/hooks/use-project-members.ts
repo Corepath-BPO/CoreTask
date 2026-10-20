@@ -1,9 +1,10 @@
-import type { ProjectMemberRole } from '@coretask/contracts';
+import type { ProjectMemberRole, ProjectNotificationKind } from '@coretask/contracts';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { invitationsApi } from '@/features/members/api/invitations.api';
 import { ApiError } from '@/lib/api/api-error';
-import { queryKeys } from '@/lib/api/query-client';
+import { queryClient, queryKeys } from '@/lib/api/query-client';
 import { humanizeEnum } from '@/lib/utils';
 
 import { projectMembersApi } from '../api/projects.api';
@@ -92,5 +93,88 @@ export function useLeaveProject(workspaceId: string | undefined) {
       toast.success(`You left ${variables.name}`);
     },
     onError: (error) => reportError(error, 'Could not leave that project.'),
+  });
+}
+
+/**
+ * Invitations waiting to land someone in this project, for the Share dialog.
+ * Only asked for by someone who may manage the roster; anyone else would get
+ * a 403.
+ */
+export function useProjectInvitations(
+  workspaceId: string | undefined,
+  projectId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.projects.invitations(workspaceId ?? '', projectId ?? ''),
+    queryFn: () => projectMembersApi.invitations(workspaceId as string, projectId as string),
+    enabled: enabled && Boolean(workspaceId) && Boolean(projectId),
+  });
+}
+
+/** Both lists an invitation shows in: this project's, and the workspace's on Members. */
+async function invalidateInvitations(workspaceId: string, projectId: string) {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.projects.invitations(workspaceId, projectId),
+    }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.invitations(workspaceId) }),
+  ]);
+}
+
+export function useInviteToProject(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: ({ email, role }: { email: string; role: ProjectMemberRole }) =>
+      projectMembersApi.invite(workspaceId as string, projectId, { email, role }),
+    onSuccess: async (invitation) => {
+      await invalidateInvitations(workspaceId as string, projectId);
+      toast.success(`Invited ${invitation.email}`, {
+        description: 'They join the workspace and this project when they accept.',
+      });
+    },
+    onError: (error) => reportError(error, 'Could not send that invitation.'),
+  });
+}
+
+export function useRevokeProjectInvitation(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: ({ invitationId }: { invitationId: string; email: string }) =>
+      invitationsApi.revoke(workspaceId as string, invitationId),
+    onSuccess: async (_result, variables) => {
+      await invalidateInvitations(workspaceId as string, projectId);
+      toast.success(`Invitation to ${variables.email} revoked`);
+    },
+    onError: (error) => reportError(error, 'Could not revoke that invitation.'),
+  });
+}
+
+/** What a project tells the reader about. Fetched only while its menu is open. */
+export function useProjectNotificationSettings(
+  workspaceId: string | undefined,
+  projectId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.projects.notificationSettings(workspaceId ?? '', projectId),
+    queryFn: () => projectMembersApi.notificationSettings(workspaceId as string, projectId),
+    enabled: enabled && Boolean(workspaceId),
+  });
+}
+
+export function useSetProjectNotificationSettings(
+  workspaceId: string | undefined,
+  projectId: string,
+) {
+  return useMutation({
+    mutationFn: (notifyOn: ProjectNotificationKind[]) =>
+      projectMembersApi.setNotificationSettings(workspaceId as string, projectId, { notifyOn }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(
+        queryKeys.projects.notificationSettings(workspaceId ?? '', projectId),
+        settings,
+      );
+    },
+    onError: (error) => reportError(error, 'Could not save your notification choice.'),
   });
 }

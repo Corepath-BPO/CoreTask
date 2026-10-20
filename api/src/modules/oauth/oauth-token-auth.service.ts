@@ -31,6 +31,7 @@ export class OAuthTokenAuthService {
         grant: {
           select: {
             id: true,
+            scopes: true,
             revokedAt: true,
             app: { select: { id: true, name: true } },
             user: { select: { id: true, email: true, isActive: true } },
@@ -57,7 +58,12 @@ export class OAuthTokenAuthService {
       id: token.grant.user.id,
       email: token.grant.user.email,
       sessionId: null,
-      oauth: { grantId: token.grant.id, appId: token.grant.app.id, appName: token.grant.app.name },
+      oauth: {
+        grantId: token.grant.id,
+        appId: token.grant.app.id,
+        appName: token.grant.app.name,
+        scopes: token.grant.scopes,
+      },
     };
   }
 

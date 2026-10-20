@@ -1,4 +1,4 @@
-import type { ConnectedApp, OAuthApp } from '@coretask/types';
+import type { ConnectedApp, OAuthApp, WorkspaceAppSummary } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/api/api-error';
 import { setupUser } from '@/test/test-utils';
 
+import { AppDirectoryPage } from './app-directory-page';
 import { ConnectedAppsPage } from './connected-apps-page';
 import { OAuthAppsPage } from './oauth-apps-page';
 import { OAuthConsentPage } from './oauth-consent-page';
@@ -21,6 +22,10 @@ const api = {
   disconnect: vi.fn(),
   consent: vi.fn(),
   authorize: vi.fn(),
+  appDirectory: vi.fn(),
+  setAppPolicy: vi.fn(),
+  approveApp: vi.fn(),
+  removeDirectoryApp: vi.fn(),
 };
 
 vi.mock('../api/oauth.api', () => ({
@@ -33,6 +38,16 @@ vi.mock('../api/oauth.api', () => ({
           api[name as keyof typeof api](...args),
     },
   ),
+}));
+
+let activeRole = 'ADMIN';
+vi.mock('@/features/workspaces/hooks/use-workspaces', () => ({
+  useActiveWorkspace: () => ({
+    workspace: { id: 'ws-1', name: 'Acme Product', role: activeRole },
+    workspaces: [],
+    isLoading: false,
+    select: vi.fn(),
+  }),
 }));
 
 vi.mock('@/stores/auth.store', () => ({
@@ -48,6 +63,7 @@ function app(overrides: Partial<OAuthApp> = {}): OAuthApp {
     websiteUrl: null,
     redirectUris: ['https://tool.example/callback'],
     clientId: 'ctc_client',
+    clientType: 'confidential',
     secretHint: 'cts_AbCdEf',
     connections: 2,
     createdAt: '2026-10-01T00:00:00.000Z',
@@ -104,9 +120,56 @@ describe('OAuth apps', () => {
         description: null,
         websiteUrl: null,
         redirectUris: ['https://tool.example/callback', 'http://localhost:5678/cb'],
+        clientType: 'confidential',
       }),
     );
     expect(await screen.findByLabelText('Client secret')).toHaveValue('cts_the_secret');
+  });
+
+  it('registers a mobile app with an app scheme, and has no secret to show', async () => {
+    api.apps.mockResolvedValue([]);
+    api.createApp.mockResolvedValue({
+      app: app({ clientType: 'public', secretHint: null }),
+      clientSecret: null,
+    });
+    renderWith(<OAuthAppsPage />);
+    const user = setupUser();
+
+    await user.click(await screen.findByRole('button', { name: 'Register app' }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/Name/), 'Leasing mobile');
+    await user.type(
+      within(dialog).getByLabelText(/Redirect URIs/),
+      'com.example.leasing:/callback',
+    );
+    // A server-side app may not return to an app scheme.
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    expect(await within(dialog).findByText(/mobile and desktop apps/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('radio', { name: /Mobile or desktop app/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
+
+    await waitFor(() =>
+      expect(api.createApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          redirectUris: ['com.example.leasing:/callback'],
+          clientType: 'public',
+        }),
+      ),
+    );
+    expect(await screen.findByText(/has no secret/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Client secret')).not.toBeInTheDocument();
+  });
+
+  it('offers no secret to replace for a mobile app', async () => {
+    api.apps.mockResolvedValue([app({ clientType: 'public', secretHint: null })]);
+    renderWith(<OAuthAppsPage />);
+    const user = setupUser();
+
+    expect(await screen.findByText('Mobile or desktop · PKCE')).toBeInTheDocument();
+    expect(screen.getByText(/No secret/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Actions for Leasing sync' }));
+    expect(screen.queryByRole('menuitem', { name: 'Replace secret' })).not.toBeInTheDocument();
   });
 });
 
@@ -161,6 +224,7 @@ describe('the consent page', () => {
       app: { name: 'Leasing sync', description: null, websiteUrl: null, publisher: 'Ada Owner' },
       scopes: [{ scope: 'default', description: 'See and change your tasks.' }],
       redirectHost: 'tool.example',
+      blockedWorkspaces: [],
     });
     api.authorize.mockResolvedValue({
       redirectTo: 'https://tool.example/callback?code=c&state=st-1',
@@ -189,6 +253,24 @@ describe('the consent page', () => {
     expect(api.authorize).toHaveBeenCalledWith(expect.objectContaining({ approve: true }));
   });
 
+  it('says which workspaces only allow approved apps, before the person allows it', async () => {
+    api.consent.mockResolvedValue({
+      app: { name: 'Leasing sync', description: null, websiteUrl: null, publisher: 'Ada Owner' },
+      scopes: [{ scope: 'default', description: 'See and change your tasks.' }],
+      redirectHost: 'tool.example',
+      blockedWorkspaces: [
+        { id: 'ws-1', name: 'Acme' },
+        { id: 'ws-2', name: 'Leasing' },
+      ],
+    });
+    renderWith(<OAuthConsentPage />);
+
+    const note = await screen.findByRole('note');
+    expect(note).toHaveTextContent(/It won’t reach Acme and Leasing/);
+    expect(note).toHaveTextContent(/App directory/);
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
+  });
+
   it('offers nothing to click when the request does not check out', async () => {
     api.consent.mockRejectedValue(
       new ApiError({
@@ -202,5 +284,107 @@ describe('the consent page', () => {
     expect(await screen.findByText('This app can’t be connected')).toBeInTheDocument();
     expect(screen.getByText(/did not register/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the app directory', () => {
+  const summary = (overrides: Partial<WorkspaceAppSummary> = {}): WorkspaceAppSummary => ({
+    id: 'app-1',
+    clientId: 'ctc_client',
+    name: 'Leasing sync',
+    description: 'Keeps the CRM in step.',
+    websiteUrl: null,
+    publisher: 'Ada Owner',
+    ...overrides,
+  });
+
+  afterEach(() => {
+    activeRole = 'ADMIN';
+  });
+
+  it('shows a member what is approved and whether they use it, without the admin controls', async () => {
+    activeRole = 'MEMBER';
+    api.appDirectory.mockResolvedValue({
+      policy: 'APPROVED',
+      apps: [
+        {
+          app: summary(),
+          approvedAt: '2026-10-01T00:00:00.000Z',
+          approvedBy: { id: 'u-1', name: 'Ada Owner' },
+          connectedByMe: true,
+        },
+      ],
+      unapproved: [],
+    });
+    renderWith(<AppDirectoryPage />);
+
+    expect(await screen.findByText('Leasing sync')).toBeInTheDocument();
+    expect(api.appDirectory).toHaveBeenCalledWith('ws-1');
+    expect(screen.getByText('You use this')).toBeInTheDocument();
+    expect(screen.getByText(/Only these apps can act in Acme Product/)).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+
+  it('lets an admin allow only approved apps, and approve by client id or from what members use', async () => {
+    api.appDirectory.mockResolvedValue({
+      policy: 'ANY',
+      apps: [],
+      unapproved: [
+        { app: summary({ id: 'app-2', clientId: 'ctc_other', name: 'Lease bot' }), members: 2 },
+      ],
+    });
+    api.setAppPolicy.mockResolvedValue({ policy: 'APPROVED', apps: [], unapproved: [] });
+    api.approveApp.mockResolvedValue({
+      app: summary(),
+      approvedAt: '2026-10-01T00:00:00.000Z',
+      approvedBy: null,
+      connectedByMe: false,
+    });
+    renderWith(<AppDirectoryPage />);
+    const user = setupUser();
+
+    expect(await screen.findByText('No approved apps yet')).toBeInTheDocument();
+    expect(screen.getByText(/2 members connected/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /Only approved apps/ }));
+    await waitFor(() =>
+      expect(api.setAppPolicy).toHaveBeenCalledWith('ws-1', { policy: 'APPROVED' }),
+    );
+
+    await user.type(screen.getByLabelText('Approve an app by client id'), ' ctc_client {Enter}');
+    await waitFor(() =>
+      expect(api.approveApp).toHaveBeenCalledWith('ws-1', { clientId: 'ctc_client' }),
+    );
+
+    const knocking = screen.getByRole('list', { name: 'Connected, not approved' });
+    await user.click(within(knocking).getByRole('button', { name: 'Approve' }));
+    await waitFor(() =>
+      expect(api.approveApp).toHaveBeenCalledWith('ws-1', { clientId: 'ctc_other' }),
+    );
+  });
+
+  it('asks before taking an app out, and says what that does under approved-only', async () => {
+    api.appDirectory.mockResolvedValue({
+      policy: 'APPROVED',
+      apps: [
+        {
+          app: summary(),
+          approvedAt: '2026-10-01T00:00:00.000Z',
+          approvedBy: null,
+          connectedByMe: false,
+        },
+      ],
+      unapproved: [],
+    });
+    api.removeDirectoryApp.mockResolvedValue(undefined);
+    renderWith(<AppDirectoryPage />);
+    const user = setupUser();
+
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent(/stops working in this workspace at once/);
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(api.removeDirectoryApp).toHaveBeenCalledWith('ws-1', 'app-1'));
   });
 });

@@ -2,7 +2,11 @@ import { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/c
 import type { ProjectAccess as ApiAccess } from '@coretask/types';
 import { describe, expect, it } from 'vitest';
 
-import { resolveProjectAccess, roleForProjectItem } from './project-access';
+import {
+  conversationRoleForProjectItem,
+  resolveProjectAccess,
+  roleForProjectItem,
+} from './project-access';
 
 const project = (visibility: ProjectVisibility, access: ApiAccess) => ({ visibility, access });
 
@@ -33,6 +37,26 @@ describe('resolveProjectAccess', () => {
     expect(result.canManageMembers).toBe(false);
     expect(result.canLeave).toBe(true);
     expect(result.isPrivate).toBe(true);
+  });
+
+  it('lets a commenter comment and nothing more', () => {
+    const commenter = project(ProjectVisibility.PUBLIC, {
+      effectiveRole: WorkspaceRole.GUEST,
+      projectRole: ProjectMemberRole.COMMENTER,
+      isMember: true,
+      canManage: false,
+    });
+
+    const result = resolveProjectAccess(commenter, WorkspaceRole.MEMBER);
+    expect(result.canEdit).toBe(false);
+    expect(result.canComment).toBe(true);
+    expect(conversationRoleForProjectItem('p-1', commenter, WorkspaceRole.MEMBER)).toBe(
+      WorkspaceRole.MEMBER,
+    );
+    expect(roleForProjectItem('p-1', commenter, WorkspaceRole.MEMBER)).toBe(WorkspaceRole.GUEST);
+
+    // A workspace guest stays read-only, commenter or not.
+    expect(resolveProjectAccess(commenter, WorkspaceRole.GUEST).canComment).toBe(false);
   });
 
   it('lets an editor edit but not manage', () => {

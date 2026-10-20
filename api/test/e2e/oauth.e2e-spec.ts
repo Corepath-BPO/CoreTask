@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 
 import { API_PREFIX, AutomationTrigger, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
@@ -24,24 +25,50 @@ import {
 describe('OAuth apps and webhook subscriptions (e2e)', () => {
   let context: TestContext;
   let deliveries: WebhookDeliveryService;
+  /**
+   * The subscriber's server. It answers the X-Hook-Secret handshake by
+   * echoing the header, unless a test says how it should answer instead.
+   */
+  let listener: Server;
+  let HOOK = '';
+  let handshake: 'echo' | 'ignore' | 'refuse' = 'echo';
+  let handshakes: string[] = [];
 
   beforeAll(async () => {
     context = await createTestContext();
     deliveries = context.app.get(WebhookDeliveryService);
+    listener = createServer((req, res) => {
+      const secret = req.headers['x-hook-secret'];
+      if (typeof secret === 'string') {
+        handshakes.push(secret);
+        if (handshake === 'refuse') {
+          res.writeHead(410).end();
+          return;
+        }
+        res.writeHead(200, handshake === 'echo' ? { 'X-Hook-Secret': secret } : {}).end();
+        return;
+      }
+      res.writeHead(204).end();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+    const address = listener.address();
+    HOOK = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}/catch/1`;
   });
 
   beforeEach(async () => {
+    handshake = 'echo';
+    handshakes = [];
     await context.prisma.truncateAllTables();
   });
 
   afterAll(async () => {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
     await closeTestContext(context);
   });
 
   const server = () => context.app.getHttpServer();
   const url = (path: string) => `${API_PREFIX}${path}`;
   const REDIRECT = 'https://tool.example/oauth/callback';
-  const HOOK = 'https://hooks.example/catch/1';
 
   interface Actor {
     token: string;
@@ -360,6 +387,364 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
     });
   });
 
+  describe('public clients (mobile and desktop apps)', () => {
+    const APP_REDIRECT = 'com.example.leasing:/oauth/callback';
+    const verifier = 'v'.repeat(20) + randomUUID().replace(/-/g, '');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+    const registerPublic = async (developer: Actor) => {
+      const created = await request(server())
+        .post(url('/users/me/oauth-apps'))
+        .set(as(developer))
+        .send({ name: 'Leasing mobile', redirectUris: [APP_REDIRECT], clientType: 'public' })
+        .expect(201);
+      return created.body.data as {
+        app: { id: string; clientId: string; clientType: string; secretHint: string | null };
+        clientSecret: string | null;
+      };
+    };
+
+    const allowPublic = (person: Actor, clientId: string, pkce = true) =>
+      request(server())
+        .post(url('/oauth/authorize'))
+        .set(as(person))
+        .send({
+          clientId,
+          redirectUri: APP_REDIRECT,
+          state: 'st-1',
+          approve: true,
+          ...(pkce ? { codeChallenge: challenge, codeChallengeMethod: 'S256' } : {}),
+        });
+
+    const tokenFor = (fields: Record<string, string>) =>
+      request(server()).post(url('/oauth/token')).type('form').send(fields);
+
+    it('is given no secret, and only it may register an app scheme', async () => {
+      const scope = await setupScope();
+      const registered = await registerPublic(scope.owner);
+      expect(registered.clientSecret).toBeNull();
+      expect(registered.app).toMatchObject({ clientType: 'public', secretHint: null });
+
+      await request(server())
+        .post(url(`/users/me/oauth-apps/${registered.app.id}/rotate-secret`))
+        .set(as(scope.owner))
+        .expect(400);
+
+      // A server-side app may not claim an app scheme.
+      await request(server())
+        .post(url('/users/me/oauth-apps'))
+        .set(as(scope.owner))
+        .send({ name: 'Leasing sync', redirectUris: [APP_REDIRECT] })
+        .expect(422);
+    });
+
+    it('must use PKCE, and exchanges with its id and the verifier alone', async () => {
+      const scope = await setupScope();
+      const { app } = await registerPublic(scope.owner);
+
+      const refused = await allowPublic(scope.member, app.clientId, false).expect(400);
+      expect(refused.body.error.code).toBe('OAUTH_INVALID_REQUEST');
+
+      const allowed = await allowPublic(scope.member, app.clientId).expect(200);
+      const redirect = new URL(allowed.body.data.redirectTo as string);
+      expect(redirect.protocol).toBe('com.example.leasing:');
+      const code = redirect.searchParams.get('code') as string;
+
+      const base = {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: APP_REDIRECT,
+        client_id: app.clientId,
+      };
+      const missing = await tokenFor(base).expect(400);
+      expect(missing.body.error).toBe('invalid_grant');
+
+      // The code was spent by the failed attempt; a fresh one with the verifier works.
+      const again = await allowPublic(scope.member, app.clientId).expect(200);
+      const fresh = new URL(again.body.data.redirectTo as string).searchParams.get(
+        'code',
+      ) as string;
+      const token = await tokenFor({ ...base, code: fresh, code_verifier: verifier }).expect(200);
+      expect(token.body).toMatchObject({ access_token: expect.stringMatching(/^cto_/) });
+
+      await request(server())
+        .get(url('/workspaces'))
+        .set(as(token.body.access_token as string))
+        .expect(200);
+    });
+
+    it('gets a new refresh token each time, and the old one stops working', async () => {
+      const scope = await setupScope();
+      const { app } = await registerPublic(scope.owner);
+      const allowed = await allowPublic(scope.member, app.clientId).expect(200);
+      const code = new URL(allowed.body.data.redirectTo as string).searchParams.get(
+        'code',
+      ) as string;
+      const first = await tokenFor({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: APP_REDIRECT,
+        client_id: app.clientId,
+        code_verifier: verifier,
+      }).expect(200);
+
+      const refreshed = await tokenFor({
+        grant_type: 'refresh_token',
+        refresh_token: first.body.refresh_token as string,
+        client_id: app.clientId,
+      }).expect(200);
+      expect(refreshed.body.refresh_token).toEqual(expect.stringMatching(/^ctr_/));
+      expect(refreshed.body.refresh_token).not.toBe(first.body.refresh_token);
+
+      const replayed = await tokenFor({
+        grant_type: 'refresh_token',
+        refresh_token: first.body.refresh_token as string,
+        client_id: app.clientId,
+      }).expect(400);
+      expect(replayed.body.error).toBe('invalid_grant');
+    });
+
+    it('still asks a confidential client for its secret', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const code = await allow(scope.member, app);
+
+      const refused = await exchange(app, code, { client_secret: '' }).expect(401);
+      expect(refused.body.error).toBe('invalid_client');
+    });
+  });
+
+  describe('the read scope', () => {
+    const connectFor = async (person: Actor, app: App, scope: string) => {
+      const code = await allow(person, app, { scope });
+      const response = await exchange(app, code).expect(200);
+      return response.body as { access_token: string; scope: string };
+    };
+
+    it('reads and listens, and is refused every other change', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const consent = await request(server())
+        .post(url('/oauth/consent'))
+        .set(as(scope.member))
+        .send({ clientId: app.clientId, redirectUri: REDIRECT, scope: 'read' })
+        .expect(200);
+      expect(consent.body.data.scopes).toEqual([
+        { scope: 'read', description: expect.stringMatching(/cannot change anything/) },
+      ]);
+
+      const token = await connectFor(scope.member, app, 'read');
+      expect(token.scope).toBe('read');
+
+      await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set(as(token.access_token))
+        .expect(200);
+      const refused = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set(as(token.access_token))
+        .send({ title: 'Should not exist', projectId: scope.projectId })
+        .expect(403);
+      expect(refused.body.error.code).toBe('OAUTH_SCOPE_INSUFFICIENT');
+      expect(await context.prisma.task.count({ where: { title: 'Should not exist' } })).toBe(0);
+
+      // Subscribing to hear about changes is reading.
+      const subscribed = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/webhook-subscriptions`))
+        .set(as(token.access_token))
+        .send({ projectId: scope.projectId, url: HOOK, events: ['task.created'] })
+        .expect(201);
+      await request(server())
+        .delete(
+          url(
+            `/workspaces/${scope.workspaceId}/webhook-subscriptions/${subscribed.body.data.subscription.id}`,
+          ),
+        )
+        .set(as(token.access_token))
+        .expect(204);
+
+      const listed = await request(server())
+        .get(url('/users/me/connected-apps'))
+        .set(as(scope.member))
+        .expect(200);
+      expect(listed.body.data[0].scopes).toEqual(['read']);
+    });
+
+    it('takes read and default together as default', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connectFor(scope.member, app, 'read default');
+      expect(token.scope).toBe('default');
+
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set(as(token.access_token))
+        .send({ title: 'Allowed', projectId: scope.projectId })
+        .expect(201);
+    });
+  });
+
+  describe('the app directory', () => {
+    const directoryUrl = (scope: Scope) => url(`/workspaces/${scope.workspaceId}/app-directory`);
+    const projectsUrl = (scope: Scope) => url(`/workspaces/${scope.workspaceId}/projects`);
+    const setPolicy = (scope: Scope, policy: string) =>
+      request(server()).patch(directoryUrl(scope)).set(as(scope.owner)).send({ policy });
+    const blockedFor = async (person: Actor, app: App) => {
+      const consent = await request(server())
+        .post(url('/oauth/consent'))
+        .set(as(person))
+        .send({ clientId: app.clientId, redirectUri: REDIRECT })
+        .expect(200);
+      return consent.body.data.blockedWorkspaces as { id: string; name: string }[];
+    };
+
+    it('lets admins allow only approved apps, and refuses the rest there', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      // Any app, to begin with; a member sees the directory but not what knocks.
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(200);
+      const asMember = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.member))
+        .expect(200);
+      expect(asMember.body.data).toEqual({ policy: 'ANY', apps: [], unapproved: [] });
+      const notAdmin = await request(server())
+        .patch(directoryUrl(scope))
+        .set(as(scope.member))
+        .send({ policy: 'APPROVED' })
+        .expect(403);
+      expect(notAdmin.body.error.code).toBe('INSUFFICIENT_WORKSPACE_ROLE');
+
+      const asOwner = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.owner))
+        .expect(200);
+      expect(asOwner.body.data.unapproved).toEqual([
+        {
+          app: expect.objectContaining({
+            id: app.id,
+            clientId: app.clientId,
+            name: 'Leasing sync',
+            publisher: 'Ada Owner',
+          }),
+          members: 1,
+        },
+      ]);
+
+      // Approved apps only: this one is refused here, and does not see the workspace.
+      const switched = await setPolicy(scope, 'APPROVED').expect(200);
+      expect(switched.body.data.policy).toBe('APPROVED');
+      const refused = await request(server())
+        .get(projectsUrl(scope))
+        .set(as(token.access_token))
+        .expect(403);
+      expect(refused.body.error.code).toBe('OAUTH_APP_NOT_APPROVED');
+      const listed = await request(server())
+        .get(url('/workspaces'))
+        .set(as(token.access_token))
+        .expect(200);
+      expect(listed.body.data).toEqual([]);
+      expect(await blockedFor(scope.member, app)).toEqual([
+        { id: scope.workspaceId, name: 'Acme' },
+      ]);
+
+      // Approved by client id: the app reaches the workspace again.
+      const approved = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: app.clientId })
+        .expect(201);
+      expect(approved.body.data).toMatchObject({
+        app: { id: app.id, name: 'Leasing sync' },
+        approvedBy: { id: scope.owner.userId, name: 'Ada Owner' },
+        connectedByMe: false,
+      });
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(200);
+      expect(await blockedFor(scope.member, app)).toEqual([]);
+      const mine = await request(server())
+        .get(directoryUrl(scope))
+        .set(as(scope.member))
+        .expect(200);
+      expect(mine.body.data.apps).toEqual([
+        expect.objectContaining({
+          app: expect.objectContaining({ id: app.id }),
+          connectedByMe: true,
+        }),
+      ]);
+
+      // Taken out again: refused again. Nobody was disconnected.
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/app-directory/apps/${app.id}`))
+        .set(as(scope.owner))
+        .expect(204);
+      await request(server()).get(projectsUrl(scope)).set(as(token.access_token)).expect(403);
+      await request(server())
+        .delete(url(`/workspaces/${scope.workspaceId}/app-directory/apps/${app.id}`))
+        .set(as(scope.owner))
+        .expect(404);
+      expect(
+        await context.prisma.oAuthGrant.count({ where: { appId: app.id, revokedAt: null } }),
+      ).toBe(1);
+    });
+
+    it('is for people: an app cannot read or approve itself, nor an unknown app be added', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.owner, app);
+
+      const asApp = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(token.access_token))
+        .send({ clientId: app.clientId })
+        .expect(403);
+      expect(asApp.body.error.code).toBe('OAUTH_TOKEN_NOT_ALLOWED');
+      await request(server()).get(directoryUrl(scope)).set(as(token.access_token)).expect(403);
+
+      const unknown = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: 'ctc_nobody' })
+        .expect(404);
+      expect(unknown.body.error.code).toBe('OAUTH_UNKNOWN_CLIENT');
+      await setPolicy(scope, 'SOMETIMES').expect(422);
+    });
+
+    it('silences an unapproved app’s webhook subscriptions until it is approved', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/webhook-subscriptions`))
+        .set(as(token.access_token))
+        .send({ projectId: scope.projectId, url: HOOK, events: ['task.created'] })
+        .expect(201);
+      const event = (): AutomationEvent => ({
+        eventId: randomUUID(),
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        trigger: AutomationTrigger.TASK_CREATED,
+        entityType: 'TASK',
+        entityId: randomUUID(),
+        actorId: scope.owner.userId,
+        after: {},
+        correlationId: randomUUID(),
+        depth: 0,
+      });
+
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 1 });
+      await setPolicy(scope, 'APPROVED').expect(200);
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 0 });
+      await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/app-directory/apps`))
+        .set(as(scope.owner))
+        .send({ clientId: app.clientId })
+        .expect(201);
+      expect(await deliveries.fanOut(event())).toEqual({ deliveries: 1 });
+    });
+  });
+
   describe('ending a connection', () => {
     it('lets the app revoke its refresh token, ending its access too', async () => {
       const scope = await setupScope();
@@ -463,6 +848,28 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
         .post(subscriptionsUrl(scope))
         .set(credential)
         .send({ projectId, url: HOOK, events: ['task.created'] });
+
+    it('sends the new secret in the X-Hook-Secret handshake before saving anything', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      const created = await subscribe(scope, as(token.access_token), scope.projectId).expect(201);
+      expect(handshakes).toEqual([created.body.data.secret]);
+    });
+
+    it('refuses a URL that does not echo the handshake, or turns it away', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      for (const answer of ['ignore', 'refuse'] as const) {
+        handshake = answer;
+        const refused = await subscribe(scope, as(token.access_token), scope.projectId).expect(422);
+        expect(refused.body.error.code).toBe('WEBHOOK_HANDSHAKE_FAILED');
+      }
+      expect(await context.prisma.webhookEndpoint.count()).toBe(0);
+    });
 
     it('lets an app subscribe to a project it can see, and hears what happens there', async () => {
       const scope = await setupScope();

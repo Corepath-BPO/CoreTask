@@ -1,4 +1,4 @@
-import { OAUTH_SCOPES } from '@coretask/contracts';
+import { OAUTH_APP_POLICIES, OAUTH_CLIENT_TYPES, OAUTH_SCOPES } from '@coretask/contracts';
 import { ApiProperty } from '@nestjs/swagger';
 
 /** Swagger models mirroring the OAuth types in `@coretask/types`. */
@@ -24,10 +24,18 @@ export class OAuthAppDto {
   clientId!: string;
 
   @ApiProperty({
-    example: 'cts_AbCdEf',
-    description: 'Enough to tell secrets apart, never enough to use one.',
+    enum: OAUTH_CLIENT_TYPES,
+    example: 'confidential',
+    description: 'A public client (mobile, desktop) has no secret and must use PKCE.',
   })
-  secretHint!: string;
+  clientType!: string;
+
+  @ApiProperty({
+    example: 'cts_AbCdEf',
+    nullable: true,
+    description: 'Enough to tell secrets apart, never enough to use one. Null for a public client.',
+  })
+  secretHint!: string | null;
 
   @ApiProperty({ example: 3, description: 'People who have it connected now.' })
   connections!: number;
@@ -43,8 +51,12 @@ export class CreatedOAuthAppDto {
   @ApiProperty({ type: OAuthAppDto })
   app!: OAuthAppDto;
 
-  @ApiProperty({ example: 'cts_…', description: 'Shown once. Store it in the tool now.' })
-  clientSecret!: string;
+  @ApiProperty({
+    example: 'cts_…',
+    nullable: true,
+    description: 'Shown once. Store it in the tool now. Null for a public client, which has none.',
+  })
+  clientSecret!: string | null;
 }
 
 export class OAuthSecretRotationDto {
@@ -74,6 +86,14 @@ class OAuthConsentScopeDto {
   description!: string;
 }
 
+class WorkspaceRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Leasing' })
+  name!: string;
+}
+
 export class OAuthConsentDto {
   @ApiProperty({ type: OAuthConsentAppDto })
   app!: OAuthConsentAppDto;
@@ -83,6 +103,13 @@ export class OAuthConsentDto {
 
   @ApiProperty({ example: 'example.com' })
   redirectHost!: string;
+
+  @ApiProperty({
+    type: [WorkspaceRefDto],
+    description:
+      'The person’s workspaces that allow only approved apps and have not approved this one.',
+  })
+  blockedWorkspaces!: WorkspaceRefDto[];
 }
 
 export class OAuthRedirectDto {
@@ -140,4 +167,68 @@ export class OAuthTokenResponseDto {
 
   @ApiProperty({ example: 'default' })
   scope!: string;
+}
+
+class WorkspaceAppSummaryDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'ctc_…', description: 'Public; how an admin names the app.' })
+  clientId!: string;
+
+  @ApiProperty({ example: 'Leasing sync' })
+  name!: string;
+
+  @ApiProperty({ nullable: true })
+  description!: string | null;
+
+  @ApiProperty({ nullable: true })
+  websiteUrl!: string | null;
+
+  @ApiProperty({ example: 'Ada Lovelace', description: 'Who registered the app.' })
+  publisher!: string;
+}
+
+class PersonRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Ada Lovelace' })
+  name!: string;
+}
+
+export class DirectoryAppDto {
+  @ApiProperty({ type: WorkspaceAppSummaryDto })
+  app!: WorkspaceAppSummaryDto;
+
+  @ApiProperty({ format: 'date-time' })
+  approvedAt!: string;
+
+  @ApiProperty({ type: PersonRefDto, nullable: true })
+  approvedBy!: PersonRefDto | null;
+
+  @ApiProperty({ description: 'Whether the person asking has it connected.' })
+  connectedByMe!: boolean;
+}
+
+class UnapprovedAppDto {
+  @ApiProperty({ type: WorkspaceAppSummaryDto })
+  app!: WorkspaceAppSummaryDto;
+
+  @ApiProperty({ example: 2, description: 'Members of this workspace connected to it.' })
+  members!: number;
+}
+
+export class WorkspaceAppDirectoryDto {
+  @ApiProperty({ enum: OAUTH_APP_POLICIES, example: 'ANY' })
+  policy!: string;
+
+  @ApiProperty({ type: [DirectoryAppDto] })
+  apps!: DirectoryAppDto[];
+
+  @ApiProperty({
+    type: [UnapprovedAppDto],
+    description: 'Apps members connected that are not in the directory. Admins only.',
+  })
+  unapproved!: UnapprovedAppDto[];
 }

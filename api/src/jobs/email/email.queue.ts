@@ -7,8 +7,8 @@ import {
   QueueName,
   type InvitationEmailJobData,
   type MessageEmailJobData,
+  type EmailVerificationJobData,
   type PasswordResetEmailJobData,
-  type WelcomeEmailJobData,
 } from '../queue-names';
 
 @Injectable()
@@ -18,21 +18,26 @@ export class EmailQueue {
   constructor(@InjectQueue(QueueName.EMAIL) private readonly queue: Queue) {}
 
   /**
-   * Enqueues the welcome e-mail.
+   * Enqueues a "confirm your e-mail address" link — on sign-up, where it is
+   * also the welcome.
    *
-   * Never rejects: a Redis outage should degrade the welcome e-mail, not the
-   * registration that triggered it.
+   * Never rejects: a Redis outage should cost the link, not the registration
+   * or the request that asked for it. A new link can always be sent.
    */
-  async enqueueWelcome(data: WelcomeEmailJobData): Promise<void> {
+  async enqueueEmailVerification(data: EmailVerificationJobData): Promise<void> {
     try {
-      await this.queue.add(EmailJob.WELCOME, data, {
+      await this.queue.add(EmailJob.EMAIL_VERIFICATION, data, {
         attempts: 5,
         backoff: { type: 'exponential', delay: 5_000 },
-        removeOnComplete: { age: 3_600, count: 1_000 },
-        removeOnFail: { age: 86_400 },
+        // Removed on completion so the raw token does not linger in Redis.
+        removeOnComplete: true,
+        removeOnFail: { age: 3_600 },
       });
     } catch (error) {
-      this.logger.error({ err: error, userId: data.userId }, 'Failed to enqueue welcome e-mail');
+      this.logger.error(
+        { err: error, userId: data.userId },
+        'Failed to enqueue an e-mail confirmation',
+      );
     }
   }
 

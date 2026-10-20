@@ -65,6 +65,8 @@ interface CommentThreadProps {
   workspaceId: string | undefined;
   parent: CommentParent | null;
   role: WorkspaceRole;
+  /** The role the conversation is joined with, when it differs: a project COMMENTER's. */
+  commentRole?: WorkspaceRole;
   /** The composer, so the task panel's Tab+C chord can focus it. */
   composerRef?: Ref<CommentComposerHandle> | undefined;
   /** A comment a link named: scrolled into view and lit up once loaded. */
@@ -87,6 +89,7 @@ export function CommentThread({
   workspaceId,
   parent,
   role,
+  commentRole,
   composerRef,
   focusCommentId,
   permalink,
@@ -179,7 +182,7 @@ export function CommentThread({
     [],
   );
 
-  const canComment = hasAtLeastRole(role, WorkspaceRole.MEMBER);
+  const canComment = hasAtLeastRole(commentRole ?? role, WorkspaceRole.MEMBER);
   const canModerate = hasAtLeastRole(role, WorkspaceRole.MANAGER);
   const stories = useMemo(
     () => activity.data?.pages.flatMap((page) => page.items) ?? [],

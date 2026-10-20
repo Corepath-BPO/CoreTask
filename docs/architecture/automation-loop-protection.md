@@ -6,10 +6,10 @@ This document describes `AutomationRunnerService` as it is written today, not
 what the brief asks for. Where the two differ, the difference is listed under
 [Not yet implemented](#not-yet-implemented).
 
-## The four mechanisms that exist
+## The mechanisms that exist
 
-Each catches something the others miss, which is why there are four rather than
-one good one.
+Each catches something the others miss, which is why there are several rather
+than one good one.
 
 ### 1. Correlation id
 
@@ -82,22 +82,85 @@ does it_ — an intent no amount of automatic protection can express, and one th
 was previously unexpressible. It defaults to `true` so every rule that existed
 before the column keeps behaving exactly as it did.
 
-### And a cap on actions
+### 5. A cap on actions per run
 
-`MAX_ACTIONS_PER_EXECUTION` is **25**, and it is enforced:
+`MAX_ACTIONS_PER_EXECUTION` is **25**. It is a backstop against a single
+runaway rule rather than against a cycle — one rule with two hundred actions
+never loops and is still a problem.
 
-```ts
-const actions = plan.actions.slice(0, MAX_ACTIONS_PER_EXECUTION);
-```
+It is enforced twice, and neither time silently:
 
-It is a backstop against a single runaway rule rather than against a cycle —
-one rule with two hundred actions never loops and is still a problem.
+- **At publish.** `validateGraphStructure` in `@coretask/validation` counts
+  actions along each path from the trigger, starting again after a Wait step
+  (what follows a Wait runs later, as a run of its own). The first step past
+  the cap is an error on that step: "A rule does at most 25 actions in one run,
+  and this is one more." The builder shows it from the same function.
+- **At run time,** for a rule that reached the runner some other way — written
+  before the check, or a shape the per-path count does not see (a step with
+  two children, which only the API can write). `AutomationRunnerService.perform`
+  runs the first 25 and writes a log row for every step after them —
+  `succeeded: false`, "Not run: a rule does at most 25 actions in one run." —
+  and the run ends `PARTIALLY_FAILED` with an error saying how many were cut.
+  A rule that does less than it says while reporting success is the failure
+  this engine refuses everywhere else.
 
-**It truncates silently.** The 26th action is dropped: no log line, no warning,
-and the execution completes as `COMPLETED` because every action it ran
-succeeded. A rule that does less than it says it does, reporting success, is
-the failure mode this codebase is otherwise careful to avoid. It should either
-refuse at publish time or record a truncation reason on the execution.
+### 6. A cap on actions per chain
+
+`MAX_ACTIONS_PER_CHAIN` is **100**. The depth limit bounds how deep a chain
+goes and the per-run cap how much one run does; neither bounds the total —
+five hops of twenty-five actions each is 125 writes from one click, within
+both.
+
+A **chain** is everything descended from one event. Every event carries a
+`chainId`: `AutomationEventPublisher` sets it to the event's own id when the
+event has none (nothing came before it), and `follow` copies it onto every
+event a rule's write raises. It is written to `AutomationExecution.chainId`,
+indexed, beside `actionsRun` — how many action steps the run performed.
+
+Before running a plan's actions, `perform` sums `actionsRun` over the chain's
+other runs. What is left of the 100 — or 25, whichever is lower — is what this
+run may do; the steps past it are logged as not run, naming the chain cap. A
+run with nothing left at all is `SKIPPED`: "Stopped: … This looks like a
+loop."
+
+Why not count by `correlationId`, which already exists? Because a manual run
+and a scheduled run give every task in the batch the same correlation id, so
+the history reads them as one run. Counted that way, a fifty-task batch would
+cut the fiftieth task off for the work done on the other forty-nine. Fifty
+tasks are fifty chains.
+
+The sum excludes runs still in progress beside this one (the processor runs
+two jobs at once), so it can be short by a run's worth. A backstop against a
+runaway does not need to be exact to the action.
+
+### 7. One run per rule per event
+
+`AutomationEventPublisher` enqueues with `attempts: 3` and exponential
+backoff, so a job that throws after its first rule acted is retried from the
+beginning. Two things stop the retry doing that rule's work again:
+
+- **The queue job is keyed on the event** — `jobId: event-<eventId>` (a
+  resumption after a Wait adds `-from-<nodeId>`; BullMQ refuses a `:` in a
+  custom id). The same event published twice is one job while BullMQ still
+  holds the first: an hour after it completes, a day after it fails.
+- **The run is keyed on the rule and the event.** `AutomationExecution` has
+  `idempotencyKey` — the event id, plus `/<nodeId>` for a resumption — unique
+  per rule. `begin` looks for it before creating a run. Found finished, the
+  rule is not run again; found `RUNNING`, a worker died part-way, and the run
+  is closed as `FAILED` ("stopped part-way and was not repeated") rather than
+  re-run, because which of its steps took effect is not knowable and a comment
+  posted twice is the harm this exists to prevent.
+
+Either way the retry hands back what the earlier run asked to have sent. Each
+step's log row keeps its `followUps` — the events its write raised, the
+webhooks and e-mails it queued — so a job that failed after a rule ran does
+not lose the chain that rule started. Those events keep the ids they were
+raised with, so publishing them again is the same jobs.
+
+The events the engine raises on a run's behalf — a parent's checklist
+completing, a task coming unblocked, a Wait step resuming — get ids derived
+from their source (`derivedEventId`, a name-based UUID) rather than random
+ones, for the same reason: raised twice, they are the same occurrence.
 
 ## How a chain continues
 
@@ -142,7 +205,9 @@ So, today:
 | Depth limit            | yes — every hop is one deeper                 |
 | `BLOCK_SELF_RETRIGGER` | yes — every hop names the rule that caused it |
 | `allowChaining`        | yes — every hop has `depth > 0`               |
-| Action cap             | yes                                           |
+| Per-run action cap     | yes                                           |
+| Per-chain action cap   | yes — every hop inherits the `chainId`        |
+| One run per event      | yes — every hop has an id of its own          |
 | Same-event snapshot    | yes — a sibling rule's write is not an input  |
 
 This is what makes rules composable. "When the field changes, move it" and
@@ -188,24 +253,15 @@ Two rather than one narrows the window. It does not close it.
 
 ## Not yet implemented
 
-The brief asks for these. None of them exists.
-
-**Idempotency keys.** Nothing deduplicates an event. This matters more than it
-looks: `AutomationEventPublisher` enqueues with `attempts: 3` and exponential
-backoff, so a job that throws after performing two of a rule's four actions is
-retried from the beginning and performs those two again. There is no key by
-which the runner could recognise work it has already done.
-
 **Per-rule execution locks.** Two events for the same task arriving together can
 interleave. There is no advisory lock, no row lock, and no serialisation key on
 the queue job. Concurrency 2 is the only mitigation.
 
-**A cap on actions across a chain.** `MAX_ACTIONS_PER_EXECUTION` bounds one
-execution. Nothing bounds the total work done by one correlation id, so five
-rules of twenty-five actions each is 125 writes attributed to one click, within
-every limit.
-
-**A truncation signal.** The action cap should be visible when it bites.
+**Resuming an interrupted run.** A run found `RUNNING` on a retry is closed, not
+finished: its remaining steps do not run. Finishing it would mean knowing
+which of its steps took effect before the worker died, and the log row is
+written after the step, so a step that wrote and then died before logging
+would run twice.
 
 ## Related
 

@@ -2,6 +2,7 @@ import {
   EXTERNAL_ACTION_CATEGORY,
   TRIGGER_LABEL,
   isFallbackBranch,
+  isTicketTrigger,
   type AutomationTrigger,
   delayLength,
 } from '@coretask/contracts';
@@ -228,6 +229,11 @@ export function NodeConfigRail({
            * step is called two things a click apart.
            */
           alternative={branchRows(nodes).findIndex((row) => row.id === mode.nodeId) > 0}
+          subject={
+            isTicketTrigger(nodes.find((node) => node.type === 'TRIGGER')?.subtype)
+              ? 'TICKET'
+              : 'TASK'
+          }
           metadata={metadata}
           onClose={onClose}
           onChange={onChange}
@@ -314,6 +320,7 @@ function RailHeader({
 function ConfigurePanel({
   node,
   alternative,
+  subject,
   metadata,
   onClose,
   onChange,
@@ -323,6 +330,8 @@ function ConfigurePanel({
   node: CanvasNode | null;
   /** True for a branch after the first, which reads as "Otherwise if". */
   alternative: boolean;
+  /** What the rule is about, which decides what a condition may ask. */
+  subject: 'TASK' | 'TICKET';
   metadata: AutomationMetadata | undefined;
   onClose: () => void;
   onChange: (nodeId: string, configuration: Record<string, unknown>) => void;
@@ -381,6 +390,7 @@ function ConfigurePanel({
           <NodeConfigFields
             node={node}
             metadata={metadata}
+            subject={subject}
             onChange={(configuration) => onChange(node.id, configuration)}
           />
         </div>

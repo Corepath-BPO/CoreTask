@@ -44,6 +44,8 @@ export const queryKeys = {
   /** A person's own: the apps they registered, and the apps they connected. */
   oauthApps: ['oauth-apps'] as const,
   connectedApps: ['connected-apps'] as const,
+  /** A workspace's: its approved apps and whether only those may act in it. */
+  appDirectory: (workspaceId: string) => ['app-directory', workspaceId] as const,
   slack: {
     all: (workspaceId: string) => ['slack', workspaceId] as const,
     status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
@@ -77,6 +79,11 @@ export const queryKeys = {
     /** Under the project prefix on purpose: one invalidation reaches the roster too. */
     members: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'members', projectId] as const,
+    invitations: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'invitations', projectId] as const,
+    /** The reader's own choice of what this project tells them about. */
+    notificationSettings: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projects.all(workspaceId), 'notification-settings', projectId] as const,
     note: (workspaceId: string, projectId: string) =>
       [...queryKeys.projects.all(workspaceId), 'note', projectId] as const,
     resources: (workspaceId: string, projectId: string) =>
@@ -98,6 +105,9 @@ export const queryKeys = {
     /** Logged time; under `tasks` so an estimate change refreshes its total line. */
     time: (workspaceId: string, taskId: string) =>
       [...queryKeys.tasks.all(workspaceId), 'time', taskId] as const,
+    /** Under `tasks` so an automation that adds one refreshes the open panel. */
+    checklists: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'checklists', taskId] as const,
   },
   tickets: {
     all: (workspaceId: string) => ['tickets', workspaceId] as const,
@@ -229,6 +239,8 @@ export const queryKeys = {
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'messages'] as const,
     files: (workspaceId: string, projectId: string) =>
       [...queryKeys.projectUpdates.all(workspaceId), projectId, 'files'] as const,
+    statusDraft: (workspaceId: string, projectId: string) =>
+      [...queryKeys.projectUpdates.all(workspaceId), projectId, 'status-draft'] as const,
   },
   search: {
     /** Term and kinds are part of the key — each is a different answer. */

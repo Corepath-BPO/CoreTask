@@ -1,4 +1,8 @@
-import type { ProjectMember } from '@coretask/types';
+import type {
+  ProjectMember,
+  ProjectNotificationSettings,
+  WorkspaceInvitation,
+} from '@coretask/types';
 import {
   Body,
   Controller,
@@ -10,6 +14,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
@@ -24,15 +29,23 @@ import {
   RequireProjectAdmin,
 } from '../../common/decorators/workspace.decorator';
 import type { ActorContext, ProjectAccessContext } from '../../common/types/api.types';
+import { WorkspaceInvitationDto } from '../invitations/dto/invitation-response.dto';
+import { InvitationsService } from '../invitations/invitations.service';
 import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import {
   LeaveProjectResultDto,
   ProjectMemberDto,
+  ProjectNotificationSettingsDto,
   RemoveProjectMemberResultDto,
 } from './dto/project-member-response.dto';
-import { AddProjectMemberDto, UpdateProjectMemberRoleDto } from './dto/project-member.dto';
+import {
+  AddProjectMemberDto,
+  InviteToProjectDto,
+  UpdateProjectMemberRoleDto,
+  UpdateProjectNotificationSettingsDto,
+} from './dto/project-member.dto';
 import { ProjectMembersService } from './project-members.service';
 
 /**
@@ -54,7 +67,10 @@ import { ProjectMembersService } from './project-members.service';
 @ApiErrorResponseDoc(403, 'Not a member of this workspace, or not a project admin for a change')
 @ApiErrorResponseDoc(404, 'No such project here, or it is private and the caller is not a member')
 export class ProjectMembersController {
-  constructor(private readonly members: ProjectMembersService) {}
+  constructor(
+    private readonly members: ProjectMembersService,
+    private readonly invitations: InvitationsService,
+  ) {}
 
   /*
    * Declared before `members/:userId` so neither word is ever read as an id.
@@ -92,6 +108,33 @@ export class ProjectMembersController {
     return { left: removed };
   }
 
+  @Get('notification-settings')
+  @ApiOperation({
+    summary: 'What this project tells you about',
+    description:
+      'Status updates and messages until you choose. Only members hear from a project; for anyone else `member` is false and `notifyOn` is what joining starts with.',
+  })
+  @ApiEnvelopeResponse(ProjectNotificationSettingsDto)
+  notificationSettings(
+    @CurrentProject() access: ProjectAccessContext,
+    @Actor() actor: ActorContext,
+  ): Promise<ProjectNotificationSettings> {
+    return this.members.notificationSettings(access, actor);
+  }
+
+  @Put('notification-settings')
+  @ApiOperation({ summary: 'Choose what this project tells you about' })
+  @ApiEnvelopeResponse(ProjectNotificationSettingsDto)
+  @ApiErrorResponseDoc(409, 'The caller is not a member of this project')
+  @ApiErrorResponseDoc(422, 'Validation failed')
+  setNotificationSettings(
+    @CurrentProject() access: ProjectAccessContext,
+    @Actor() actor: ActorContext,
+    @Body() dto: UpdateProjectNotificationSettingsDto,
+  ): Promise<ProjectNotificationSettings> {
+    return this.members.setNotificationSettings(access, actor, dto.notifyOn);
+  }
+
   @Get('members')
   @ApiOperation({
     summary: 'List a project’s members',
@@ -118,6 +161,41 @@ export class ProjectMembersController {
     @Body() dto: AddProjectMemberDto,
   ): Promise<ProjectMember> {
     return this.members.add(access, actor, dto.userId, dto.role);
+  }
+
+  @Get('invitations')
+  @RequireProjectAdmin()
+  @ApiOperation({
+    summary: 'List invitations waiting to land someone in this project',
+    description: 'Newest first. Revoke one from the workspace invitations endpoint.',
+  })
+  @ApiEnvelopeResponse(WorkspaceInvitationDto, { isArray: true })
+  listInvitations(@CurrentProject() access: ProjectAccessContext): Promise<WorkspaceInvitation[]> {
+    return this.invitations.listForProject(access.workspaceId, access.projectId);
+  }
+
+  @Post('invitations')
+  @RequireProjectAdmin()
+  @ApiOperation({
+    summary: 'Invite someone outside the workspace into this project',
+    description:
+      'Workspace admins only, as on the Members page. Sends a workspace invitation that also adds them to this project at the given role on acceptance. They join the workspace as a member, or as a guest for VIEWER; an address with a live invitation keeps its team and any higher role.',
+  })
+  @ApiEnvelopeResponse(WorkspaceInvitationDto, { status: 201 })
+  @ApiErrorResponseDoc(403, 'The caller is not a workspace admin')
+  @ApiErrorResponseDoc(409, 'That person is already in the workspace')
+  @ApiErrorResponseDoc(422, 'Validation failed')
+  invite(
+    @CurrentProject() access: ProjectAccessContext,
+    @Actor() actor: ActorContext,
+    @Body() dto: InviteToProjectDto,
+  ): Promise<WorkspaceInvitation> {
+    return this.invitations.inviteToProject(
+      access.workspaceId,
+      access.projectId,
+      actor.userId,
+      dto,
+    );
   }
 
   @Patch('members/:userId')

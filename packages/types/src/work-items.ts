@@ -155,6 +155,8 @@ export interface Task {
   projectId: string | null;
   sectionId: string | null;
   parentTaskId: string | null;
+  /** Set on a subtask of a ticket rather than of a task. */
+  parentTicketId: string | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -181,6 +183,9 @@ export interface Task {
   approvalStatus: ApprovalStatus | null;
   assigneeId: string | null;
   assignee: UserRef | null;
+  /** The team responsible for the task, beside the person assigned to it. */
+  teamId: string | null;
+  team: ProjectTeamRef | null;
   createdById: string;
   subtaskCount: number;
   completedSubtaskCount: number;
@@ -204,6 +209,8 @@ export interface TaskDetail extends Task {
   createdBy: UserRef | null;
   /** Set by "Mark as duplicate": the task this one repeats. */
   duplicateOf: { id: string; title: string } | null;
+  /** The ticket this is a subtask of, for the link back to it. */
+  parentTicket: { id: string; key: string; title: string } | null;
 }
 
 /** A project a task is in besides its home, with its section there. */
@@ -224,6 +231,8 @@ export interface CreateTaskPayload {
   projectId?: string | null;
   sectionId?: string | null;
   parentTaskId?: string | null;
+  /** A subtask of this ticket instead: it joins the ticket's project, in no section. */
+  parentTicketId?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   assigneeId?: string | null;
@@ -246,6 +255,8 @@ export interface UpdateTaskPayload {
   status?: TaskStatus;
   priority?: TaskPriority;
   assigneeId?: string | null;
+  /** The team responsible for the task; null clears it. */
+  teamId?: string | null;
   startDate?: string | null;
   startAt?: string | null;
   dueDate?: string | null;
@@ -401,4 +412,43 @@ export interface CreateCommentPayload {
 
 export interface UpdateCommentPayload {
   body: string;
+}
+
+/** One line of a task's checklist. */
+export interface TaskChecklistItem {
+  id: string;
+  title: string;
+  position: number;
+  completed: boolean;
+  completedAt: string | null;
+  completedBy: { id: string; name: string } | null;
+}
+
+/** A named list of things to tick off, on one task. */
+export interface TaskChecklist {
+  id: string;
+  taskId: string;
+  name: string;
+  position: number;
+  items: TaskChecklistItem[];
+  createdBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+export interface CreateChecklistPayload {
+  name: string;
+  /** Items to start it with, in order. */
+  items?: string[];
+}
+
+export interface UpdateChecklistPayload {
+  name?: string;
+  /** Where it sits among the task's checklists: lower comes first. */
+  position?: number;
+}
+
+export interface UpdateChecklistItemPayload {
+  title?: string;
+  completed?: boolean;
+  position?: number;
 }

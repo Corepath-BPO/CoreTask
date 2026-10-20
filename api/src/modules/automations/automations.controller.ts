@@ -28,7 +28,14 @@ import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AutomationsService } from './automations.service';
-import { AutomationNodeDto, CreateRuleDto, RunRuleDto, UpdateRuleDto } from './dto/automation.dto';
+import {
+  AutomationNodeDto,
+  CreateRuleDto,
+  ExecutionsQueryDto,
+  RevertRuleDto,
+  RunRuleDto,
+  UpdateRuleDto,
+} from './dto/automation.dto';
 import { AutomationDefinitionService } from './structured/automation-definition.service';
 
 /**
@@ -130,10 +137,75 @@ export class AutomationsController {
       // nobody can be asked about is one nobody dares change.
       createdBy: rule.createdBy,
       publishedAt: rule.publishedAt?.toISOString() ?? null,
+      // What is running, and whether the steps below say something else.
+      ...(await this.automations.versionState(rule)),
       graph: toGraph(rule.nodes),
       createdAt: rule.createdAt.toISOString(),
       updatedAt: rule.updatedAt.toISOString(),
     };
+  }
+
+  @Get(':ruleId/versions')
+  @ApiOperation({
+    summary: 'The versions a rule has published, newest first',
+    description:
+      'Publishing makes a version: the steps as they stood, which is what the rule runs until ' +
+      'the next publish. Every run records the version it executed. `isPublished` marks the one ' +
+      'running now.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  versions(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+  ) {
+    return this.automations.versions(workspaceId, projectId, ruleId);
+  }
+
+  @Get(':ruleId/versions/:versionId')
+  @ApiOperation({ summary: 'One published version, with its steps as a graph' })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  @ApiParam({ name: 'versionId', format: 'uuid' })
+  version(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ) {
+    return this.automations.version(workspaceId, projectId, ruleId, versionId);
+  }
+
+  @Post(':ruleId/versions/:versionId/revert')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Put an earlier version back',
+    description:
+      'Copies the version’s steps and trigger into the draft, where the builder shows them. ' +
+      'Nothing running changes until the draft is published — or pass `publish: true` to ' +
+      'publish it in the same call, refused exactly as Publish is. History is kept: publishing ' +
+      'a restored version adds a new version with the old steps.',
+  })
+  @ApiParam({ name: 'ruleId', format: 'uuid' })
+  @ApiParam({ name: 'versionId', format: 'uuid' })
+  @ApiErrorResponseDoc(400, 'Asked to publish, and the restored steps are not ready')
+  revert(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() dto: RevertRuleDto,
+  ) {
+    return this.automations.revert(
+      workspaceId,
+      projectId,
+      role,
+      ruleId,
+      versionId,
+      userId,
+      dto.publish ?? false,
+    );
   }
 
   @Post(':ruleId/validate')
@@ -175,7 +247,9 @@ export class AutomationsController {
   @Patch(':ruleId')
   @ApiOperation({
     summary: 'Update a rule',
-    description: 'Supplying `nodes` replaces the whole canvas and bumps the version.',
+    description:
+      'Supplying `nodes` replaces the whole canvas — the draft. A published rule goes on running ' +
+      'the version it was published with until it is published again.',
   })
   @ApiParam({ name: 'ruleId', format: 'uuid' })
   update(
@@ -205,9 +279,10 @@ export class AutomationsController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @CurrentUser('id') userId: string,
     @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
-    return this.automations.publish(workspaceId, projectId, role, ruleId);
+    return this.automations.publish(workspaceId, projectId, role, ruleId, userId);
   }
 
   @Post(':ruleId/run')
@@ -265,12 +340,14 @@ export class AutomationsController {
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @CurrentUser('id') userId: string,
     @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
     // A paused rule may have gone stale while it was off (deleted section,
     // removed member, unsupported action after a deployment). Resume through
     // the same validator as first publish instead of activating broken work.
-    return this.automations.publish(workspaceId, projectId, role, ruleId);
+    // Unchanged since it was paused, it goes back to the version it ran.
+    return this.automations.publish(workspaceId, projectId, role, ruleId, userId);
   }
 
   @Post(':ruleId/duplicate')
@@ -304,14 +381,19 @@ export class AutomationsController {
   }
 
   @Get(':ruleId/executions')
-  @ApiOperation({ summary: 'Recent runs, with per-action logs' })
+  @ApiOperation({
+    summary: 'Runs, newest first, with per-action logs',
+    description:
+      'Paged with `page` and `limit` (default 25); the page numbers and the total are in `meta`.',
+  })
   @ApiParam({ name: 'ruleId', format: 'uuid' })
   executions(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('ruleId', ParseUUIDPipe) ruleId: string,
+    @Query() query: ExecutionsQueryDto,
   ) {
-    return this.automations.executions(workspaceId, projectId, ruleId);
+    return this.automations.executions(workspaceId, projectId, ruleId, query);
   }
 
   /* ------------------------------------------------------------------------ */

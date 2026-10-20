@@ -3,6 +3,14 @@ import type { AutomationGraph, AutomationGraphNode } from '@coretask/types';
 import { deriveEdges } from '@coretask/validation';
 import type { AutomationNode } from '@prisma/client';
 
+import type { SnapshotNode } from '../versions/rule-snapshot';
+
+/**
+ * A node row, or a published version's copy of one — which keeps no
+ * coordinates, and is laid out the way an unplaced row is.
+ */
+type GraphRow = SnapshotNode & Partial<Pick<AutomationNode, 'positionX' | 'positionY'>>;
+
 /**
  * Rows to the shape the canvas draws.
  *
@@ -10,7 +18,7 @@ import type { AutomationNode } from '@prisma/client';
  * What this adds is edges, derived from parentage rather than stored, and a
  * position for rules built before the canvas existed.
  */
-export function toGraph(nodes: readonly AutomationNode[]): AutomationGraph {
+export function toGraph(nodes: readonly GraphRow[]): AutomationGraph {
   const ordered = [...nodes].sort((a, b) => a.position - b.position);
   const placed = ordered.map((node) => toGraphNode(node, ordered));
 
@@ -28,7 +36,7 @@ export function toGraph(nodes: readonly AutomationNode[]): AutomationGraph {
   };
 }
 
-function toGraphNode(node: AutomationNode, all: readonly AutomationNode[]): AutomationGraphNode {
+function toGraphNode(node: GraphRow, all: readonly GraphRow[]): AutomationGraphNode {
   return {
     id: node.id,
     type: node.nodeType,
@@ -55,13 +63,10 @@ function toGraphNode(node: AutomationNode, all: readonly AutomationNode[]): Auto
  * from "placed at the origin", and the origin is not somewhere a person drags a
  * node to.
  */
-function placementFor(
-  node: AutomationNode,
-  all: readonly AutomationNode[],
-): { x: number; y: number } {
-  if (node.positionX !== 0 || node.positionY !== 0) {
-    return { x: node.positionX, y: node.positionY };
-  }
+function placementFor(node: GraphRow, all: readonly GraphRow[]): { x: number; y: number } {
+  const x = node.positionX ?? 0;
+  const y = node.positionY ?? 0;
+  if (x !== 0 || y !== 0) return { x, y };
 
   const column = node.nodeType === 'TRIGGER' ? 0 : node.nodeType === 'CONDITION' ? 1 : 2;
 

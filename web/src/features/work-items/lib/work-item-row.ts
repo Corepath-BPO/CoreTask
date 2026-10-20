@@ -51,6 +51,9 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
     projectId: item.projectId,
     sectionId: item.sectionId,
     parentTaskId: item.parentId,
+    // A row of the project's own: a ticket's subtasks are lines under it,
+    // never rows here.
+    parentTicketId: null,
     title: item.title,
     description: item.description,
 
@@ -83,6 +86,9 @@ export function toWorkItemRow(item: ProjectWorkItem): WorkItemRow {
     // holds one. Taking the first is lossless for both kinds today.
     assigneeId: item.assignees[0]?.id ?? null,
     assignee: item.assignees[0] ?? null,
+    // Nor does it carry the team; the task pane reads that off the task too.
+    teamId: null,
+    team: null,
     createdById: item.createdById,
 
     subtaskCount: item.subtaskCount,

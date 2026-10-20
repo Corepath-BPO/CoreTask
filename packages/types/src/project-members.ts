@@ -1,4 +1,8 @@
-import type { ProjectMemberRole, WorkspaceRole } from '@coretask/contracts';
+import type {
+  ProjectMemberRole,
+  ProjectNotificationKind,
+  WorkspaceRole,
+} from '@coretask/contracts';
 
 import type { UserRef } from './work-items.js';
 
@@ -45,4 +49,18 @@ export interface AddProjectMemberPayload {
 
 export interface UpdateProjectMemberRolePayload {
   role: ProjectMemberRole;
+}
+
+/**
+ * What a project tells the caller about. Only members hear from a project;
+ * for anyone else `member` is false and `notifyOn` the defaults they would
+ * start with on joining.
+ */
+export interface ProjectNotificationSettings {
+  member: boolean;
+  notifyOn: ProjectNotificationKind[];
+}
+
+export interface UpdateProjectNotificationSettingsPayload {
+  notifyOn: ProjectNotificationKind[];
 }

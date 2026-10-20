@@ -2,6 +2,7 @@ import {
   ActivityAction,
   ActivityEntity,
   NotificationType,
+  OAuthAppPolicy,
   WorkspaceRole,
 } from '@coretask/contracts';
 import type { Workspace as WorkspaceDto, WorkspaceSummary } from '@coretask/types';
@@ -36,10 +37,22 @@ export class WorkspacesService {
    *
    * Scoped by membership rather than by any client-supplied filter — this is the
    * only list endpoint, so there is no "all workspaces" query to get wrong.
+   * Asked by an OAuth app, it leaves out the workspaces that app may not act in.
    */
-  async listForUser(userId: string): Promise<WorkspaceSummary[]> {
+  async listForUser(userId: string, oauthAppId?: string): Promise<WorkspaceSummary[]> {
     const memberships = await this.prisma.workspaceMember.findMany({
-      where: { userId, workspace: { archivedAt: null } },
+      where: {
+        userId,
+        workspace: {
+          archivedAt: null,
+          ...(oauthAppId && {
+            OR: [
+              { oauthAppPolicy: OAuthAppPolicy.ANY },
+              { oauthApps: { some: { appId: oauthAppId } } },
+            ],
+          }),
+        },
+      },
       orderBy: { joinedAt: 'asc' },
       include: {
         workspace: {

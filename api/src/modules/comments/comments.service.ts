@@ -99,7 +99,8 @@ export class CommentsService {
     /** Set when the words arrived by email, from this address. */
     emailedBy?: string,
   ): Promise<Comment> {
-    const parent = await this.resolveTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
+    const parent = await this.resolveTask(workspaceId, taskId, actor);
+    await this.assertMayComment(parent, actor);
     return this.create(workspaceId, actor.userId, parent, dto, emailedBy);
   }
 
@@ -109,7 +110,8 @@ export class CommentsService {
     idOrKey: string,
     dto: CreateCommentDto,
   ): Promise<Comment> {
-    const parent = await this.resolveTicket(workspaceId, idOrKey, actor, WorkspaceRole.MEMBER);
+    const parent = await this.resolveTicket(workspaceId, idOrKey, actor);
+    await this.assertMayComment(parent, actor);
     return this.create(workspaceId, actor.userId, parent, dto);
   }
 
@@ -292,7 +294,11 @@ export class CommentsService {
   async like(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
     const { userId } = actor;
     const existing = await this.requireComment(workspaceId, commentId, actor);
-    await this.access.assertEffectiveRole(existing.projectId, actor, WorkspaceRole.MEMBER);
+    await this.access.assertConversationRole(
+      { projectId: existing.projectId, taskId: existing.taskId },
+      actor,
+      WorkspaceRole.MEMBER,
+    );
 
     try {
       await this.prisma.commentLike.create({ data: { commentId, userId } });
@@ -308,7 +314,11 @@ export class CommentsService {
   async unlike(workspaceId: string, actor: ActorContext, commentId: string): Promise<Comment> {
     const { userId } = actor;
     const existing = await this.requireComment(workspaceId, commentId, actor);
-    await this.access.assertEffectiveRole(existing.projectId, actor, WorkspaceRole.MEMBER);
+    await this.access.assertConversationRole(
+      { projectId: existing.projectId, taskId: existing.taskId },
+      actor,
+      WorkspaceRole.MEMBER,
+    );
     await this.prisma.commentLike.deleteMany({ where: { commentId, userId } });
     return this.reread(workspaceId, existing, userId);
   }
@@ -658,6 +668,18 @@ export class CommentsService {
           actionUrl: parent.actionUrl,
         }),
       ),
+    );
+  }
+
+  /**
+   * Commenting is taking part, not editing: an editor may, and so may a
+   * project COMMENTER, who may change nothing else.
+   */
+  private async assertMayComment(parent: CommentParent, actor: ActorContext): Promise<void> {
+    await this.access.assertConversationRole(
+      { projectId: parent.projectId, taskId: parent.link.taskId },
+      actor,
+      WorkspaceRole.MEMBER,
     );
   }
 

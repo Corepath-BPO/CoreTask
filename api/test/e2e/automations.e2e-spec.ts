@@ -32,6 +32,7 @@ describe('Automations (e2e)', () => {
     // and the broadcast to open tabs is fire-and-forget by design.
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toProjectAudience: async () => undefined,
       toWorkspace: async () => undefined,
     } as never);
   });
@@ -2296,6 +2297,45 @@ describe('Automations (e2e)', () => {
 
   // -------------------------------------------------------------------------
   describe('execution', () => {
+    it('pages the run history newest first, with the page numbers in meta', async () => {
+      const scope = await setupScope();
+      const ruleId = await publishedRule(scope);
+      const base = Date.UTC(2026, 9, 1);
+      await context.prisma.automationExecution.createMany({
+        data: Array.from({ length: 30 }, (_, index) => ({
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          ruleId,
+          status: 'COMPLETED' as const,
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          correlationId: randomUUID(),
+          startedAt: new Date(base + index * 60_000),
+        })),
+      });
+      const history = (query: string) =>
+        request(server())
+          .get(`${rulesUrl(scope)}/${ruleId}/executions${query}`)
+          .set('Authorization', `Bearer ${scope.member.token}`)
+          .expect(200);
+
+      // No page asked for: the 25 newest, as the history always showed.
+      const first = await history('');
+      expect(first.body.data).toHaveLength(25);
+      expect(first.body.meta).toEqual({ page: 1, limit: 25, total: 30, totalPages: 2 });
+      expect(new Date(first.body.data[0].startedAt).getTime()).toBe(base + 29 * 60_000);
+
+      const second = await history('?page=2');
+      expect(second.body.data).toHaveLength(5);
+      const seen = new Set(first.body.data.map((row: { id: string }) => row.id));
+      expect(second.body.data.some((row: { id: string }) => seen.has(row.id))).toBe(false);
+      expect(new Date(second.body.data[4].startedAt).getTime()).toBe(base);
+
+      await request(server())
+        .get(`${rulesUrl(scope)}/${ruleId}/executions?limit=500`)
+        .set('Authorization', `Bearer ${scope.member.token}`)
+        .expect(422);
+    });
+
     it('runs a matching rule and performs its action', async () => {
       const scope = await setupScope();
       const ruleId = await publishedRule(scope);
@@ -2407,9 +2447,19 @@ describe('Automations (e2e)', () => {
       // Published with a valid member, then the target is swapped for someone
       // outside the workspace — which is what happens when a person leaves.
       const ruleId = await publishedRule(scope);
-      await context.prisma.automationNode.updateMany({
-        where: { ruleId, subtype: 'ASSIGN_USER' },
-        data: { configuration: { userId: stranger.userId } },
+      const live = await context.prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } });
+      const version = await context.prisma.automationRuleVersion.findUniqueOrThrow({
+        where: { id: live.publishedVersionId ?? '' },
+      });
+      await context.prisma.automationRuleVersion.update({
+        where: { id: version.id },
+        data: {
+          nodes: (version.nodes as { subtype: string }[]).map((node) =>
+            node.subtype === 'ASSIGN_USER'
+              ? { ...node, configuration: { userId: stranger.userId } }
+              : node,
+          ),
+        },
       });
 
       await runner.handle(moveEvent(scope));

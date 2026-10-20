@@ -18,6 +18,10 @@ export const ApiRoutes = {
     me: '/auth/me',
     forgotPassword: '/auth/forgot-password',
     resetPassword: '/auth/reset-password',
+    logoutAll: '/auth/logout-all',
+    changePassword: '/auth/change-password',
+    verifyEmail: '/auth/verify-email',
+    resendVerification: '/auth/resend-verification',
   },
   workspaces: {
     list: '/workspaces',
@@ -229,6 +233,9 @@ export const ApiRoutes = {
     /** Ask the project's owner for a status update. */
     requestStatus: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/status-updates/request`,
+    /** The update a rule's AI step drafted, waiting to be reviewed and posted. */
+    statusDraft: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/status-draft`,
     messages: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/messages`,
     message: (workspaceId: string, projectId: string, messageId: string) =>
@@ -256,6 +263,12 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/projects/${projectId}/join`,
     leave: (workspaceId: string, projectId: string) =>
       `/workspaces/${workspaceId}/projects/${projectId}/leave`,
+    /** Invitations by e-mail that join the workspace and land in this project. */
+    invitations: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/invitations`,
+    /** What this project tells the caller about, as one of its members. */
+    notificationSettings: (workspaceId: string, projectId: string) =>
+      `/workspaces/${workspaceId}/projects/${projectId}/notification-settings`,
   },
   /**
    * Workspace-scoped rather than nested under a project: a task may have no
@@ -280,14 +293,23 @@ export const ApiRoutes = {
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies`,
     dependency: (workspaceId: string, taskId: string, dependencyId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/dependencies/${dependencyId}`,
-    /** Time logged against a task. */
     /** "Mark as duplicate": POST names the original, DELETE undoes it. */
     duplicateOf: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/duplicate-of`,
+    /** Time logged against a task. */
     timeEntries: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries`,
     timeEntry: (workspaceId: string, taskId: string, entryId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/time-entries/${entryId}`,
+    /** A task's checklists, each with its items. */
+    checklists: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists`,
+    checklist: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}`,
+    checklistItems: (workspaceId: string, taskId: string, checklistId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items`,
+    checklistItem: (workspaceId: string, taskId: string, checklistId: string, itemId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/checklists/${checklistId}/items/${itemId}`,
     /** Multi-homing: the other projects a task is in. */
     projects: (workspaceId: string, taskId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/projects`,
@@ -430,6 +452,13 @@ export const ApiRoutes = {
     rotateSecret: (appId: string) => `/users/me/oauth-apps/${appId}/rotate-secret`,
     connectedApps: '/users/me/connected-apps',
     connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
+  },
+  /** A workspace's approved OAuth apps, and whether only those may act in it. */
+  appDirectory: {
+    root: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory`,
+    apps: (workspaceId: string) => `/workspaces/${workspaceId}/app-directory/apps`,
+    app: (workspaceId: string, appId: string) =>
+      `/workspaces/${workspaceId}/app-directory/apps/${appId}`,
   },
   /**
    * The CoreTask Slack app. The workspace's own routes are for the

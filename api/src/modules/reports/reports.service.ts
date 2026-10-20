@@ -219,6 +219,7 @@ export class ReportsService {
       ],
       archivedAt: null,
       parentTaskId: null,
+      parentTicketId: null,
       ...(query.completion === ReportCompletion.OPEN ? { completedAt: null } : {}),
       ...(query.completion === ReportCompletion.DONE ? { completedAt: { not: null } } : {}),
       ...(query.overdueOnly ? { completedAt: null, dueDate: { lt: new Date(today) } } : {}),

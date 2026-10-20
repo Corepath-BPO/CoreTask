@@ -1,4 +1,9 @@
-import type { CreateOAuthAppPayload, UpdateOAuthAppPayload } from '@coretask/types';
+import { OAuthAppPolicy } from '@coretask/contracts';
+import type {
+  ApproveWorkspaceAppPayload,
+  CreateOAuthAppPayload,
+  UpdateOAuthAppPayload,
+} from '@coretask/types';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -75,5 +80,52 @@ export function useDisconnectApp() {
       toast.success('App disconnected');
     },
     onError: (error) => reportError(error, 'Could not disconnect the app.'),
+  });
+}
+
+export function useAppDirectory(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.appDirectory(workspaceId ?? ''),
+    queryFn: () => oauthApi.appDirectory(workspaceId as string),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useSetAppPolicy(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: (policy: OAuthAppPolicy) =>
+      oauthApi.setAppPolicy(workspaceId as string, { policy }),
+    onSuccess: (directory) => {
+      queryClient.setQueryData(queryKeys.appDirectory(workspaceId ?? ''), directory);
+      toast.success(
+        directory.policy === OAuthAppPolicy.APPROVED
+          ? 'Only approved apps can act here now'
+          : 'Any app members connect can act here now',
+      );
+    },
+    onError: (error) => reportError(error, 'Could not change which apps are allowed.'),
+  });
+}
+
+export function useApproveDirectoryApp(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: (payload: ApproveWorkspaceAppPayload) =>
+      oauthApi.approveApp(workspaceId as string, payload),
+    onSuccess: async (approved) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.appDirectory(workspaceId ?? '') });
+      toast.success(`“${approved.app.name}” approved`);
+    },
+    onError: (error) => reportError(error, 'Could not approve the app.'),
+  });
+}
+
+export function useRemoveDirectoryApp(workspaceId: string | undefined) {
+  return useMutation({
+    mutationFn: (appId: string) => oauthApi.removeDirectoryApp(workspaceId as string, appId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.appDirectory(workspaceId ?? '') });
+      toast.success('App removed from the directory');
+    },
+    onError: (error) => reportError(error, 'Could not remove the app.'),
   });
 }

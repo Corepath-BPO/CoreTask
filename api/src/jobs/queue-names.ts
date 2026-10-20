@@ -65,7 +65,8 @@ export const MaintenanceJob = {
 export type MaintenanceJob = (typeof MaintenanceJob)[keyof typeof MaintenanceJob];
 
 export const EmailJob = {
-  WELCOME: 'welcome',
+  /** "Confirm your e-mail address" — on sign-up, where it is also the welcome. */
+  EMAIL_VERIFICATION: 'email-verification',
   INVITATION: 'invitation',
   /** A message already written by the API — a task's update to its email thread. */
   MESSAGE: 'message',
@@ -73,10 +74,17 @@ export const EmailJob = {
 } as const;
 export type EmailJob = (typeof EmailJob)[keyof typeof EmailJob];
 
-export interface WelcomeEmailJobData {
+/**
+ * Carries the *raw* confirmation token, for the same reason a reset does.
+ * Removed on completion so it does not linger in Redis.
+ */
+export interface EmailVerificationJobData {
   userId: string;
   email: string;
   name: string;
+  token: string;
+  expiresAt: string;
+  welcome: boolean;
 }
 
 /**
@@ -92,6 +100,8 @@ export interface InvitationEmailJobData {
   role: string;
   /** Null when the invitation names no team. */
   teamName: string | null;
+  /** The project it lands them in, from a Share dialog; null otherwise. */
+  projectName: string | null;
   expiresAt: string;
 }
 
@@ -133,4 +143,7 @@ export interface PasswordResetEmailJobData {
 }
 
 export type EmailJobData =
-  WelcomeEmailJobData | InvitationEmailJobData | MessageEmailJobData | PasswordResetEmailJobData;
+  | EmailVerificationJobData
+  | InvitationEmailJobData
+  | MessageEmailJobData
+  | PasswordResetEmailJobData;

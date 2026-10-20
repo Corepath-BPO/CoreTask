@@ -3,6 +3,7 @@ import {
   WorkspaceRole,
   canManageProject,
   canSeeProject,
+  effectiveConversationRole,
   effectiveWorkspaceRole,
   hasAtLeastRole,
   hasProjectAdminOverride,
@@ -256,6 +257,54 @@ export class ProjectAccessService {
     });
 
     return effectiveWorkspaceRole(actor.role, membership?.role ?? null);
+  }
+
+  /**
+   * The role `actor` takes part in the conversation on an item in `projectId`
+   * with — `effectiveRoleFor`, with a COMMENTER counted as an EDITOR.
+   */
+  async conversationRoleFor(projectId: string | null, actor: ActorContext): Promise<WorkspaceRole> {
+    if (!projectId || hasProjectAdminOverride(actor.role)) return actor.role;
+
+    const membership = await this.prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId: actor.userId } },
+      select: { role: true },
+    });
+
+    return effectiveConversationRole(actor.role, membership?.role ?? null);
+  }
+
+  /**
+   * 403 unless `actor` may comment, like or reply on an item in `projectId`:
+   * `assertEffectiveRole` for the conversation rather than the work. On a
+   * task, the best role across its projects, as for its edits.
+   */
+  async assertConversationRole(
+    item: { projectId: string | null; taskId?: string | null },
+    actor: ActorContext,
+    minimum: WorkspaceRole,
+  ): Promise<WorkspaceRole> {
+    let effective = await this.conversationRoleFor(item.projectId, actor);
+    if (item.taskId && item.projectId && !hasProjectAdminOverride(actor.role)) {
+      const links = await this.prisma.taskProject.findMany({
+        where: { taskId: item.taskId, project: { AND: [this.projectWhere(actor)] } },
+        select: { projectId: true },
+      });
+      for (const link of links) {
+        const role = await this.conversationRoleFor(link.projectId, actor);
+        if (hasAtLeastRole(role, effective)) effective = role;
+      }
+    }
+
+    if (!hasAtLeastRole(effective, minimum)) {
+      throw AppException.forbidden(
+        effective === actor.role ? 'INSUFFICIENT_WORKSPACE_ROLE' : 'INSUFFICIENT_PROJECT_ROLE',
+        undefined,
+        { required: minimum, actual: effective },
+      );
+    }
+
+    return effective;
   }
 
   /**

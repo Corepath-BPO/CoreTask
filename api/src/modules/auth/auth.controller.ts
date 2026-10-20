@@ -1,6 +1,16 @@
 import { REFRESH_TOKEN_COOKIE } from '@coretask/contracts';
-import type { AuthSession, AuthUser } from '@coretask/types';
-import { forgotPasswordSchema, resetPasswordSchema } from '@coretask/validation';
+import type {
+  AuthSession,
+  AuthUser,
+  ResendVerificationResult,
+  VerifyEmailResult,
+} from '@coretask/types';
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  verifyEmailSchema,
+} from '@coretask/validation';
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -13,13 +23,20 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
+import type { AuthenticatedUser } from '../../common/types/api.types';
 import { buildClearCookieOptions, buildRefreshCookieOptions } from '../../common/utils/cookie.util';
 import { parseBody } from '../../common/utils/zod-body.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { AUTH_THROTTLE, SESSION_THROTTLE } from '../../config/throttle.config';
 
 import { AuthService, type AuthResult } from './auth.service';
-import { AuthSessionDto, AuthUserDto, LogoutResultDto } from './dto/auth-response.dto';
+import {
+  AuthSessionDto,
+  AuthUserDto,
+  LogoutResultDto,
+  ResendVerificationResultDto,
+  VerifyEmailResultDto,
+} from './dto/auth-response.dto';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 import type { SessionContext } from './token.service';
 
@@ -140,6 +157,72 @@ export class AuthController {
     await this.auth.logout(readRefreshCookie(request));
     response.clearCookie(REFRESH_TOKEN_COOKIE, buildClearCookieOptions(this.config));
     return { loggedOut: true };
+  }
+
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Sign out everywhere',
+    description:
+      'Revokes every session the account has, this one included, and clears the cookie. Access tokens already issued expire on their own within 15 minutes.',
+  })
+  @ApiEnvelopeResponse(LogoutResultDto)
+  @ApiErrorResponseDoc(401, 'Missing or invalid access token')
+  async logoutAll(
+    @CurrentUser('id') userId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ loggedOut: true }> {
+    await this.auth.logoutEverywhere(userId);
+    response.clearCookie(REFRESH_TOKEN_COOKIE, buildClearCookieOptions(this.config));
+    return { loggedOut: true };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Change the password while signed in',
+    description:
+      'Needs the current password. Signs out every other session; this one stays signed in.',
+  })
+  @ApiErrorResponseDoc(400, 'The current password is wrong')
+  @ApiErrorResponseDoc(422, 'The new password does not meet the policy')
+  @ApiErrorResponseDoc(429, 'Too many attempts')
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+  ): Promise<void> {
+    const input = parseBody(changePasswordSchema, body, 'The new password is invalid.');
+    await this.auth.changePassword(user.id, user.sessionId, input);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'E-mail a new link to confirm the address',
+    description:
+      'Sends nothing when the address is already confirmed or a link went out under a minute ago; the answer says which.',
+  })
+  @ApiEnvelopeResponse(ResendVerificationResultDto)
+  resendVerification(@CurrentUser('id') userId: string): Promise<ResendVerificationResult> {
+    return this.auth.resendEmailVerification(userId);
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm an e-mail address from a link',
+    description: 'The link works once, for 72 hours, and only for the address it was sent to.',
+  })
+  @ApiEnvelopeResponse(VerifyEmailResultDto)
+  @ApiErrorResponseDoc(400, 'The link is invalid, used or expired')
+  @ApiErrorResponseDoc(429, 'Too many attempts')
+  async verifyEmail(@Body() body: unknown): Promise<VerifyEmailResult> {
+    const input = parseBody(verifyEmailSchema, body, 'The confirmation link is incomplete.');
+    return this.auth.verifyEmail(input.token);
   }
 
   @Get('me')
