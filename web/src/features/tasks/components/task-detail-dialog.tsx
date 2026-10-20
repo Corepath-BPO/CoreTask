@@ -89,7 +89,10 @@ import {
   useSubtasks,
 } from '@/features/projects/hooks/use-project-views';
 import { useProject } from '@/features/projects/hooks/use-projects';
-import { roleForProjectItem } from '@/features/projects/lib/project-access';
+import {
+  conversationRoleForProjectItem,
+  roleForProjectItem,
+} from '@/features/projects/lib/project-access';
 import {
   useMoveProjectWorkItem,
   useProjectWorkItem,
@@ -97,6 +100,7 @@ import {
 } from '@/features/work-items/hooks/use-project-work-items';
 import { toWorkItemUpdate } from '@/features/work-items/lib/cell-payload';
 import { isTicketRow, toWorkItemRow } from '@/features/work-items/lib/work-item-row';
+import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { queryClient, queryKeys } from '@/lib/api/query-client';
 import { usePanelFocus } from '@/lib/hooks/use-panel-focus';
@@ -133,10 +137,13 @@ import { ApprovalDecision } from './approval-decision';
 import { TaskDatePopover } from './task-date-popover';
 import { AddToProjectPicker, OtherProjectRow, RemoveFromHomeButton } from './task-projects-field';
 import { TaskRepeatControl } from './task-repeat';
+import { TaskChecklists } from './task-checklists';
 import { TaskTimeField } from './task-time-field';
 import { DependenciesField, TaskLikeButton } from './task-relations';
 
 const UNASSIGNED = '__unassigned__';
+/* "No team" as a value the select can hold — Radix reads '' as nothing chosen. */
+const NO_TEAM = '__no_team__';
 const NO_SECTION = '__none__';
 
 interface TaskDetailDialogProps {
@@ -272,6 +279,7 @@ export function TaskDetailPanel({
           otherProjects: [],
           createdBy: null,
           duplicateOf: null,
+          parentTicket: null,
         }
       : undefined);
   const isLoading = taskQuery.isLoading || (wantFallback && workItemQuery.isLoading);
@@ -555,6 +563,7 @@ function TaskDetailBody({
   linkedCommentId,
 }: TaskDetailBodyProps) {
   const { data: members } = useWorkspaceMembers(workspaceId);
+  const { data: teams } = useTeams(workspaceId);
   const me = useCurrentUser();
   // Already cached by the board in the common case, so this is usually free.
   const { data: project } = useProject(workspaceId, task.projectId ?? '');
@@ -564,6 +573,8 @@ function TaskDetailBody({
    * My Tasks or the inbox, this is what keeps a viewer's panel read-only.
    */
   const role = roleForProjectItem(task.projectId, project, workspaceRole);
+  // A project COMMENTER writes in the thread though the rest stays read-only.
+  const commentRole = conversationRoleForProjectItem(task.projectId, project, workspaceRole);
   const updateTask = useUpdateTask(workspaceId);
   const archiveTask = useArchiveTask(workspaceId);
   const createTask = useCreateTask(workspaceId);
@@ -638,7 +649,24 @@ function TaskDetailBody({
   const addSubtask = () => {
     const trimmed = subtaskTitle.trim();
     if (!trimmed) return;
-    createTask.mutate({ title: trimmed, parentTaskId: task.id });
+    createTask.mutate(
+      ticket
+        ? { title: trimmed, parentTicketId: task.id }
+        : { title: trimmed, parentTaskId: task.id },
+      {
+        // A ticket's lines come from the project's subtask list and its row's
+        // counts, neither of which the task invalidation reaches.
+        onSuccess: () => {
+          if (!ticket || !projectRef) return;
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectViews.subtasks(workspaceId ?? '', projectRef.id, task.id),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.workItems.all(workspaceId ?? '', projectRef.id),
+          });
+        },
+      },
+    );
     setSubtaskTitle('');
   };
 
@@ -676,8 +704,8 @@ function TaskDetailBody({
    * Asana's chords, for the task on screen. Registered above the list's own
    * handlers so Tab+A assigns this task rather than the rows behind it, and
    * only while the panel is actually open — it stays mounted while hidden.
-   * `null` claims a chord this task cannot answer (a ticket has no subtasks),
-   * so it does not fall through to the list either.
+   * `null` claims a chord this item cannot answer (a ticket is not completed
+   * by a tick), so it does not fall through to the list either.
    */
   useShortcutActions(
     {
@@ -687,7 +715,7 @@ function TaskDetailBody({
       dueToday: canEdit ? () => dueOn(0) : null,
       dueTomorrow: canEdit ? () => dueOn(1) : null,
       comment: () => composerRef.current?.focus(),
-      subtask: canEdit && !ticket ? () => setAddingSubtask(true) : null,
+      subtask: canEdit ? () => setAddingSubtask(true) : null,
       toggleComplete:
         canEdit && !ticket
           ? () => save({ status: taskDone ? TaskStatus.TODO : TaskStatus.DONE })
@@ -737,6 +765,25 @@ function TaskDetailBody({
           {task.section && <Badge variant="muted">{task.section.name}</Badge>}
           {task.archivedAt && <Badge variant="destructive">Archived</Badge>}
         </div>
+
+        {task.parentTicket && (
+          <p className="text-xs text-muted-foreground">
+            Subtask of{' '}
+            {onOpenTask ? (
+              <button
+                type="button"
+                onClick={() => task.parentTicket && onOpenTask(task.parentTicket.id)}
+                className="cursor-pointer font-medium text-foreground underline-offset-2 hover:underline"
+              >
+                {task.parentTicket.key} · {task.parentTicket.title}
+              </button>
+            ) : (
+              <span className="font-medium text-foreground">
+                {task.parentTicket.key} · {task.parentTicket.title}
+              </span>
+            )}
+          </p>
+        )}
 
         {task.duplicateOf && (
           <DuplicateBanner
@@ -799,6 +846,48 @@ function TaskDetailBody({
             </SelectContent>
           </Select>
         </FieldRow>
+
+        {/* The team responsible, which an automation can also set. Offered once
+            the workspace has a team; a ticket's routes do not take one. */}
+        {!ticket && ((teams?.length ?? 0) > 0 || task.team) && (
+          <FieldRow label="Team">
+            <Select
+              value={task.teamId ?? NO_TEAM}
+              onValueChange={(value) => save({ teamId: value === NO_TEAM ? null : value })}
+              disabled={!canEdit}
+            >
+              <SelectTrigger
+                aria-label="Team"
+                className="h-8 w-fit min-w-44 border-0 bg-transparent px-2 shadow-none hover:bg-muted"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_TEAM}>
+                  <span className="text-muted-foreground">No team</span>
+                </SelectItem>
+                {[
+                  ...(teams ?? []),
+                  // A team the list has not caught up with still shows by name.
+                  ...(task.team && !(teams ?? []).some((team) => team.id === task.teamId)
+                    ? [task.team]
+                    : []),
+                ].map((team) => (
+                  <SelectItem key={team.id} value={team.id}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: team.color }}
+                      />
+                      {team.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        )}
 
         <FieldRow label="Due date">
           <TaskDatePopover
@@ -1104,7 +1193,7 @@ function TaskDetailBody({
               {task.completedSubtaskCount}/{task.subtaskCount}
             </span>
           )}
-          {canEdit && !ticket && (
+          {canEdit && (
             <button
               type="button"
               onClick={() => setAddingSubtask(true)}
@@ -1167,16 +1256,7 @@ function TaskDetailBody({
           })}
         </ul>
 
-        {/* The API only parents subtasks under tasks — say so rather than
-            offering an add that fails. */}
-        {ticket && (
-          <p className="pt-1 text-xs text-muted-foreground">
-            Subtasks under tickets need API support. Not built yet.
-          </p>
-        )}
-
         {canEdit &&
-          !ticket &&
           (addingSubtask ? (
             <div className="flex items-center gap-2 pt-1">
               <Input
@@ -1313,6 +1393,9 @@ function TaskDetailBody({
           )}
       </section>
 
+      {/* Checklists live on tasks; a ticket's routes have none. */}
+      {!ticket && <TaskChecklists workspaceId={workspaceId} taskId={task.id} canEdit={canEdit} />}
+
       <Separator />
 
       <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -1365,6 +1448,7 @@ function TaskDetailBody({
         workspaceId={workspaceId}
         parent={itemParent}
         role={role}
+        commentRole={commentRole}
         composerRef={composerRef}
         focusCommentId={linkedCommentId ?? null}
         // Where a copied link lands: the project's List when the task has a

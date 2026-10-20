@@ -10,6 +10,7 @@ import {
   canManageProject,
   canSeeProject,
   defaultJoinRole,
+  effectiveConversationRole,
   effectiveWorkspaceRole,
   hasProjectAdminOverride,
   lowerRole,
@@ -70,6 +71,33 @@ describe('effectiveWorkspaceRole', () => {
     expect(effectiveWorkspaceRole(WorkspaceRole.GUEST, ProjectMemberRole.ADMIN)).toBe(
       WorkspaceRole.GUEST,
     );
+  });
+});
+
+describe('effectiveConversationRole', () => {
+  it('reads a COMMENTER as a GUEST for the work and as an EDITOR for the conversation', () => {
+    expect(effectiveWorkspaceRole(WorkspaceRole.MANAGER, ProjectMemberRole.COMMENTER)).toBe(
+      WorkspaceRole.GUEST,
+    );
+    expect(effectiveConversationRole(WorkspaceRole.MANAGER, ProjectMemberRole.COMMENTER)).toBe(
+      WorkspaceRole.MEMBER,
+    );
+  });
+
+  it('never lifts a workspace GUEST, and changes nothing for the other roles', () => {
+    expect(effectiveConversationRole(WorkspaceRole.GUEST, ProjectMemberRole.COMMENTER)).toBe(
+      WorkspaceRole.GUEST,
+    );
+    for (const role of [
+      ProjectMemberRole.ADMIN,
+      ProjectMemberRole.EDITOR,
+      ProjectMemberRole.VIEWER,
+      null,
+    ]) {
+      expect(effectiveConversationRole(WorkspaceRole.MEMBER, role)).toBe(
+        effectiveWorkspaceRole(WorkspaceRole.MEMBER, role),
+      );
+    }
   });
 });
 

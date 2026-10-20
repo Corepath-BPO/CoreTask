@@ -2,10 +2,15 @@ import {
   MAX_OAUTH_REDIRECT_URIS,
   OAUTH_APP_DESCRIPTION_MAX_LENGTH,
   OAUTH_APP_NAME_MAX_LENGTH,
+  OAUTH_APP_POLICIES,
+  OAUTH_CLIENT_TYPES,
   OAUTH_CODE_CHALLENGE_METHOD,
   OAUTH_REDIRECT_URI_MAX_LENGTH,
+  type OAuthAppPolicy,
+  OAuthClientType,
   OAUTH_SCOPES,
   OAuthScope,
+  normaliseOAuthScopes,
   redirectUriProblem,
 } from '@coretask/contracts';
 import { z } from 'zod';
@@ -36,6 +41,11 @@ const websiteSchema = z
   .nullable()
   .optional();
 
+/**
+ * One redirect URI's shape. Whether it suits the app — an app scheme only for
+ * a public client — is checked against the app's type: by the create schema
+ * below, and by the service on an update, where the type is stored.
+ */
 export const redirectUriSchema = z
   .string()
   .trim()
@@ -44,7 +54,7 @@ export const redirectUriSchema = z
     `Must be at most ${OAUTH_REDIRECT_URI_MAX_LENGTH} characters.`,
   )
   .superRefine((value, ctx) => {
-    const problem = redirectUriProblem(value);
+    const problem = redirectUriProblem(value, { publicClient: true });
     if (problem) ctx.addIssue({ code: 'custom', message: problem });
   });
 
@@ -54,12 +64,25 @@ const redirectUrisSchema = z
   .max(MAX_OAUTH_REDIRECT_URIS, `At most ${MAX_OAUTH_REDIRECT_URIS} redirect URIs.`)
   .transform((uris) => [...new Set(uris)]);
 
-export const createOAuthAppSchema = z.object({
-  name: appNameSchema,
-  description: descriptionSchema,
-  websiteUrl: websiteSchema,
-  redirectUris: redirectUrisSchema,
-});
+export const createOAuthAppSchema = z
+  .object({
+    name: appNameSchema,
+    description: descriptionSchema,
+    websiteUrl: websiteSchema,
+    redirectUris: redirectUrisSchema,
+    clientType: z
+      .enum(OAUTH_CLIENT_TYPES as unknown as [OAuthClientType, ...OAuthClientType[]])
+      .default(OAuthClientType.CONFIDENTIAL),
+  })
+  .superRefine((value, ctx) => {
+    value.redirectUris.forEach((uri, index) => {
+      const problem = redirectUriProblem(uri, {
+        publicClient: value.clientType === OAuthClientType.PUBLIC,
+      });
+      if (problem)
+        ctx.addIssue({ code: 'custom', message: problem, path: ['redirectUris', index] });
+    });
+  });
 export type CreateOAuthAppInput = z.input<typeof createOAuthAppSchema>;
 
 export const updateOAuthAppSchema = z
@@ -93,7 +116,7 @@ export const oauthAuthorizationSchema = z.object({
       z
         .array(z.enum(OAUTH_SCOPES as unknown as [string, ...string[]], 'Unknown scope.'))
         .min(1)
-        .transform((scopes) => [...new Set(scopes)]),
+        .transform((scopes) => normaliseOAuthScopes(scopes as OAuthScope[])),
     ),
   state: z.string().max(1024).nullable().optional(),
   codeChallenge: z
@@ -122,3 +145,14 @@ export const createWebhookSubscriptionSchema = z.object({
   name: webhookNameSchema.optional(),
 });
 export type CreateWebhookSubscriptionInput = z.input<typeof createWebhookSubscriptionSchema>;
+
+/** An admin adds an app to the workspace's directory by its client id. */
+export const approveWorkspaceAppSchema = z.object({
+  clientId: z.string().trim().min(1, 'Enter the app’s client id.').max(200),
+});
+export type ApproveWorkspaceAppInput = z.input<typeof approveWorkspaceAppSchema>;
+
+export const updateAppPolicySchema = z.object({
+  policy: z.enum(OAUTH_APP_POLICIES as unknown as [OAuthAppPolicy, ...OAuthAppPolicy[]]),
+});
+export type UpdateAppPolicyInput = z.input<typeof updateAppPolicySchema>;

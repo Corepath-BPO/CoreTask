@@ -1,15 +1,19 @@
 import { ApiRoutes } from '@coretask/contracts';
 import type {
+  ApproveWorkspaceAppPayload,
   ConnectedApp,
   CreateOAuthAppPayload,
   CreatedOAuthApp,
+  DirectoryApp,
   OAuthApp,
   OAuthAuthorizationRequest,
   OAuthConsent,
   OAuthDecision,
   OAuthRedirect,
   OAuthSecretRotation,
+  UpdateAppPolicyPayload,
   UpdateOAuthAppPayload,
+  WorkspaceAppDirectory,
 } from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
@@ -40,4 +44,19 @@ export const oauthApi = {
 
   authorize: (decision: OAuthDecision): Promise<OAuthRedirect> =>
     apiClient.post<OAuthRedirect>(ApiRoutes.oauth.authorize, decision),
+
+  appDirectory: (workspaceId: string): Promise<WorkspaceAppDirectory> =>
+    apiClient.get<WorkspaceAppDirectory>(ApiRoutes.appDirectory.root(workspaceId)),
+
+  setAppPolicy: (
+    workspaceId: string,
+    payload: UpdateAppPolicyPayload,
+  ): Promise<WorkspaceAppDirectory> =>
+    apiClient.patch<WorkspaceAppDirectory>(ApiRoutes.appDirectory.root(workspaceId), payload),
+
+  approveApp: (workspaceId: string, payload: ApproveWorkspaceAppPayload): Promise<DirectoryApp> =>
+    apiClient.post<DirectoryApp>(ApiRoutes.appDirectory.apps(workspaceId), payload),
+
+  removeDirectoryApp: (workspaceId: string, appId: string): Promise<void> =>
+    apiClient.delete<void>(ApiRoutes.appDirectory.app(workspaceId, appId)),
 };

@@ -43,3 +43,16 @@ export class LogoutResultDto {
   @ApiProperty({ example: true })
   loggedOut!: boolean;
 }
+
+export class ResendVerificationResultDto {
+  @ApiProperty({ example: true, description: 'False when nothing was sent.' })
+  sent!: boolean;
+
+  @ApiProperty({ example: false, description: 'True when the address was already confirmed.' })
+  emailVerified!: boolean;
+}
+
+export class VerifyEmailResultDto {
+  @ApiProperty({ example: 'demo@coretask.dev' })
+  email!: string;
+}

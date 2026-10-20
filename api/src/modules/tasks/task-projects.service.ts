@@ -13,9 +13,11 @@ import { ActivityAction, ActivityEntity } from '@prisma/client';
 import { AppException } from '../../common/exceptions/app.exception';
 import type { ActorContext } from '../../common/types/api.types';
 import { PrismaService } from '../../database/prisma.service';
+import { ProjectActivityNotifier } from '../../integrations/notifications/project-activity.notifier';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
+import { taskRef } from '../followers/item-ref';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { inProject, taskToWorkItem, workItemTaskInclude } from '../work-items/lib/work-item.mapper';
 
@@ -39,6 +41,7 @@ export class TaskProjectsService {
     private readonly activity: ActivityLogsService,
     private readonly automation: AutomationEventPublisher,
     private readonly realtime: RealtimeGateway,
+    private readonly projectNotifier: ProjectActivityNotifier,
   ) {}
 
   async add(
@@ -123,6 +126,11 @@ export class TaskProjectsService {
       actorId: actor.userId,
       after: { title: task.title, sectionId },
     });
+    await this.projectNotifier.itemAdded(
+      taskRef(workspaceId, { id: taskId, title: task.title, projectId: payload.projectId }),
+      payload.projectId,
+      actor.userId,
+    );
 
     await this.emit(ServerEvent.WORK_ITEM_CREATED, taskId, [payload.projectId], actor.userId);
 

@@ -1,33 +1,23 @@
 # Versioning and publishing
 
-A rule points at two versions:
+A rule has a **draft** and, once published, a **published version**, and they
+are different things. The builder edits the draft; the runner reads the
+published version and nothing else. That single decision is what lets somebody
+edit a live rule — and the builder save it as they type — without the edits
+taking effect.
 
-```prisma
-model AutomationRule {
-  draftVersionId     String? @unique
-  publishedVersionId String? @unique
-}
+```
+AutomationRule
+  ├── automation_nodes          the draft: what the builder edits and saves
+  ├── triggerType/Config        the draft's trigger
+  └── publishedVersionId ──► AutomationRuleVersion
+                                 version          1, 2, 3… within the rule
+                                 nodes            the node tree, as published
+                                 triggerType/Config
+                                 name, createdBy, createdAt
 ```
 
-They are different rows. That single decision is what lets somebody edit a live
-rule without the edits taking effect.
-
-## Status: the tables exist, publishing does not use them
-
-`automation_rule_versions` was created by
-`20260807160000_automation_structured_rules`, along with the `draftVersionId`
-and `publishedVersionId` columns on `automation_rules`.
-
-**Nothing reads or writes them.** `AutomationsService.publish` validates the
-node graph and sets `status = ACTIVE` and `publishedAt = now()`. It creates no
-version row. `AutomationsService.update` replaces the rule's nodes in place and
-increments `AutomationRule.version`, an integer counter — so a live rule's
-definition changes the moment somebody saves, which is exactly the behaviour
-this model exists to end.
-
-Everything below describes the model. The final section says what runs today.
-
-## Why two rows and not a draft flag
+## Why two copies and not a draft flag
 
 The cheap version of this is a `hasUnpublishedChanges` boolean and one set of
 steps. It cannot work, because there is only one copy of the rule and the runner
@@ -38,70 +28,141 @@ deletes the comment action, and goes to lunch mid-edit. With one copy the rule
 now assigns and does not comment — on every task that fires it, for the whole
 lunch break, with no publish and no intent. Autosave makes this worse rather
 than better: the more responsive the editor, the more intermediate states get
-executed.
+executed. Before versions, the builder autosaved only rules that were not
+running, and an active rule's Save said it applied at once.
 
-Two rows make the question trivial. The runner reads `publishedVersion`. The
-editor writes `draftVersion`. A half-finished edit is a row nothing executes,
-and it can be saved as often as the editor likes.
+With two copies the question is trivial. The editor writes the draft, as often
+as it likes; the runner reads the published version. A half-finished edit is a
+set of rows nothing executes.
 
-The unique constraints on both columns say a version is the draft of at most one
-rule and the published state of at most one rule. Without them a version row
-could be shared, and publishing one rule would change another.
+## What a version holds
+
+`AutomationRuleVersion.nodes` is the rule's node tree as it stood when it was
+published — each node's `id`, `nodeType`, `subtype`, `configuration`,
+`parentNodeId`, `branchKey` and `position`, the row shape of `automation_nodes`
+— beside the trigger it was published with and the rule's name at the time.
+
+JSON rather than a second set of node rows, for the reason a template is JSON
+(see [the engine](./automation-engine.md#the-rule-library)): a published version
+is never edited, validated in place or partly read. The runner reads it whole
+and a revert copies it whole, so rows would be structure with no query to
+serve — and every reader of `automation_nodes` would have to remember to leave
+the published ones out.
+
+`version` counts up within a rule, enforced by `UNIQUE (ruleId, version)`.
+`AutomationRule.version` is something else: a count of draft saves, which the
+API has always returned. The builder shows the published version's number.
 
 ## What publish does
 
-1. Validate the draft — structure, then references against the project.
-2. Point `publishedVersionId` at the draft version.
-3. Create the next draft: a copy of what was just published, carrying
-   `version + 1`.
-4. Stamp `publishedAt`, set `status = ACTIVE`.
+`AutomationsService.publish`:
+
+1. Validates the draft — the same checks `/validate` runs, plus the rule's own
+   trigger columns.
+2. Compares the draft with the version running: same trigger, same
+   configuration, and the same steps in the same places. Ids do not count —
+   a restored version or a template's copy has fresh ones — so steps are named
+   by their path from the trigger instead (`sameGraph`).
+3. If they differ, creates the next version from the draft. If not, keeps the
+   running one: a second press of Publish, or resuming a paused rule, does not
+   add a copy to the history.
+4. Points `publishedVersionId` at it, sets `status = ACTIVE`, stamps
+   `publishedAt`.
 
 Publishing does not mutate what is running. It points the rule at a different
-row. The distinction matters at the moment of the swap: a running execution
-holds the version it started with, so a publish mid-execution cannot change the
-actions of a rule that is halfway through them.
+row. Two publishes racing for the same number fail on the unique index, and the
+loser gets `409`.
 
-Step 3 is what keeps "edit a published rule" cheap. Without a fresh draft, the
-first keystroke after publishing would have to clone the published version
-first, and a failure there leaves an editor with nowhere to write.
+`enable` is publish. A rule may have gone stale while it was paused — a deleted
+section, a member who left — and it is validated again on the way back on.
 
-`version` is monotonic within a rule, enforced by `UNIQUE (ruleId, version)`.
-The draft carries the next number, so the number in the interface is the one the
-edit will publish as.
+## What the runner reads
 
-## Why draft edits never execute
+`AutomationRunnerService.runnableRules` finds candidate rules by the
+**published version's** trigger:
 
-The runner's query selects on the rule, and reads the rule's
-`publishedVersionId`. A draft is reachable only through `draftVersionId`, which
-nothing on the execution path touches.
+```ts
+where: { status: ACTIVE, publishedVersion: { is: { triggerType: event.trigger } } }
+```
 
-This is a structural guarantee rather than a check that could be forgotten. There
-is no code path in which a draft is a candidate for execution, so there is no
-code path that has to remember to exclude it.
+and runs that version's `nodes` with that version's `triggerConfig`. The clock
+finds scheduled and date-triggered rules the same way, and "Run rule" checks the
+published trigger. The rule's own `triggerType`/`triggerConfig` columns describe
+the draft — the builder derives them from the trigger node on every save — so a
+trigger changed in the builder takes effect when it is published, not when it is
+typed.
 
-The corollary is worth stating: **a rule with a draft and no published version
-has never run and cannot run.** A new rule is created as a `DRAFT`, whatever
-status the request asks for, and `publish` is the only path to `ACTIVE`. A
-half-built rule saved straight to `ACTIVE` would start acting on real tasks
-before anybody had finished describing what it should do.
+An `ACTIVE` rule with no published version runs nothing; the runner logs a
+warning. Publishing cannot leave a rule in that state, so a rule in it was
+switched on some other way.
 
-## Version history
+Every run records the version it executed (`AutomationExecution.ruleVersionId`),
+and the run history shows it. Without that, the only available explanation of
+an old run is the rule's current definition, which may be unrecognisable.
 
-Old versions are not deleted. `AutomationRuleVersion` rows accumulate per rule,
-and the FKs from `automation_rules` are `ON DELETE SET NULL`:
+### A run that waits
 
-> `SET NULL`, not `CASCADE`: losing a version must not delete the rule that
-> points at it. A rule with no draft is recoverable; a rule that vanished is
-> not.
+A run that reaches a Wait step stores the version it is running on the
+`AutomationDelayedRun`, and the clock republishes the event naming it
+(`resumeVersionId`). The resumed run finishes on that version, even if the rule
+has been republished since: what a run does next does not change halfway
+through it. Such a run is matched by its rule alone, since a later version may
+listen for a different trigger.
 
-Keeping history is what makes an execution explicable. An
-`AutomationExecution` from three months ago records what happened; the version
-that was published then records what the rule said at the time. Without it, the
-only available explanation for an old run is the rule's current definition,
-which may be unrecognisable.
+## History and revert
 
-The execution row does not yet carry a version id, so that link is not currently
-possible — see below.
+`GET /:ruleId/versions` lists the published versions, newest first, and
+`GET /:ruleId/versions/:versionId` returns one with its steps as a graph.
+
+`POST /:ruleId/versions/:versionId/revert` copies a version's steps and trigger
+**into the draft**. Nothing running changes until somebody publishes, which
+validates the old steps against the project as it is now — the section an old
+version moved tasks into may be gone. `publish: true` does both in one call, for
+a rollback that cannot wait for a review. History is not rewritten: publishing a
+restored version adds a new version with the old steps, so the record still says
+something else ran in between.
+
+Restoring the version that is running is how unpublished changes are discarded.
+
+## The builder
+
+- Every saved rule autosaves, live ones included: a save writes the draft.
+- The header shows the running version (`Active · v3`) and, when the draft
+  differs from it, **Unpublished changes**; Publish reads **Publish changes**
+  and is off while there is nothing to publish. A paused rule's reads **Publish
+  and resume**.
+- **Version history** lists the versions with **Restore** on each older one,
+  and **Discard changes** when the draft differs. Restoring over unpublished
+  changes asks first.
+
+A node keeps its id across saves — the server keeps an id that is the rule's
+own and stores the builder's `new-<uuid>` as the uuid — and the builder rebases
+its pending edits when a save lands (`rebaseEdits`), dropping what the save
+carried and keeping what was typed while it was in flight. Before this, every
+save gave every node a new id, so an autosave closed the panel somebody was
+typing into and lost the keystrokes after it.
+
+## The backfill
+
+`20261016210000_automation_rule_version_graphs` gave every rule that had been
+published a version 1 holding exactly what it ran at the time — its node rows
+and trigger columns — and pointed the rule at it. Until then the runner read
+those directly, so no rule's behaviour changed; the running definition merely
+became a row later edits cannot reach.
+
+## The structured definition
+
+The `/:ruleId/definition` routes (see [the rule tree](./automation-rule-tree.md))
+keep their own draft as an `AutomationRuleVersion` with branches, under
+`draftVersionId`. Their publish **compiles** that draft into the node shape
+(`compileDefinition`) and stores it on the same version row before pointing
+`publishedVersionId` at it, so a rule published either way runs what was
+published. The next structured draft takes the next free version number, since
+the builder publishes versions of its own in between.
+
+The two editors do not share a draft. A rule published through the structured
+routes shows unpublished changes in the builder until one of them publishes
+again — which is the truth: the builder's draft is not what runs.
 
 ## Rule naming
 
@@ -111,40 +172,18 @@ somebody typed it and it is never overwritten.
 
 The migration defaults every existing rule to `MANUAL`, because each of their
 names was typed by somebody and re-deriving one from its trigger would rename
-their rule during a deployment. A default of `AUTO` would have been a silent
-mass edit dressed up as a schema change.
-
-## What runs today
-
-| Concern                      | Today                                               |
-| ---------------------------- | --------------------------------------------------- |
-| Where a rule's steps live    | `automation_nodes`, on the rule itself              |
-| Saving                       | `PATCH :ruleId` with `nodes` — replaces the canvas  |
-| Effect of saving a live rule | takes effect immediately                            |
-| Publish                      | validates, sets `status = ACTIVE` and `publishedAt` |
-| `AutomationRule.version`     | an integer bumped on every node-replacing save      |
-| `AutomationRuleVersion`      | table exists, zero rows written by the application  |
-
-The two things called `version` are not the same thing and will need
-disambiguating when versions are wired up. `AutomationRule.version` counts saves
-of the node graph; `AutomationRuleVersion.version` numbers versions of a rule.
-Reusing the name on the rule row for the pointer-holder is how somebody ends up
-comparing a save counter with a version number.
+their rule during a deployment.
 
 ## Not yet implemented
 
-- Writing version rows. Nothing creates an `AutomationRuleVersion`.
-- Publish pointing at a version rather than flipping a status.
-- The runner reading `publishedVersion`.
-- Debounced draft saving. The builder saves through `PATCH :ruleId`, which
-  replaces the live definition.
-- Any endpoint for version history, or for reverting to a previous version.
-- A version id on `AutomationExecution`, without which an old run cannot be
-  matched to the definition that produced it.
-- The autosave indicator in the builder header that milestone 4 calls for.
+- Comparing two versions step by step. The history lists versions and restores
+  them; it does not show what changed between two.
+- Settings are not versioned. A rule's name, description and whether other
+  rules may set it off (`allowChaining`) apply as soon as they are saved.
 
 ## Related
 
 - [The structured rule model](./automation-rule-tree.md)
 - [The REST surface](../api/automation-rules.md)
+- [Loop protection](./automation-loop-protection.md)
 - [The phased migration](../database/automation-rule-migration.md)

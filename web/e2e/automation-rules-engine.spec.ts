@@ -1,0 +1,436 @@
+import { request as apiRequest, type APIRequestContext, type Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
+
+/**
+ * The rules-engine work in the builder, in a real browser: branch rows dragged
+ * into another order, condition groups, publishing a live rule's draft as a
+ * version and restoring an older one, and the team and checklist steps — with
+ * the task panel fields they write.
+ *
+ * Each rule is built through the API so a test starts from a known shape, in a
+ * project of this run's own.
+ */
+test.describe.configure({ mode: 'serial' });
+
+const RUN = Date.now().toString(36);
+const API_ORIGIN = process.env['E2E_API_ORIGIN'] ?? 'http://localhost:3010';
+
+interface Api {
+  request: APIRequestContext;
+  headers: { authorization: string };
+  userId: string;
+  workspaceId: string;
+  projectId: string;
+}
+
+async function connect(): Promise<Api> {
+  const request = await apiRequest.newContext({ baseURL: API_ORIGIN });
+  const login = await request.post('/api/v1/auth/login', {
+    data: {
+      email: process.env['SEED_USER_EMAIL'] ?? 'demo@coretask.dev',
+      password: process.env['SEED_USER_PASSWORD'] ?? 'CoreTask!2024',
+    },
+  });
+  expect(login.ok(), `could not sign in: ${login.status()}`).toBe(true);
+
+  const session = (await login.json()).data;
+  const headers = { authorization: `Bearer ${session.accessToken}` };
+  const workspaces = await (await request.get('/api/v1/workspaces', { headers })).json();
+  const workspaceId = workspaces.data[0].id as string;
+
+  const project = await request.post(`/api/v1/workspaces/${workspaceId}/projects`, {
+    headers,
+    data: { name: `Rules engine probe ${RUN}`, key: `RE${RUN.slice(-6).toUpperCase()}` },
+  });
+  expect(project.ok(), `could not create the project: ${project.status()}`).toBe(true);
+
+  return {
+    request,
+    headers,
+    userId: session.user.id as string,
+    workspaceId,
+    projectId: (await project.json()).data.id as string,
+  };
+}
+
+const row = (id: string, order: number, configuration: Record<string, unknown>) => ({
+  id,
+  nodeType: 'CONDITION',
+  subtype: 'FIELD_COMPARISON',
+  configuration,
+  parentId: 't',
+  order,
+});
+const comment = (id: string, parentId: string, order: number, body: string) => ({
+  id,
+  nodeType: 'ACTION',
+  subtype: 'ADD_COMMENT',
+  configuration: { body },
+  parentId,
+  order,
+});
+const high = { field: 'priority', operator: 'IS', value: 'HIGH' };
+
+test.describe('the rules engine in the builder', () => {
+  let api: Api;
+
+  test.beforeAll(async () => {
+    api = await connect();
+  });
+
+  const createRule = async (name: string, nodes: unknown[], publish = false) => {
+    const base = `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations`;
+    const created = await api.request.post(base, {
+      headers: api.headers,
+      data: {
+        name,
+        triggerType: 'TASK_CREATED',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_CREATED', parentId: null, order: 0 },
+          ...nodes,
+        ],
+      },
+    });
+    expect(created.ok(), `could not create the rule: ${created.status()}`).toBe(true);
+    const id = (await created.json()).data.id as string;
+
+    if (publish) {
+      const published = await api.request.post(`${base}/${id}/publish`, { headers: api.headers });
+      expect(published.ok(), `could not publish: ${published.status()}`).toBe(true);
+    }
+    return id;
+  };
+
+  const open = async (page: Page, ruleId: string) => {
+    await page.goto(`/projects/${api.projectId}/automations/${ruleId}`);
+    await expect(page.locator('.react-flow__node').first()).toBeVisible();
+  };
+
+  /** The branch rows top to bottom, each with the comment beside it. */
+  const rowsInOrder = async (page: Page) =>
+    page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.react-flow__node')].map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          label: element.querySelector('button')?.getAttribute('aria-label') ?? '',
+          y: Math.round(rect.y),
+        };
+      });
+      return cards
+        .filter((card) => card.label.startsWith('Do this'))
+        .sort((a, b) => a.y - b.y)
+        .map((card) => card.label.replace(/^Do this — Comment: /, ''));
+    });
+
+  test('drags a branch row above another, its actions coming with it', async ({ page }) => {
+    const ruleId = await createRule(`Reorder ${RUN}`, [
+      row('a', 1, high),
+      comment('ca', 'a', 5, 'Branch A'),
+      row('b', 2, { field: 'priority', operator: 'IS', value: 'CRITICAL' }),
+      comment('cb', 'b', 6, 'Branch B'),
+      row('c', 3, high),
+      comment('cc', 'c', 7, 'Branch C'),
+    ]);
+    await open(page, ruleId);
+    await expect.poll(() => rowsInOrder(page)).toEqual(['“Branch A”', '“Branch B”', '“Branch C”']);
+
+    const handleOf = (name: RegExp) =>
+      page
+        .locator('.react-flow__node', { has: page.getByRole('button', { name }) })
+        .locator('.branch-drag-handle');
+
+    /*
+     * Where both handles are once they stop moving. The canvas opens with a
+     * 200ms animated fit, and a box read during it puts the press beside the
+     * handle — on the pane, which pans instead of dragging the row.
+     */
+    const settled = async () => {
+      const read = () =>
+        Promise.all([
+          handleOf(/^Otherwise if — Priority is High$/).boundingBox(),
+          handleOf(/^Check if — Priority is High$/).boundingBox(),
+        ]);
+      let last = JSON.stringify(await read());
+      await expect
+        .poll(async () => {
+          const now = JSON.stringify(await read());
+          const still = now === last;
+          last = now;
+          return still;
+        })
+        .toBe(true);
+      return read();
+    };
+
+    const [from, to] = await settled();
+    expect(from && to).toBeTruthy();
+
+    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2 + 6, { steps: 12 });
+    await page.mouse.up();
+
+    await expect.poll(() => rowsInOrder(page)).toEqual(['“Branch C”', '“Branch A”', '“Branch B”']);
+    // The first row is the rule's question now; the one it displaced is an alternative.
+    await expect(
+      page.getByRole('button', { name: /^Otherwise if — Priority is High$/ }),
+    ).toHaveCount(1);
+  });
+
+  test('moves a row with its menu, and the fallback stays last', async ({ page }) => {
+    const ruleId = await createRule(`Move ${RUN}`, [
+      row('a', 1, high),
+      comment('ca', 'a', 5, 'First'),
+      row('b', 2, { field: 'priority', operator: 'IS', value: 'LOW' }),
+      comment('cb', 'b', 6, 'Second'),
+      row('o', 3, { fallback: true }),
+      comment('co', 'o', 7, 'Fallback'),
+    ]);
+    await open(page, ruleId);
+
+    await page.getByRole('button', { name: 'More for: Priority is Low' }).click();
+    await page.getByRole('menuitem', { name: 'Move up' }).click();
+
+    await expect.poll(() => rowsInOrder(page)).toEqual(['“Second”', '“First”', '“Fallback”']);
+
+    // Last movable row: nowhere further down to go, and nothing below the fallback.
+    await page.getByRole('button', { name: 'More for: Priority is High' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Move down' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(
+      page
+        .locator('.react-flow__node', {
+          has: page.getByRole('button', { name: /^Otherwise — / }),
+        })
+        .locator('.branch-drag-handle'),
+    ).toHaveCount(0);
+  });
+
+  test('asks a second question, and lets either answer', async ({ page }) => {
+    const ruleId = await createRule(`Group ${RUN}`, [
+      row('a', 1, high),
+      comment('ca', 'a', 5, 'Hot'),
+    ]);
+    await open(page, ruleId);
+
+    await page.getByRole('button', { name: /^Check if — Priority is High$/ }).click();
+    await page.getByRole('button', { name: 'Add another condition' }).click();
+
+    await page.getByLabel('Condition 2', { exact: true }).click();
+    await page.getByRole('option', { name: 'Priority is…' }).click();
+    await page.locator('#group-1-condition-value').click();
+    await page.getByRole('option', { name: 'Critical' }).click();
+
+    await page.getByLabel('Check that', { exact: true }).click();
+    await page.getByRole('option', { name: 'Any of these is true' }).click();
+
+    await expect(
+      page.getByRole('button', { name: 'Check if — Priority is High or Priority is Critical' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('group', { name: 'Conditions' }).getByText('or', { exact: true }),
+    ).toBeVisible();
+
+    // Back down to one question: the step is a plain check again.
+    await page.getByRole('button', { name: 'Remove condition 2' }).click();
+    await expect(page.getByRole('button', { name: 'Add another condition' })).toBeVisible();
+  });
+
+  test('saves a live rule as a draft, publishes it as a version, and restores the last one', async ({
+    page,
+  }) => {
+    const ruleId = await createRule(
+      `Versions ${RUN}`,
+      [row('a', 1, high), comment('ca', 'a', 5, 'Version one')],
+      true,
+    );
+    await open(page, ruleId);
+
+    const header = page.locator('header').filter({ hasText: `Versions ${RUN}` });
+    await expect(header).toContainText('v1');
+    await expect(page.getByRole('button', { name: 'Publish changes' })).toBeDisabled();
+
+    await page.getByRole('button', { name: /^Do this — Comment/ }).click();
+    await page.locator('#step-body').fill('Version two');
+
+    // Saved on its own, and said to be waiting for a publish.
+    await expect(header).toContainText('Unpublished changes');
+    await expect(header).toContainText('Saved');
+
+    await page.getByRole('button', { name: 'Publish changes' }).click();
+    await expect(header).toContainText('v2');
+    await expect(header).not.toContainText('Unpublished changes');
+
+    await page.getByRole('button', { name: 'Version history' }).click();
+    await expect(page.getByText('Version 2')).toBeVisible();
+    await page.getByRole('button', { name: 'Restore version 1' }).click();
+
+    await expect(
+      page.getByRole('button', { name: 'Do this — Comment: “Version one”' }),
+    ).toBeVisible();
+    await expect(header).toContainText('Unpublished changes');
+  });
+
+  const createTeam = async (name: string) => {
+    const created = await api.request.post(`/api/v1/workspaces/${api.workspaceId}/teams`, {
+      headers: api.headers,
+      data: { name },
+    });
+    expect(created.ok(), `could not create the team: ${created.status()}`).toBe(true);
+    return (await created.json()).data.id as string;
+  };
+
+  test('sets up a team step and a checklist step', async ({ page }) => {
+    const team = `Upkeep ${RUN}`;
+    const teamId = await createTeam(team);
+    const ruleId = await createRule(`Move-in ${RUN}`, [
+      {
+        id: 'a',
+        nodeType: 'ACTION',
+        subtype: 'ASSIGN_TEAM',
+        configuration: { teamId },
+        parentId: 't',
+        order: 1,
+      },
+      {
+        id: 'b',
+        nodeType: 'ACTION',
+        subtype: 'CREATE_CHECKLIST',
+        configuration: { name: 'Inspection', items: ['Keys handed over', 'Meter readings taken'] },
+        parentId: 'a',
+        order: 2,
+      },
+    ]);
+    await open(page, ruleId);
+
+    await expect(page.getByRole('button', { name: `Do this — Assign team ${team}` })).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Do this — Add checklist Inspection · 2 items' })
+      .click();
+
+    // One item a line; a blank line is not an item.
+    await page
+      .getByLabel('Items', { exact: true })
+      .fill(['Keys handed over', 'Meter readings taken', '', 'Smoke alarms tested'].join('\n'));
+    await expect(
+      page.getByRole('button', { name: 'Do this — Add checklist Inspection · 3 items' }),
+    ).toBeVisible();
+
+    // On a phone the settings cover the canvas; put them away to reach the next card.
+    await page.getByRole('button', { name: 'Close settings' }).click();
+    await page.getByRole('button', { name: `Do this — Assign team ${team}` }).click();
+    await page.getByLabel('Team', { exact: true }).click();
+    await page.getByRole('option', { name: 'No team — clear it' }).click();
+    await expect(page.getByRole('button', { name: 'Do this — Clear the team' })).toBeVisible();
+  });
+
+  test('ticks a checklist and sets the team in the task panel', async ({ page }) => {
+    const team = `Leasing ${RUN}`;
+    await createTeam(team);
+    const tasks = `/api/v1/workspaces/${api.workspaceId}/tasks`;
+    const created = await api.request.post(tasks, {
+      headers: api.headers,
+      data: { title: `Unit 4B ${RUN}`, projectId: api.projectId },
+    });
+    expect(created.ok(), `could not create the task: ${created.status()}`).toBe(true);
+    const taskId = (await created.json()).data.id as string;
+    const listed = await api.request.post(`${tasks}/${taskId}/checklists`, {
+      headers: api.headers,
+      data: { name: 'Inspection', items: ['Keys handed over', 'Meter readings taken'] },
+    });
+    expect(listed.ok(), `could not add the checklist: ${listed.status()}`).toBe(true);
+
+    await page.goto(`/projects/${api.projectId}/list?task=${taskId}`);
+    const checklists = page.getByRole('region', { name: 'Checklists' });
+    await expect(checklists.getByText('0/2')).toBeVisible();
+
+    await checklists.getByRole('checkbox', { name: 'Keys handed over' }).click();
+    await expect(checklists.getByText('1/2')).toBeVisible();
+
+    await checklists.getByRole('button', { name: 'Add an item' }).click();
+    await page.getByRole('textbox', { name: 'New item for "Inspection"' }).fill('Lease signed');
+    await page.keyboard.press('Enter');
+    await expect(checklists.getByText('1/3')).toBeVisible();
+
+    await page.getByRole('combobox', { name: 'Team' }).click();
+    await page.getByRole('option', { name: team }).click();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
+
+    // All of it is the task's, not the page's.
+    await page.reload();
+    await expect(checklists.getByRole('checkbox', { name: 'Keys handed over' })).toBeChecked();
+    await expect(checklists.getByText('Lease signed')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
+  });
+
+  /*
+   * My Tasks is in no project's room, and a rule's broadcast used to go only
+   * there — so the panel kept the pre-rule team and checklists until a reload.
+   * Run by hand, so the rule's own broadcast is the only thing that can tell
+   * the open panel: nothing the person did here refetches it.
+   */
+  test('shows a rule’s checklist and team in a task panel opened from My Tasks', async ({
+    page,
+  }) => {
+    const team = `Turnover ${RUN}`;
+    const teamId = await createTeam(team);
+    const created = await api.request.post(`/api/v1/workspaces/${api.workspaceId}/tasks`, {
+      headers: api.headers,
+      data: { title: `Unit 12C ${RUN}`, projectId: api.projectId, assigneeId: api.userId },
+    });
+    expect(created.ok(), `could not create the task: ${created.status()}`).toBe(true);
+    const taskId = (await created.json()).data.id as string;
+
+    const rules = `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations`;
+    const rule = await api.request.post(rules, {
+      headers: api.headers,
+      data: {
+        name: `Turnover ${RUN}`,
+        triggerType: 'RUN_MANUALLY',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'RUN_MANUALLY', parentId: null, order: 0 },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_TEAM',
+            configuration: { teamId },
+            parentId: 't',
+            order: 1,
+          },
+          {
+            id: 'b',
+            nodeType: 'ACTION',
+            subtype: 'CREATE_CHECKLIST',
+            configuration: { name: 'Turnover', items: ['Paint touched up', 'Carpets cleaned'] },
+            parentId: 'a',
+            order: 2,
+          },
+        ],
+      },
+    });
+    expect(rule.ok(), `could not create the rule: ${rule.status()}`).toBe(true);
+    const ruleId = (await rule.json()).data.id as string;
+    const published = await api.request.post(`${rules}/${ruleId}/publish`, {
+      headers: api.headers,
+    });
+    expect(published.ok(), `could not publish: ${published.status()}`).toBe(true);
+
+    await page.goto(`/my-tasks?task=${taskId}`);
+    const checklists = page.getByRole('region', { name: 'Checklists' });
+    await expect(checklists.getByRole('button', { name: 'Add a checklist' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText('No team');
+    await expect(checklists.getByText('Turnover')).toHaveCount(0);
+
+    const ran = await api.request.post(`${rules}/${ruleId}/run`, {
+      headers: api.headers,
+      data: { taskIds: [taskId] },
+    });
+    expect(ran.ok(), `could not run the rule: ${ran.status()}`).toBe(true);
+
+    // The worker runs it a moment later; the panel hears of it without a reload.
+    await expect(checklists.getByText('0/2')).toBeVisible({ timeout: 15_000 });
+    await expect(checklists.getByText('Paint touched up')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
+  });
+});

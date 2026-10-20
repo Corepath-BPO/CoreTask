@@ -14,6 +14,7 @@ import {
   List,
   LogOut,
   Pencil,
+  Sparkles,
   Ticket,
   UserPlus,
   Users,
@@ -34,6 +35,7 @@ import type { ProjectStatusUpdateValue } from '@/features/projects/hooks/use-pro
 
 import type { ProjectAccess } from '../lib/project-access';
 
+import { ProjectNotificationsButton } from './project-notifications-button';
 import { ProjectStarButton } from './project-star-button';
 import { ProjectMembersStack } from './sharing/project-members-stack';
 import { ProjectPrivacyBadge } from './sharing/project-privacy-badge';
@@ -61,6 +63,8 @@ interface ProjectHeaderProps {
   onExportCsv?: () => void;
   /** Ask the project's owner for a status update; left out for the owner. */
   onRequestStatus?: () => void;
+  /** Open the update a rule's AI step drafted; present only while one waits. */
+  onReviewDraft?: () => void;
 }
 
 /**
@@ -92,6 +96,7 @@ export function ProjectHeader({
   onSyncCalendar,
   onExportCsv,
   onRequestStatus,
+  onReviewDraft,
 }: ProjectHeaderProps) {
   const archived = project.archivedAt !== null;
   const TileIcon = project.defaultWorkItemType === WorkItemType.TICKET ? Ticket : List;
@@ -194,6 +199,15 @@ export function ProjectHeader({
           projectName={project.name}
         />
 
+        {/* Only members hear from a project, so only they choose what. */}
+        {access.isMember && (
+          <ProjectNotificationsButton
+            workspaceId={project.workspaceId}
+            projectId={project.id}
+            projectName={project.name}
+          />
+        )}
+
         {/* Asana's "Set status" — the portfolios status machinery, from the
             project itself. Picking a status opens the composer. */}
         <StatusUpdateMenu
@@ -212,6 +226,13 @@ export function ProjectHeader({
             </Button>
           }
         />
+
+        {onReviewDraft && (
+          <Button variant="outline" size="sm" onClick={onReviewDraft}>
+            <Sparkles className="text-primary-strong" />
+            Review AI draft
+          </Button>
+        )}
 
         {archived && <Badge variant="muted">Archived</Badge>}
 

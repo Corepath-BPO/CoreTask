@@ -34,21 +34,37 @@ export function useAuth() {
     },
   });
 
+  const forgetSession = async () => {
+    clear();
+    // Deliberate sign-out, so the next load can skip the restore entirely.
+    markSignedOut();
+    setActiveWorkspaceId(null);
+    queryClient.clear();
+    await navigate({ to: '/login', replace: true });
+  };
+
   const logout = useMutation({
     mutationFn: () => authApi.logout(),
     // Runs on success *and* failure: if the server already dropped the session,
     // the client must still end up signed out rather than stuck.
-    onSettled: async () => {
-      clear();
-      // Deliberate sign-out, so the next load can skip the restore entirely.
-      markSignedOut();
-      setActiveWorkspaceId(null);
-      queryClient.clear();
-      await navigate({ to: '/login', replace: true });
+    onSettled: forgetSession,
+  });
+
+  /**
+   * "Sign out everywhere". Unlike a plain sign-out, a failure here is shown
+   * rather than papered over: the person asked for the other devices to lose
+   * access, and leaving this one would hide that they still have it.
+   */
+  const logoutEverywhere = useMutation({
+    mutationFn: () => authApi.logoutAll(),
+    onSuccess: async () => {
+      toast.success('Signed out on every device');
+      await forgetSession();
     },
+    onError: () => toast.error('Could not sign out everywhere. Try again.'),
   });
 
   const signOut = useCallback(() => logout.mutate(), [logout]);
 
-  return { login, register, logout, signOut };
+  return { login, register, logout, logoutEverywhere, signOut };
 }

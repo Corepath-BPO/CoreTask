@@ -464,10 +464,13 @@ describe('Teams (e2e)', () => {
         .expect(200);
 
       expect(preview.body.data.teamName).toBe('Platform');
+      // `projectName` is null here; an invitation from a project's Share
+      // dialog names the project the same way, by name alone.
       expect(Object.keys(preview.body.data).sort()).toEqual([
         'email',
         'expiresAt',
         'invitedByName',
+        'projectName',
         'role',
         'teamName',
         'workspaceName',

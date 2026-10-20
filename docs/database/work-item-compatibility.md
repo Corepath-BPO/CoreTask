@@ -105,11 +105,20 @@ approaches, neither started:
   and migrate the existing rows — cleaner, and a data migration over every value
   ever recorded.
 
-### Tickets have no hierarchy
+### Tickets are never children, but may have subtasks
 
 `parentId` is always null for a ticket and the API refuses one as a child. A
 subtask created from the List is always a `TASK`, whatever the project defaults
 to.
+
+A ticket's own subtasks are tasks with `parentTicketId` set
+(`POST /tasks` with `parentTicketId`): in the ticket's project, so a private
+project's checklist stays private, and in no section, since they are lines
+under the ticket rather than cards. They go with the ticket — deleted with it,
+and moved with it when it changes project. Every query for a project's
+top-level tasks leaves them out beside `parentTaskId`, the List's subtask route
+answers for a ticket id as for a task's, and a ticket row's `subtaskCount` and
+`completedSubtaskCount` count them.
 
 ### Tickets are archived, not deleted
 

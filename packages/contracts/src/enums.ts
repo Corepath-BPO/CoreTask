@@ -58,6 +58,8 @@ export const PROJECT_VISIBILITIES = Object.values(ProjectVisibility);
 export const ProjectMemberRole = {
   ADMIN: 'ADMIN',
   EDITOR: 'EDITOR',
+  /** Reads like a viewer, and takes part in the conversation like an editor. */
+  COMMENTER: 'COMMENTER',
   VIEWER: 'VIEWER',
 } as const;
 export type ProjectMemberRole = (typeof ProjectMemberRole)[keyof typeof ProjectMemberRole];

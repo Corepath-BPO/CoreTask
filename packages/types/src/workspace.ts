@@ -1,4 +1,4 @@
-import type { WorkspaceRole } from '@coretask/contracts';
+import type { ProjectMemberRole, WorkspaceRole } from '@coretask/contracts';
 
 import type { OutOfOffice } from './auth.js';
 
@@ -60,6 +60,8 @@ export interface WorkspaceInvitation {
   } | null;
   /** Team they join on acceptance, if the invitation named one. */
   team: { id: string; name: string; color: string } | null;
+  /** Project they join on acceptance, from a project's Share dialog. */
+  project: { id: string; name: string; role: ProjectMemberRole } | null;
   expiresAt: string;
   /** True once `expiresAt` has passed; the API decides, not the client's clock. */
   expired: boolean;
@@ -81,6 +83,8 @@ export interface WorkspaceInvitationPreview {
   invitedByName: string | null;
   /** Name only — enough to say what they are joining, nothing about its people. */
   teamName: string | null;
+  /** The project an invitation from a Share dialog lands them in; name only. */
+  projectName: string | null;
   expiresAt: string;
 }
 
@@ -109,6 +113,18 @@ export interface AcceptInvitationResult {
   workspaceId: string;
   workspaceSlug: string;
   role: WorkspaceRole;
+  /** The project they were added to, so the app can open it; null otherwise. */
+  projectId: string | null;
+}
+
+/**
+ * Invites someone outside the workspace into one project. They join the
+ * workspace as a member (a guest for VIEWER, which is all a viewer acts as)
+ * and the project at this role.
+ */
+export interface CreateProjectInvitationPayload {
+  email: string;
+  role: ProjectMemberRole;
 }
 
 export interface CreateWorkspacePayload {

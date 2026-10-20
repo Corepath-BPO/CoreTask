@@ -18,6 +18,23 @@ export interface ProjectStatusUpdate {
   createdAt: string;
 }
 
+/**
+ * A status update a rule's "Draft an update with AI…" step wrote, waiting for
+ * a person to review and post it. One per project; posting any update clears
+ * it.
+ */
+export interface ProjectStatusDraft {
+  id: string;
+  projectId: string;
+  status: ProjectStatusValue;
+  title: string;
+  summary: string | null;
+  nextSteps: string | null;
+  /** The rule that drafted it; null once that rule is gone. */
+  rule: { id: string; name: string } | null;
+  createdAt: string;
+}
+
 /** A status update on a portfolio as a whole. */
 export interface PortfolioStatusUpdate {
   id: string;

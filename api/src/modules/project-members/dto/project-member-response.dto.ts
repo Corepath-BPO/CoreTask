@@ -1,4 +1,4 @@
-import { PROJECT_MEMBER_ROLES } from '@coretask/contracts';
+import { PROJECT_MEMBER_ROLES, PROJECT_NOTIFICATION_KINDS } from '@coretask/contracts';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /** Swagger models mirroring `ProjectMember` in `@coretask/types`. */
@@ -48,4 +48,17 @@ export class RemoveProjectMemberResultDto {
 export class LeaveProjectResultDto {
   @ApiProperty({ description: 'False when the caller was not a member to begin with.' })
   left!: boolean;
+}
+
+export class ProjectNotificationSettingsDto {
+  @ApiProperty({ description: 'Only a project’s members hear from it.' })
+  member!: boolean;
+
+  @ApiProperty({
+    enum: PROJECT_NOTIFICATION_KINDS,
+    isArray: true,
+    example: ['STATUS_UPDATES', 'MESSAGES'],
+    description: 'For a non-member, what joining would start with.',
+  })
+  notifyOn!: string[];
 }

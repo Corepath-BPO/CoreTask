@@ -225,10 +225,10 @@ export const OPERATORS_BY_VALUE_KIND: Record<ConditionValueKind, readonly Filter
  */
 
 /**
- * How the builder groups several conditions.
+ * How a condition group combines what it asks.
  *
- * `ALL` is what the runner does today — every condition must hold. `ANY` needs
- * runner support before the builder offers it; see the branching document.
+ * `ALL`: every entry must hold. `ANY`: at least one must. Shared with the view
+ * filters, and with a condition step's group — see `automation-condition-groups`.
  */
 export const ConditionMatch = {
   ALL: 'ALL',

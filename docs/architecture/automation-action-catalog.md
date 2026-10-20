@@ -8,8 +8,10 @@ to…, Create new, Convert task to…, Add to task.
 This document maps each group onto what CoreTask can actually run.
 
 The executable set is `AUTOMATION_ACTIONS` in
-`packages/contracts/src/automation.ts`. Eleven actions. Anything not in that
+`packages/contracts/src/automation.ts` — thirty actions. Anything not in that
 list is not something the engine performs, whatever a catalogue shows.
+`PLANNED_ACTIONS`, the contract-only list, is empty: the last two entries in it,
+`CREATE_CHECKLIST` and `ASSIGN_TEAM`, now run.
 
 ## The convention: disabled with a reason, never hidden
 
@@ -18,14 +20,9 @@ is not filtered out of the list.
 
 The reason is what absence communicates. A catalogue missing "Convert to
 project" reads as _never considered_ — the person concludes the product does not
-think in those terms and stops looking. The same entry greyed, saying "not
-available yet", reads as _not yet_, which is the truth and saves them searching
-for it a second time somewhere else.
-
-`AutomationMetadataService` states the same rule for triggers:
-
-> Listed rather than filtered: an unavailable trigger shown disabled says "not
-> yet", and one simply missing says "never considered".
+think in those terms and stops looking. The same entry greyed, with its reason,
+reads as a decision, which is the truth and saves them searching for it a
+second time somewhere else.
 
 The convention has a second half that matters more: an entry shown as available
 must be one the engine will actually run. Publishing validates every action
@@ -34,34 +31,36 @@ loudly rather than reporting success for something that did not happen. A button
 that appears to work and silently does nothing is worse than one that is
 visibly unavailable.
 
-### The convention is not implemented in the API
+### Where it is decided
 
-`AutomationMetadataService.actions()` maps `AUTOMATION_ACTIONS` and marks every
-entry `available: true`. `PLANNED_ACTIONS` is never read, so the metadata
-endpoint returns **only** the eleven executable actions — the unavailable ones
-are absent, not disabled.
+`actionCatalogue` in `api/src/modules/automations/builder/automation-catalogue.ts`
+builds the list the metadata endpoint returns. Each row's `available` is read
+off `AUTOMATION_ACTIONS` (`runnerCanPerform`) — never written by hand — so a row
+cannot claim to work by being written optimistically, and nothing can be offered
+there and refused at publish. A row that cannot run carries a `reason`: its
+own where one is written, `AI_UNAVAILABLE_REASON` for the AI steps when no model
+is configured, and a generic "not an action the engine can run yet" otherwise.
 
-Any client following the convention today has to import `PLANNED_ACTIONS` from
-the contracts package and merge the two lists itself. The endpoint is the wrong
-place for that split to be missing, since it is the thing that knows what the
-engine can do.
+Rows are grouped by `ACTION_CATEGORY`, which are the references' seven groups
+plus `Use AI`, `Wait`, and `Send to another tool` (the External tab). Custom
+fields are generated in place, one "Change `Field` to…" row per settable field,
+carrying `fieldId` and `fieldName`.
 
-The same method hard-codes `available: true` for every trigger, including
-`TICKET_CREATED` and `TICKET_STATUS_CHANGED`. Those two are now published by
-`ProjectWorkItemService`, so the flag happens to be correct — but it is correct
-by coincidence, not because anything checks.
+Each row also says what it acts on (`subjects`): a ticket rule is offered only
+the rows that name tickets.
 
 ## Group by group
 
-Legend: **runs** — implemented and executable today. **planned** — a contract
-entry in `PLANNED_ACTIONS`, no implementation. **absent** — not modelled at all.
+Legend: **runs** — implemented and executable. **disabled** — shown greyed, with
+the reason given. **absent** — not in the catalogue.
 
 ### Move task
 
-| Entry              | Action            | State |
-| ------------------ | ----------------- | ----- |
-| to a section       | `MOVE_TO_SECTION` | runs  |
-| to another project | `MOVE_TO_PROJECT` | runs  |
+| Entry                        | Action                | State |
+| ---------------------------- | --------------------- | ----- |
+| Move to a section…           | `MOVE_TO_SECTION`     | runs  |
+| Move to another project…     | `MOVE_TO_PROJECT`     | runs  |
+| Remove task from the project | `REMOVE_FROM_PROJECT` | runs  |
 
 `MOVE_TO_SECTION` re-checks at execution time that the section is still in the
 rule's own project, and fails the action if it is not — a rule authored months
@@ -70,9 +69,8 @@ another project's section would be a tenancy hole rather than a mistake.
 
 `MOVE_TO_PROJECT` takes a `projectId` and an optional `targetSectionId`, under
 its own key so nothing that reads `sectionId` as "a section of this project"
-ever sees it. Only a move: a task lives in one project here, so Asana's "add to
-project" half is shown in the panel as a disabled option with that reason. What
-the task carries is decided rather than left to chance:
+ever sees it. `mode: 'ADD'` adds the task to the other project and keeps it here
+too (multi-homing); the default moves it. A moved task:
 
 - **Section** — the chosen one, or the project's first; a project with no
   sections takes the task sectionless.
@@ -92,60 +90,73 @@ the same is re-checked and the action fails rather than reaching. The follow-up
 `TASK_MOVED_TO_SECTION` event is raised in the _new_ project, so the rules there
 see the task arrive, and the realtime relay is sent to both boards.
 
+`REMOVE_FROM_PROJECT` takes the task out of the project but keeps its assignee,
+so it stays in that person's My Tasks.
+
 ### Change status
 
-| Entry          | Action          | State |
-| -------------- | --------------- | ----- |
-| set the status | `UPDATE_STATUS` | runs  |
+| Entry                        | Action                | State |
+| ---------------------------- | --------------------- | ----- |
+| Change the status            | `UPDATE_STATUS`       | runs  |
+| Change completion status to… | `SET_COMPLETION`      | runs  |
+| Set ticket status to…        | `SET_TICKET_STATUS`   | runs  |
+| Set ticket priority to…      | `SET_TICKET_PRIORITY` | runs  |
+| Draft an update with AI…     | `AI_DRAFT_UPDATE`     | runs  |
 
 Setting the status to `DONE` also stamps `completedAt`. Completion is a fact
 about the task rather than a second action somebody has to remember to add.
+`SET_COMPLETION` moves the task to the project's Done status, or back to its
+first open one.
 
-The action config accepts either `statusDefinitionId` or the legacy `status`
+`UPDATE_STATUS` accepts either `statusDefinitionId` or the legacy `status`
 enum, because the status-definition migration is deliberately incomplete — see
 [the project view migration](../database/project-view-migration.md).
 
+The two ticket rows are offered to ticket rules only. "Draft an update with
+AI…" is described under [AI entries](#ai-entries).
+
 ### Change task field to…
 
-References show one entry per field, each naming the field as a pill. CoreTask
-covers four of the fields a task has:
+| Field       | Action                                | State |
+| ----------- | ------------------------------------- | ----- |
+| Assignee    | `ASSIGN_USER` / `UNASSIGN_USER`       | runs  |
+| Team        | `ASSIGN_TEAM`                         | runs  |
+| Due date    | `SET_DUE_DATE` / `CLEAR_DUE_DATE`     | runs  |
+| Start date  | `SET_START_DATE` / `CLEAR_START_DATE` | runs  |
+| Priority    | `UPDATE_PRIORITY`                     | runs  |
+| Estimate    | `SET_ESTIMATE`                        | runs  |
+| Name        | `SET_TASK_NAME`                       | runs  |
+| Description | `SET_TASK_DESCRIPTION`                | runs  |
 
-| Field         | Action                            | State   |
-| ------------- | --------------------------------- | ------- |
-| Assignee      | `ASSIGN_USER` / `UNASSIGN_USER`   | runs    |
-| Priority      | `UPDATE_PRIORITY`                 | runs    |
-| Due date      | `SET_DUE_DATE` / `CLEAR_DUE_DATE` | runs    |
-| Assigned team | `ASSIGN_TEAM`                     | planned |
-| Title         | —                                 | absent  |
-| Description   | —                                 | absent  |
-| Start date    | —                                 | absent  |
-| Collaborators | —                                 | absent  |
-
-`SET_DUE_DATE` takes `daysFromNow`, not a date. A fixed date written into a rule
-is stale the week after; "due in three days" stays meaningful for as long as the
-rule exists.
+`SET_DUE_DATE` and `SET_START_DATE` take `daysFromNow`, not a date. A fixed date
+written into a rule is stale the week after; "due in three days" stays
+meaningful for as long as the rule exists.
 
 `ASSIGN_USER` re-checks workspace membership when it runs, and fails with "That
 person is no longer in this workspace" rather than writing an assignee id that
 no longer resolves.
 
-Title and description are absent rather than planned. Both would need the
-variable representation described in
-[automation variables](./automation-variables.md) to be worth having — an action
-that can only set a task's title to a constant is an action that renames every
-task it touches to the same thing.
+`ASSIGN_TEAM` writes the task's `teamId` — the team responsible for it, beside
+the assignee. Its configuration is either `{ teamId }` or `{ clear: true }`,
+kept apart so that a step nobody has answered yet is told from one that
+deliberately clears the team. Publishing refuses a team from another workspace,
+and the runner re-checks the team when it runs, failing with "That team is no
+longer in this workspace" rather than writing a dangling id. The change is told
+in the task's story ("set the team to Maintenance") and raises `TASK_UPDATED`,
+so a "task is updated" rule that changes the team is warned about at publish
+as one that will set itself off, and its chain is capped like any other — see
+[loop protection](./automation-loop-protection.md).
+
+The task's team is also a field in the task panel, offered once the workspace
+has a team, and settable through `PATCH /tasks/:id` with `teamId`.
+
+Name and description take text with variables — see
+[automation variables](./automation-variables.md).
 
 ### Change custom field to…
 
-| Entry              | Action             | State |
-| ------------------ | ------------------ | ----- |
-| set a custom field | `SET_CUSTOM_FIELD` | runs  |
-
-The references generate one entry per field in the project, each naming the
-field as a pill. `AutomationMetadataService` returns `customFields` for the
-project — id, name and type — which is what such a list would be generated from.
-Nothing generates it yet; the builder offers one generic "Set a custom field"
-entry with the field chosen inside the inspector.
+One generated row per settable field in the project, each naming the field as a
+token, all running `SET_CUSTOM_FIELD`.
 
 The action resolves the field **through the project association**
 (`projects: { some: { projectId } }`), so a rule may only write a field its own
@@ -154,61 +165,80 @@ is routed to the column matching the field's type by `customFieldValue`.
 
 ### Create new
 
-| Entry     | Action             | State   |
-| --------- | ------------------ | ------- |
-| Subtask   | `CREATE_SUBTASK`   | runs    |
-| Checklist | `CREATE_CHECKLIST` | planned |
-| Task      | —                  | absent  |
-| Project   | —                  | absent  |
-| Ticket    | —                  | absent  |
+| Entry             | Action           | State    |
+| ----------------- | ---------------- | -------- |
+| Create a task…    | `CREATE_TASK`    | runs     |
+| Create subtasks…  | `CREATE_SUBTASK` | runs     |
+| Create approvals… | —                | disabled |
+
+`CREATE_TASK` makes a task in this project, with a name that can use variables,
+a section, an assignee and a due date. It is also what a schedule with no tasks
+runs.
 
 `CREATE_SUBTASK` inherits the parent's project and section and is authored by
-whoever caused the trigger, falling back to the task's creator. Each row is a
-literal title — with the same limitation as the absent title action above — and
-may name an assignee and a due date of its own: a fixed calendar date, or a
-number of days after the rule runs (`subtaskEntries` in `@coretask/contracts`
-is the one reading of the row). Assignees are re-checked at run time as the
-assign action's is; a row whose person has left is created unassigned and the
-execution log says so, rather than the checklist losing every row. The assignee
-follows the subtask, as one a rule assigns later does.
+whoever caused the trigger, falling back to the task's creator. Each row may
+name an assignee and a due date of its own: a fixed calendar date, or a number
+of days after the rule runs (`subtaskEntries` in `@coretask/contracts` is the
+one reading of the row). Assignees are re-checked at run time as the assign
+action's is; a row whose person has left is created unassigned and the
+execution log says so, rather than the step losing every row.
+
+"Create approvals…" is disabled with its reason: create a task, then set its
+type to Approval.
 
 ### Convert task to…
 
-**Nothing in this group runs, and nothing is planned.** CoreTask has no
-conversion between work item types available to automation.
+| Entry                   | Action          | State    |
+| ----------------------- | --------------- | -------- |
+| Set task type to        | `SET_TASK_TYPE` | runs     |
+| Convert task to project | —               | disabled |
 
-The anchor document lists convert-to-project among the things deliberately
-excluded, and it is not an oversight: a project is not a heavier task in this
-data model. `ProjectWorkItem` does distinguish tasks from tickets — see
-[project work items](./project-work-items.md) — so a task-to-ticket conversion
-is the plausible first member of this group, and it does not exist either.
-
-The whole group renders disabled, per the convention.
+`SET_TASK_TYPE` converts between a task, a milestone and an approval; an
+approval starts pending. Convert-to-project is disabled with its reason — a
+project is not a heavier task in this data model, so there is nothing to
+convert to.
 
 ### Add to task
 
-| Entry                   | Action                     | State   |
-| ----------------------- | -------------------------- | ------- |
-| Comment                 | `ADD_COMMENT`              | runs    |
-| Notification            | `SEND_IN_APP_NOTIFICATION` | runs    |
-| Checklist               | `CREATE_CHECKLIST`         | planned |
-| Attachment              | —                          | absent  |
-| Follower / collaborator | —                          | absent  |
-| Tag                     | —                          | absent  |
+| Entry                       | Action                     | State  |
+| --------------------------- | -------------------------- | ------ |
+| Add comment                 | `ADD_COMMENT`              | runs   |
+| Add or remove collaborators | `ADD_REMOVE_COLLABORATORS` | runs   |
+| Send a notification         | `SEND_IN_APP_NOTIFICATION` | runs   |
+| Checklist…                  | `CREATE_CHECKLIST`         | runs   |
+| Attachment                  | —                          | absent |
+| Tag                         | —                          | absent |
 
 `ADD_COMMENT` is authored by whoever caused the trigger, falling back to the
 task's creator: a comment needs an author and a rule is not a person. An empty
 body fails the action rather than posting a blank comment.
 
-`SEND_IN_APP_NOTIFICATION` is grouped here in the references' shape but is not
-really "on the task" — it targets a user, defaulting to the assignee, and fails
+`SEND_IN_APP_NOTIFICATION` targets a user, defaulting to the assignee, and fails
 with "Nobody to notify" when there is neither a configured recipient nor an
 assignee.
 
+`CREATE_CHECKLIST` adds a named checklist to the task, its items unticked. The
+configuration is `{ name, items }`: the name is text with variables, as a
+comment's body is; the items are the step's own lines, which the builder edits
+one per line. `checklistOf` in `@coretask/contracts` is the one reading of it —
+the runner, the validator and the builder's card all use it — so blank lines are
+dropped and both the item count (`MAX_CHECKLIST_ITEMS`, 50) and the text lengths
+are capped the same way everywhere. Publishing refuses a step with no name or no
+items. At run time a name that renders empty, or a task that already holds
+`MAX_CHECKLISTS_PER_TASK` (20) checklists, fails the step with a message in the
+execution log rather than writing anything. A rule that fires twice on a task
+adds two checklists: a rule firing twice is a rule configured to.
+
+Checklists are their own rows (`task_checklists`, `task_checklist_items`), and
+the same lists are edited by people in the task panel through
+`/tasks/:taskId/checklists` — lighter than subtasks: an item is a line and a
+tick, with who ticked it and when.
+
 ## External actions
 
-`SEND_WEBHOOK` is implemented and is the one row on the External tab. Its
-configuration names a destination — `endpointId` (a webhook endpoint registered
+`SEND_WEBHOOK` and `SEND_EMAIL` are the External tab.
+
+A webhook step names a destination — `endpointId` (a webhook endpoint registered
 under Integrations, signed with its secret) or `url` (an ad-hoc address, sent
 unsigned) — and optional `extraFields`, key/value pairs merged into the payload
 as `data.extra`. No secret lives in a rule: every member can read a rule.
@@ -223,8 +253,11 @@ the same arrangement as the events a rule raises. The worker's
 CoreTask may call (no private addresses unless `WEBHOOK_ALLOW_PRIVATE_URLS`) is
 decided at publish time by the validator and again at delivery time.
 
-`SEND_EMAIL` stays in `PLANNED_ACTIONS` with a contract entry only; a webhook
-into a mail tool covers the need until rules can send mail themselves.
+An email step writes to people on the task — the assignee, the collaborators,
+the creator (`AutomationEmailRecipient`), each a member of the workspace, at
+most `MAX_EMAIL_RECIPIENTS` — never a typed address, since a rule anyone can
+edit must not be a way to send mail to anyone at all. Variables fill in the
+words, and the mail links to the task. Like a webhook, it is sent after the run.
 
 ## AI entries
 
@@ -241,42 +274,34 @@ ids; the calls that come back are mapped to ordinary actions (`ASSIGN_USER`,
 `UPDATE_PRIORITY`, `SET_CUSTOM_FIELD`…) and run by `runAction`, at most
 `AI_MAX_CHANGES` and one of each. The AI check forces an `answer` tool with
 `holds` and `reason`. `plan` is asynchronous so that only reached checks are
-asked. "Draft an update with AI…" stays planned.
+asked. "Let AI decide the number of subtasks" forces a `choose` tool that
+answers with row numbers of the step's own list, so the model can leave a
+subtask out but never word one.
 
-## Summary of the eleven that run
+"Draft an update with AI…" (`AI_DRAFT_UPDATE`) forces a `draft` tool over a
+plain-text card of the project — its counts, what was finished in the last
+seven days, what is overdue and due next, and the last update. The answer is
+stored as the project's one `ProjectStatusDraft` (a newer one replaces it) and
+the project's owner, else the last poster, else the rule's author is told; it
+is never posted by the rule. It runs in task rules and in a schedule with no
+tasks, where it is the one action besides "Create a task".
 
-| Action                     | Label                   | Category            |
-| -------------------------- | ----------------------- | ------------------- |
-| `ASSIGN_USER`              | Assign a person         | Assignment          |
-| `UNASSIGN_USER`            | Remove the assignee     | Assignment          |
-| `MOVE_TO_SECTION`          | Move to a section       | Status and workflow |
-| `MOVE_TO_PROJECT`          | Move to another project | Status and workflow |
-| `UPDATE_STATUS`            | Change the status       | Status and workflow |
-| `UPDATE_PRIORITY`          | Change the priority     | Status and workflow |
-| `SET_DUE_DATE`             | Set the due date        | Dates               |
-| `CLEAR_DUE_DATE`           | Clear the due date      | Dates               |
-| `SET_CUSTOM_FIELD`         | Set a custom field      | Fields              |
-| `ADD_COMMENT`              | Add a comment           | Communication       |
-| `SEND_IN_APP_NOTIFICATION` | Send a notification     | Communication       |
-| `CREATE_SUBTASK`           | Create a subtask        | Subtasks            |
+## The Wait step
 
-Categories come from `AUTOMATION_SELECTOR_CATEGORY` and are how the builder
-groups the list today — they are not the seven groups the references show. The
-reference grouping is a presentation concern for the new catalogue; the
-categories above are what the metadata endpoint currently returns.
+"Wait…" sits in the catalogue as its own group but is not an action: it is a
+step the runner stops at, and the clock resumes what follows it minutes, hours
+or days later, judged on the task as it is by then.
 
-## Not yet implemented
+## Not yet in the catalogue
 
-- The catalogue's own shape: search box, tabs, grouped rows with icons, custom
-  fields generated as individual entries.
-- `PLANNED_ACTIONS` in the metadata response, which is what any disabled-with-a-
-  reason rendering needs.
-- A `reason` field on `AutomationCatalogEntry`. It carries `available` but no
-  explanation, so a client can grey a row and cannot say why.
-- Every action marked planned or absent above.
+- Adding an attachment or a tag to a task.
+- Creating approvals as their own step, and converting a task to a project —
+  both shown disabled, with the reasons above.
 
 ## Related
 
 - [The automation engine](./automation-engine.md) — how an action executes
-- [Automation variables](./automation-variables.md) — why text-setting actions wait
+- [Loop protection](./automation-loop-protection.md) — what stops a rule
+  feeding itself
+- [Automation variables](./automation-variables.md) — text with variables
 - [The rule builder rebuild](./asana-parity-rule-builder.md)

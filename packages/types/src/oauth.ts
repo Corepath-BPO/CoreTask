@@ -1,4 +1,9 @@
-import type { OAuthScope, SubscribableWebhookEvent } from '@coretask/contracts';
+import type {
+  OAuthAppPolicy,
+  OAuthClientType,
+  OAuthScope,
+  SubscribableWebhookEvent,
+} from '@coretask/contracts';
 
 /** An app a developer registered (Integrations › OAuth apps). */
 export interface OAuthApp {
@@ -9,8 +14,10 @@ export interface OAuthApp {
   redirectUris: string[];
   /** Public; goes in the authorization link. */
   clientId: string;
-  /** `cts_` and a few characters, to tell secrets apart. Never the secret. */
-  secretHint: string;
+  /** A public client (mobile, desktop) has no secret and must use PKCE. */
+  clientType: OAuthClientType;
+  /** `cts_` and a few characters, to tell secrets apart. Never the secret. Null for a public client. */
+  secretHint: string | null;
   /** People who have it connected now. */
   connections: number;
   createdAt: string;
@@ -20,7 +27,8 @@ export interface OAuthApp {
 /** The one response besides a rotation that carries the client secret. */
 export interface CreatedOAuthApp {
   app: OAuthApp;
-  clientSecret: string;
+  /** Null for a public client, which is given none. */
+  clientSecret: string | null;
 }
 
 export interface OAuthSecretRotation {
@@ -32,9 +40,11 @@ export interface CreateOAuthAppPayload {
   description?: string | null;
   websiteUrl?: string | null;
   redirectUris: string[];
+  /** Fixed once registered. Confidential when left out. */
+  clientType?: OAuthClientType;
 }
 
-export type UpdateOAuthAppPayload = Partial<CreateOAuthAppPayload>;
+export type UpdateOAuthAppPayload = Partial<Omit<CreateOAuthAppPayload, 'clientType'>>;
 
 /** An authorization request as the consent page forwards it to the API. */
 export interface OAuthAuthorizationRequest {
@@ -60,6 +70,11 @@ export interface OAuthConsent {
   scopes: { scope: OAuthScope; description: string }[];
   /** The host the person is sent back to, shown so they know where they are going. */
   redirectHost: string;
+  /**
+   * The person's workspaces whose admins allow only approved apps and have
+   * not approved this one: it would not reach them.
+   */
+  blockedWorkspaces: { id: string; name: string }[];
 }
 
 export interface OAuthDecision extends OAuthAuthorizationRequest {
@@ -110,4 +125,49 @@ export interface CreatedWebhookSubscription {
   subscription: WebhookSubscription;
   /** Signs every delivery; in this response and nowhere afterwards. */
   secret: string;
+}
+
+/**
+ * An app as a workspace's app directory shows it. The client id is public —
+ * it is in every authorization link — and is how an admin names an app.
+ */
+export interface WorkspaceAppSummary {
+  id: string;
+  clientId: string;
+  name: string;
+  description: string | null;
+  websiteUrl: string | null;
+  /** The developer who registered it. */
+  publisher: string;
+}
+
+/** An app a workspace's admins approved (Integrations › App directory). */
+export interface DirectoryApp {
+  app: WorkspaceAppSummary;
+  approvedAt: string;
+  approvedBy: { id: string; name: string } | null;
+  /** Whether the person looking has it connected. */
+  connectedByMe: boolean;
+}
+
+/** An app members connected that the directory does not hold. */
+export interface UnapprovedApp {
+  app: WorkspaceAppSummary;
+  /** Members of this workspace connected to it. */
+  members: number;
+}
+
+export interface WorkspaceAppDirectory {
+  policy: OAuthAppPolicy;
+  apps: DirectoryApp[];
+  /** For admins deciding what to approve; empty for everyone else. */
+  unapproved: UnapprovedApp[];
+}
+
+export interface ApproveWorkspaceAppPayload {
+  clientId: string;
+}
+
+export interface UpdateAppPolicyPayload {
+  policy: OAuthAppPolicy;
 }

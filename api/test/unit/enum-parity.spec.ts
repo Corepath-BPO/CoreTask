@@ -31,6 +31,7 @@ import {
   TICKET_TYPES,
   WEBHOOK_DELIVERY_STATUSES,
   WORKSPACE_ROLES,
+  OAUTH_APP_POLICIES,
 } from '@coretask/contracts';
 import { $Enums } from '@prisma/client';
 
@@ -74,6 +75,7 @@ describe('shared enums match the Prisma schema', () => {
     ['MyTasksBucket', MY_TASKS_BUCKETS],
     ['GoalStatus', GOAL_STATUSES],
     ['GoalProgressSource', GOAL_PROGRESS_SOURCES],
+    ['OAuthAppPolicy', OAUTH_APP_POLICIES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

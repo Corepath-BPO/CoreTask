@@ -248,6 +248,150 @@ describe('Project updates (e2e)', () => {
     });
   });
 
+  describe('what each member hears', () => {
+    const settingsUrl = (scope: { workspaceId: string; projectId: string }) =>
+      projectUrl(scope, '/notification-settings');
+    const tasksUrl = (scope: { workspaceId: string }) =>
+      url(`/workspaces/${scope.workspaceId}/tasks`);
+    const titlesFor = async (userId: string) =>
+      (await notificationsFor(userId)).map((row) => row.title);
+
+    it('lets each member choose what the project tells them', async () => {
+      const scope = await setup();
+
+      const initial = await request(server())
+        .get(settingsUrl(scope))
+        .set(as(scope.member))
+        .expect(200);
+      expect(initial.body.data).toEqual({
+        member: true,
+        notifyOn: ['STATUS_UPDATES', 'MESSAGES'],
+      });
+
+      const chosen = await request(server())
+        .put(settingsUrl(scope))
+        .set(as(scope.member))
+        .send({ notifyOn: ['TASKS_COMPLETED', 'MESSAGES', 'TASKS_ADDED'] })
+        .expect(200);
+      expect(chosen.body.data).toEqual({
+        member: true,
+        notifyOn: ['MESSAGES', 'TASKS_ADDED', 'TASKS_COMPLETED'],
+      });
+      await request(server())
+        .put(settingsUrl(scope))
+        .set(as(scope.member))
+        .send({ notifyOn: ['EVERYTHING'] })
+        .expect(422);
+
+      // A status update reaches the guest, who kept the defaults; not the member.
+      await request(server())
+        .post(projectUrl(scope, '/status-updates'))
+        .set(as(scope.owner))
+        .send({ status: 'ON_TRACK', title: 'Week 42' })
+        .expect(201);
+      expect(await titlesFor(scope.member.userId)).toEqual([]);
+      expect(await titlesFor(scope.guest.userId)).toEqual(['Ada Owner set Leasing to On track']);
+
+      await request(server())
+        .post(projectUrl(scope, '/messages'))
+        .set(as(scope.owner))
+        .send({ title: 'Kick-off', body: '<p>Agenda</p>' })
+        .expect(201);
+      expect(await titlesFor(scope.member.userId)).toEqual([
+        'Ada Owner posted in Leasing: Kick-off',
+      ]);
+
+      // Tasks added and completed: only the member asked.
+      const task = await request(server())
+        .post(tasksUrl(scope))
+        .set(as(scope.owner))
+        .send({ title: 'Renewal notices', projectId: scope.projectId })
+        .expect(201);
+      await request(server())
+        .patch(`${tasksUrl(scope)}/${task.body.data.id}`)
+        .set(as(scope.owner))
+        .send({ status: 'DONE' })
+        .expect(200);
+      expect(await titlesFor(scope.member.userId)).toEqual(
+        expect.arrayContaining([
+          'Ada Owner added “Renewal notices” to Leasing',
+          'Ada Owner completed “Renewal notices” in Leasing',
+        ]),
+      );
+      // The guest kept the defaults: the update and the message, no task news.
+      const guestHeard = await titlesFor(scope.guest.userId);
+      expect(guestHeard).toHaveLength(2);
+      expect(guestHeard).toEqual(
+        expect.arrayContaining([
+          'Ada Owner set Leasing to On track',
+          'Ada Owner posted in Leasing: Kick-off',
+        ]),
+      );
+    });
+
+    it('tells a follower once when a task is completed, and never the person who did it', async () => {
+      const scope = await setup();
+      await request(server())
+        .put(settingsUrl(scope))
+        .set(as(scope.member))
+        .send({ notifyOn: ['TASKS_COMPLETED'] })
+        .expect(200);
+      await request(server())
+        .put(settingsUrl(scope))
+        .set(as(scope.owner))
+        .send({ notifyOn: ['TASKS_ADDED', 'TASKS_COMPLETED'] })
+        .expect(200);
+
+      // Assigned, so the member follows it and hears its completion that way.
+      const task = await request(server())
+        .post(tasksUrl(scope))
+        .set(as(scope.owner))
+        .send({
+          title: 'Inspect unit 4',
+          projectId: scope.projectId,
+          assigneeId: scope.member.userId,
+        })
+        .expect(201);
+      await request(server())
+        .patch(`${tasksUrl(scope)}/${task.body.data.id}`)
+        .set(as(scope.owner))
+        .send({ status: 'DONE' })
+        .expect(200);
+
+      expect(await titlesFor(scope.member.userId)).toEqual([]);
+      expect(
+        await context.prisma.notification.count({
+          where: { userId: scope.member.userId, entityId: task.body.data.id },
+        }),
+      ).toBeGreaterThan(0);
+      expect(await titlesFor(scope.owner.userId)).toEqual([]);
+    });
+
+    it('is for members: anyone else sees the defaults and cannot choose', async () => {
+      const scope = await setup();
+      const open = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set(as(scope.owner))
+        .send({ name: 'Open house' })
+        .expect(201);
+      const other = { workspaceId: scope.workspaceId, projectId: open.body.data.id as string };
+
+      const seen = await request(server())
+        .get(settingsUrl(other))
+        .set(as(scope.outsider))
+        .expect(200);
+      expect(seen.body.data).toEqual({ member: false, notifyOn: ['STATUS_UPDATES', 'MESSAGES'] });
+      const refused = await request(server())
+        .put(settingsUrl(other))
+        .set(as(scope.outsider))
+        .send({ notifyOn: [] })
+        .expect(409);
+      expect(refused.body.error.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+      // A private project stays hidden.
+      await request(server()).get(settingsUrl(scope)).set(as(scope.outsider)).expect(404);
+    });
+  });
+
   describe('files', () => {
     it('lists finished uploads on the project’s tasks, with the task they are on', async () => {
       const scope = await setup();

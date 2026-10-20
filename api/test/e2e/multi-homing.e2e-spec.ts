@@ -353,6 +353,7 @@ describe('Multi-homing (e2e)', () => {
     // The completion happened at home; the other project's rule still hears it.
     const runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toProjectAudience: async () => undefined,
       toWorkspace: async () => undefined,
     } as never);
     const event: AutomationEvent = {

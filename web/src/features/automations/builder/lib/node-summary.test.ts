@@ -36,6 +36,7 @@ const metadata = {
   statuses: [{ id: 'st-1', name: 'In Progress', colorToken: 'blue' }],
   priorities: [{ id: 'pr-1', name: 'High', colorToken: 'orange' }],
   members: [{ id: 'u-1', name: 'Maya Okafor', email: 'maya@example.com', avatarUrl: null }],
+  teams: [{ id: 'team-1', name: 'Maintenance', color: '#0ea5e9' }],
   customFields: [],
   webhookEndpoints: [{ id: 'wh-1', name: 'n8n', host: 'n8n.example.com', enabled: true }],
 } as AutomationMetadata;
@@ -95,6 +96,27 @@ describe('what a node says', () => {
     expect(summarise(node({ subtype: 'MOVE_TO_PROJECT', configuration: {} }), metadata)).toBe(
       'Move — choose a project',
     );
+  });
+
+  it('names the team a step assigns, or says it clears it', () => {
+    const team = (configuration: Record<string, unknown>) =>
+      summarise(node({ subtype: 'ASSIGN_TEAM', configuration }), metadata);
+
+    expect(team({ teamId: 'team-1' })).toBe('Assign team Maintenance');
+    expect(team({ clear: true })).toBe('Clear the team');
+    expect(team({})).toBe('Assign a team — choose one');
+    expect(team({ teamId: 'team-gone' })).toBe('Assign team a team that was removed');
+  });
+
+  it('reads a checklist step as its name and how many items', () => {
+    const checklist = (configuration: Record<string, unknown>) =>
+      summarise(node({ subtype: 'CREATE_CHECKLIST', configuration }), metadata);
+
+    expect(checklist({ name: 'Move-in', items: ['Keys', '', 'Meters'] })).toBe(
+      'Add checklist Move-in · 2 items',
+    );
+    expect(checklist({ name: 'Move-in', items: [] })).toBe('Add checklist Move-in · no items yet');
+    expect(checklist({ items: ['Keys'] })).toBe('Add a checklist — name it');
   });
 
   it('reads the ticket steps in the ticket’s words', () => {
@@ -179,6 +201,18 @@ describe('which nodes are flagged incomplete', () => {
   it('flags an action with nothing chosen', () => {
     expect(isNodeIncomplete(node({ configuration: {} }))).toBe(true);
     expect(isNodeIncomplete(node({ configuration: { userId: 'u-1' } }))).toBe(false);
+  });
+
+  it('flags a team step with no answer, and a checklist with no name or items', () => {
+    const step = (subtype: string, configuration: Record<string, unknown>) =>
+      isNodeIncomplete(node({ subtype, configuration }));
+
+    expect(step('ASSIGN_TEAM', {})).toBe(true);
+    expect(step('ASSIGN_TEAM', { clear: true })).toBe(false);
+    expect(step('ASSIGN_TEAM', { teamId: 'team-1' })).toBe(false);
+    expect(step('CREATE_CHECKLIST', { name: 'Move-in', items: ['  '] })).toBe(true);
+    expect(step('CREATE_CHECKLIST', { name: '', items: ['Keys'] })).toBe(true);
+    expect(step('CREATE_CHECKLIST', { name: 'Move-in', items: ['Keys'] })).toBe(false);
   });
 
   it('flags a subtask step whose dated row has no date yet', () => {
@@ -535,5 +569,60 @@ describe('the AI steps', () => {
     );
     expect(isNodeIncomplete(check({ field: 'ai.check' }))).toBe(true);
     expect(isNodeIncomplete(check({ field: 'ai.check', question: 'Is it broken?' }))).toBe(false);
+  });
+});
+
+describe('a condition group', () => {
+  const withSections = {
+    ...metadata,
+    conditionFields: [
+      ...metadata.conditionFields,
+      {
+        field: 'sectionId',
+        label: 'Section',
+        valueKind: 'REFERENCE' as const,
+        options: [{ value: 'sec-1', label: 'Incoming Request' }],
+      },
+    ],
+  } as AutomationMetadata;
+  const high = { field: 'priority', operator: 'IS', value: 'HIGH' };
+  const section = { field: 'sectionId', operator: 'IS', value: 'sec-1' };
+  const group = (configuration: Record<string, unknown>) =>
+    node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration });
+
+  it('reads as one sentence joined by the word its mode means', () => {
+    expect(summarise(group({ match: 'ANY', conditions: [high, section] }), withSections)).toBe(
+      'Priority is High or Section is Incoming Request',
+    );
+    expect(summarise(group({ match: 'ALL', conditions: [high, section] }), withSections)).toBe(
+      'Priority is High and Section is Incoming Request',
+    );
+  });
+
+  it('puts a group inside a group in parentheses', () => {
+    expect(
+      summarise(
+        group({ match: 'ALL', conditions: [high, { match: 'ANY', conditions: [section, high] }] }),
+        withSections,
+      ),
+    ).toBe('Priority is High and ( Section is Incoming Request or Priority is High )');
+  });
+
+  it('names the first few and counts the rest', () => {
+    const many = group({ match: 'ANY', conditions: [high, high, high, high, high] });
+
+    expect(summarise(many, withSections)).toMatch(/or 2 more$/);
+  });
+
+  it('is incomplete while any comparison in it is, and complete once all are', () => {
+    expect(isNodeIncomplete(group({ match: 'ALL', conditions: [high, {}] }))).toBe(true);
+    expect(isNodeIncomplete(group({ match: 'ALL', conditions: [] }))).toBe(true);
+    expect(isNodeIncomplete(group({ match: 'ANY', conditions: [high, section] }))).toBe(false);
+  });
+
+  it('shows an unanswered comparison as a gap, not an instruction', () => {
+    const parts = summariseParts(group({ match: 'ALL', conditions: [high, {}] }), withSections);
+
+    expect(parts.at(-1)).toEqual({ text: 'Unspecified', chip: true, placeholder: true });
   });
 });

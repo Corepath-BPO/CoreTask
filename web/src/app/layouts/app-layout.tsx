@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@/components/feedback/error-boundary';
 import { ShortcutsHelpDialog } from '@/components/navigation/shortcuts-help-dialog';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Topbar } from '@/components/navigation/topbar';
+import { VerifyEmailBanner } from '@/features/auth/components/verify-email-banner';
 import { useGlobalShortcuts } from '@/lib/shortcuts/use-global-shortcuts';
 
 /** Authenticated shell: sidebar, top bar, and the routed content area. */
@@ -39,6 +40,7 @@ export function AppLayout() {
             {/* Full width, as Asana lays its pages: the content starts at the
                 sidebar rather than floating in a centered column. */}
             <div className="w-full px-4 py-6 sm:px-6">
+              <VerifyEmailBanner />
               {/* Scoped per route: a crash in one page must not take the shell
                   down with it, or the user loses their way out. */}
               <ErrorBoundary>

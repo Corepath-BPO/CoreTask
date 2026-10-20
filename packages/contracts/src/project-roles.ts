@@ -22,6 +22,7 @@ import {
 export const PROJECT_MEMBER_ROLE_RANK: Record<ProjectMemberRole, number> = {
   ADMIN: 30,
   EDITOR: 20,
+  COMMENTER: 15,
   VIEWER: 10,
 };
 
@@ -32,6 +33,9 @@ export const PROJECT_MEMBER_ROLE_RANK: Record<ProjectMemberRole, number> = {
 export const PROJECT_ROLE_CAP: Record<ProjectMemberRole, WorkspaceRole | null> = {
   ADMIN: null,
   EDITOR: WorkspaceRole.MEMBER,
+  // Read-only for the work itself; `effectiveConversationRole` lifts it for
+  // comments, likes and replies.
+  COMMENTER: WorkspaceRole.GUEST,
   VIEWER: WorkspaceRole.GUEST,
 };
 
@@ -61,6 +65,24 @@ export function effectiveWorkspaceRole(
   if (projectRole === null) return workspaceRole;
   const cap = PROJECT_ROLE_CAP[projectRole];
   return cap === null ? workspaceRole : lowerRole(workspaceRole, cap);
+}
+
+/**
+ * The role someone takes part in a project's conversations with: comments
+ * on its tasks and tickets, likes, and replies to its messages. The same as
+ * `effectiveWorkspaceRole`, except that a COMMENTER counts as an EDITOR here
+ * — that is the whole of the role. The workspace role still caps it, so a
+ * workspace GUEST made a commenter stays read-only: a project role never
+ * grants what the workspace did not.
+ */
+export function effectiveConversationRole(
+  workspaceRole: WorkspaceRole,
+  projectRole: ProjectMemberRole | null,
+): WorkspaceRole {
+  return effectiveWorkspaceRole(
+    workspaceRole,
+    projectRole === ProjectMemberRole.COMMENTER ? ProjectMemberRole.EDITOR : projectRole,
+  );
 }
 
 /** Whether a project is visible to someone at all. */

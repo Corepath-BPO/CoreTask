@@ -423,7 +423,13 @@ export class BundlesService {
         continue;
       }
       try {
-        await this.automations.publish(workspaceId, projectId, actor.role, written.ruleId);
+        await this.automations.publish(
+          workspaceId,
+          projectId,
+          actor.role,
+          written.ruleId,
+          actor.userId,
+        );
         result.rulesLive += 1;
       } catch {
         result.rulesNeedingAttention.push(snapshot.name);

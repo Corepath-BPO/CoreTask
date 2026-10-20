@@ -73,6 +73,11 @@ export function AcceptInvitationPage({ token }: { token: string }) {
         // active.
         setActiveWorkspaceId(result.workspaceId);
         await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
+        // An invitation from a project's Share dialog opens that project.
+        if (result.projectId) {
+          await navigate({ to: '/projects/$projectId', params: { projectId: result.projectId } });
+          return;
+        }
         await navigate({ to: '/' });
       },
     });
@@ -88,8 +93,19 @@ export function AcceptInvitationPage({ token }: { token: string }) {
           </CardTitle>
           <CardDescription>
             {invitation.invitedByName ?? 'Someone'} invited{' '}
-            <span className="font-medium text-foreground">{invitation.email}</span> to join as a{' '}
-            {humanizeEnum(invitation.role).toLowerCase()}
+            <span className="font-medium text-foreground">{invitation.email}</span>
+            {invitation.projectName ? (
+              <>
+                {' '}
+                to the <span className="font-medium text-foreground">
+                  {invitation.projectName}
+                </span>{' '}
+                project. You join the workspace
+              </>
+            ) : (
+              ' to join'
+            )}{' '}
+            as a {humanizeEnum(invitation.role).toLowerCase()}
             {invitation.teamName ? (
               <>
                 {' '}

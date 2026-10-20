@@ -1,5 +1,5 @@
 import { PROJECT_APP_INFO, WebhookEventType } from '@coretask/contracts';
-import type { ProjectSummary, StatusTemplate } from '@coretask/types';
+import type { ProjectStatusDraft, ProjectSummary, StatusTemplate } from '@coretask/types';
 import {
   ChevronDown,
   ChevronRight,
@@ -26,9 +26,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
-import { cn, daysUntil, formatDate, initials, percentage } from '@/lib/utils';
+import { cn, daysUntil, formatDate, formatRelativeTime, initials, percentage } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 import {
+  useDiscardStatusDraft,
   usePostStatusUpdate,
   useProjectStatusUpdate,
   type ProjectStatusUpdate,
@@ -46,6 +47,11 @@ interface StatusUpdateComposerProps {
   project: ProjectSummary;
   /** The status picked from the menu; the composer starts on it. */
   initialStatus: ProjectStatusUpdateValue;
+  /**
+   * A draft a rule's AI step wrote. The composer opens on its words, says
+   * where they came from, and offers to discard it; posting spends it.
+   */
+  draft?: ProjectStatusDraft | null;
   onClose: () => void;
 }
 
@@ -60,10 +66,12 @@ interface StatusUpdateComposerProps {
 export function StatusUpdateComposer({
   project,
   initialStatus,
+  draft = null,
   onClose,
 }: StatusUpdateComposerProps) {
   const { workspace } = useActiveWorkspace();
   const postUpdate = usePostStatusUpdate(workspace?.id, project.id);
+  const discardDraft = useDiscardStatusDraft(workspace?.id, project.id);
   // Everyone on the roster but the author hears about it — the server's rule.
   const { data: members } = useProjectMembers(workspace?.id, project.id);
   const previous = useProjectStatusUpdate(project.id);
@@ -75,10 +83,12 @@ export function StatusUpdateComposer({
     (app) => app.enabled && app.events.includes(WebhookEventType.PROJECT_STATUS_UPDATED),
   );
 
-  const [status, setStatusValue] = useState<ProjectStatusUpdateValue>(initialStatus);
-  const [title, setTitle] = useState(`${project.name} - ${formatDate(new Date())}`);
-  const [summary, setSummary] = useState('');
-  const [nextSteps, setNextSteps] = useState('');
+  const [status, setStatusValue] = useState<ProjectStatusUpdateValue>(
+    draft ? (draft.status.toLowerCase() as ProjectStatusUpdateValue) : initialStatus,
+  );
+  const [title, setTitle] = useState(draft?.title ?? `${project.name} - ${formatDate(new Date())}`);
+  const [summary, setSummary] = useState(draft?.summary ?? '');
+  const [nextSteps, setNextSteps] = useState(draft?.nextSteps ?? '');
   const [railTab, setRailTab] = useState<'previous' | 'highlights' | 'drafts'>('highlights');
 
   const option = statusUpdateOption(status);
@@ -212,6 +222,27 @@ export function StatusUpdateComposer({
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-2xl space-y-8 px-6 py-10">
+            {draft && (
+              <div
+                role="note"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3.5 py-2.5 text-sm"
+              >
+                <Sparkles className="size-4 shrink-0 text-primary-strong" aria-hidden="true" />
+                <p className="min-w-0 flex-1">
+                  Drafted by AI
+                  {draft.rule ? ` for the rule “${draft.rule.name}”` : ''}{' '}
+                  {formatRelativeTime(draft.createdAt)}. Read it through before you post.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={discardDraft.isPending}
+                  onClick={() => discardDraft.mutate(undefined, { onSuccess: onClose })}
+                >
+                  Discard draft
+                </Button>
+              </div>
+            )}
             {/* Plain heading until engaged — the box appears on hover/focus. */}
             <input
               value={title}

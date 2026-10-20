@@ -11,28 +11,33 @@ Reading requires membership. **Every write requires `MANAGER`**, enforced in
 handler can forget it. Responses use the standard envelope,
 `{ "success": true, "data": … }`.
 
-This documents the surface as it exists. The structured rule model
-([versions, branches, condition groups](../architecture/automation-rule-tree.md))
-has tables but no endpoints; every route below reads and writes the
-`AutomationNode` tree.
+This documents the surface as it exists. The builder edits a rule as an
+`AutomationNode` tree — the **draft** — and publishing snapshots it into an
+`AutomationRuleVersion`, which is what runs; see
+[versioning](../architecture/automation-versioning.md). The structured model's
+`/:ruleId/definition` routes are a second way to write the same rule, described
+in [the rule tree](../architecture/automation-rule-tree.md).
 
 ## Endpoints
 
-| Method   | Path                  | Role    | Purpose                                   |
-| -------- | --------------------- | ------- | ----------------------------------------- |
-| `GET`    | `/`                   | member  | rules on this project, archived excluded  |
-| `POST`   | `/`                   | manager | create a rule — always as a `DRAFT`       |
-| `GET`    | `/metadata`           | member  | what the builder's forms may offer        |
-| `GET`    | `/:ruleId/graph`      | member  | the rule as nodes plus derived edges      |
-| `POST`   | `/:ruleId/validate`   | member  | check a graph without saving it           |
-| `GET`    | `/:ruleId`            | member  | one rule with its nodes                   |
-| `PATCH`  | `/:ruleId`            | manager | update; `nodes` replaces the whole canvas |
-| `POST`   | `/:ruleId/publish`    | manager | validate and activate                     |
-| `POST`   | `/:ruleId/pause`      | manager | `status = PAUSED`                         |
-| `POST`   | `/:ruleId/enable`     | manager | `status = ACTIVE`                         |
-| `POST`   | `/:ruleId/duplicate`  | manager | copy as a new draft                       |
-| `DELETE` | `/:ruleId`            | manager | archive if it has run, otherwise delete   |
-| `GET`    | `/:ruleId/executions` | member  | the last 25 runs, with per-action logs    |
+| Method   | Path                                  | Role    | Purpose                                   |
+| -------- | ------------------------------------- | ------- | ----------------------------------------- |
+| `GET`    | `/`                                   | member  | rules on this project, archived excluded  |
+| `POST`   | `/`                                   | manager | create a rule — always as a `DRAFT`       |
+| `GET`    | `/metadata`                           | member  | what the builder's forms may offer        |
+| `GET`    | `/:ruleId/graph`                      | member  | the rule as nodes plus derived edges      |
+| `POST`   | `/:ruleId/validate`                   | member  | check a graph without saving it           |
+| `GET`    | `/:ruleId`                            | member  | one rule with its nodes                   |
+| `PATCH`  | `/:ruleId`                            | manager | save the draft; `nodes` replaces it       |
+| `POST`   | `/:ruleId/publish`                    | manager | validate, snapshot as a version, activate |
+| `POST`   | `/:ruleId/pause`                      | manager | `status = PAUSED`                         |
+| `POST`   | `/:ruleId/enable`                     | manager | publish again — validated, as publish is  |
+| `GET`    | `/:ruleId/versions`                   | member  | published versions, newest first          |
+| `GET`    | `/:ruleId/versions/:versionId`        | member  | one version, with its steps as a graph    |
+| `POST`   | `/:ruleId/versions/:versionId/revert` | manager | put a version back in the draft           |
+| `POST`   | `/:ruleId/duplicate`                  | manager | copy as a new draft                       |
+| `DELETE` | `/:ruleId`                            | manager | archive if it has run, otherwise delete   |
+| `GET`    | `/:ruleId/executions`                 | member  | runs, newest first, paged, with logs      |
 
 `GET /metadata` is declared **before** `GET /:ruleId` in the controller, and has
 to stay there. Nest matches in declaration order; the other way round,
@@ -136,10 +141,17 @@ rule's own header fields:
   "status": "ACTIVE", "version": 3, "allowChaining": true,
   "createdBy": { "id": "019f…", "name": "…", "email": "…", "avatarUrl": null },
   "publishedAt": "2026-08-01T09:12:00.000Z",
+  "publishedVersion": { "id": "019f…", "version": 2, "isPublished": true, … },
+  "hasUnpublishedChanges": true,
   "graph": { "nodes": [ … ], "edges": [ … ] },
   "createdAt": "…", "updatedAt": "…"
 }
 ```
+
+`graph` is the **draft**. `publishedVersion` is what runs (null until the first
+publish), and `hasUnpublishedChanges` says whether the two differ — compared by
+what each step is and where it sits, never by id, so a save that changed nothing
+is not a change. The builder's header reads both.
 
 **Edges are derived, never stored.** `parentNodeId` already says what an edge
 row would say, and keeping both is how two answers to one question start
@@ -201,31 +213,37 @@ this question, not an error.
 Any of `name`, `description`, `allowChaining`, `triggerType`, `triggerConfig`,
 `nodes`.
 
-**Supplying `nodes` replaces every node** and increments `version`. They are not
-diffed. A builder sends the canvas as it now stands, and reconciling that
-against stored rows means guessing which node is "the same" one — guessing wrong
-silently rewires a rule. Omitting `nodes` leaves the canvas untouched.
+**This writes the draft.** A published rule goes on running the version it was
+published with until `publish` is called again, so a builder may save a live
+rule as often as it likes — the web builder autosaves every saved rule.
 
-Node ids sent by the client are mapped to fresh database ids within the write,
-and `parentId` is resolved through that map. A caller therefore cannot smuggle
-in a row it does not own by naming its id, and parentage still round-trips
-within one save.
+**Supplying `nodes` replaces every node** and increments `version` (a count of
+draft saves, not a version number). They are not diffed. A builder sends the
+canvas as it now stands, and reconciling that against stored rows means guessing
+which node is "the same" one — guessing wrong silently rewires a rule. Omitting
+`nodes` leaves the canvas untouched.
+
+A node keeps its id from one save to the next when the id is one of this rule's
+own nodes, and a `new-<uuid>` id from the builder is stored as that uuid. Any
+other id — another rule's node, or a name like `"t"` — is given a fresh one, so
+a caller cannot claim a row it does not own by naming it. `parentId` is resolved
+through the same mapping, so parentage round-trips within one save.
 
 When `nodes` includes a trigger and the request does not set `triggerType` or
-`triggerConfig` explicitly, both are **derived from the trigger node**. Those
-columns are a denormalisation of the graph — they are how the runner finds
-candidate rules — and a builder that saved a changed trigger as part of the
-canvas would otherwise leave the rule showing one trigger and firing on another.
-An explicit value still wins.
-
-This is also the only save path. There is no separate draft endpoint, so a
-`PATCH` against a published rule changes what it does immediately; see
-[versioning](../architecture/automation-versioning.md).
+`triggerConfig` explicitly, both are **derived from the trigger node**: the
+rule's trigger columns describe the draft's trigger, and a builder that saved a
+changed trigger as part of the canvas would otherwise publish a version with the
+old one. An explicit value still wins. What a live rule listens for is the
+published version's trigger, which changes only on `publish`.
 
 ## `POST /:ruleId/publish`
 
-Validates, then sets `status = ACTIVE` and stamps `publishedAt`. Refuses a rule
-that:
+Validates the draft, then snapshots it — its nodes and trigger — as the next
+`AutomationRuleVersion`, points `publishedVersionId` at it, sets
+`status = ACTIVE` and stamps `publishedAt`. A draft identical to the version
+already running (a second press, a resume) points back at that version instead
+of adding a copy to the history. Two publishes racing for the same version
+number get `409` for the loser. Refuses a rule that:
 
 - names a trigger the engine does not understand
 - has no action at all
@@ -261,9 +279,53 @@ Note that `publish` runs `AutomationsService.validate`, a shorter list than
 
 ## `POST /:ruleId/pause` and `/enable`
 
-Both set a status and nothing else. Pausing keeps the definition, which is what
-makes stopping a misbehaving rule safe and instant — only `ACTIVE` rules run,
-and every other status is a rule that exists and does nothing.
+`pause` sets the status and nothing else. Pausing keeps the definition, which is
+what makes stopping a misbehaving rule safe and instant — only `ACTIVE` rules
+run, and every other status is a rule that exists and does nothing.
+
+`enable` is `publish`: a rule may have gone stale while it was off (a deleted
+section, a member who left), so it is validated again. Unchanged, it goes back
+to the version it ran before.
+
+## `GET /:ruleId/versions` and `/versions/:versionId`
+
+Published versions, newest first:
+
+```json
+[
+  {
+    "id": "019f…",
+    "version": 2,
+    "name": "Assign on arrival",
+    "triggerType": "TASK_MOVED_TO_SECTION",
+    "publishedAt": "…",
+    "publishedBy": { "id": "…", "name": "…", "avatarUrl": null },
+    "isPublished": true,
+    "stepCount": 3
+  }
+]
+```
+
+`name` is what the rule was called when that version was published. The single
+version adds `triggerConfig` and `graph` — its steps, laid out as `/graph` lays
+out a rule. A draft the structured endpoints are still editing has no steps of
+this kind and is not listed. `404` for a version of another rule.
+
+## `POST /:ruleId/versions/:versionId/revert`
+
+```json
+{ "publish": false }
+```
+
+Copies the version's nodes and trigger into the draft and answers with the rule
+as `GET /:ruleId` does. Nothing running changes: the restored steps are
+published by `publish`, validated against the project as it is now. With
+`"publish": true` it publishes in the same call and is refused exactly as
+`publish` is. History is not rewritten — publishing a restored version adds a
+new version with the old steps.
+
+Restoring the version that is running is how a draft's unpublished changes are
+discarded.
 
 ## `POST /:ruleId/duplicate`
 
@@ -272,10 +334,9 @@ Copies the rule and its nodes as a new `DRAFT` named `"<name> copy"`.
 Always a draft: duplicating a live rule and having both fire immediately is
 never what anyone means by "duplicate".
 
-The copy does **not** preserve parentage — `duplicate` copies `nodeType`,
-`subtype`, `configuration` and `position` only. A branched rule duplicates into
-a flat one, which the runner will then evaluate with flat semantics. Worth
-knowing before relying on it.
+The copy keeps the graph's shape — parentage, arms and order — through the same
+writer a save uses. It copies the draft, which for a live rule may differ from
+what is running.
 
 ## `DELETE /:ruleId`
 
@@ -293,8 +354,13 @@ A draft has no history to lose.
 
 ## `GET /:ruleId/executions`
 
-The 25 most recent runs, newest first, each including its
-`AutomationExecutionLog` rows in the order they were written.
+Runs, newest first, each including its `AutomationExecutionLog` rows in the
+order they were written. Paged with `page` and `limit` (default 25, at most
+100); the data is the array of runs and the envelope's `meta` carries
+`{ page, limit, total, totalPages }`, so a caller that never asks for a page
+gets the same 25 it always did. Runs that started in the same instant are
+ordered by id, so none appears on two pages. **Run history** in the web app
+shows the newest 25 and loads older ones with **Show older runs**.
 
 | Status             | Meaning                                        |
 | ------------------ | ---------------------------------------------- |
@@ -309,10 +375,13 @@ wrong, and a history that conflates the two is useless for diagnosis.
 
 Each log row carries `succeeded`, a `message`, and `beforeValue`/`afterValue`,
 because a rule with four actions where the third failed is only diagnosable if
-each is accounted for separately.
+each is accounted for separately. A step a cap cut off has a row of its own
+saying it was not run and why; see
+[loop protection](../architecture/automation-loop-protection.md).
 
-The limit is fixed at 25 in the service and is not exposed as a query
-parameter.
+Each run carries `ruleVersion: { version }` — the version it executed — so an
+old run reads against what the rule said then. Null for runs from before
+versions were kept.
 
 ## The rule library
 
@@ -394,6 +463,7 @@ not exist.
 | Status | When                                                                 |
 | ------ | -------------------------------------------------------------------- |
 | `400`  | a malformed uuid in the path, or a rule that is not ready to publish |
+| `409`  | two publishes of one rule at the same moment                         |
 | `401`  | missing or invalid access token                                      |
 | `403`  | not a member, or not a `MANAGER` for a write                         |
 | `404`  | `RESOURCE_NOT_FOUND` — no such rule **in this project**              |
@@ -403,12 +473,8 @@ distinguishable "exists but forbidden" would confirm the id is real.
 
 ## Not yet available
 
-- Any endpoint for the structured model: no versions, branches, condition groups
-  or actions as resources.
-- A draft-save endpoint. `PATCH` writes the live definition.
-- Version history or revert.
-- Pagination on executions.
-- A manual "run this rule now" trigger.
+- Branches, condition groups or actions as resources of their own; the
+  structured model is read and written whole through `/:ruleId/definition`.
 - Planned actions in the metadata response.
 
 ## Related

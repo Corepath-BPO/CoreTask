@@ -21,15 +21,19 @@ it: `HttpOnly`, `SameSite`, `Secure` in production, and scoped to
 
 ## Endpoints
 
-| Method | Path                    | Auth           | Purpose                             |
-| ------ | ----------------------- | -------------- | ----------------------------------- |
-| POST   | `/auth/register`        | none           | Create an account, start a session  |
-| POST   | `/auth/login`           | none           | Exchange credentials for a session  |
-| POST   | `/auth/refresh`         | refresh cookie | Rotate and mint a new access token  |
-| POST   | `/auth/logout`          | refresh cookie | Revoke the current session          |
-| GET    | `/auth/me`              | access token   | Return the authenticated user       |
-| POST   | `/auth/forgot-password` | none           | E-mail a link to set a new password |
-| POST   | `/auth/reset-password`  | none           | Set a new password from that link   |
+| Method | Path                        | Auth           | Purpose                                  |
+| ------ | --------------------------- | -------------- | ---------------------------------------- |
+| POST   | `/auth/register`            | none           | Create an account, start a session       |
+| POST   | `/auth/login`               | none           | Exchange credentials for a session       |
+| POST   | `/auth/refresh`             | refresh cookie | Rotate and mint a new access token       |
+| POST   | `/auth/logout`              | refresh cookie | Revoke the current session               |
+| POST   | `/auth/logout-all`          | access token   | Revoke every session, this one included  |
+| GET    | `/auth/me`                  | access token   | Return the authenticated user            |
+| POST   | `/auth/change-password`     | access token   | New password; other sessions signed out  |
+| POST   | `/auth/forgot-password`     | none           | E-mail a link to set a new password      |
+| POST   | `/auth/reset-password`      | none           | Set a new password from that link        |
+| POST   | `/auth/resend-verification` | access token   | E-mail a new link to confirm the address |
+| POST   | `/auth/verify-email`        | none           | Confirm the address from that link       |
 
 ### POST /auth/register
 
@@ -103,7 +107,47 @@ hash is stored; the queued e-mail job is removed once sent.
 `{ token, password }`, the password held to the registration policy. `204` on
 success; every session the account had is revoked, so it signs in again.
 `400 PASSWORD_RESET_INVALID` for a link that is unknown, used or expired. The
-web page takes the token out of the address bar as soon as it reads it.
+web page takes the token out of the address bar as soon as it reads it. Using
+the link also confirms the address, since it was mailed there.
+
+### POST /auth/logout-all
+
+"Sign out everywhere", from **Settings › Sign-in and security**. Revokes every
+refresh token the account has, this session's included, and clears the cookie:
+`200 { loggedOut: true }`. Access tokens already handed out are not tracked, so
+they keep working until they expire (15 minutes); none of them can be
+refreshed.
+
+### POST /auth/change-password
+
+`{ currentPassword, newPassword }`, the new one held to the registration policy
+and refused if it is the current one (`422`). `204` on success. Every _other_
+session is revoked; the one that made the change stays signed in. Any unused
+reset link is voided, since it would undo the change. A wrong current password
+is `400 CURRENT_PASSWORD_INCORRECT` rather than a 401, so the client does not
+mistake it for an expired session.
+
+### E-mail confirmation
+
+Registering queues one e-mail, "Welcome to CoreTask — confirm your e-mail
+address", with a link to `<WEB_URL>/verify-email?token=…`. The link works once,
+for 72 hours, and only for the address it was sent to. As with reset links,
+only the token's SHA-256 hash is stored and the queued job is removed once
+sent. Accepting a workspace invitation or using a reset link also confirms the
+address, since both were mailed there.
+
+- `POST /auth/resend-verification` sends a new link, replacing any unused one.
+  It answers `{ sent, emailVerified }`: nothing is sent when the address is
+  already confirmed, or when a link went out under a minute ago.
+- `POST /auth/verify-email` with `{ token }` answers `{ email }`, or
+  `400 EMAIL_VERIFICATION_INVALID` for a link that is unknown, used, expired,
+  or for an address the account no longer has. It needs no session, because
+  the link may be opened on another device.
+
+Nothing is gated on a confirmed address yet. The web app shows a dismissible
+reminder while it is unconfirmed (back each browser session), and
+**Settings › Sign-in and security** shows the state with a **Send confirmation
+link** button.
 
 ## Rotation and replay detection
 
@@ -141,20 +185,22 @@ leak cannot be replayed. Passwords, which have low entropy, use Argon2id
 
 ## Error codes
 
-| Code                       | Status | Meaning                                     |
-| -------------------------- | ------ | ------------------------------------------- |
-| `VALIDATION_FAILED`        | 422    | Field errors in `error.details.fields`      |
-| `EMAIL_ALREADY_REGISTERED` | 409    | Address already in use                      |
-| `INVALID_CREDENTIALS`      | 401    | Wrong password **or** unknown address       |
-| `UNAUTHORIZED`             | 401    | No access token supplied                    |
-| `ACCESS_TOKEN_EXPIRED`     | 401    | Refresh and retry                           |
-| `ACCESS_TOKEN_INVALID`     | 401    | Malformed or wrongly signed — sign in again |
-| `REFRESH_TOKEN_INVALID`    | 401    | Missing or unparseable refresh cookie       |
-| `REFRESH_TOKEN_EXPIRED`    | 401    | Past its 30-day life                        |
-| `REFRESH_TOKEN_REUSED`     | 401    | Replay detected; the family was revoked     |
-| `ACCOUNT_DISABLED`         | 403    | Account deactivated                         |
-| `PASSWORD_RESET_INVALID`   | 400    | Reset link unknown, used or expired         |
-| `RATE_LIMIT_EXCEEDED`      | 429    | Auth throttle tripped                       |
+| Code                         | Status | Meaning                                       |
+| ---------------------------- | ------ | --------------------------------------------- |
+| `VALIDATION_FAILED`          | 422    | Field errors in `error.details.fields`        |
+| `EMAIL_ALREADY_REGISTERED`   | 409    | Address already in use                        |
+| `INVALID_CREDENTIALS`        | 401    | Wrong password **or** unknown address         |
+| `UNAUTHORIZED`               | 401    | No access token supplied                      |
+| `ACCESS_TOKEN_EXPIRED`       | 401    | Refresh and retry                             |
+| `ACCESS_TOKEN_INVALID`       | 401    | Malformed or wrongly signed — sign in again   |
+| `REFRESH_TOKEN_INVALID`      | 401    | Missing or unparseable refresh cookie         |
+| `REFRESH_TOKEN_EXPIRED`      | 401    | Past its 30-day life                          |
+| `REFRESH_TOKEN_REUSED`       | 401    | Replay detected; the family was revoked       |
+| `ACCOUNT_DISABLED`           | 403    | Account deactivated                           |
+| `PASSWORD_RESET_INVALID`     | 400    | Reset link unknown, used or expired           |
+| `CURRENT_PASSWORD_INCORRECT` | 400    | Changing a password: the current one is wrong |
+| `EMAIL_VERIFICATION_INVALID` | 400    | Confirmation link unknown, used or expired    |
+| `RATE_LIMIT_EXCEEDED`        | 429    | Auth throttle tripped                         |
 
 Branch on `error.code`. `error.message` is human-facing copy and may change.
 
@@ -264,8 +310,6 @@ workspace id every other call needs:
 
 ## Not yet implemented
 
-E-mail verification, changing a password while signed in, "sign out
-everywhere", and MFA. The groundwork exists — `emailVerifiedAt` on the user,
-the e-mail queue and worker, and `TokenService.revokeAllForUser()`, which the
-password reset already calls and which is one controller method away from
-being a `/auth/logout-all` endpoint.
+MFA, changing the e-mail address, and a list of active sessions to end one at a
+time. Anything that should require a confirmed address (inviting others, say)
+is not gated on it yet.

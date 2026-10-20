@@ -1,9 +1,10 @@
 import {
+  ProjectMemberRole,
   ProjectVisibility,
   WorkspaceRole,
+  effectiveConversationRole,
   hasAtLeastRole,
   hasProjectAdminOverride,
-  type ProjectMemberRole,
 } from '@coretask/contracts';
 import type { ProjectSummary } from '@coretask/types';
 import { useMemo } from 'react';
@@ -17,8 +18,9 @@ import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
  * one place that turns it into `canEdit` / `canManage` / `canManageMembers`, so
  * a project screen never reaches for the workspace role directly. A project
  * role only ever lowers that role — an EDITOR acts as at most a MEMBER, a
- * VIEWER as at most a GUEST — so a workspace manager who is a viewer here gets
- * a read-only screen, which is what the API would enforce anyway.
+ * COMMENTER or a VIEWER as at most a GUEST — so a workspace manager who is a
+ * viewer here gets a read-only screen, which is what the API would enforce
+ * anyway. A COMMENTER differs from a VIEWER only in `canComment`.
  */
 export interface ProjectAccess {
   /** The workspace role after the project role's cap. */
@@ -28,6 +30,8 @@ export interface ProjectAccess {
   isPrivate: boolean;
   /** MEMBER or better here: may add and edit work. */
   canEdit: boolean;
+  /** May comment, like and reply: an editor, or a COMMENTER, who may do nothing else. */
+  canComment: boolean;
   /** MANAGER or better here: may archive, delete sections, manage rules. */
   canManage: boolean;
   /** A project admin, or a workspace admin: may change the roster and the privacy. */
@@ -59,6 +63,10 @@ export function resolveProjectAccess(
     projectRole,
     isPrivate,
     canEdit: hasAtLeastRole(effectiveRole, WorkspaceRole.MEMBER),
+    canComment: hasAtLeastRole(
+      conversationRole(effectiveRole, projectRole, workspaceRole),
+      WorkspaceRole.MEMBER,
+    ),
     canManage: hasAtLeastRole(effectiveRole, WorkspaceRole.MANAGER),
     canManageMembers,
     canJoin: project != null && !isMember && !isPrivate,
@@ -87,6 +95,32 @@ export function roleForProjectItem(
   if (!project) return WorkspaceRole.GUEST;
 
   return resolveProjectAccess(project, workspaceRole).effectiveRole;
+}
+
+/**
+ * The role an item's conversation is joined with: `roleForProjectItem`, with
+ * a project COMMENTER counted as an editor — for the comment thread, which a
+ * commenter writes in although the rest of the panel stays read-only.
+ */
+export function conversationRoleForProjectItem(
+  projectId: string | null | undefined,
+  project: AccessSource,
+  workspaceRole: WorkspaceRole,
+): WorkspaceRole {
+  const role = roleForProjectItem(projectId, project, workspaceRole);
+  if (!projectId || !project) return role;
+  return conversationRole(role, project.access?.projectRole ?? null, workspaceRole);
+}
+
+/** The API's effective role, lifted for a COMMENTER as `effectiveConversationRole` says. */
+function conversationRole(
+  effectiveRole: WorkspaceRole,
+  projectRole: ProjectMemberRole | null,
+  workspaceRole: WorkspaceRole,
+): WorkspaceRole {
+  return projectRole === ProjectMemberRole.COMMENTER
+    ? effectiveConversationRole(workspaceRole, projectRole)
+    : effectiveRole;
 }
 
 /** `resolveProjectAccess` against the active workspace's role. */

@@ -65,6 +65,7 @@ enum ProjectVisibility {
 enum ProjectMemberRole {
   ADMIN
   EDITOR
+  COMMENTER
   VIEWER
 }
 
@@ -222,6 +223,7 @@ model User {
   createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
   oauthApps                  OAuthApp[]
   passwordResetTokens        PasswordResetToken[]
+  emailVerificationTokens    EmailVerificationToken[]
   oauthCodes                 OAuthAuthorizationCode[]
   oauthGrants                OAuthGrant[]
   slackInstallations         SlackInstallation[]
@@ -234,6 +236,8 @@ model User {
   projectMembersAdded        ProjectMember[]          @relation("ProjectMemberAddedBy")
   createdTasks               Task[]                   @relation("TaskCreatedBy")
   assignedTasks              Task[]                   @relation("TaskAssignee")
+  createdChecklists          TaskChecklist[]          @relation("TaskChecklistCreatedBy")
+  completedChecklistItems    TaskChecklistItem[]      @relation("ChecklistItemCompletedBy")
   reportedTickets            Ticket[]                 @relation("TicketReporter")
   assignedTickets            Ticket[]                 @relation("TicketAssignee")
   comments                   Comment[]
@@ -254,6 +258,7 @@ model User {
   createdGoals               Goal[]                   @relation("GoalCreatedBy")
   createdDependencies        TaskDependency[]         @relation("DependencyCreatedBy")
   sentInvitations            WorkspaceInvitation[]    @relation("InvitationSentBy")
+  approvedOAuthApps          WorkspaceOAuthApp[]      @relation("OAuthAppApprovedBy")
   teamMemberships            TeamMember[]
   ledTeams                   Team[]                   @relation("TeamLead")
   activityLogs               ActivityLog[]
@@ -360,19 +365,48 @@ model OAuthApp {
   redirectUris     String[]
   /// `ctc_…`, public.
   clientId         String   @unique @db.VarChar(64)
+  /// A public client (mobile, desktop) has no secret: it proves itself with
+  /// PKCE, and its refresh tokens rotate. Fixed when the app is registered.
+  isPublic         Boolean  @default(false)
   /// SHA-256 hex of the `cts_…` secret.
-  clientSecretHash String   @db.VarChar(64)
+  clientSecretHash String?  @db.VarChar(64)
   /// `cts_` plus the first characters — for the list, never for lookup.
-  secretHint       String   @db.VarChar(16)
+  secretHint       String?  @db.VarChar(16)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  owner  User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  codes  OAuthAuthorizationCode[]
-  grants OAuthGrant[]
+  owner      User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  codes      OAuthAuthorizationCode[]
+  grants     OAuthGrant[]
+  workspaces WorkspaceOAuthApp[]
 
   @@index([ownerId])
   @@map("oauth_apps")
+}
+
+/// Whether a workspace lets in any OAuth app its members connect, or only the
+/// ones its admins put in its app directory.
+enum OAuthAppPolicy {
+  ANY
+  APPROVED
+}
+
+/// An OAuth app a workspace's admins approved: its app directory. Under the
+/// APPROVED policy, an app's tokens act in the workspace only while it is here.
+model WorkspaceOAuthApp {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @db.Uuid
+  appId        String   @db.Uuid
+  approvedById String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  app        OAuthApp  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  approvedBy User?     @relation("OAuthAppApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, appId])
+  @@index([appId])
+  @@map("workspace_oauth_apps")
 }
 
 /// A code handed to an app's redirect URI, good once, for a few minutes.
@@ -556,16 +590,20 @@ model Workspace {
   /// transaction so keys stay gapless and collision-free.
   ticketCounter Int     @default(1000)
 
-  createdById String    @db.Uuid
-  archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdById    String         @db.Uuid
+  /// Which OAuth apps may act in this workspace: any a member connects, or
+  /// only those in its app directory (`WorkspaceOAuthApp`).
+  oauthAppPolicy OAuthAppPolicy @default(ANY)
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   createdBy               User                     @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members                 WorkspaceMember[]
   invitations             WorkspaceInvitation[]
   apiKeys                 ApiKey[]
   webhookEndpoints        WebhookEndpoint[]
+  oauthApps               WorkspaceOAuthApp[]
   webhookDeliveries       WebhookDelivery[]
   slackInstallation       SlackInstallation?
   teams                   Team[]
@@ -637,32 +675,39 @@ model WorkspaceMember {
 /// row rather than stacking up offers, which also makes "resend" and "change the
 /// role before they accept" the same operation.
 model WorkspaceInvitation {
-  id          String        @id @default(uuid(7)) @db.Uuid
-  workspaceId String        @db.Uuid
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
   /// Lower-cased on write so the unique constraint is case-insensitive.
-  email       String        @db.VarChar(254)
-  role        WorkspaceRole @default(MEMBER)
-  tokenHash   String        @unique
-  invitedById String?       @db.Uuid
+  email       String             @db.VarChar(254)
+  role        WorkspaceRole      @default(MEMBER)
+  tokenHash   String             @unique
+  invitedById String?            @db.Uuid
   /// Team to join on acceptance. Optional — most invitations name no team.
   /// `SetNull` on purpose: deleting a team must not invalidate a live
   /// invitation, because the workspace membership is the part that matters and
   /// the team was only ever a convenience.
-  teamId      String?       @db.Uuid
+  teamId      String?            @db.Uuid
+  /// Project to join on acceptance, from a project's Share dialog, with the
+  /// role to hold there. `SetNull` for the team's reason: a deleted project
+  /// still leaves the workspace invitation worth accepting.
+  projectId   String?            @db.Uuid
+  projectRole ProjectMemberRole?
   expiresAt   DateTime
   acceptedAt  DateTime?
   revokedAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invitedBy User?     @relation("InvitationSentBy", fields: [invitedById], references: [id], onDelete: SetNull)
   team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, email])
   @@index([email])
   @@index([workspaceId, acceptedAt])
   @@index([teamId])
+  @@index([projectId])
   @@map("workspace_invitations")
 }
 
@@ -701,6 +746,8 @@ model Project {
   lead             User?                 @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
   team             Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
   members          ProjectMember[]
+  invitations      WorkspaceInvitation[]
+  statusDraft      ProjectStatusDraft?
   stars            ProjectStar[]
   statusUpdates    ProjectStatusUpdate[]
   portfolios       PortfolioProject[]
@@ -1136,6 +1183,27 @@ model ProjectStatusUpdate {
   @@map("project_status_updates")
 }
 
+/// A status update a rule's "Draft an update with AI…" step wrote, waiting
+/// for a person to review and post it. One per project: a newer draft
+/// replaces it, and posting any update clears it — the project has a fresher
+/// word on itself by then.
+model ProjectStatusDraft {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @db.Uuid
+  projectId   String             @unique @db.Uuid
+  ruleId      String?            @db.Uuid
+  status      ProjectStatusValue
+  title       String             @db.VarChar(200)
+  summary     String?
+  nextSteps   String?
+  createdAt   DateTime           @default(now())
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rule    AutomationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@map("project_status_drafts")
+}
+
 /// A package of a project's workflow — Customize › Bundles. Its sections and
 /// fields are added to every project it is applied to; its rules and task
 /// templates are written into each, tagged, and replaced when it changes.
@@ -1387,6 +1455,10 @@ model ProjectMember {
   /// is one indexed statement (see the schema conventions).
   workspaceId String            @db.Uuid
   role        ProjectMemberRole @default(EDITOR)
+  /// What this project tells them about: ProjectNotificationKind values
+  /// (contracts' project-notifications.ts). Status updates and messages
+  /// until they choose.
+  notifyOn    String[]          @default(["STATUS_UPDATES", "MESSAGES"])
   /// Who added them. Null for the creator's own row and for backfilled leads.
   addedById   String?           @db.Uuid
   createdAt   DateTime          @default(now())
@@ -1428,6 +1500,8 @@ model Team {
   goals       Goal[]
   invitations WorkspaceInvitation[]
   messages    TeamMessage[]
+  /// Tasks this team has been made responsible for.
+  tasks       Task[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
@@ -1485,6 +1559,9 @@ model Task {
   projectId            String?         @db.Uuid
   sectionId            String?         @db.Uuid
   parentTaskId         String?         @db.Uuid
+  /// A subtask of a ticket rather than of a task. In the ticket's project, in
+  /// no section, and gone with the ticket, as a task's subtasks are with it.
+  parentTicketId       String?         @db.Uuid
   title                String          @db.VarChar(500)
   description          String?
   /// Legacy enum. Still authoritative until the definition backfill is
@@ -1522,6 +1599,10 @@ model Task {
   /// Set by "Mark as duplicate": the task this one repeats. It is completed,
   /// and its collaborators join the original.
   duplicateOfId        String?         @db.Uuid
+  /// The team responsible for the task, beside the one person assigned to it —
+  /// "assign to the facilities team". A team of this workspace; cleared, not
+  /// cascaded, when the team is deleted.
+  teamId               String?         @db.Uuid
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
@@ -1529,9 +1610,12 @@ model Task {
   project            Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   section            Section?                @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   parentTask         Task?                   @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  parentTicket       Ticket?                 @relation("TicketSubtasks", fields: [parentTicketId], references: [id], onDelete: Cascade)
   subtasks           Task[]                  @relation("TaskSubtasks")
   assignee           User?                   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  team               Team?                   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  checklists         TaskChecklist[]
   comments           Comment[]
   attachments        Attachment[]
   followers          Follower[]
@@ -1560,7 +1644,51 @@ model Task {
   @@index([assigneeId, status])
   @@index([workspaceId, dueDate])
   @@index([parentTaskId])
+  @@index([parentTicketId])
+  @@index([teamId])
   @@map("tasks")
+}
+
+/// A named list of things to tick off, on one task.
+///
+/// Lighter than subtasks on purpose: an item is a line and a checkbox — no
+/// assignee, dates, comments or place on a board of its own. "Move-in
+/// inspection: keys, meter readings, smoke alarms" is a checklist; work that
+/// somebody owns and schedules is a subtask.
+model TaskChecklist {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  taskId      String   @db.Uuid
+  name        String   @db.VarChar(200)
+  position    Float    @default(0)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task      Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy User?               @relation("TaskChecklistCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     TaskChecklistItem[]
+
+  @@index([taskId, position])
+  @@map("task_checklists")
+}
+
+/// One line of a checklist. Done when `completedAt` is set.
+model TaskChecklistItem {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  checklistId   String    @db.Uuid
+  title         String    @db.VarChar(500)
+  position      Float     @default(0)
+  completedAt   DateTime?
+  completedById String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  checklist   TaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  completedBy User?         @relation("ChecklistItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([checklistId, position])
+  @@map("task_checklist_items")
 }
 
 /// One person's like on one task — Asana's thumbs-up in the pane. The pair is
@@ -1640,6 +1768,7 @@ model Ticket {
   comments    Comment[]
   attachments Attachment[]
   followers   Follower[]
+  subtasks    Task[]       @relation("TicketSubtasks")
 
   @@unique([workspaceId, number])
   @@unique([workspaceId, key])
@@ -2255,6 +2384,7 @@ model AutomationRule {
   createdBy         User?                   @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   nodes             AutomationNode[]
   executions        AutomationExecution[]
+  statusDrafts      ProjectStatusDraft[]
   delayedRuns       AutomationDelayedRun[]
   webhookDeliveries WebhookDelivery[]
   versions          AutomationRuleVersion[] @relation("RuleVersions")
@@ -2317,15 +2447,30 @@ model AutomationRuleVersion {
   triggerType   String @db.VarChar(60)
   triggerConfig Json   @default("{}")
 
+  /// The steps this version runs: the rule's node tree as it stood when it was
+  /// published, in the row shape `automation_nodes` has (id, nodeType, subtype,
+  /// configuration, parentNodeId, branchKey, position).
+  ///
+  /// JSON rather than a second set of node rows, for the reason a template is: a
+  /// published version is never edited, validated in place or partly read — the
+  /// runner reads it whole and a revert copies it whole — so rows would be
+  /// structure with no query to serve, and every reader of `automation_nodes`
+  /// would have to remember to leave them out. Null on a draft the structured
+  /// definition endpoints are still editing; set when that draft is published.
+  nodes Json?
+  /// What the rule was called when this version was published, for the history.
+  name  String? @db.VarChar(120)
+
   createdById String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  rule        AutomationRule     @relation("RuleVersions", fields: [ruleId], references: [id], onDelete: Cascade)
-  createdBy   User?              @relation("AutomationVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  rule        AutomationRule        @relation("RuleVersions", fields: [ruleId], references: [id], onDelete: Cascade)
+  createdBy   User?                 @relation("AutomationVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   branches    AutomationBranch[]
-  draftOf     AutomationRule?    @relation("RuleDraft")
-  publishedOf AutomationRule?    @relation("RulePublished")
+  draftOf     AutomationRule?       @relation("RuleDraft")
+  publishedOf AutomationRule?       @relation("RulePublished")
+  executions  AutomationExecution[]
 
   @@unique([ruleId, version])
   @@index([ruleId])
@@ -2500,37 +2645,56 @@ model AutomationClockFiring {
 
 /// One run of one rule.
 model AutomationExecution {
-  id            String                    @id @default(uuid(7)) @db.Uuid
-  workspaceId   String                    @db.Uuid
-  projectId     String                    @db.Uuid
-  ruleId        String                    @db.Uuid
-  status        AutomationExecutionStatus @default(RUNNING)
-  triggerType   String                    @db.VarChar(60)
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                    @db.Uuid
+  projectId      String                    @db.Uuid
+  ruleId         String                    @db.Uuid
+  status         AutomationExecutionStatus @default(RUNNING)
+  triggerType    String                    @db.VarChar(60)
   /// What the run was about — usually a task.
-  entityType    String?                   @db.VarChar(40)
-  entityId      String?                   @db.Uuid
+  entityType     String?                   @db.VarChar(40)
+  entityId       String?                   @db.Uuid
   /// Who or what caused the triggering change. Null when a rule caused it.
-  actorId       String?                   @db.Uuid
+  actorId        String?                   @db.Uuid
   /// Shared by every execution descended from one original user action, which
   /// is what makes a loop detectable rather than merely suspected.
-  correlationId String                    @db.Uuid
+  correlationId  String                    @db.Uuid
+  /// The event this chain of rules started from. Narrower than the correlation
+  /// id, which a manual or scheduled run shares across every task in the batch:
+  /// the per-chain action cap counts within this, so a batch of fifty tasks is
+  /// fifty chains rather than one long one.
+  chainId        String?                   @db.Uuid
+  /// The event this run answered, plus the Wait step it resumed after, if any.
+  /// Unique per rule, so a queue retry of the same event finds the run it
+  /// already made instead of making the same changes twice.
+  idempotencyKey String?                   @db.VarChar(120)
+  /// How many action steps this run performed — what the chain cap sums.
+  actionsRun     Int                       @default(0)
   /// How many rules deep this is. The original action is 0.
-  depth         Int                       @default(0)
+  depth          Int                       @default(0)
   /// Set when conditions did not match, so a no-op is distinguishable from a
   /// failure in the history.
-  skippedReason String?                   @db.VarChar(200)
-  error         String?
-  durationMs    Int?
-  startedAt     DateTime                  @default(now())
-  finishedAt    DateTime?
+  skippedReason  String?                   @db.VarChar(200)
+  error          String?
+  durationMs     Int?
+  /// The published version this run executed — what the rule said at the
+  /// time, which its current definition may no longer. Null for runs from
+  /// before versions were kept, and for a stop recorded before a rule ran.
+  ruleVersionId  String?                   @db.Uuid
+  startedAt      DateTime                  @default(now())
+  finishedAt     DateTime?
 
-  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  rule      AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  logs      AutomationExecutionLog[]
+  workspace   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule        AutomationRule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  ruleVersion AutomationRuleVersion?   @relation(fields: [ruleVersionId], references: [id], onDelete: SetNull)
+  logs        AutomationExecutionLog[]
 
+  @@unique([ruleId, idempotencyKey])
   @@index([ruleId, startedAt])
   @@index([projectId, status])
   @@index([correlationId])
+  @@index([chainId])
+  @@index([ruleVersionId])
   @@map("automation_executions")
 }
 
@@ -2549,6 +2713,10 @@ model AutomationExecutionLog {
   message     String?  @db.VarChar(500)
   beforeValue Json?
   afterValue  Json?
+  /// What this step asked to be sent once the run was over — the events its
+  /// write amounts to, webhooks, e-mails. Kept so a queue retry that finds the
+  /// run already made can send them again rather than losing the chain.
+  followUps   Json?
   createdAt   DateTime @default(now())
 
   execution AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
@@ -2705,19 +2873,22 @@ model PortfolioStatusUpdate {
 /// A rule run waiting at a Wait step. The clock publishes `event` again, aimed
 /// at the rule and marked to resume from `nodeId`, once `runAt` has passed.
 model AutomationDelayedRun {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  workspaceId String   @db.Uuid
-  projectId   String   @db.Uuid
-  ruleId      String   @db.Uuid
+  id            String   @id @default(uuid(7)) @db.Uuid
+  workspaceId   String   @db.Uuid
+  projectId     String   @db.Uuid
+  ruleId        String   @db.Uuid
   /// The Wait step the run resumes after.
-  nodeId      String   @db.Uuid
-  runAt       DateTime
+  nodeId        String   @db.Uuid
+  /// The version the run started on, which it finishes on: a rule republished
+  /// while a run waits does not change what that run does next.
+  ruleVersionId String?  @db.Uuid
+  runAt         DateTime
   /// The event the run started from, to be published again.
-  event       Json
+  event         Json
   /// PENDING until the clock takes it; DONE once republished; CANCELLED when
   /// the rule had stopped by then.
-  status      String   @default("PENDING") @db.VarChar(16)
-  createdAt   DateTime @default(now())
+  status        String   @default("PENDING") @db.VarChar(16)
+  createdAt     DateTime @default(now())
 
   rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
@@ -2740,6 +2911,24 @@ model PasswordResetToken {
 
   @@index([userId, createdAt])
   @@map("password_reset_tokens")
+}
+
+/// A "confirm your e-mail address" link. Bound to the address it was sent to,
+/// so a link mailed before an address change cannot vouch for the new one.
+model EmailVerificationToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  email     String    @db.VarChar(254)
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("email_verification_tokens")
 }
 
 /// The CoreTask Slack app installed in a Slack workspace, for one CoreTask

@@ -31,18 +31,19 @@ export class FollowerNotifier {
     private readonly notifications: NotificationDispatcher,
   ) {}
 
+  /** Answers who was told, so a caller with more to say can leave them out. */
   async notifyStories(
     ref: ItemRef,
     actorId: string | null,
     stories: readonly StoryDraft[],
-  ): Promise<void> {
+  ): Promise<string[]> {
     const worth = stories.filter((story) => this.worthAnInboxLine(story.metadata));
-    if (worth.length === 0) return;
+    if (worth.length === 0) return [];
 
     const recipients = (await this.followers.followerIds(ref.workspaceId, ref.link)).filter(
       (id) => id !== actorId,
     );
-    if (recipients.length === 0) return;
+    if (recipients.length === 0) return [];
 
     const actor = actorId
       ? await this.prisma.user.findUnique({ where: { id: actorId }, select: { name: true } })
@@ -81,6 +82,7 @@ export class FollowerNotifier {
         }),
       ),
     );
+    return recipients;
   }
 
   private worthAnInboxLine(metadata: FieldStoryMetadata): boolean {

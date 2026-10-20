@@ -1,5 +1,5 @@
 import { ProjectMemberRole, ProjectVisibility, WorkspaceRole } from '@coretask/contracts';
-import type { ProjectMember, ProjectSummary } from '@coretask/types';
+import type { ProjectMember, ProjectSummary, WorkspaceInvitation } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithRouter, screen, setupUser, within } from '@/test/test-utils';
@@ -67,7 +67,12 @@ const updateRoleMutate = vi.fn();
 const removeMutate = vi.fn();
 const leaveMutate = vi.fn();
 const updateProjectMutate = vi.fn();
+const inviteMutate = vi.fn();
+const revokeMutate = vi.fn();
+const invitationsState: { data: WorkspaceInvitation[] } = { data: [] };
 let me: typeof owner = owner;
+/** The viewer's own workspace role, which decides whether they may invite someone new. */
+let myWorkspaceRole: WorkspaceRole = WorkspaceRole.OWNER;
 
 vi.mock('../../hooks/use-project-members', () => ({
   useProjectMembers: () => membersState,
@@ -75,6 +80,9 @@ vi.mock('../../hooks/use-project-members', () => ({
   useUpdateProjectMemberRole: () => ({ mutate: updateRoleMutate, isPending: false }),
   useRemoveProjectMember: () => ({ mutate: removeMutate, isPending: false }),
   useLeaveProject: () => ({ mutate: leaveMutate, isPending: false }),
+  useProjectInvitations: () => invitationsState,
+  useInviteToProject: () => ({ mutate: inviteMutate, isPending: false }),
+  useRevokeProjectInvitation: () => ({ mutate: revokeMutate, isPending: false }),
 }));
 
 vi.mock('../../hooks/use-projects', () => ({
@@ -82,6 +90,7 @@ vi.mock('../../hooks/use-projects', () => ({
 }));
 
 vi.mock('@/features/workspaces/hooks/use-workspaces', () => ({
+  useActiveWorkspace: () => ({ workspace: { id: 'ws-1', role: myWorkspaceRole } }),
   useWorkspaceMembers: () => ({
     data: [
       { id: 'm1', workspaceId: 'ws-1', role: 'OWNER', joinedAt: '', user: owner },
@@ -124,8 +133,83 @@ describe('ShareProjectDialog', () => {
       member(maya, ProjectMemberRole.ADMIN),
     ];
     membersState.isLoading = false;
+    invitationsState.data = [];
     me = owner;
+    myWorkspaceRole = WorkspaceRole.OWNER;
     vi.clearAllMocks();
+  });
+
+  it('invites an address that is not in the workspace, at the chosen role', async () => {
+    await open();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
+    await userEvent.type(
+      screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
+      'Ada@Example.com',
+    );
+    await userEvent.click(await screen.findByRole('option', { name: /invite ada@example.com/i }));
+
+    expect(inviteMutate).toHaveBeenCalledWith({
+      email: 'ada@example.com',
+      role: ProjectMemberRole.EDITOR,
+    });
+  });
+
+  it('does not offer to invite someone who is already in the workspace', async () => {
+    await open();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
+    await userEvent.type(
+      screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
+      'jonas@coretask.dev',
+    );
+
+    expect(screen.queryByRole('option', { name: /invite/i })).not.toBeInTheDocument();
+  });
+
+  it('tells a project admin who is not a workspace admin to ask one', async () => {
+    myWorkspaceRole = WorkspaceRole.MEMBER;
+    await open({}, WorkspaceRole.MEMBER);
+
+    expect(screen.getByText(/ask a workspace admin to invite them/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
+    await userEvent.type(
+      screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
+      'ada@example.com',
+    );
+
+    const option = await screen.findByRole('option', {
+      name: /only a workspace admin can invite/i,
+    });
+    expect(option).toHaveAttribute('aria-disabled', 'true');
+    expect(inviteMutate).not.toHaveBeenCalled();
+  });
+
+  it('lists the invitations still waiting, with a way to revoke them', async () => {
+    invitationsState.data = [
+      {
+        id: 'inv-1',
+        workspaceId: 'ws-1',
+        email: 'ada@example.com',
+        role: WorkspaceRole.MEMBER,
+        invitedBy: owner,
+        team: null,
+        project: { id: project.id, name: project.name, role: ProjectMemberRole.VIEWER },
+        expiresAt: '2026-12-01T00:00:00.000Z',
+        expired: false,
+        createdAt: '2026-10-01T00:00:00.000Z',
+      },
+    ];
+    await open();
+
+    const invited = screen.getByRole('list', { name: 'Invited' });
+    expect(within(invited).getByText('ada@example.com')).toBeInTheDocument();
+    expect(within(invited).getByText('Viewer')).toBeInTheDocument();
+
+    await userEvent.click(
+      within(invited).getByRole('button', { name: 'Revoke the invitation to ada@example.com' }),
+    );
+    expect(revokeMutate).toHaveBeenCalledWith({ invitationId: 'inv-1', email: 'ada@example.com' });
   });
 
   it('lists the roster with a role picker per row for a project admin', async () => {
