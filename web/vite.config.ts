@@ -63,7 +63,27 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+
+    /*
+     * Before every test, put `vi.spyOn` spies back on their objects and return
+     * every mock, `vi.fn()` included, to no calls and the implementation it was
+     * created with. Vitest 3 did all of that under `restoreMocks` alone;
+     * Vitest 4 narrowed it to restoring spies, so without `mockReset` a
+     * module-level `vi.fn()` carries its calls from one test into the next and
+     * `not.toHaveBeenCalled()` stops meaning "not in this test".
+     */
     restoreMocks: true,
+    mockReset: true,
+
+    /*
+     * The default 5 s is too tight for the suites that drive Radix dropdowns
+     * through `userEvent`: every interaction walks jsdom pointer emulation,
+     * and on a loaded CI runner the OAuth and playground specs time out at 5 s
+     * yet pass comfortably at 30 s. The ceiling is here to catch a genuine
+     * hang, not to police how fast the machine is.
+     */
+    testTimeout: 30_000,
+
     /*
      * Vitest's default is one worker per CPU thread less one, 17 on a 4P+8E
      * laptop. Past about half that, the extra workers mostly fight over the
@@ -73,12 +93,17 @@ export default defineConfig({
      * CI keeps the default. `--maxWorkers` on the command line still wins.
      */
     maxWorkers: process.env.CI ? undefined : '50%',
+
     // `e2e/` belongs to Playwright; Vitest would try to execute its
     // `test.describe` blocks and fail on the wrong runner.
     exclude: [...configDefaults.exclude, 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
+      // Without this, Vitest 4 reports only the files the run happened to
+      // load, so a module no test imports would drop out of the report
+      // instead of showing as 0%.
+      include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/test/**', 'src/**/*.d.ts', 'src/main.tsx'],
     },
   },

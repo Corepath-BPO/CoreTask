@@ -33,7 +33,7 @@ export const API_KEY_ROLES = [
 export type ApiKeyRole = (typeof API_KEY_ROLES)[number];
 
 /** Routes an API key may never call are marked `@SessionOnly()` on the API. */
-export const INTEGRATION_PRINCIPALS = ['user', 'api_key'] as const;
+export const INTEGRATION_PRINCIPALS = ['user', 'api_key', 'oauth_app'] as const;
 export type IntegrationPrincipal = (typeof INTEGRATION_PRINCIPALS)[number];
 
 /**

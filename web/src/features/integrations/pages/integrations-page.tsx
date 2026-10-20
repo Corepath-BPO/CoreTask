@@ -1,5 +1,5 @@
 import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
-import { Outlet } from '@tanstack/react-router';
+import { Navigate, Outlet, useLocation } from '@tanstack/react-router';
 import { Plug, ShieldAlert } from 'lucide-react';
 
 import { PageHeader } from '@/components/common/page-header';
@@ -8,16 +8,19 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { IntegrationsTabs } from '../components/integrations-tabs';
+import { INTEGRATIONS_TABS } from '../lib/integrations-tabs';
 
 /**
  * Shell for the integrations area: header, tabs, and the admin gate.
  *
- * The gate is here rather than in each tab so a member who deep-links to a tab
- * never mounts it — and so no admin-only query is ever started for them. The
- * API authorises independently; this is courtesy, not the boundary.
+ * The gate is here rather than in each tab so a member who deep-links to an
+ * admin tab never mounts it — and so no admin-only query is ever started for
+ * them. Their own tabs, OAuth apps and Connected apps, are open to everyone.
+ * The API authorises independently; this is courtesy, not the boundary.
  */
 export function IntegrationsPage() {
   const { workspace, isLoading } = useActiveWorkspace();
+  const { pathname } = useLocation();
 
   if (isLoading) {
     return (
@@ -42,28 +45,46 @@ export function IntegrationsPage() {
 
   const role = (workspace.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
   const canManage = hasAtLeastRole(role, WorkspaceRole.ADMIN);
+  const tab = INTEGRATIONS_TABS.find((entry) =>
+    pathname.startsWith(`/integrations/${entry.segment}`),
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Integrations"
-        description={`API keys, webhooks and a playground for the tools that work with ${workspace.name}.`}
+        description={`API keys, webhooks, OAuth apps, Slack and a playground for the tools that work with ${workspace.name}.`}
       />
 
-      {canManage ? (
-        <>
-          <div className="border-b border-border">
-            <IntegrationsTabs />
-          </div>
-          <Outlet />
-        </>
-      ) : (
+      <div className="border-b border-border">
+        <IntegrationsTabs canManage={canManage} />
+      </div>
+      {tab?.adminOnly && !canManage ? (
         <EmptyState
           icon={ShieldAlert}
           title="Workspace admins only"
-          description="Ask a workspace admin to manage API keys and webhooks."
+          description="Ask a workspace admin to manage API keys and webhooks. Your own OAuth apps, connected apps and Slack link are in the other tabs."
         />
+      ) : (
+        <Outlet />
       )}
     </div>
+  );
+}
+
+/** Bare `/integrations`: the first tab this person may use. */
+export function IntegrationsIndex() {
+  const { workspace, isLoading } = useActiveWorkspace();
+  if (isLoading) return null;
+  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  return (
+    <Navigate
+      to={
+        hasAtLeastRole(role, WorkspaceRole.ADMIN)
+          ? '/integrations/api-keys'
+          : '/integrations/connected-apps'
+      }
+      replace
+    />
   );
 }

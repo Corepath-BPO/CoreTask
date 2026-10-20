@@ -3,7 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { createApp } from '../../src/bootstrap/create-app';
 import { PrismaService } from '../../src/database/prisma.service';
 
-import { buildE2eDatabaseUrl } from './test-database';
+import { buildE2eDatabaseUrl, E2E_QUEUE_PREFIX } from './test-database';
 
 export interface TestContext {
   app: INestApplication;
@@ -19,6 +19,8 @@ export interface TestContext {
  */
 export async function createTestContext(): Promise<TestContext> {
   process.env['DATABASE_URL'] = buildE2eDatabaseUrl();
+  // Assigned, not defaulted: a developer's .env may name the worker's prefix.
+  process.env['QUEUE_PREFIX'] = E2E_QUEUE_PREFIX;
 
   const app = await createApp();
   await app.init();

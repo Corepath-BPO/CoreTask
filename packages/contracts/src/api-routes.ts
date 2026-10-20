@@ -16,6 +16,8 @@ export const ApiRoutes = {
     refresh: '/auth/refresh',
     logout: '/auth/logout',
     me: '/auth/me',
+    forgotPassword: '/auth/forgot-password',
+    resetPassword: '/auth/reset-password',
   },
   workspaces: {
     list: '/workspaces',
@@ -417,6 +419,39 @@ export const ApiRoutes = {
   },
   integration: {
     whoami: '/integration/whoami',
+  },
+  oauth: {
+    consent: '/oauth/consent',
+    authorize: '/oauth/authorize',
+    token: '/oauth/token',
+    revoke: '/oauth/revoke',
+    apps: '/users/me/oauth-apps',
+    app: (appId: string) => `/users/me/oauth-apps/${appId}`,
+    rotateSecret: (appId: string) => `/users/me/oauth-apps/${appId}/rotate-secret`,
+    connectedApps: '/users/me/connected-apps',
+    connectedApp: (appId: string) => `/users/me/connected-apps/${appId}`,
+  },
+  /**
+   * The CoreTask Slack app. The workspace's own routes are for the
+   * Integrations page; `complete` and the link pair are posted by web pages
+   * Slack sends people to; `commands` and `interactions` are Slack's, signed
+   * with the app's signing secret rather than signed in.
+   */
+  slack: {
+    status: (workspaceId: string) => `/workspaces/${workspaceId}/slack`,
+    install: (workspaceId: string) => `/workspaces/${workspaceId}/slack/install`,
+    channels: (workspaceId: string) => `/workspaces/${workspaceId}/slack/channels`,
+    myLink: (workspaceId: string) => `/workspaces/${workspaceId}/slack/me`,
+    complete: '/integrations/slack/install',
+    linkPreview: '/integrations/slack/link/preview',
+    link: '/integrations/slack/link',
+    commands: '/integrations/slack/commands',
+    interactions: '/integrations/slack/interactions',
+  },
+  webhookSubscriptions: {
+    list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,
+    one: (workspaceId: string, subscriptionId: string) =>
+      `/workspaces/${workspaceId}/webhook-subscriptions/${subscriptionId}`,
   },
   webhooks: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhooks`,

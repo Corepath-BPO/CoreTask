@@ -62,7 +62,7 @@ database or a secret.
 | Cache/queues  | Redis, BullMQ (consumed by a separate worker process)                    |
 | Realtime      | Socket.IO gateway, authenticated with the same access token as REST      |
 | Auth          | Argon2id passwords, short-lived JWT + rotating refresh token in a cookie |
-| Storage       | MinIO locally, any S3-compatible service in production                   |
+| Storage       | RustFS locally, any S3-compatible service in production                  |
 
 The frontend and backend are **independently deployable**: the browser talks to
 the API only over HTTP and WebSocket, and the API has no knowledge of the
@@ -87,7 +87,7 @@ CoreTask/
 │   ├── src/common/           filters, guards, interceptors, decorators, DTOs, utils
 │   ├── src/database/         Prisma service
 │   ├── src/modules/          auth, users, workspaces, workspace-members, …
-│   ├── src/integrations/     email, storage, notification dispatch
+│   ├── src/integrations/     email, storage, notification dispatch, AI
 │   ├── src/jobs/             BullMQ queues and processors
 │   ├── src/websocket/        Socket.IO gateway
 │   ├── prisma/               schema, migrations, seed
@@ -110,12 +110,12 @@ CoreTask/
 
 ## Prerequisites
 
-| Tool           | Version | Notes                                                        |
-| -------------- | ------- | ------------------------------------------------------------ |
-| Node.js        | ≥ 20.11 | Only needed for running outside Docker                       |
-| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate` |
-| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                           |
-| Git            | any     |                                                              |
+| Tool           | Version | Notes                                                                                                       |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| Node.js        | ≥ 24.9  | Only needed outside Docker. The API runs on 22.12+, but its Jest suites need 24.9+ (see api/jest.config.ts) |
+| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate`                                                |
+| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                                                                          |
+| Git            | any     |                                                                                                             |
 
 npm and Yarn are not supported — the workspace uses pnpm's linker and lockfile.
 
@@ -168,7 +168,7 @@ prefix.
 
 ## Running with Docker
 
-The full stack — web, API, worker, PostgreSQL, Redis and MinIO:
+The full stack — web, API, worker, PostgreSQL, Redis and RustFS for object storage:
 
 ```bash
 pnpm dev:build
@@ -195,8 +195,9 @@ pnpm down
 pnpm infra
 ```
 
-`pnpm infra` starts only PostgreSQL, Redis and MinIO — the combination you want
-when running the API and web dev servers on the host.
+`pnpm infra` starts only PostgreSQL, Redis and RustFS, and creates the storage
+bucket — the combination you want when running the API and web dev servers on
+the host.
 
 To discard all database and object-storage volumes:
 
@@ -268,18 +269,18 @@ cheap on a small laptop.
 
 ## Default ports
 
-| Service       | URL                                 |
-| ------------- | ----------------------------------- |
-| Frontend      | http://localhost:5173               |
-| API           | http://localhost:3000               |
-| REST base     | http://localhost:3000/api/v1        |
-| Swagger UI    | http://localhost:3000/api/docs      |
-| OpenAPI JSON  | http://localhost:3000/api/docs-json |
-| Health        | http://localhost:3000/api/v1/health |
-| PostgreSQL    | localhost:5432                      |
-| Redis         | localhost:6379                      |
-| MinIO API     | http://localhost:9000               |
-| MinIO Console | http://localhost:9001               |
+| Service         | URL                                   |
+| --------------- | ------------------------------------- |
+| Frontend        | http://localhost:5173                 |
+| API             | http://localhost:3000                 |
+| REST base       | http://localhost:3000/api/v1          |
+| Swagger UI      | http://localhost:3000/api/docs        |
+| OpenAPI JSON    | http://localhost:3000/api/docs-json   |
+| Health          | http://localhost:3000/api/v1/health   |
+| PostgreSQL      | localhost:5432                        |
+| Redis           | localhost:6379                        |
+| Storage API     | http://localhost:9000                 |
+| Storage console | http://localhost:9001/rustfs/console/ |
 
 Every published port is configurable — see
 [Troubleshooting → port already allocated](#port-already-allocated).
@@ -368,8 +369,11 @@ pnpm test:e2e
 ```
 
 These boot the real Nest application (same pipes, guards, filters and
-interceptors as production) with Supertest, against a dedicated `coretask_e2e`
-PostgreSQL **schema** — your development data is never touched.
+interceptors as production) with Supertest, against a dedicated PostgreSQL
+**schema** and BullMQ queue prefix — your development data is never touched.
+Both are named for the checkout (`coretask_e2e_<folder>_<hash>`), so runs in two
+git worktrees at once keep apart; set `E2E_SCHEMA` to give a second run in the
+same checkout its own.
 
 Covered: health and dependency checks, registration, login, invalid login,
 account enumeration resistance, `/auth/me`, refresh-token rotation, replay
@@ -556,6 +560,17 @@ pnpm compose:validate
   beside a name when someone picks an assignee; My Tasks auto-sort by due date
 - Sync to calendar: a private iCalendar link for My Tasks or a project, which
   can be reset and follows its owner's access
+- Ticket rules: when a ticket is reported or changes status, check it and
+  triage it — status, priority, assignee, section, comments, e-mail, a task
+- Rules that wait: a Wait step of minutes, hours or days, after which the
+  rest of the rule runs against the task as it is by then
+- Connectors: OAuth 2.0 apps (register under Integrations › OAuth apps; people
+  allow them on a consent page and disconnect them under Connected apps), and
+  webhook subscriptions an API key or app makes through the API, one project
+  at a time
+- AI in rules (with an Anthropic API key): "Use AI…" makes the changes its
+  instructions call for, from a list the author ticks and the project's own
+  options, and "Check with AI" lets a yes-or-no question decide a path
 - Rules that add a task to another project as well, fill variables into the
   subtasks they create, and e-mail the people on a task
 - Goals: a tree of outcomes with status, owner, team and time period, and
@@ -601,6 +616,9 @@ pnpm compose:validate
   creator, collaborators — as a link, with saved searches in the sidebar
 - Apps: a project's updates posted to Slack, Microsoft Teams, Google Chat or
   Discord, as each tool's own messages
+- Two-way Slack: `/coretask` and a message shortcut make tasks as the linked
+  person, and the app's channel posts carry buttons to complete or take a
+  task — see [Slack](docs/integrations/slack.md)
 - Email to a project: an address per project whose mail becomes tasks, with
   comments sent back to the people on the email and their replies kept as
   comments
@@ -610,8 +628,8 @@ pnpm compose:validate
 - Health endpoint, Swagger, structured logging with correlation ids
 - Realtime gateway with authenticated, membership-checked rooms
 - BullMQ queue + worker process (welcome e-mail on registration)
-- Real outbound e-mail through Microsoft Graph, with SMTP and a log transport as
-  the other two options — see [Outbound e-mail](docs/architecture/backend.md)
+- Real outbound e-mail through Microsoft Graph, or written to the log when Graph
+  is not configured — see [Outbound e-mail](docs/architecture/backend.md)
 
 ### Design notes
 
@@ -654,8 +672,8 @@ API_PORT=3010
 POSTGRES_PORT=55432
 REDIS_PORT=56379
 WEB_PORT=5173
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
+STORAGE_API_PORT=9000
+STORAGE_CONSOLE_PORT=9001
 ```
 
 Remember to update `DATABASE_URL`, `API_URL` and `VITE_API_URL` to match when
@@ -666,6 +684,20 @@ Find the offender:
 ```bash
 docker ps --format "{{.Names}}\t{{.Ports}}"
 ```
+
+### `coretask-storage` will not start: port 9000 already allocated
+
+A stack created before the move from MinIO to RustFS still has its old
+`coretask-minio` container holding ports 9000 and 9001. Compose no longer
+defines that service, so `up` leaves it running. Remove it as an orphan:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --remove-orphans
+```
+
+Nothing stored in MinIO carries over: RustFS starts on a new, empty volume, so
+attachments uploaded before the switch will show as missing. Once you no longer
+need them, reclaim the space with `docker volume rm coretask-minio-data`.
 
 ### `Environment validation failed` on API start
 
@@ -772,6 +804,7 @@ This deletes the database and object-storage volumes and rebuilds from scratch.
 | [Task dates, times and rich text](docs/architecture/task-dates-and-rich-text.md)             | Date/instant pairs, overdue, the picker, sanitised HTML, mentions, pictures |
 | [List selection, bulk edit and shortcuts](docs/architecture/list-selection-and-shortcuts.md) | Multi-select rules, the bulk bar and route, Tab chords                      |
 | [Comments and collaboration](docs/architecture/comments-and-collaboration.md)                | Followers, who gets told, stories in the panel, rich-text threads           |
+| [OAuth apps and webhook subscriptions](docs/architecture/oauth-and-connectors.md)            | Authorization-code flow, tokens, revocation, REST hooks for connectors      |
 | [Comments, followers and activity API](docs/api/comments-followers-activity.md)              | Threads by cursor, likes, pins, followers, an item's stories                |
 | [Project privacy and members API](docs/api/project-members.md)                               | Public/private projects, the roster and its roles, what `access` means      |
 | [Custom field system](docs/architecture/custom-field-system.md)                              | Eleven types incl. rating and formula, formats, stories, remove modes       |

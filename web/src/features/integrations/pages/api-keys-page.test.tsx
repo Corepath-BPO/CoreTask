@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { env } from '@/app/config/env';
 import { setupUser } from '@/test/test-utils';
 
 import { ApiKeysPage } from './api-keys-page';
@@ -185,6 +186,6 @@ describe('ApiKeysPage', () => {
 
     await screen.findByText('n8n');
     expect(screen.getByText(WORKSPACE)).toBeInTheDocument();
-    expect(screen.getByText(/localhost:3000\/api\/v1$/)).toBeInTheDocument();
+    expect(screen.getByText(env.apiUrl)).toBeInTheDocument();
   });
 });

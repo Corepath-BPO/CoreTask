@@ -65,7 +65,40 @@ every row the engine can run is enabled.
   missed by more than an hour is skipped rather than fired late.
 - Task types and approvals are rule material too: _Task type is changed_,
   _Approval status is changed_, a check on each, and _Set task type_.
-- Still greyed, with reasons: AI steps, tickets as rule targets.
+- **Ticket rules:** _Ticket is reported_ and _Ticket status changes_ (to any
+  status, or to one) start rules that act on the ticket. They check its type,
+  priority, severity, status or assignee. They can set its status or priority,
+  assign or unassign it, move it to a section, set or clear its due date,
+  comment, notify, email its people, change its collaborators, or create a task
+  from it ("Fix {{task.name}}" names the ticket). The builder greys out the
+  steps that belong to the other kind of rule, and publishing refuses them.
+  Setting a ticket's status raises _Ticket status changes_ for the next rule.
+- **Wait…** pauses a rule for 1 minute to 90 days before the steps after it.
+  What comes before runs at once; the clock picks the run up once the time
+  has passed and judges what follows on the task or ticket as it is by then.
+  So _Wait 2 days → Task is incomplete → Add comment_ nudges only if nobody
+  finished it. The rule's log says when it will continue. A run whose rule
+  was paused in the meantime is cancelled, and one whose wait step was edited
+  away is skipped. Webhooks fire once, for the event, not again on resuming.
+- **AI steps**, once the server has an Anthropic key (`ANTHROPIC_API_KEY`;
+  without one both stay greyed with that reason):
+  - **Use AI…** takes instructions and a list of what AI may do — comment,
+    assign, move to a section, change status or priority, set the due date,
+    create subtasks, fill in chosen custom fields. The model reads the task
+    (fields, description, subtasks, recent comments) and picks from this
+    project's own sections, statuses, people and options. Its choices run as
+    the ordinary actions, so history, notifications and follow-up rules behave
+    as if the author had added them. The run's log lists what it changed and
+    its one-line reason. Anything it suggests outside the ticked list is
+    ignored and counted. Its comments end "— Written by AI for the rule …",
+    since a rule's comment is posted under whoever set the rule off.
+  - **Create conditional check with AI** asks a yes-or-no question. The rule
+    goes on only on a yes; a no is logged as a skip with the model's reason,
+    and a check that could not be asked fails the run instead of skipping.
+    Only the rows a run reaches are asked.
+  - Task rules only. Task text is treated as data, never as instructions.
+- Still greyed, with reasons: "Draft an update with AI…" and "Let AI decide
+  the number of subtasks" (a Use AI… step that may create subtasks does it).
 
 ## Project templates and duplicates
 
@@ -139,8 +172,34 @@ place.
   the URL must be the tool's own webhook address. Underneath, an app is a
   webhook endpoint scoped to the project, so it retries, keeps a delivery log,
   switches itself off after repeated failures, and appears in the admin's
-  webhook list marked as an app.
+  webhook list marked as an app. With the CoreTask Slack app connected
+  (Integrations › Slack), **Add Slack** offers **As the CoreTask app** and a
+  channel picker instead of a URL: the bot posts there itself, with **Mark
+  complete**, **Assign to me** and **Open in CoreTask** under each task.
+- **Slack, two-way** (Integrations › Slack): an admin's **Add to Slack**; each
+  person links their Slack account once; `/coretask <task name>` and the
+  **Create a CoreTask task** message shortcut open a form (project, assignee,
+  due date, description) that makes the task as that person; buttons on the
+  app's posts act on the task and redraw the post. See
+  [docs/integrations/slack.md](../integrations/slack.md).
 - Every Customize row is built now; none is marked _Soon_.
+
+## Connecting other tools
+
+Asana's developer console and OAuth, and its webhooks API:
+
+- **Integrations › OAuth apps** registers an app: name, description, website,
+  redirect URIs; the client id and a once-shown secret. Anyone can register
+  one; it acts only for people who allow it.
+- A tool sends a person to **/oauth/authorize**. They see the app, who made
+  it, what it can do and where they will be sent, and **Allow** or **Cancel**.
+  The tool trades the code for an hour-long access token and a refresh token.
+- **Integrations › Connected apps** lists the apps a person allowed, with
+  **Disconnect**. The tab and OAuth apps are open to every member; API keys,
+  Webhooks and Playground stay with admins.
+- API keys and apps can **subscribe webhooks** to a project through the API
+  and remove them; Settings › Webhooks shows them as "Added by …".
+- See `docs/architecture/oauth-and-connectors.md` for the flow and its rules.
 
 ## Task pane
 

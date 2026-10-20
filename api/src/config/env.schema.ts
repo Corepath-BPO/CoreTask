@@ -49,6 +49,12 @@ export const envSchema = z
     REDIS_PORT: port.default(6379),
     REDIS_PASSWORD: optionalString,
     REDIS_DB: z.coerce.number().int().min(0).max(15).default(0),
+    // BullMQ's own default. The API and the worker must share it: the API
+    // queues jobs under it and the worker takes them from there.
+    QUEUE_PREFIX: z
+      .string()
+      .regex(/^[\w-]+$/, 'letters, digits, "_" and "-" only')
+      .default('bull'),
 
     JWT_ACCESS_SECRET: secret,
     JWT_REFRESH_SECRET: secret,
@@ -65,7 +71,7 @@ export const envSchema = z
     STORAGE_ENDPOINT: z.string().min(1).default('http://localhost:9000'),
     /**
      * Where a *browser* reaches storage, when that differs from where the API
-     * does. In Docker the API talks to `coretask-minio:9000`, a hostname that
+     * does. In Docker the API talks to `coretask-storage:9000`, a hostname that
      * exists only on the compose network — presigning with it produces URLs no
      * client can resolve. The signature covers the Host header, so this cannot
      * be patched in afterwards; the URL has to be signed for the host the
@@ -80,17 +86,9 @@ export const envSchema = z
     STORAGE_FORCE_PATH_STYLE: booleanFlag(true),
     STORAGE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).default(25),
 
-    // An empty SMTP_HOST selects the development transport, which writes the
-    // rendered message to the log instead of opening a connection.
-    SMTP_HOST: optionalString,
-    SMTP_PORT: port.default(1025),
-    SMTP_USER: optionalString,
-    SMTP_PASSWORD: optionalString,
-    SMTP_SECURE: booleanFlag(false),
-    SMTP_FROM: z.string().min(1).default('CoreTask <no-reply@coretask.local>'),
-
     /*
-     * Microsoft Graph, used in preference to SMTP when all four values are set.
+     * Microsoft Graph, the e-mail transport, used when all four values are set;
+     * without them e-mail is written to the log instead.
      * Client-credentials flow against an app registration holding the
      * application permission `Mail.Send`; mail is sent as MAIL_FROM_ADDRESS,
      * which must be a real mailbox in the tenant.
@@ -113,6 +111,31 @@ export const envSchema = z
       (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
       z.string().min(16, 'At least 16 characters.').optional(),
     ),
+
+    /*
+     * The model behind the AI steps in rules. Without a key the steps are
+     * greyed out with a reason — there is no stand-in model. The key is a
+     * secret: .env only, never a compose file or an image.
+     */
+    ANTHROPIC_API_KEY: optionalString,
+    ANTHROPIC_BASE_URL: z.string().url().default('https://api.anthropic.com'),
+    AI_MODEL: z.string().min(1).default('claude-sonnet-5-5'),
+    AI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+
+    /*
+     * The CoreTask Slack app (docs/integrations/slack.md): a workspace admin
+     * installs it, then people create tasks from Slack and act on the ones
+     * CoreTask posts. The three come from the app's Basic Information page,
+     * all or none; without them Integrations › Slack says what is missing.
+     * Secrets: .env only. The two addresses exist so tests can stand in for
+     * Slack, and nothing else should change them.
+     */
+    SLACK_CLIENT_ID: optionalString,
+    SLACK_CLIENT_SECRET: optionalString,
+    SLACK_SIGNING_SECRET: optionalString,
+    SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
+    SLACK_AUTHORIZE_URL: z.string().url().default('https://slack.com/oauth/v2/authorize'),
+    SLACK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
 
     /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
@@ -159,6 +182,20 @@ export const envSchema = z
           code: 'custom',
           path: [key],
           message: 'Required when any other Microsoft Graph mail setting is present.',
+        });
+      }
+    }
+
+    // Same reasoning as Graph: half a Slack app installs, then fails every
+    // request it signs, which is worse than saying so at boot.
+    const slackKeys = ['SLACK_CLIENT_ID', 'SLACK_CLIENT_SECRET', 'SLACK_SIGNING_SECRET'] as const;
+    const slackProvided = slackKeys.filter((key) => env[key]);
+    if (slackProvided.length > 0 && slackProvided.length < slackKeys.length) {
+      for (const key of slackKeys.filter((candidate) => !env[candidate])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Required when any other Slack app setting is present.',
         });
       }
     }

@@ -144,12 +144,18 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   // fallback `catalogueIcon` already applies to the action side.
   customField: glyph(SlidersHorizontal),
 
+  // "Create conditional check with AI", keyed by the field it stores.
+  'ai.check': glyph(Sparkles),
+
   /* Conditions declared but not checkable, greyed with their reason. */
-  AI_CONDITION: glyph(Sparkles),
   ADDED_BY_FORM: glyph(ClipboardList),
   ADDED_BY_EMAIL: glyph(Mail),
   TASK_TYPE: glyph(Shapes),
-  TICKET: glyph(Ticket),
+  'ticket.type': glyph(Ticket),
+  'ticket.priority': glyph(Ticket),
+  'ticket.severity': glyph(Ticket),
+  'ticket.status': glyph(TicketCheck),
+  'ticket.assignee': glyph(Ticket),
   APPROVAL_STATUS: glyph(ShieldCheck),
   NO_LONGER_BLOCKED: glyph(CircleSlash),
   IN_ANY_PROJECT: glyph(FolderSymlink),
@@ -170,7 +176,8 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   AI_ACTION: glyph(Sparkles),
   AI_DRAFT_UPDATE: glyph(Sparkles),
   SET_COMPLETION: glyph(CircleCheck),
-  SET_TICKET: glyph(Ticket),
+  SET_TICKET_STATUS: glyph(TicketCheck),
+  SET_TICKET_PRIORITY: glyph(Ticket),
   SET_TASK_TYPE: glyph(Shapes),
   SET_TASK_NAME: glyph(Type),
   SET_TASK_DESCRIPTION: glyph(AlignLeft),

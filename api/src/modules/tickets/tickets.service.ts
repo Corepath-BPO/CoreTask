@@ -39,6 +39,7 @@ import {
   toTicketDetailDto,
   toTicketDto,
 } from './ticket.mapper';
+import { ticketLifecycle } from './ticket-lifecycle';
 
 @Injectable()
 export class TicketsService {
@@ -148,7 +149,7 @@ export class TicketsService {
           reporterId: userId,
           assigneeId: dto.assigneeId ?? null,
           dueDate: toDate(dto.dueDate),
-          ...this.lifecycleTimestamps(status, null, null),
+          ...ticketLifecycle(status, null, null),
         },
         include: ticketInclude,
       });
@@ -240,10 +241,7 @@ export class TicketsService {
     const statusChanged = dto.status !== undefined && dto.status !== existing.status;
     if (dto.status !== undefined) {
       data.status = dto.status;
-      Object.assign(
-        data,
-        this.lifecycleTimestamps(dto.status, existing.resolvedAt, existing.closedAt),
-      );
+      Object.assign(data, ticketLifecycle(dto.status, existing.resolvedAt, existing.closedAt));
     }
 
     if (Object.keys(data).length === 0) {
@@ -338,32 +336,6 @@ export class TicketsService {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
-
-  /**
-   * Keeps `resolvedAt` / `closedAt` derived from status rather than settable.
-   *
-   * Closing implies resolution, so a ticket closed without passing through
-   * RESOLVED still gets a resolution timestamp — otherwise "time to resolve"
-   * reporting would silently miss those.
-   */
-  private lifecycleTimestamps(
-    status: TicketStatus,
-    resolvedAt: Date | null,
-    closedAt: Date | null,
-  ): { resolvedAt: Date | null; closedAt: Date | null } {
-    const now = new Date();
-
-    if (status === TicketStatus.CLOSED) {
-      return { resolvedAt: resolvedAt ?? now, closedAt: closedAt ?? now };
-    }
-
-    if (status === TicketStatus.RESOLVED) {
-      return { resolvedAt: resolvedAt ?? now, closedAt: null };
-    }
-
-    // Reopened: the ticket is live again, so neither timestamp applies.
-    return { resolvedAt: null, closedAt: null };
-  }
 
   private buildWhere(
     workspaceId: string,

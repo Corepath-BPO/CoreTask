@@ -70,6 +70,7 @@ function endpoint(overrides: Partial<WebhookEndpoint> = {}): WebhookEndpoint {
     lastDeliveryStatus: 'SUCCEEDED',
     lastSuccessAt: '2026-09-14T10:00:00.000Z',
     createdBy: { id: ME, name: 'Demo Owner', email: 'demo@coretask.dev', avatarUrl: null },
+    source: { kind: 'SETTINGS', name: null },
     createdAt: '2026-09-01T00:00:00.000Z',
     updatedAt: '2026-09-14T10:00:00.000Z',
     ...overrides,

@@ -50,6 +50,28 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.input<typeof loginSchema>;
 
+/** "Forgot password": just the address. The answer is the same whether it has an account. */
+export const forgotPasswordSchema = z.object({ email: emailSchema });
+export type ForgotPasswordInput = z.input<typeof forgotPasswordSchema>;
+
+/** The token from the link and the new password, held to the same policy as registering. */
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1, 'The reset link is incomplete.').max(200),
+  password: passwordSchema,
+});
+export type ResetPasswordInput = z.input<typeof resetPasswordSchema>;
+
+export const resetPasswordFormSchema = z
+  .object({
+    password: passwordSchema,
+    confirmPassword: z.string().min(1, 'Confirm your password.'),
+  })
+  .refine((values) => values.password === values.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+export type ResetPasswordFormInput = z.input<typeof resetPasswordFormSchema>;
+
 export const registerFormSchema = registerSchema
   .extend({
     confirmPassword: z.string().min(1, 'Confirm your password.'),

@@ -3,7 +3,13 @@ import type { AutomationMetadata } from '@coretask/types';
 import type { CanvasNode } from './graph-edits';
 import { describe, expect, it } from 'vitest';
 
-import { isNodeIncomplete, nodeCategory, nodeHeading, summarise } from './node-summary';
+import {
+  isNodeIncomplete,
+  nodeCategory,
+  nodeHeading,
+  summarise,
+  summariseParts,
+} from './node-summary';
 
 const metadata = {
   triggers: [],
@@ -88,6 +94,18 @@ describe('what a node says', () => {
     expect(summarise(node({ configuration: {} }), metadata)).toBe('Assign — choose somebody');
     expect(summarise(node({ subtype: 'MOVE_TO_PROJECT', configuration: {} }), metadata)).toBe(
       'Move — choose a project',
+    );
+  });
+
+  it('reads the ticket steps in the ticket’s words', () => {
+    expect(
+      summarise(
+        node({ subtype: 'SET_TICKET_STATUS', configuration: { status: 'IN_PROGRESS' } }),
+        metadata,
+      ),
+    ).toBe('Set ticket status to In progress');
+    expect(summarise(node({ subtype: 'SET_TICKET_PRIORITY', configuration: {} }), metadata)).toBe(
+      'Set ticket priority — choose one',
     );
   });
 
@@ -462,5 +480,60 @@ describe('the triggers that are not edits, and the newer actions', () => {
     expect(isNodeIncomplete(node({ subtype: 'SET_TASK_DESCRIPTION', configuration: {} }))).toBe(
       false,
     );
+  });
+});
+
+describe('the Wait step', () => {
+  const wait = (configuration: Record<string, unknown>) =>
+    node({ type: 'DELAY', subtype: 'DELAY', configuration });
+
+  it('says how long it waits, the length set apart as the value', () => {
+    expect(summarise(wait({ amount: 2, unit: 'DAYS' }), metadata)).toBe('Wait 2 days');
+    expect(summarise(wait({ amount: 1, unit: 'HOURS' }), metadata)).toBe('Wait 1 hour');
+    expect(summariseParts(wait({ amount: 30, unit: 'MINUTES' }), metadata)).toEqual([
+      { text: 'Wait' },
+      { text: '30 minutes', chip: true },
+    ]);
+  });
+
+  it('asks how long until it knows, and is flagged until then', () => {
+    expect(summarise(wait({}), metadata)).toBe('Wait — choose how long');
+    expect(isNodeIncomplete(wait({}))).toBe(true);
+    expect(isNodeIncomplete(wait({ amount: 91, unit: 'DAYS' }))).toBe(true);
+    expect(isNodeIncomplete(wait({ amount: 1, unit: 'DAYS' }))).toBe(false);
+  });
+});
+
+describe('the AI steps', () => {
+  it('shows what "Use AI…" was told, and flags it until it may change something', () => {
+    const ai = (configuration: Record<string, unknown>) =>
+      node({ subtype: 'AI_ACTION', configuration });
+
+    expect(summarise(ai({}), metadata)).toBe('Use AI — write the instructions');
+    expect(summariseParts(ai({ instructions: 'Triage the request' }), metadata)).toEqual([
+      { text: 'Use AI:' },
+      { text: 'Triage the request', chip: true },
+    ]);
+    expect(
+      summarise(
+        ai({ instructions: 'Read the request and decide whether it is a repair or a renewal' }),
+        metadata,
+      ),
+    ).toBe('Use AI: Read the request and decide whether it is a repair or a…');
+
+    expect(isNodeIncomplete(ai({ instructions: 'Triage' }))).toBe(true);
+    expect(isNodeIncomplete(ai({ instructions: 'Triage', allow: ['COMMENT'] }))).toBe(false);
+  });
+
+  it('shows the AI check’s question, and flags it until there is one', () => {
+    const check = (configuration: Record<string, unknown>) =>
+      node({ type: 'CONDITION', subtype: 'FIELD_COMPARISON', configuration });
+
+    expect(summarise(check({ field: 'ai.check' }), metadata)).toBe('AI — ask a yes-or-no question');
+    expect(summarise(check({ field: 'ai.check', question: 'Is it broken?' }), metadata)).toBe(
+      'AI: Is it broken?',
+    );
+    expect(isNodeIncomplete(check({ field: 'ai.check' }))).toBe(true);
+    expect(isNodeIncomplete(check({ field: 'ai.check', question: 'Is it broken?' }))).toBe(false);
   });
 });

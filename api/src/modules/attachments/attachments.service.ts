@@ -168,9 +168,10 @@ export class AttachmentsService {
    * Turns a reservation into a real attachment, after checking what landed.
    *
    * This is the security boundary of the whole feature. A presigned PUT cannot
-   * enforce a size limit — S3 and MinIO have no way to express one on a signed
-   * URL — so a URL issued for a 2 KB image will happily accept a gigabyte.
-   * Reading the object back is what makes the recorded size true.
+   * enforce a size limit — S3 and the servers modelled on it have no way to
+   * express one on a signed URL — so a URL issued for a 2 KB image will happily
+   * accept a gigabyte. Reading the object back is what makes the recorded size
+   * true.
    *
    * A mismatch deletes the object rather than leaving it to the sweeper: it is
    * already known to be unwanted, and paying for it until a cron notices would

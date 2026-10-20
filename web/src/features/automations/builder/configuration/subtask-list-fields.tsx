@@ -120,8 +120,9 @@ function dueLabel(row: SubtaskEntry): string | null {
  *
  * The two options underneath are shown as Asana shows them and say why they
  * cannot be changed: assignees follow their tasks throughout this application,
- * and no AI runs in it yet. The convention in this panel is disabled with a
- * reason rather than quietly missing.
+ * and AI writes subtasks from a "Use AI…" step rather than from inside this
+ * one. The convention in this panel is disabled with a reason rather than
+ * quietly missing.
  */
 export function SubtaskListFields({
   configuration,
@@ -229,7 +230,7 @@ export function SubtaskListFields({
           <OptionRow
             checked={false}
             label="Let AI decide the number of subtasks to create"
-            reason="No AI runs in this workspace yet."
+            reason="Add a “Use AI…” step that may create subtasks to let AI choose them."
           />
         </div>
       </div>

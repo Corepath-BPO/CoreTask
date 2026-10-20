@@ -9,17 +9,27 @@ export interface ApiKeyPrincipal {
   name: string;
 }
 
-/** Identity attached to the request by `JwtAuthGuard` — a session or an API key. */
+/** The app an OAuth access token was issued to, and the grant it was issued under. */
+export interface OAuthPrincipal {
+  grantId: string;
+  appId: string;
+  appName: string;
+}
+
+/** Identity attached to the request by `JwtAuthGuard` — a session, an API key or an OAuth token. */
 export interface AuthenticatedUser {
   id: string;
   email: string;
   /**
    * Session id, tying this access token to a refresh-token family. Null when
-   * an API key authenticated the request: a key has no session to revoke.
+   * an API key or an OAuth token authenticated the request: neither has a
+   * session to revoke.
    */
   sessionId: string | null;
   /** Present when a workspace API key authenticated the request. */
   apiKey?: ApiKeyPrincipal;
+  /** Present when an OAuth access token did: the request acts as the person who allowed the app. */
+  oauth?: OAuthPrincipal;
 }
 
 /**
