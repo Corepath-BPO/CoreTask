@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  type ProjectApp,
+  ProjectApp,
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
   WEBHOOK_EVENT_ID_HEADER,
@@ -21,12 +21,17 @@ import { UnrecoverableError } from 'bullmq';
 import { fetchWithTimeout, safeBody } from '../../common/utils/http.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
+import { SlackApiClient, SlackApiError } from '../../integrations/slack/slack-api.client';
 import type { RuleWebhookRequest } from '../../jobs/queue-names';
 import { WebhookQueue } from '../../jobs/webhook/webhook.queue';
 import type { AutomationEvent } from '../automations/automation-event.publisher';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
-import { renderAppMessage, type AppMessageContext } from './lib/app-messages';
+import {
+  renderAppMessage,
+  renderSlackChannelMessage,
+  type AppMessageContext,
+} from './lib/app-messages';
 import { decryptSecret, deriveKey } from './lib/secret-cipher';
 import { signWebhook } from './lib/signature';
 import { assertResolvesToAllowedAddress } from './lib/url-policy';
@@ -71,6 +76,7 @@ export class WebhookDeliveryService {
     private readonly queue: WebhookQueue,
     private readonly payloads: WebhookPayloadBuilder,
     private readonly projectAccess: ProjectAccessService,
+    private readonly slack: SlackApiClient,
   ) {
     this.key = deriveKey(config.webhooks.encryptionKeyMaterial);
   }
@@ -416,6 +422,15 @@ export class WebhookDeliveryService {
       return { status: 'endpoint-disabled' };
     }
 
+    if (delivery.endpoint?.app === ProjectApp.SLACK && delivery.endpoint.slackChannelId) {
+      return this.postAsSlackBot(
+        delivery,
+        delivery.endpoint,
+        delivery.endpoint.slackChannelId,
+        attempt,
+      );
+    }
+
     const body = delivery.endpoint?.app
       ? JSON.stringify(
           renderAppMessage(
@@ -504,6 +519,82 @@ export class WebhookDeliveryService {
 
     if (!retryable) throw new UnrecoverableError(message);
     throw new Error(message);
+  }
+
+  /**
+   * A Slack app that posts as the CoreTask bot: `chat.postMessage` with the
+   * workspace's bot token, and buttons under a task's post. Slack answers
+   * 200 with `ok: false` for nearly every failure, so its error code — not
+   * the status — says whether another try could help: `channel_not_found`
+   * will not fix itself, `ratelimited` will.
+   */
+  private async postAsSlackBot(
+    delivery: DeliveryWithEndpoint,
+    endpoint: WebhookEndpoint,
+    channelId: string,
+    attempt: number,
+  ): Promise<{ status: string }> {
+    const installation = await this.prisma.slackInstallation.findUnique({
+      where: { workspaceId: delivery.workspaceId },
+      select: { botToken: true },
+    });
+    if (!installation) {
+      const error = 'Slack is not connected to this workspace.';
+      await this.settle(
+        delivery,
+        attempt,
+        { succeeded: false, responseStatus: null, error, durationMs: null, snippet: null },
+        { final: true, countAgainstEndpoint: true },
+      );
+      throw new UnrecoverableError(error);
+    }
+
+    const message = renderSlackChannelMessage(
+      delivery.payload as unknown as WebhookEventPayload,
+      await this.appContext(endpoint.projectId, delivery.payload),
+    );
+    const started = Date.now();
+    try {
+      const posted = await this.slack.postMessage(
+        decryptSecret(installation.botToken, this.key),
+        channelId,
+        message,
+      );
+      await this.settle(
+        delivery,
+        attempt,
+        {
+          succeeded: true,
+          responseStatus: 200,
+          error: null,
+          durationMs: Date.now() - started,
+          snippet: JSON.stringify({ ok: true, channel: posted.channel, ts: posted.ts }),
+        },
+        { final: true, countAgainstEndpoint: true },
+      );
+      return { status: 'delivered' };
+    } catch (error) {
+      const retryable = !(error instanceof SlackApiError) || error.retryable;
+      const reason =
+        error instanceof SlackApiError
+          ? `Slack said ${error.error}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      await this.settle(
+        delivery,
+        attempt,
+        {
+          succeeded: false,
+          responseStatus: null,
+          error: reason,
+          durationMs: Date.now() - started,
+          snippet: null,
+        },
+        { final: !retryable || attempt >= delivery.maxAttempts, countAgainstEndpoint: true },
+      );
+      throw retryable ? new Error(reason) : new UnrecoverableError(reason);
+    }
   }
 
   /** Records the attempt on the delivery and, when it counts, on the endpoint's health. */

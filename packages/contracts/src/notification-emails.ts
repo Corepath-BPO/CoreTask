@@ -1,4 +1,4 @@
-import { type NotificationType } from './enums.js';
+import type { NotificationType } from './enums.js';
 
 /**
  * Which inbox notifications also arrive by email — Asana's Settings ›

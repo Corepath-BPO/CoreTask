@@ -25,7 +25,11 @@ export function isUndeliverableAddress(address: string): boolean {
   const at = address.lastIndexOf('@');
   if (at === -1) return true;
 
-  const domain = address.slice(at + 1).trim().toLowerCase().replace(/\.$/, '');
+  const domain = address
+    .slice(at + 1)
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, '');
   if (!domain) return true;
 
   if (RESERVED_DOMAINS.includes(domain as (typeof RESERVED_DOMAINS)[number])) return true;

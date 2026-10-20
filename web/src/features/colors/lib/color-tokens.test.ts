@@ -33,8 +33,7 @@ describe('colour tokens', () => {
   it('light and dark are genuinely different, not the same table twice', () => {
     const differences = COLOR_TOKENS.filter(
       (token) =>
-        resolveColorToken(token, 'light').onSurface !==
-        resolveColorToken(token, 'dark').onSurface,
+        resolveColorToken(token, 'light').onSurface !== resolveColorToken(token, 'dark').onSurface,
     );
 
     expect(differences).toHaveLength(COLOR_TOKENS.length);

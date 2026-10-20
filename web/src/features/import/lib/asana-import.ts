@@ -195,7 +195,9 @@ export function buildImportPlan(
   const priorityIsSystem =
     priorityCol !== -1 &&
     priorityValues.length > 0 &&
-    priorityValues.every((value) => (Object.values(TaskPriority) as string[]).includes(value.toUpperCase()));
+    priorityValues.every((value) =>
+      (Object.values(TaskPriority) as string[]).includes(value.toUpperCase()),
+    );
 
   /* ---- custom columns ------------------------------------------------- */
 
@@ -345,7 +347,10 @@ export function buildImportPlan(
     const startDate = toIsoZ(startRaw);
     const dueDate = toIsoZ(dueRaw);
     if (startRaw.trim() !== '' && startDate === null) {
-      warnings.push({ rowIndex, message: `Unreadable start date "${startRaw.trim()}" was skipped.` });
+      warnings.push({
+        rowIndex,
+        message: `Unreadable start date "${startRaw.trim()}" was skipped.`,
+      });
     }
     if (dueRaw.trim() !== '' && dueDate === null) {
       warnings.push({ rowIndex, message: `Unreadable due date "${dueRaw.trim()}" was skipped.` });
@@ -400,7 +405,8 @@ export function buildImportPlan(
       : null;
 
   return {
-    projectName: projectName || options.fileName.replace(/\.csv$/i, '').trim() || 'Imported project',
+    projectName:
+      projectName || options.fileName.replace(/\.csv$/i, '').trim() || 'Imported project',
     sections,
     tasks,
     customFieldColumns,

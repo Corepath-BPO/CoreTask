@@ -62,7 +62,7 @@ database or a secret.
 | Cache/queues  | Redis, BullMQ (consumed by a separate worker process)                    |
 | Realtime      | Socket.IO gateway, authenticated with the same access token as REST      |
 | Auth          | Argon2id passwords, short-lived JWT + rotating refresh token in a cookie |
-| Storage       | MinIO locally, any S3-compatible service in production                   |
+| Storage       | RustFS locally, any S3-compatible service in production                  |
 
 The frontend and backend are **independently deployable**: the browser talks to
 the API only over HTTP and WebSocket, and the API has no knowledge of the
@@ -110,12 +110,12 @@ CoreTask/
 
 ## Prerequisites
 
-| Tool           | Version | Notes                                                        |
-| -------------- | ------- | ------------------------------------------------------------ |
-| Node.js        | ≥ 20.11 | Only needed for running outside Docker                       |
-| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate` |
-| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                           |
-| Git            | any     |                                                              |
+| Tool           | Version | Notes                                                                                                       |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| Node.js        | ≥ 24.9  | Only needed outside Docker. The API runs on 22.12+, but its Jest suites need 24.9+ (see api/jest.config.ts) |
+| pnpm           | ≥ 9     | `corepack enable && corepack prepare pnpm@latest --activate`                                                |
+| Docker Desktop | ≥ 24    | With Compose v2 (`docker compose`)                                                                          |
+| Git            | any     |                                                                                                             |
 
 npm and Yarn are not supported — the workspace uses pnpm's linker and lockfile.
 
@@ -168,7 +168,7 @@ prefix.
 
 ## Running with Docker
 
-The full stack — web, API, worker, PostgreSQL, Redis and MinIO:
+The full stack — web, API, worker, PostgreSQL, Redis and RustFS for object storage:
 
 ```bash
 pnpm dev:build
@@ -195,8 +195,9 @@ pnpm down
 pnpm infra
 ```
 
-`pnpm infra` starts only PostgreSQL, Redis and MinIO — the combination you want
-when running the API and web dev servers on the host.
+`pnpm infra` starts only PostgreSQL, Redis and RustFS, and creates the storage
+bucket — the combination you want when running the API and web dev servers on
+the host.
 
 To discard all database and object-storage volumes:
 
@@ -268,18 +269,18 @@ cheap on a small laptop.
 
 ## Default ports
 
-| Service       | URL                                 |
-| ------------- | ----------------------------------- |
-| Frontend      | http://localhost:5173               |
-| API           | http://localhost:3000               |
-| REST base     | http://localhost:3000/api/v1        |
-| Swagger UI    | http://localhost:3000/api/docs      |
-| OpenAPI JSON  | http://localhost:3000/api/docs-json |
-| Health        | http://localhost:3000/api/v1/health |
-| PostgreSQL    | localhost:5432                      |
-| Redis         | localhost:6379                      |
-| MinIO API     | http://localhost:9000               |
-| MinIO Console | http://localhost:9001               |
+| Service         | URL                                   |
+| --------------- | ------------------------------------- |
+| Frontend        | http://localhost:5173                 |
+| API             | http://localhost:3000                 |
+| REST base       | http://localhost:3000/api/v1          |
+| Swagger UI      | http://localhost:3000/api/docs        |
+| OpenAPI JSON    | http://localhost:3000/api/docs-json   |
+| Health          | http://localhost:3000/api/v1/health   |
+| PostgreSQL      | localhost:5432                        |
+| Redis           | localhost:6379                        |
+| Storage API     | http://localhost:9000                 |
+| Storage console | http://localhost:9001/rustfs/console/ |
 
 Every published port is configurable — see
 [Troubleshooting → port already allocated](#port-already-allocated).
@@ -368,8 +369,11 @@ pnpm test:e2e
 ```
 
 These boot the real Nest application (same pipes, guards, filters and
-interceptors as production) with Supertest, against a dedicated `coretask_e2e`
-PostgreSQL **schema** — your development data is never touched.
+interceptors as production) with Supertest, against a dedicated PostgreSQL
+**schema** and BullMQ queue prefix — your development data is never touched.
+Both are named for the checkout (`coretask_e2e_<folder>_<hash>`), so runs in two
+git worktrees at once keep apart; set `E2E_SCHEMA` to give a second run in the
+same checkout its own.
 
 Covered: health and dependency checks, registration, login, invalid login,
 account enumeration resistance, `/auth/me`, refresh-token rotation, replay
@@ -612,6 +616,9 @@ pnpm compose:validate
   creator, collaborators — as a link, with saved searches in the sidebar
 - Apps: a project's updates posted to Slack, Microsoft Teams, Google Chat or
   Discord, as each tool's own messages
+- Two-way Slack: `/coretask` and a message shortcut make tasks as the linked
+  person, and the app's channel posts carry buttons to complete or take a
+  task — see [Slack](docs/integrations/slack.md)
 - Email to a project: an address per project whose mail becomes tasks, with
   comments sent back to the people on the email and their replies kept as
   comments
@@ -665,8 +672,8 @@ API_PORT=3010
 POSTGRES_PORT=55432
 REDIS_PORT=56379
 WEB_PORT=5173
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
+STORAGE_API_PORT=9000
+STORAGE_CONSOLE_PORT=9001
 ```
 
 Remember to update `DATABASE_URL`, `API_URL` and `VITE_API_URL` to match when
@@ -677,6 +684,20 @@ Find the offender:
 ```bash
 docker ps --format "{{.Names}}\t{{.Ports}}"
 ```
+
+### `coretask-storage` will not start: port 9000 already allocated
+
+A stack created before the move from MinIO to RustFS still has its old
+`coretask-minio` container holding ports 9000 and 9001. Compose no longer
+defines that service, so `up` leaves it running. Remove it as an orphan:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --remove-orphans
+```
+
+Nothing stored in MinIO carries over: RustFS starts on a new, empty volume, so
+attachments uploaded before the switch will show as missing. Once you no longer
+need them, reclaim the space with `docker volume rm coretask-minio-data`.
 
 ### `Environment validation failed` on API start
 

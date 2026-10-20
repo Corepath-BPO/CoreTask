@@ -7,6 +7,7 @@ import {
 import type { WebhookEventPayload } from '@coretask/types';
 
 import { htmlToText } from '../../../common/utils/rich-text.util';
+import { taskActions } from '../../slack/lib/slack-blocks';
 
 /** What the payload alone does not say: names, and where the app lives. */
 export interface AppMessageContext {
@@ -33,6 +34,8 @@ interface TaskSnapshot {
   projectId: string | null;
   dueDate: string | null;
   assignee: { name: string } | null;
+  completedAt?: string | null;
+  kind?: string;
 }
 
 const QUOTE_MAX = 300;
@@ -159,6 +162,43 @@ export function renderAppMessage(
     case ProjectApp.DISCORD:
       return discord(update);
   }
+}
+
+/**
+ * A Slack post from the CoreTask bot: the same message, and under a task's
+ * update the buttons that act on it. Only the bot's posts can carry them —
+ * pressing one goes back to the app that posted it, which an incoming
+ * webhook's message has none of.
+ */
+export function renderSlackChannelMessage(
+  payload: WebhookEventPayload,
+  context: AppMessageContext,
+): { text: string; blocks: unknown[] } {
+  const message = slack(describeUpdate(payload, context)) as { text: string; blocks: unknown[] };
+  const task = (payload.data as { task?: TaskSnapshot | null } | null)?.task;
+  if (
+    !task ||
+    payload.type === WebhookEventType.PING ||
+    payload.type === WebhookEventType.PROJECT_STATUS_UPDATED
+  ) {
+    return message;
+  }
+  const projectId = task.projectId ?? payload.projectId;
+  const url = projectId
+    ? `${context.webUrl}/projects/${projectId}/list?task=${task.id}`
+    : `${context.webUrl}/my-tasks?task=${task.id}`;
+  return {
+    ...message,
+    blocks: [
+      ...message.blocks,
+      taskActions({
+        id: task.id,
+        url,
+        completed: Boolean(task.completedAt),
+        approval: task.kind === 'APPROVAL',
+      }),
+    ],
+  };
 }
 
 /** The plain sentence, for notifications and anything that shows no markup. */

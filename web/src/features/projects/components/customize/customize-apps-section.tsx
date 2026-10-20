@@ -43,8 +43,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { useSlackChannels, useSlackStatus } from '@/features/integrations/hooks/use-slack';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/utils/format';
 
@@ -220,11 +228,16 @@ function ConnectedApp({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">
             {connection.name}
-            <span className="font-normal text-muted-foreground"> · {info.label}</span>
+            <span className="font-normal text-muted-foreground">
+              {' '}
+              · {connection.slackChannel ? 'CoreTask Slack app' : info.label}
+            </span>
           </p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {connection.urlHint}
-          </p>
+          {connection.urlHint !== connection.name && (
+            <p className="truncate font-mono text-[11px] text-muted-foreground">
+              {connection.urlHint}
+            </p>
+          )}
         </div>
         <Switch
           checked={connection.enabled}
@@ -291,9 +304,22 @@ function AppDialog({
     editing.mode === 'edit' ? editing.connection.events : [...DEFAULT_PROJECT_APP_EVENTS],
   );
 
+  // A new Slack app posts as the CoreTask app when the workspace has it —
+  // buttons and all — and through a pasted webhook otherwise.
+  const connectingSlack = editing.mode === 'connect' && app === 'SLACK';
+  const slack = useSlackStatus(connectingSlack ? workspaceId : undefined);
+  const botAvailable = connectingSlack && Boolean(slack.data?.installation);
+  const [via, setVia] = useState<'app' | 'webhook'>('app');
+  const usingApp = botAvailable && via === 'app';
+  const channels = useSlackChannels(workspaceId, usingApp);
+  const [channelId, setChannelId] = useState('');
+
   const pending = connect.isPending || update.isPending;
-  const urlLooksWrong = url.trim() !== '' && !appAcceptsUrl(app, url);
-  const ready = events.length > 0 && (editing.mode === 'edit' || url.trim() !== '') && !pending;
+  const urlLooksWrong = !usingApp && url.trim() !== '' && !appAcceptsUrl(app, url);
+  const ready =
+    events.length > 0 &&
+    (editing.mode === 'edit' || (usingApp ? channelId !== '' : url.trim() !== '')) &&
+    !pending;
 
   const toggle = (event: ProjectAppEvent, on: boolean) =>
     setEvents((current) =>
@@ -313,7 +339,12 @@ function AppDialog({
       );
     } else {
       connect.mutate(
-        { app, url: url.trim(), ...(name.trim() ? { name: name.trim() } : {}), events },
+        {
+          app,
+          ...(usingApp ? { slackChannelId: channelId } : { url: url.trim() }),
+          ...(name.trim() ? { name: name.trim() } : {}),
+          events,
+        },
         { onSuccess: onClose },
       );
     }
@@ -329,7 +360,9 @@ function AppDialog({
           <DialogDescription>
             {editing.mode === 'edit'
               ? 'Change what this channel hears about.'
-              : `${info.howTo} Updates from this project will be posted there.`}
+              : usingApp
+                ? 'The CoreTask Slack app posts this project’s updates to a channel, with buttons to complete a task or take it.'
+                : `${info.howTo} Updates from this project will be posted there.`}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -339,7 +372,69 @@ function AppDialog({
             submit();
           }}
         >
-          {editing.mode === 'connect' && (
+          {botAvailable && (
+            <div role="radiogroup" aria-label="How to post" className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ['app', 'As the CoreTask app', 'Buttons on each task'],
+                  ['webhook', 'Incoming webhook', 'A URL you paste'],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={via === value}
+                  onClick={() => setVia(value)}
+                  className={cn(
+                    'rounded-lg border px-3 py-2 text-left text-sm transition-colors',
+                    via === value ? 'border-primary bg-primary/5' : 'hover:bg-muted/50',
+                  )}
+                >
+                  <span className="block font-medium">{label}</span>
+                  <span className="block text-xs text-muted-foreground">{hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {connectingSlack && !slack.isLoading && !botAvailable && slack.data?.configured && (
+            <p className="text-xs text-muted-foreground">
+              Connect the CoreTask Slack app in{' '}
+              <a href="/integrations/slack" className="underline">
+                Integrations › Slack
+              </a>{' '}
+              to post with buttons instead.
+            </p>
+          )}
+          {usingApp && (
+            <Field
+              label="Channel"
+              htmlFor="app-channel"
+              hint="Public channels, and private ones the app has been invited to."
+            >
+              <Select value={channelId} onValueChange={setChannelId}>
+                <SelectTrigger id="app-channel" className="w-full">
+                  <SelectValue
+                    placeholder={channels.isLoading ? 'Asking Slack…' : 'Choose a channel'}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {(channels.data ?? []).map((channel) => (
+                    <SelectItem key={channel.id} value={channel.id}>
+                      {channel.isPrivate ? '🔒 ' : '#'}
+                      {channel.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {channels.isError && (
+                <p className="text-xs text-destructive">
+                  Slack did not list the channels. Try again.
+                </p>
+              )}
+            </Field>
+          )}
+          {editing.mode === 'connect' && !usingApp && (
             <Field label="Webhook URL" htmlFor="app-url">
               <Input
                 id="app-url"
@@ -359,7 +454,11 @@ function AppDialog({
           <Field
             label="Channel name"
             htmlFor="app-name"
-            hint={`How it is listed here. ${info.label} when left empty.`}
+            hint={
+              usingApp
+                ? 'How it is listed here. The channel’s own name when left empty.'
+                : `How it is listed here. ${info.label} when left empty.`
+            }
           >
             <Input
               id="app-name"

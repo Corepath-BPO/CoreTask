@@ -109,7 +109,7 @@ healthy, which is the signal that migrations are done.
 | ---------- | ----------------------------------------------------------- |
 | PostgreSQL | `pg_isready -U … -d …`                                      |
 | Redis      | `redis-cli ping`                                            |
-| MinIO      | `mc ready local`                                            |
+| RustFS     | `curl -fsS …:9000/health`                                   |
 | API        | `node -e "fetch('…/api/v1/health')"` — no curl in the image |
 | Web (prod) | `wget --spider …/healthz` — a real nginx location, not `/`  |
 | Worker     | process liveness; a queue consumer has no HTTP surface      |
@@ -143,7 +143,7 @@ to `index.html` — otherwise the SPA fallback would make every path look health
 | ------------------------- | ------------------------ |
 | `coretask-postgres-data`  | Database                 |
 | `coretask-redis-data`     | AOF persistence          |
-| `coretask-minio-data`     | Objects                  |
+| `coretask-storage-data`   | Objects                  |
 | `coretask-*-node-modules` | Per-service dependencies |
 
 ```bash
@@ -153,5 +153,6 @@ pnpm down:volumes    # stop and delete everything
 
 ## Object storage bootstrap
 
-`coretask-minio-init` runs `mc mb --ignore-existing` and exits 0. Seeing it as
+`coretask-storage-init` creates the bucket with the AWS CLI unless it already
+exists, then exits 0. Seeing it as
 `exited` in `docker compose ps` is the success state, not a failure.

@@ -4,16 +4,20 @@ import { dirname, resolve } from 'node:path';
 
 import '../setup-env';
 
-import { buildE2eDatabaseUrl, E2E_SCHEMA } from './test-database';
+import { Redis } from 'ioredis';
+
+import { parseEnv } from '../../src/config/env';
+
+import { buildE2eDatabaseUrl, E2E_QUEUE_PREFIX, E2E_SCHEMA } from './test-database';
 
 /**
- * Prepares the e2e schema once per run.
+ * Prepares the e2e schema and queues once per run.
  *
  * `migrate deploy` is idempotent, so a second run is a fast no-op and the suite
  * always executes against the committed migrations rather than a hand-built
  * schema that could drift from production.
  */
-export default function globalSetup(): void {
+export default async function globalSetup(): Promise<void> {
   const databaseUrl = buildE2eDatabaseUrl();
   process.env['DATABASE_URL'] = databaseUrl;
 
@@ -33,6 +37,50 @@ export default function globalSetup(): void {
         detail,
       ].join('\n'),
     );
+  }
+
+  await clearQueues();
+}
+
+/**
+ * Empties the last run's queues.
+ *
+ * Nothing consumes them: the processors live in the worker, which listens on
+ * its own prefix. Every job a run queued — an automation event per task
+ * created, a webhook fan-out, an e-mail — would otherwise stay in Redis for
+ * good, one run's worth more each time.
+ */
+async function clearQueues(): Promise<void> {
+  const env = parseEnv();
+  const redis = new Redis({
+    host: env.REDIS_HOST,
+    port: env.REDIS_PORT,
+    db: env.REDIS_DB,
+    ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+  });
+
+  try {
+    await redis.connect();
+    let cursor = '0';
+    do {
+      const [next, keys] = await redis.scan(cursor, 'MATCH', `${E2E_QUEUE_PREFIX}:*`, 'COUNT', 500);
+      if (keys.length > 0) await redis.unlink(...keys);
+      cursor = next;
+    } while (cursor !== '0');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      [
+        `Could not clear the e2e queues "${E2E_QUEUE_PREFIX}:*".`,
+        'PostgreSQL and Redis must be running:  pnpm infra',
+        '',
+        detail,
+      ].join('\n'),
+    );
+  } finally {
+    redis.disconnect();
   }
 }
 
