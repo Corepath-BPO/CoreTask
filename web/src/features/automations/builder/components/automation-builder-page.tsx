@@ -226,7 +226,20 @@ export function AutomationBuilderPage({
     const target = addingAt ?? { parentId: lastNodeId ?? '', arm: null };
     const node = makeNodeUnder('ACTION', subtype, target.parentId || null, target.arm, realNodes);
 
-    setEdits((previous) => ({ ...previous, added: [...previous.added, node] }));
+    setEdits((previous) => ({
+      ...previous,
+      added: [...previous.added, node],
+      /*
+       * Whatever already followed that spot now follows this step.
+       *
+       * This is the second half of an insertion, done here because here is
+       * where the step first exists — `insertAfter` only aims the list. It
+       * finds nothing at all in the other two cases: appending and filling an
+       * empty arm both point at a place with nothing after it, so a rule that
+       * is being grown rather than spliced is left exactly as it was.
+       */
+      reparented: { ...previous.reparented, ...adoptChildren(node, realNodes) },
+    }));
 
     return node;
   };
@@ -314,28 +327,41 @@ export function AutomationBuilderPage({
   /*
    * Adding a step in the middle of a rule rather than at the end.
    *
-   * Whatever used to follow `parentId` now follows the new step, so the rule
-   * gains a stage instead of growing a second tail. `adoptChildren` works out
-   * which nodes that is — only the ones on the same arm, so inserting into one
-   * side of a split leaves the other side where it was.
+   * Whatever used to follow `parentId` ends up following the new step, so the
+   * rule gains a stage instead of growing a second tail. `adoptChildren` works
+   * out which nodes that is — only the ones on the same arm, so inserting into
+   * one side of a split leaves the other side where it was.
    */
   const insertAfter = (type: 'ACTION' | 'BRANCH', parentId: string) => {
     const parent = realNodes.find((node) => node.id === parentId);
     if (!parent) return;
 
-    const inserted =
-      type === 'BRANCH'
-        ? { ...makeBranch(realNodes), parentId, branchKey: null }
-        : makeNodeUnder('ACTION', '', parentId, null, realNodes);
+    /*
+     * An action is aimed here, not built here.
+     *
+     * There is nothing to build yet: which action it is is the question the
+     * list is about to ask. Adding an empty one up front *and* opening the list
+     * produced two steps for one click — answering the list builds its own node
+     * under the same parent, and the blank one was never retyped and never
+     * removed. It stayed behind as a second path out of that parent, so asking
+     * for one more step forked the rule, and the empty subtype it carried is a
+     * node the save endpoint refuses outright.
+     *
+     * A split has no such question. It carries its own comparison, so it can be
+     * drawn immediately and answered on the canvas afterwards.
+     */
+    if (type === 'ACTION') {
+      openActionPicker({ parentId, arm: null });
+      return;
+    }
+
+    const inserted = { ...makeBranch(realNodes), parentId, branchKey: null };
 
     setEdits((previous) => ({
       ...previous,
       added: [...previous.added, inserted],
       reparented: { ...previous.reparented, ...adoptChildren(inserted, realNodes) },
     }));
-
-    // A step with no action chosen is not a step yet, so the list opens on it.
-    if (type === 'ACTION') openActionPicker({ parentId, arm: null });
   };
 
   const triggerNode = realNodes.find((node) => node.type === 'TRIGGER') ?? null;

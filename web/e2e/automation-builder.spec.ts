@@ -305,6 +305,45 @@ test.describe('the automation builder', () => {
     expect(labels).not.toContain('Add a step');
   });
 
+  test('adds one step from a card’s plus, not two', async ({ page }) => {
+    /*
+     * The plus and the list it opens are one act, and used to be two steps.
+     *
+     * Pressing it added an empty card of its own *and* opened the catalogue,
+     * which added the chosen one beside it — so a rule asked for one more step
+     * grew two, forked at that point because both hung off the same parent. The
+     * blank one could never be finished either: it had no action, no way to be
+     * given one, and an empty subtype the save endpoint refuses outright.
+     */
+    await openBuilder(page);
+
+    await page.getByRole('button', { name: /^Add a step —/ }).click();
+    await page.getByRole('option', { name: /add a comment/i }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).map((box) => box.label).join(' | '), {
+        timeout: 5000,
+      })
+      .toContain('Comment');
+
+    const before = (await nodeBoxes(page)).length;
+
+    // The control on the card itself, which is where "and then" is asked once
+    // the rule already ends in something.
+    await page.getByRole('button', { name: /^Add a step after: Comment/ }).click();
+    await page.getByRole('option', { name: /assign a person/i }).click();
+
+    await expect
+      .poll(async () => (await nodeBoxes(page)).length, { timeout: 5000 })
+      .toBe(before + 1);
+
+    // An action with nothing chosen renders as a card with nothing after the
+    // dash — the orphan, as it appeared on the canvas.
+    const labels = (await nodeBoxes(page)).map((box) => box.label);
+    expect(labels.filter((label) => label === 'Do this —')).toEqual([]);
+    expect(labels.join(' | ')).toContain('Assign');
+  });
+
   test('adds a branch, and draws both of its arms', async ({ page }) => {
     /*
      * A split showing only the path somebody built looks like it goes one way.
