@@ -53,6 +53,7 @@ import {
   CHECKLIST_NAME_MAX,
   MAX_CHECKLISTS_PER_TASK,
   checklistOf,
+  WorkItemType,
 } from '@coretask/contracts';
 import type { TaskCustomFieldValue as TaskCustomFieldValueDto } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -857,6 +858,10 @@ export class AutomationRunnerService {
        * user's original mutation, and echoing it would make exactly the tab
        * that caused the trigger — the one looking at the stale row — skip the
        * refetch as its "own" change. A rule's write is nobody's own change.
+       *
+       * Sent to everyone who may see the project rather than to its room: a
+       * task panel open from My Tasks, the inbox or search is in no project
+       * room, and kept showing the fields and checklists from before the rule.
        */
       // Both projects when the rule moved the task out of this one: the tab on
       // the old board has to drop the row, and the tab on the new one has to
@@ -864,12 +869,19 @@ export class AutomationRunnerService {
       const projectIds = new Set([event.projectId, task.projectId ?? event.projectId]);
 
       for (const projectId of projectIds) {
-        await this.relay.toProject(projectId, ServerEvent.WORK_ITEM_UPDATED, {
-          workspaceId: rule.workspaceId,
+        await this.relay.toProjectAudience(
+          rule.workspaceId,
           projectId,
-          occurredAt: new Date().toISOString(),
-          source: 'automation',
-        });
+          ServerEvent.WORK_ITEM_UPDATED,
+          {
+            workspaceId: rule.workspaceId,
+            projectId,
+            workItemId: task.id,
+            workItemType: WorkItemType.TASK,
+            occurredAt: new Date().toISOString(),
+            source: 'automation',
+          },
+        );
       }
     }
 
@@ -916,12 +928,19 @@ export class AutomationRunnerService {
     await this.bumpRule(rule.id, status, failures > 0 || steps.cut > 0);
 
     if (steps.attempted > failures) {
-      await this.relay.toProject(rule.projectId, ServerEvent.WORK_ITEM_UPDATED, {
-        workspaceId: rule.workspaceId,
-        projectId: rule.projectId,
-        occurredAt: new Date().toISOString(),
-        source: 'automation',
-      });
+      // Beyond the project's room for the same reason as a task run: the new
+      // task may be somebody's, and their My Tasks is in no project room.
+      await this.relay.toProjectAudience(
+        rule.workspaceId,
+        rule.projectId,
+        ServerEvent.WORK_ITEM_UPDATED,
+        {
+          workspaceId: rule.workspaceId,
+          projectId: rule.projectId,
+          occurredAt: new Date().toISOString(),
+          source: 'automation',
+        },
+      );
     }
 
     return { ran: true, events, webhooks: [], emails: [] };

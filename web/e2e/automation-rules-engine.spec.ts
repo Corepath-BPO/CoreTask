@@ -19,6 +19,7 @@ const API_ORIGIN = process.env['E2E_API_ORIGIN'] ?? 'http://localhost:3010';
 interface Api {
   request: APIRequestContext;
   headers: { authorization: string };
+  userId: string;
   workspaceId: string;
   projectId: string;
 }
@@ -33,7 +34,8 @@ async function connect(): Promise<Api> {
   });
   expect(login.ok(), `could not sign in: ${login.status()}`).toBe(true);
 
-  const headers = { authorization: `Bearer ${(await login.json()).data.accessToken}` };
+  const session = (await login.json()).data;
+  const headers = { authorization: `Bearer ${session.accessToken}` };
   const workspaces = await (await request.get('/api/v1/workspaces', { headers })).json();
   const workspaceId = workspaces.data[0].id as string;
 
@@ -43,7 +45,13 @@ async function connect(): Promise<Api> {
   });
   expect(project.ok(), `could not create the project: ${project.status()}`).toBe(true);
 
-  return { request, headers, workspaceId, projectId: (await project.json()).data.id as string };
+  return {
+    request,
+    headers,
+    userId: session.user.id as string,
+    workspaceId,
+    projectId: (await project.json()).data.id as string,
+  };
 }
 
 const row = (id: string, order: number, configuration: Record<string, unknown>) => ({
@@ -353,6 +361,76 @@ test.describe('the rules engine in the builder', () => {
     await page.reload();
     await expect(checklists.getByRole('checkbox', { name: 'Keys handed over' })).toBeChecked();
     await expect(checklists.getByText('Lease signed')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
+  });
+
+  /*
+   * My Tasks is in no project's room, and a rule's broadcast used to go only
+   * there — so the panel kept the pre-rule team and checklists until a reload.
+   * Run by hand, so the rule's own broadcast is the only thing that can tell
+   * the open panel: nothing the person did here refetches it.
+   */
+  test('shows a rule’s checklist and team in a task panel opened from My Tasks', async ({
+    page,
+  }) => {
+    const team = `Turnover ${RUN}`;
+    const teamId = await createTeam(team);
+    const created = await api.request.post(`/api/v1/workspaces/${api.workspaceId}/tasks`, {
+      headers: api.headers,
+      data: { title: `Unit 12C ${RUN}`, projectId: api.projectId, assigneeId: api.userId },
+    });
+    expect(created.ok(), `could not create the task: ${created.status()}`).toBe(true);
+    const taskId = (await created.json()).data.id as string;
+
+    const rules = `/api/v1/workspaces/${api.workspaceId}/projects/${api.projectId}/automations`;
+    const rule = await api.request.post(rules, {
+      headers: api.headers,
+      data: {
+        name: `Turnover ${RUN}`,
+        triggerType: 'RUN_MANUALLY',
+        nodes: [
+          { id: 't', nodeType: 'TRIGGER', subtype: 'RUN_MANUALLY', parentId: null, order: 0 },
+          {
+            id: 'a',
+            nodeType: 'ACTION',
+            subtype: 'ASSIGN_TEAM',
+            configuration: { teamId },
+            parentId: 't',
+            order: 1,
+          },
+          {
+            id: 'b',
+            nodeType: 'ACTION',
+            subtype: 'CREATE_CHECKLIST',
+            configuration: { name: 'Turnover', items: ['Paint touched up', 'Carpets cleaned'] },
+            parentId: 'a',
+            order: 2,
+          },
+        ],
+      },
+    });
+    expect(rule.ok(), `could not create the rule: ${rule.status()}`).toBe(true);
+    const ruleId = (await rule.json()).data.id as string;
+    const published = await api.request.post(`${rules}/${ruleId}/publish`, {
+      headers: api.headers,
+    });
+    expect(published.ok(), `could not publish: ${published.status()}`).toBe(true);
+
+    await page.goto(`/my-tasks?task=${taskId}`);
+    const checklists = page.getByRole('region', { name: 'Checklists' });
+    await expect(checklists.getByRole('button', { name: 'Add a checklist' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText('No team');
+    await expect(checklists.getByText('Turnover')).toHaveCount(0);
+
+    const ran = await api.request.post(`${rules}/${ruleId}/run`, {
+      headers: api.headers,
+      data: { taskIds: [taskId] },
+    });
+    expect(ran.ok(), `could not run the rule: ${ran.status()}`).toBe(true);
+
+    // The worker runs it a moment later; the panel hears of it without a reload.
+    await expect(checklists.getByText('0/2')).toBeVisible({ timeout: 15_000 });
+    await expect(checklists.getByText('Paint touched up')).toBeVisible();
     await expect(page.getByRole('combobox', { name: 'Team' })).toHaveText(team);
   });
 });

@@ -27,6 +27,7 @@ describe('Task checklists and teams (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toProjectAudience: async () => undefined,
       toWorkspace: async () => undefined,
     } as never);
   });
