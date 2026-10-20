@@ -387,6 +387,133 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
     });
   });
 
+  describe('public clients (mobile and desktop apps)', () => {
+    const APP_REDIRECT = 'com.example.leasing:/oauth/callback';
+    const verifier = 'v'.repeat(20) + randomUUID().replace(/-/g, '');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+    const registerPublic = async (developer: Actor) => {
+      const created = await request(server())
+        .post(url('/users/me/oauth-apps'))
+        .set(as(developer))
+        .send({ name: 'Leasing mobile', redirectUris: [APP_REDIRECT], clientType: 'public' })
+        .expect(201);
+      return created.body.data as {
+        app: { id: string; clientId: string; clientType: string; secretHint: string | null };
+        clientSecret: string | null;
+      };
+    };
+
+    const allowPublic = (person: Actor, clientId: string, pkce = true) =>
+      request(server())
+        .post(url('/oauth/authorize'))
+        .set(as(person))
+        .send({
+          clientId,
+          redirectUri: APP_REDIRECT,
+          state: 'st-1',
+          approve: true,
+          ...(pkce ? { codeChallenge: challenge, codeChallengeMethod: 'S256' } : {}),
+        });
+
+    const tokenFor = (fields: Record<string, string>) =>
+      request(server()).post(url('/oauth/token')).type('form').send(fields);
+
+    it('is given no secret, and only it may register an app scheme', async () => {
+      const scope = await setupScope();
+      const registered = await registerPublic(scope.owner);
+      expect(registered.clientSecret).toBeNull();
+      expect(registered.app).toMatchObject({ clientType: 'public', secretHint: null });
+
+      await request(server())
+        .post(url(`/users/me/oauth-apps/${registered.app.id}/rotate-secret`))
+        .set(as(scope.owner))
+        .expect(400);
+
+      // A server-side app may not claim an app scheme.
+      await request(server())
+        .post(url('/users/me/oauth-apps'))
+        .set(as(scope.owner))
+        .send({ name: 'Leasing sync', redirectUris: [APP_REDIRECT] })
+        .expect(422);
+    });
+
+    it('must use PKCE, and exchanges with its id and the verifier alone', async () => {
+      const scope = await setupScope();
+      const { app } = await registerPublic(scope.owner);
+
+      const refused = await allowPublic(scope.member, app.clientId, false).expect(400);
+      expect(refused.body.error.code).toBe('OAUTH_INVALID_REQUEST');
+
+      const allowed = await allowPublic(scope.member, app.clientId).expect(200);
+      const redirect = new URL(allowed.body.data.redirectTo as string);
+      expect(redirect.protocol).toBe('com.example.leasing:');
+      const code = redirect.searchParams.get('code') as string;
+
+      const base = {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: APP_REDIRECT,
+        client_id: app.clientId,
+      };
+      const missing = await tokenFor(base).expect(400);
+      expect(missing.body.error).toBe('invalid_grant');
+
+      // The code was spent by the failed attempt; a fresh one with the verifier works.
+      const again = await allowPublic(scope.member, app.clientId).expect(200);
+      const fresh = new URL(again.body.data.redirectTo as string).searchParams.get(
+        'code',
+      ) as string;
+      const token = await tokenFor({ ...base, code: fresh, code_verifier: verifier }).expect(200);
+      expect(token.body).toMatchObject({ access_token: expect.stringMatching(/^cto_/) });
+
+      await request(server())
+        .get(url('/workspaces'))
+        .set(as(token.body.access_token as string))
+        .expect(200);
+    });
+
+    it('gets a new refresh token each time, and the old one stops working', async () => {
+      const scope = await setupScope();
+      const { app } = await registerPublic(scope.owner);
+      const allowed = await allowPublic(scope.member, app.clientId).expect(200);
+      const code = new URL(allowed.body.data.redirectTo as string).searchParams.get(
+        'code',
+      ) as string;
+      const first = await tokenFor({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: APP_REDIRECT,
+        client_id: app.clientId,
+        code_verifier: verifier,
+      }).expect(200);
+
+      const refreshed = await tokenFor({
+        grant_type: 'refresh_token',
+        refresh_token: first.body.refresh_token as string,
+        client_id: app.clientId,
+      }).expect(200);
+      expect(refreshed.body.refresh_token).toEqual(expect.stringMatching(/^ctr_/));
+      expect(refreshed.body.refresh_token).not.toBe(first.body.refresh_token);
+
+      const replayed = await tokenFor({
+        grant_type: 'refresh_token',
+        refresh_token: first.body.refresh_token as string,
+        client_id: app.clientId,
+      }).expect(400);
+      expect(replayed.body.error).toBe('invalid_grant');
+    });
+
+    it('still asks a confidential client for its secret', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const code = await allow(scope.member, app);
+
+      const refused = await exchange(app, code, { client_secret: '' }).expect(401);
+      expect(refused.body.error).toBe('invalid_client');
+    });
+  });
+
   describe('ending a connection', () => {
     it('lets the app revoke its refresh token, ending its access too', async () => {
       const scope = await setupScope();

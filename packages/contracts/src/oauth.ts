@@ -45,6 +45,19 @@ export const OAUTH_SCOPE_DESCRIPTION: Record<OAuthScope, string> = {
     'See and change the tasks, projects, comments and fields you can reach, in every workspace you belong to. It cannot manage people, API keys or workspaces.',
 };
 
+/**
+ * What kind of client an app is (RFC 6749 §2.1).
+ *
+ * A confidential client runs on a server and keeps a secret. A public one is a
+ * mobile or desktop app, whose code anyone can read, so it is given no secret
+ * at all: it proves itself with PKCE on every authorization instead, and its
+ * refresh token is replaced each time it is used, so a stolen one works once.
+ * Chosen when the app is registered, and fixed from then on.
+ */
+export const OAuthClientType = { CONFIDENTIAL: 'confidential', PUBLIC: 'public' } as const;
+export type OAuthClientType = (typeof OAuthClientType)[keyof typeof OAuthClientType];
+export const OAUTH_CLIENT_TYPES = Object.values(OAuthClientType);
+
 /** PKCE: only the hashed form. `plain` would protect nothing a TLS connection does not. */
 export const OAUTH_CODE_CHALLENGE_METHOD = 'S256';
 
@@ -62,8 +75,26 @@ export const OAUTH_REDIRECT_URI_MAX_LENGTH = 2048;
  * and a fragment would be dropped by the browser before the tool saw it. The
  * match at authorization time is exact, so a registered URI is the only place
  * a code can ever be sent.
+ *
+ * A public client may also register a private-use scheme — reverse-domain,
+ * so it holds a dot: `com.example.app:/oauth/callback` (RFC 8252 §7.1) — which
+ * is how a mobile app gets the code back from the browser.
  */
-export function redirectUriProblem(value: string): string | null {
+export function redirectUriProblem(
+  value: string,
+  options: { publicClient?: boolean } = {},
+): string | null {
+  const privateUse = /^([a-z][a-z0-9+-]*(?:\.[a-z0-9+-]+)+):\/{1,3}([^#\s]*)(#.*)?$/i.exec(
+    value.trim(),
+  );
+  if (privateUse && !/^https?$/i.test(privateUse[1] ?? '')) {
+    if (!options.publicClient) {
+      return 'An app scheme like com.example.app:/ is for mobile and desktop apps. Register this app as one.';
+    }
+    if (privateUse[3] !== undefined) return 'A redirect URI cannot have a #fragment.';
+    return null;
+  }
+
   // No URL global here (this package runs anywhere), so the parts are read
   // with a pattern: scheme, authority, then whatever follows.
   const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^#]*)(#.*)?$/i.exec(value.trim());

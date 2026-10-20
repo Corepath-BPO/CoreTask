@@ -125,11 +125,14 @@ export class OAuthController {
   }
 }
 
-/** `client_secret_basic` when the header is there, `client_secret_post` otherwise. */
+/**
+ * `client_secret_basic` when the header is there, `client_secret_post`
+ * otherwise — or the id alone (`none`), which only a public client may use.
+ */
 function clientOf(request: Request, body: TokenRequest): ClientCredentials | null {
   const basic = readBasicClient(request.headers);
-  if (basic) return basic;
+  if (basic) return { clientId: basic.clientId, clientSecret: basic.clientSecret || null };
   const clientId = typeof body.client_id === 'string' ? body.client_id.trim() : '';
   const clientSecret = typeof body.client_secret === 'string' ? body.client_secret.trim() : '';
-  return clientId && clientSecret ? { clientId, clientSecret } : null;
+  return clientId ? { clientId, clientSecret: clientSecret || null } : null;
 }

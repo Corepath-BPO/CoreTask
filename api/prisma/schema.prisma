@@ -359,10 +359,13 @@ model OAuthApp {
   redirectUris     String[]
   /// `ctc_…`, public.
   clientId         String   @unique @db.VarChar(64)
+  /// A public client (mobile, desktop) has no secret: it proves itself with
+  /// PKCE, and its refresh tokens rotate. Fixed when the app is registered.
+  isPublic         Boolean  @default(false)
   /// SHA-256 hex of the `cts_…` secret.
-  clientSecretHash String   @db.VarChar(64)
+  clientSecretHash String?  @db.VarChar(64)
   /// `cts_` plus the first characters — for the list, never for lookup.
-  secretHint       String   @db.VarChar(16)
+  secretHint       String?  @db.VarChar(16)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

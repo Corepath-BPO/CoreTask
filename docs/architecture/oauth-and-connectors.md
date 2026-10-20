@@ -35,8 +35,26 @@ session — refuse an API key (`API_KEY_NOT_ALLOWED`) and an OAuth token
    the code, the same `redirect_uri`, the `code_verifier` if it sent a
    challenge, and its client id and secret (form body or HTTP Basic). It gets
    an access token (`cto_…`, 1 hour) and a refresh token (`ctr_…`).
-5. `grant_type=refresh_token` returns a new access token. Refresh tokens are
-   not rotated, as Asana's are not.
+5. `grant_type=refresh_token` returns a new access token. A server-side app's
+   refresh token is not rotated, as Asana's are not.
+
+### Public clients (mobile and desktop apps)
+
+An app registered as **Mobile or desktop app** (`clientType: public`, fixed at
+registration) is a public client (RFC 6749 §2.1): its code is in every copy
+of it, so it is given **no secret**.
+
+- Every authorization must carry a PKCE `code_challenge` (S256); a request
+  without one is refused on the consent page.
+- The token endpoint takes its `client_id` alone (`token_endpoint_auth_method
+none`) and the `code_verifier`; a code without a challenge is refused.
+- Each refresh **replaces the refresh token** (RFC 9700 §4.14), swapped
+  atomically, so a stolen one works at most once and two racing refreshes
+  cannot both win. The response carries the new `refresh_token`.
+- It may register a private-use redirect scheme — reverse-domain, with a dot:
+  `com.example.app:/oauth/callback` (RFC 8252 §7.1) — as well as https and
+  loopback http. A server-side app may not.
+- Revocation takes its `client_id` alone. There is no secret to replace.
 
 The token and revocation endpoints speak RFC 6749 / RFC 7009 — top-level
 `access_token`, errors as `{ error, error_description }`, `Cache-Control:
@@ -97,6 +115,5 @@ an admin.
 ## Not built
 
 - Narrower scopes (read-only, per resource).
-- Public clients without a secret (PKCE-only, for mobile or desktop apps).
 - An app directory: apps are found by being sent their authorize link.
 - Admin controls over which apps members may connect.

@@ -1,4 +1,4 @@
-import type { OAuthScope, SubscribableWebhookEvent } from '@coretask/contracts';
+import type { OAuthClientType, OAuthScope, SubscribableWebhookEvent } from '@coretask/contracts';
 
 /** An app a developer registered (Integrations › OAuth apps). */
 export interface OAuthApp {
@@ -9,8 +9,10 @@ export interface OAuthApp {
   redirectUris: string[];
   /** Public; goes in the authorization link. */
   clientId: string;
-  /** `cts_` and a few characters, to tell secrets apart. Never the secret. */
-  secretHint: string;
+  /** A public client (mobile, desktop) has no secret and must use PKCE. */
+  clientType: OAuthClientType;
+  /** `cts_` and a few characters, to tell secrets apart. Never the secret. Null for a public client. */
+  secretHint: string | null;
   /** People who have it connected now. */
   connections: number;
   createdAt: string;
@@ -20,7 +22,8 @@ export interface OAuthApp {
 /** The one response besides a rotation that carries the client secret. */
 export interface CreatedOAuthApp {
   app: OAuthApp;
-  clientSecret: string;
+  /** Null for a public client, which is given none. */
+  clientSecret: string | null;
 }
 
 export interface OAuthSecretRotation {
@@ -32,9 +35,11 @@ export interface CreateOAuthAppPayload {
   description?: string | null;
   websiteUrl?: string | null;
   redirectUris: string[];
+  /** Fixed once registered. Confidential when left out. */
+  clientType?: OAuthClientType;
 }
 
-export type UpdateOAuthAppPayload = Partial<CreateOAuthAppPayload>;
+export type UpdateOAuthAppPayload = Partial<Omit<CreateOAuthAppPayload, 'clientType'>>;
 
 /** An authorization request as the consent page forwards it to the API. */
 export interface OAuthAuthorizationRequest {

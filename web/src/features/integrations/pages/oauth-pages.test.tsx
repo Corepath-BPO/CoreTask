@@ -48,6 +48,7 @@ function app(overrides: Partial<OAuthApp> = {}): OAuthApp {
     websiteUrl: null,
     redirectUris: ['https://tool.example/callback'],
     clientId: 'ctc_client',
+    clientType: 'confidential',
     secretHint: 'cts_AbCdEf',
     connections: 2,
     createdAt: '2026-10-01T00:00:00.000Z',
@@ -103,9 +104,54 @@ describe('OAuth apps', () => {
         description: null,
         websiteUrl: null,
         redirectUris: ['https://tool.example/callback', 'http://localhost:5678/cb'],
+        clientType: 'confidential',
       }),
     );
     expect(await screen.findByLabelText('Client secret')).toHaveValue('cts_the_secret');
+  });
+
+  it('registers a mobile app with an app scheme, and has no secret to show', async () => {
+    api.apps.mockResolvedValue([]);
+    api.createApp.mockResolvedValue({
+      app: app({ clientType: 'public', secretHint: null }),
+      clientSecret: null,
+    });
+    renderWith(<OAuthAppsPage />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Register app' }));
+    const dialog = screen.getByRole('dialog');
+    await userEvent.type(within(dialog).getByLabelText(/Name/), 'Leasing mobile');
+    await userEvent.type(
+      within(dialog).getByLabelText(/Redirect URIs/),
+      'com.example.leasing:/callback',
+    );
+    // A server-side app may not return to an app scheme.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    expect(await within(dialog).findByText(/mobile and desktop apps/)).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('radio', { name: /Mobile or desktop app/ }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+
+    await waitFor(() =>
+      expect(api.createApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          redirectUris: ['com.example.leasing:/callback'],
+          clientType: 'public',
+        }),
+      ),
+    );
+    expect(await screen.findByText(/has no secret/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Client secret')).not.toBeInTheDocument();
+  });
+
+  it('offers no secret to replace for a mobile app', async () => {
+    api.apps.mockResolvedValue([app({ clientType: 'public', secretHint: null })]);
+    renderWith(<OAuthAppsPage />);
+
+    expect(await screen.findByText('Mobile or desktop · PKCE')).toBeInTheDocument();
+    expect(screen.getByText(/No secret/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Leasing sync' }));
+    expect(screen.queryByRole('menuitem', { name: 'Replace secret' })).not.toBeInTheDocument();
   });
 });
 
