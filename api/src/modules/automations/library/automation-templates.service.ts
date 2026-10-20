@@ -611,21 +611,36 @@ export class AutomationTemplatesService {
    */
   private async loadTarget(workspaceId: string, projectId: string): Promise<TargetProject> {
     const statusSelect = { id: true, name: true } as const;
+    // Top to bottom, as the board shows them: "first wins" below means the
+    // top-most only when the rows arrive in that order. Without it Postgres
+    // returns them in whatever order it stores them, and a renamed row can
+    // come back after one it was meant to beat.
+    const topDown = [{ position: 'asc' }, { id: 'asc' }] as const;
 
     const [sections, ownStatuses, links] = await Promise.all([
-      this.prisma.section.findMany({ where: { projectId }, select: { id: true, name: true } }),
+      this.prisma.section.findMany({
+        where: { projectId },
+        orderBy: [...topDown],
+        select: { id: true, name: true },
+      }),
       this.prisma.statusDefinition.findMany({
         where: { workspaceId, projectId, isArchived: false },
+        orderBy: [...topDown],
         select: statusSelect,
       }),
       this.prisma.projectCustomField.findMany({
         where: { projectId, customField: { workspaceId, isArchived: false } },
+        orderBy: [...topDown],
         select: {
           customField: {
             select: {
               id: true,
               name: true,
-              options: { where: { isArchived: false }, select: { id: true, label: true } },
+              options: {
+                where: { isArchived: false },
+                orderBy: [...topDown],
+                select: { id: true, label: true },
+              },
             },
           },
         },
@@ -637,13 +652,14 @@ export class AutomationTemplatesService {
         ? ownStatuses
         : await this.prisma.statusDefinition.findMany({
             where: { workspaceId, projectId: null, isArchived: false },
+            orderBy: [...topDown],
             select: statusSelect,
           });
 
     const fields: TargetField[] = links.map(({ customField }) => ({
       id: customField.id,
       optionById: new Set(customField.options.map((option) => option.id)),
-      optionByLabel: new Map(customField.options.map((option) => [fold(option.label), option.id])),
+      optionByLabel: firstByName(customField.options.map((option) => [option.label, option.id])),
     }));
 
     return {
