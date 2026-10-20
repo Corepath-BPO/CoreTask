@@ -141,13 +141,14 @@ describe('ShareProjectDialog', () => {
 
   it('invites an address that is not in the workspace, at the chosen role', async () => {
     await open();
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
-    await userEvent.type(
+    await user.click(screen.getByRole('button', { name: 'Add people' }));
+    await user.type(
       screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
       'Ada@Example.com',
     );
-    await userEvent.click(await screen.findByRole('option', { name: /invite ada@example.com/i }));
+    await user.click(await screen.findByRole('option', { name: /invite ada@example.com/i }));
 
     expect(inviteMutate).toHaveBeenCalledWith({
       email: 'ada@example.com',
@@ -157,9 +158,10 @@ describe('ShareProjectDialog', () => {
 
   it('does not offer to invite someone who is already in the workspace', async () => {
     await open();
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
-    await userEvent.type(
+    await user.click(screen.getByRole('button', { name: 'Add people' }));
+    await user.type(
       screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
       'jonas@coretask.dev',
     );
@@ -170,10 +172,11 @@ describe('ShareProjectDialog', () => {
   it('tells a project admin who is not a workspace admin to ask one', async () => {
     myWorkspaceRole = WorkspaceRole.MEMBER;
     await open({}, WorkspaceRole.MEMBER);
+    const user = setupUser();
 
     expect(screen.getByText(/ask a workspace admin to invite them/i)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Add people' }));
-    await userEvent.type(
+    await user.click(screen.getByRole('button', { name: 'Add people' }));
+    await user.type(
       screen.getByPlaceholderText(/e-mail address to invite|find someone/i),
       'ada@example.com',
     );
@@ -201,12 +204,13 @@ describe('ShareProjectDialog', () => {
       },
     ];
     await open();
+    const user = setupUser();
 
     const invited = screen.getByRole('list', { name: 'Invited' });
     expect(within(invited).getByText('ada@example.com')).toBeInTheDocument();
     expect(within(invited).getByText('Viewer')).toBeInTheDocument();
 
-    await userEvent.click(
+    await user.click(
       within(invited).getByRole('button', { name: 'Revoke the invitation to ada@example.com' }),
     );
     expect(revokeMutate).toHaveBeenCalledWith({ invitationId: 'inv-1', email: 'ada@example.com' });

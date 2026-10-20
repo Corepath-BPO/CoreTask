@@ -131,7 +131,7 @@ describe('StatusUpdateComposer', () => {
       );
 
     it('starts on its words, says where they came from, and posts what is on screen', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       renderDraft();
 
       expect(screen.getByRole('note')).toHaveTextContent(
@@ -154,7 +154,7 @@ describe('StatusUpdateComposer', () => {
     });
 
     it('can throw the draft away instead', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       renderDraft();
 
       await user.click(screen.getByRole('button', { name: 'Discard draft' }));

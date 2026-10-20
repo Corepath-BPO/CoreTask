@@ -2,7 +2,7 @@ import type { AuthUser } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api/api-error';
-import { renderWithProviders, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithProviders, screen, setupUser, waitFor } from '@/test/test-utils';
 
 import { AccountSecurityCard } from './account-security-card';
 
@@ -22,7 +22,7 @@ vi.mock('@/features/auth/hooks/use-auth', () => ({
   useAuth: () => ({ logoutEverywhere: { mutate: logoutEverywhere, isPending: false } }),
 }));
 
-const user: AuthUser = {
+const account: AuthUser = {
   id: 'u-1',
   email: 'bea@example.com',
   name: 'Bea Lin',
@@ -45,13 +45,14 @@ beforeEach(() => {
 
 describe('AccountSecurityCard', () => {
   it('offers a new link while the address is unconfirmed, and not after', async () => {
-    const { rerender } = renderWithProviders(<AccountSecurityCard user={user} />);
+    const { rerender } = renderWithProviders(<AccountSecurityCard user={account} />);
+    const user = setupUser();
 
     expect(screen.getByText('Not confirmed')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Send confirmation link' }));
+    await user.click(screen.getByRole('button', { name: 'Send confirmation link' }));
     expect(resend).toHaveBeenCalled();
 
-    rerender(<AccountSecurityCard user={{ ...user, emailVerified: true }} />);
+    rerender(<AccountSecurityCard user={{ ...account, emailVerified: true }} />);
     expect(screen.getByText('Confirmed')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Send confirmation link' }),
@@ -60,13 +61,14 @@ describe('AccountSecurityCard', () => {
 
   it('changes the password with the current one, and closes when it worked', async () => {
     changePassword.mockResolvedValue(undefined);
-    renderWithProviders(<AccountSecurityCard user={user} />);
+    renderWithProviders(<AccountSecurityCard user={account} />);
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Change password' }));
-    await userEvent.type(screen.getByLabelText(/^current password/i), 'Old-pass-2024!');
-    await userEvent.type(screen.getByLabelText(/^new password/i), 'Brand-new-pass-2026');
-    await userEvent.type(screen.getByLabelText(/^confirm new password/i), 'Brand-new-pass-2026');
-    await userEvent.click(
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
+    await user.type(screen.getByLabelText(/^current password/i), 'Old-pass-2024!');
+    await user.type(screen.getByLabelText(/^new password/i), 'Brand-new-pass-2026');
+    await user.type(screen.getByLabelText(/^confirm new password/i), 'Brand-new-pass-2026');
+    await user.click(
       screen.getAllByRole('button', { name: 'Change password' }).at(-1) as HTMLElement,
     );
 
@@ -84,13 +86,14 @@ describe('AccountSecurityCard', () => {
         message: 'Your current password is not right.',
       }),
     );
-    renderWithProviders(<AccountSecurityCard user={user} />);
+    renderWithProviders(<AccountSecurityCard user={account} />);
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Change password' }));
-    await userEvent.type(screen.getByLabelText(/^current password/i), 'wrong');
-    await userEvent.type(screen.getByLabelText(/^new password/i), 'Brand-new-pass-2026');
-    await userEvent.type(screen.getByLabelText(/^confirm new password/i), 'Brand-new-pass-2026');
-    await userEvent.click(
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
+    await user.type(screen.getByLabelText(/^current password/i), 'wrong');
+    await user.type(screen.getByLabelText(/^new password/i), 'Brand-new-pass-2026');
+    await user.type(screen.getByLabelText(/^confirm new password/i), 'Brand-new-pass-2026');
+    await user.click(
       screen.getAllByRole('button', { name: 'Change password' }).at(-1) as HTMLElement,
     );
 
@@ -99,13 +102,14 @@ describe('AccountSecurityCard', () => {
   });
 
   it('asks before signing out everywhere', async () => {
-    renderWithProviders(<AccountSecurityCard user={user} />);
+    renderWithProviders(<AccountSecurityCard user={account} />);
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out everywhere' }));
+    await user.click(screen.getByRole('button', { name: 'Sign out everywhere' }));
     expect(logoutEverywhere).not.toHaveBeenCalled();
     expect(screen.getByRole('alertdialog')).toHaveTextContent('this one included');
 
-    await userEvent.click(
+    await user.click(
       screen.getAllByRole('button', { name: 'Sign out everywhere' }).at(-1) as HTMLElement,
     );
     expect(logoutEverywhere).toHaveBeenCalled();

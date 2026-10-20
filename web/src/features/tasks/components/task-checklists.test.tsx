@@ -1,8 +1,8 @@
 import type { TaskChecklist } from '@coretask/types';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { setupUser } from '@/test/test-utils';
 import { TaskChecklists } from './task-checklists';
 
 const mutation = () => ({ mutate: vi.fn(), isPending: false });
@@ -65,7 +65,7 @@ describe('TaskChecklists', () => {
   });
 
   it('ticks an item by its checkbox or its text', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TaskChecklists workspaceId="ws-1" taskId="t-1" canEdit />);
 
     await user.click(screen.getByText('Meter readings taken'));
@@ -84,7 +84,7 @@ describe('TaskChecklists', () => {
   });
 
   it('adds an item on Enter and stays open for the next', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TaskChecklists workspaceId="ws-1" taskId="t-1" canEdit />);
 
     await user.click(screen.getByRole('button', { name: 'Add an item' }));
@@ -99,7 +99,7 @@ describe('TaskChecklists', () => {
   });
 
   it('answers Escape in its own box, so the task panel stays open', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const reached = vi.fn();
     const listener = (event: KeyboardEvent) => reached(event.defaultPrevented);
     window.addEventListener('keydown', listener);
@@ -114,7 +114,7 @@ describe('TaskChecklists', () => {
   });
 
   it('names a new checklist, and ignores a blank name', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     checklists = [];
     render(<TaskChecklists workspaceId="ws-1" taskId="t-1" canEdit />);
 
@@ -131,7 +131,7 @@ describe('TaskChecklists', () => {
   });
 
   it('asks before deleting a checklist', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TaskChecklists workspaceId="ws-1" taskId="t-1" canEdit />);
 
     await user.click(

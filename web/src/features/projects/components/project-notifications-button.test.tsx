@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithProviders, screen, setupUser, waitFor } from '@/test/test-utils';
 
 import { ProjectNotificationsButton } from './project-notifications-button';
 
@@ -33,13 +33,14 @@ describe('ProjectNotificationsButton', () => {
       <ProjectNotificationsButton workspaceId="ws-1" projectId="p-1" projectName="Leasing" />,
     );
     expect(notificationSettings).not.toHaveBeenCalled();
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Notifications for Leasing' }));
+    await user.click(screen.getByRole('button', { name: 'Notifications for Leasing' }));
     expect(await screen.findByRole('checkbox', { name: /Status updates/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Tasks completed/ })).not.toBeChecked();
     expect(notificationSettings).toHaveBeenCalledWith('ws-1', 'p-1');
 
-    await userEvent.click(screen.getByRole('checkbox', { name: /Tasks completed/ }));
+    await user.click(screen.getByRole('checkbox', { name: /Tasks completed/ }));
     await waitFor(() =>
       expect(setNotificationSettings).toHaveBeenCalledWith('ws-1', 'p-1', {
         notifyOn: ['STATUS_UPDATES', 'MESSAGES', 'TASKS_COMPLETED'],

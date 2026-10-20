@@ -1,8 +1,8 @@
 import type { AutomationMetadata } from '@coretask/types';
 import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { setupUser } from '@/test/test-utils';
 import { ChecklistFields, TeamFields } from './team-and-checklist-fields';
 
 const metadata = {
@@ -14,7 +14,7 @@ const metadata = {
 
 describe('TeamFields', () => {
   it('writes the chosen team, or a deliberate clear', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onChange = vi.fn();
     const { rerender } = render(
       <TeamFields configuration={{}} metadata={metadata} onChange={onChange} />,

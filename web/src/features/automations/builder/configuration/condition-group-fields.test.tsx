@@ -1,9 +1,9 @@
 import { MAX_CONDITION_GROUP_DEPTH } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { setupUser } from '@/test/test-utils';
 import { ConditionStepFields } from './condition-group-fields';
 
 const metadata = {
@@ -57,8 +57,9 @@ function renderStep(configuration: Record<string, unknown>) {
 describe('a condition step', () => {
   it('turns one comparison into a group when a second is asked for', async () => {
     const onChange = renderStep(status);
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add another condition' }));
+    await user.click(screen.getByRole('button', { name: 'Add another condition' }));
 
     expect(onChange).toHaveBeenCalledWith({ match: 'ALL', conditions: [status, {}] });
   });
@@ -74,16 +75,18 @@ describe('a condition step', () => {
 
   it('becomes one comparison again when the group is down to one', async () => {
     const onChange = renderStep({ match: 'ALL', conditions: [status, priority] });
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove condition 2' }));
+    await user.click(screen.getByRole('button', { name: 'Remove condition 2' }));
 
     expect(onChange).toHaveBeenCalledWith(status);
   });
 
   it('adds a group inside the group, asking the other way round', async () => {
     const onChange = renderStep({ match: 'ALL', conditions: [status, priority] });
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add group' }));
+    await user.click(screen.getByRole('button', { name: 'Add group' }));
 
     expect(onChange).toHaveBeenCalledWith({
       match: 'ALL',
@@ -108,8 +111,9 @@ describe('a condition step', () => {
       match: 'ALL',
       conditions: [status, priority, { match: 'ANY', conditions: [status] }],
     });
+    const user = setupUser();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove this group' }));
+    await user.click(screen.getByRole('button', { name: 'Remove this group' }));
 
     expect(onChange).toHaveBeenCalledWith({ match: 'ALL', conditions: [status, priority] });
   });

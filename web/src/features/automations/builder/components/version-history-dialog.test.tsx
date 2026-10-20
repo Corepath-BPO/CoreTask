@@ -1,7 +1,7 @@
 import type { AutomationRuleVersionSummary } from '@coretask/types';
 import { describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders, screen, userEvent } from '@/test/test-utils';
+import { renderWithProviders, screen, setupUser } from '@/test/test-utils';
 
 import { VersionHistoryDialog } from './version-history-dialog';
 
@@ -58,28 +58,31 @@ describe('VersionHistoryDialog', () => {
 
   it('restores straight away when nothing unpublished would be lost', async () => {
     const onRestore = open(false);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Restore version 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Restore version 1' }));
 
     expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ version: 1 }));
   });
 
   it('asks first when the restore would replace unpublished changes', async () => {
     const onRestore = open(true);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Restore version 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Restore version 1' }));
     expect(onRestore).not.toHaveBeenCalled();
     expect(await screen.findByText('Restore version 1?')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await user.click(screen.getByRole('button', { name: 'Restore' }));
     expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ version: 1 }));
   });
 
   it('discards unpublished changes by going back to the running version', async () => {
     const onRestore = open(true);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard changes' }));
 
     expect(onRestore).toHaveBeenCalledWith(
       expect.objectContaining({ version: 2, isPublished: true }),

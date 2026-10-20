@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders, screen, userEvent } from '@/test/test-utils';
+import { renderWithProviders, screen, setupUser } from '@/test/test-utils';
 
 import type { AutomationRule } from '../api/automations.api';
 
@@ -40,6 +40,7 @@ describe('AutomationRunHistoryDialog', () => {
               meta: { page: 2, limit: 2, total: 4, totalPages: 2 },
             },
     );
+    const user = setupUser();
 
     renderWithProviders(
       <AutomationRunHistoryDialog
@@ -53,7 +54,7 @@ describe('AutomationRunHistoryDialog', () => {
     expect(await screen.findByText(/the newest 2 of 3 runs/)).toBeInTheDocument();
     expect(screen.getAllByText('completed')).toHaveLength(2);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Show older runs' }));
+    await user.click(screen.getByRole('button', { name: 'Show older runs' }));
 
     expect(await screen.findAllByText('completed')).toHaveLength(3);
     expect(executions).toHaveBeenLastCalledWith('ws-1', 'p-1', 'rule-1', 2);

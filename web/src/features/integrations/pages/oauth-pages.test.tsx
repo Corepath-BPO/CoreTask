@@ -133,20 +133,21 @@ describe('OAuth apps', () => {
       clientSecret: null,
     });
     renderWith(<OAuthAppsPage />);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Register app' }));
+    await user.click(await screen.findByRole('button', { name: 'Register app' }));
     const dialog = screen.getByRole('dialog');
-    await userEvent.type(within(dialog).getByLabelText(/Name/), 'Leasing mobile');
-    await userEvent.type(
+    await user.type(within(dialog).getByLabelText(/Name/), 'Leasing mobile');
+    await user.type(
       within(dialog).getByLabelText(/Redirect URIs/),
       'com.example.leasing:/callback',
     );
     // A server-side app may not return to an app scheme.
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
     expect(await within(dialog).findByText(/mobile and desktop apps/)).toBeInTheDocument();
 
-    await userEvent.click(within(dialog).getByRole('radio', { name: /Mobile or desktop app/ }));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Register app' }));
+    await user.click(within(dialog).getByRole('radio', { name: /Mobile or desktop app/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register app' }));
 
     await waitFor(() =>
       expect(api.createApp).toHaveBeenCalledWith(
@@ -163,10 +164,11 @@ describe('OAuth apps', () => {
   it('offers no secret to replace for a mobile app', async () => {
     api.apps.mockResolvedValue([app({ clientType: 'public', secretHint: null })]);
     renderWith(<OAuthAppsPage />);
+    const user = setupUser();
 
     expect(await screen.findByText('Mobile or desktop · PKCE')).toBeInTheDocument();
     expect(screen.getByText(/No secret/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Actions for Leasing sync' }));
+    await user.click(screen.getByRole('button', { name: 'Actions for Leasing sync' }));
     expect(screen.queryByRole('menuitem', { name: 'Replace secret' })).not.toBeInTheDocument();
   });
 });
@@ -340,25 +342,23 @@ describe('the app directory', () => {
       connectedByMe: false,
     });
     renderWith(<AppDirectoryPage />);
+    const user = setupUser();
 
     expect(await screen.findByText('No approved apps yet')).toBeInTheDocument();
     expect(screen.getByText(/2 members connected/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Only approved apps/ }));
+    await user.click(screen.getByRole('radio', { name: /Only approved apps/ }));
     await waitFor(() =>
       expect(api.setAppPolicy).toHaveBeenCalledWith('ws-1', { policy: 'APPROVED' }),
     );
 
-    await userEvent.type(
-      screen.getByLabelText('Approve an app by client id'),
-      ' ctc_client {Enter}',
-    );
+    await user.type(screen.getByLabelText('Approve an app by client id'), ' ctc_client {Enter}');
     await waitFor(() =>
       expect(api.approveApp).toHaveBeenCalledWith('ws-1', { clientId: 'ctc_client' }),
     );
 
     const knocking = screen.getByRole('list', { name: 'Connected, not approved' });
-    await userEvent.click(within(knocking).getByRole('button', { name: 'Approve' }));
+    await user.click(within(knocking).getByRole('button', { name: 'Approve' }));
     await waitFor(() =>
       expect(api.approveApp).toHaveBeenCalledWith('ws-1', { clientId: 'ctc_other' }),
     );
@@ -379,11 +379,12 @@ describe('the app directory', () => {
     });
     api.removeDirectoryApp.mockResolvedValue(undefined);
     renderWith(<AppDirectoryPage />);
+    const user = setupUser();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent(/stops working in this workspace at once/);
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(api.removeDirectoryApp).toHaveBeenCalledWith('ws-1', 'app-1'));
   });
 });
