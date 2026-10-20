@@ -1,7 +1,8 @@
 import type { PortfolioStatusUpdate } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { PortfolioStatusDialog } from './portfolio-status-dialog';
 import { PortfolioStatusHistory } from './portfolio-status-history';
@@ -37,6 +38,7 @@ beforeEach(() => {
 
 describe('PortfolioStatusDialog', () => {
   it('posts the status picked, with a title, summary and next steps', async () => {
+    const user = setupUser();
     render(
       <PortfolioStatusDialog
         workspaceId="ws-1"
@@ -50,9 +52,9 @@ describe('PortfolioStatusDialog', () => {
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toContain(
       'Leasing programme - ',
     );
-    await userEvent.click(screen.getByRole('radio', { name: 'Off track' }));
-    await userEvent.type(screen.getByLabelText('Summary'), 'Two buildings behind.');
-    await userEvent.click(screen.getByRole('button', { name: 'Post status' }));
+    await user.click(screen.getByRole('radio', { name: 'Off track' }));
+    await user.type(screen.getByLabelText('Summary'), 'Two buildings behind.');
+    await user.click(screen.getByRole('button', { name: 'Post status' }));
 
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'off_track', summary: 'Two buildings behind.' }),
@@ -63,6 +65,7 @@ describe('PortfolioStatusDialog', () => {
 
 describe('PortfolioStatusHistory', () => {
   it('shows the newest prominently, folds the rest, and deletes where allowed', async () => {
+    const user = setupUser();
     updates = [
       update({ id: 'su-2', title: 'Week 42', summary: 'Back on track.', nextSteps: 'Sign leases' }),
       update({
@@ -84,7 +87,7 @@ describe('PortfolioStatusHistory', () => {
     expect(screen.getByText('Back on track.')).toBeVisible();
     expect(screen.getByText('1 earlier update')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Delete “Week 41”' })).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Delete “Week 42”' }));
+    await user.click(screen.getByRole('button', { name: 'Delete “Week 42”' }));
     expect(remove).toHaveBeenCalledWith('su-2');
   });
 
@@ -98,19 +101,21 @@ describe('PortfolioStatusHistory', () => {
 
 describe('StatusUpdateMenu', () => {
   it('asks for an update, and offers only that to someone who cannot post one', async () => {
+    const user = setupUser();
     const onRequest = vi.fn();
     render(<StatusUpdateMenu onPick={() => {}} onRequest={onRequest} canPick={false} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Update status/ }));
+    await user.click(screen.getByRole('button', { name: /Update status/ }));
     expect(screen.queryByRole('menuitem', { name: 'On track' })).toBeNull();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Request status update' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Request status update' }));
     expect(onRequest).toHaveBeenCalled();
   });
 
   it('leaves the request out when there is nobody to ask', async () => {
+    const user = setupUser();
     render(<StatusUpdateMenu onPick={() => {}} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Update status/ }));
+    await user.click(screen.getByRole('button', { name: /Update status/ }));
     expect(screen.getByRole('menuitem', { name: 'On track' })).toBeVisible();
     expect(screen.queryByRole('menuitem', { name: 'Request status update' })).toBeNull();
   });

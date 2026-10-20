@@ -1,8 +1,9 @@
 import type { PriorityDefinition, StatusDefinition } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { paste, setupUser } from '@/test/test-utils';
 
 import { ProjectSettingsPage } from './project-settings-page';
 
@@ -101,7 +102,7 @@ beforeEach(() => {
 
 describe('ProjectSettingsPage', () => {
   it('renames, reorders and adds statuses', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
     const statuses = screen.getByRole('list', { name: 'Task statuses' });
     expect(screen.getByText(/uses the workspace’s statuses/)).toBeInTheDocument();
@@ -109,7 +110,10 @@ describe('ProjectSettingsPage', () => {
     await user.click(within(statuses).getByRole('button', { name: 'Rename Doing' }));
     const input = within(statuses).getByRole('textbox', { name: 'Rename Doing' });
     await user.clear(input);
-    await user.type(input, 'In progress{Enter}');
+    // Pasted: each keystroke re-renders the whole page, and that is not what is
+    // under test. Typed, this journey timed out under the full parallel suite.
+    await paste(user, input, 'In progress');
+    await user.keyboard('{Enter}');
     expect(saveStatus).toHaveBeenCalledWith({ statusId: 's-2', draft: { name: 'In progress' } });
 
     await user.click(within(statuses).getByRole('button', { name: 'Move Done up' }));
@@ -118,7 +122,7 @@ describe('ProjectSettingsPage', () => {
     // The default can be neither archived nor deleted.
     expect(within(statuses).getByRole('button', { name: 'Delete To do' })).toBeDisabled();
 
-    await user.type(screen.getByRole('textbox', { name: 'New status' }), 'Waiting');
+    await paste(user, screen.getByRole('textbox', { name: 'New status' }), 'Waiting');
     await user.click(screen.getAllByRole('button', { name: 'Add' })[0] as HTMLElement);
     expect(saveStatus).toHaveBeenLastCalledWith({
       draft: { name: 'Waiting', category: 'NOT_STARTED' },
@@ -126,7 +130,7 @@ describe('ProjectSettingsPage', () => {
   });
 
   it('adds a priority below the most urgent level', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getByRole('textbox', { name: 'New priority' }), 'Urgent');

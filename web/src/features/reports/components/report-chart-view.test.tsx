@@ -1,8 +1,9 @@
 import type { ReportResult } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { ChartEditorDialog } from './chart-editor-dialog';
 import { ReportChartView } from './report-chart-view';
@@ -57,7 +58,7 @@ describe('ReportChartView', () => {
 
 describe('ChartEditorDialog', () => {
   it('keeps the chart kind fitting the grouping, and names an untitled chart', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSave = vi.fn();
     render(
       <QueryClientProvider client={new QueryClient()}>

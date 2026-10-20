@@ -1,9 +1,10 @@
 import type { TeamDetail } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { TeamDetailPage } from './team-detail-page';
 
@@ -71,7 +72,7 @@ beforeEach(() => {
 
 describe('TeamDetailPage', () => {
   it('shows the team, its projects and its people, with the lead marked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Maintenance crew' })).toBeInTheDocument();

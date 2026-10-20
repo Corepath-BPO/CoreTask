@@ -1,8 +1,9 @@
 import type { ProjectSummary, ProjectTemplate } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { DuplicateProjectDialog, UseTemplateDialog } from './project-template-dialogs';
 
@@ -56,7 +57,7 @@ beforeEach(() => {
 
 describe('DuplicateProjectDialog', () => {
   it('takes everything by default, and drops what needs the tasks when they go', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     wrap(
       <DuplicateProjectDialog workspaceId="ws-1" project={project} open onOpenChange={vi.fn()} />,
     );
@@ -86,7 +87,7 @@ describe('DuplicateProjectDialog', () => {
 
 describe('UseTemplateDialog', () => {
   it('starts a project from the chosen template, on the day given, and opens it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     start.mockImplementation((_vars, options: { onSuccess: (value: unknown) => void }) =>
       options.onSuccess({ projectId: 'new-1', rulesNeedingAttention: [], rulesSkipped: 0 }),
     );

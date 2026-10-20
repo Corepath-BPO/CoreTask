@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor } from '@/test/test-utils';
 
 import { LoginPage } from './login-page';
 
@@ -37,7 +37,7 @@ describe('LoginPage', () => {
   });
 
   it('blocks submission and reports both fields when empty', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(LoginPage, { initialPath: '/login' });
 
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
@@ -48,7 +48,7 @@ describe('LoginPage', () => {
   });
 
   it('rejects a malformed e-mail address', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(LoginPage, { initialPath: '/login' });
 
     await user.type(screen.getByLabelText(/email/i), 'not-an-email');
@@ -60,7 +60,7 @@ describe('LoginPage', () => {
   });
 
   it('submits normalised credentials when the form is valid', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(LoginPage, { initialPath: '/login' });
 
     await user.type(screen.getByLabelText(/email/i), '  Demo@CoreTask.dev ');
@@ -76,7 +76,7 @@ describe('LoginPage', () => {
   });
 
   it('toggles password visibility without losing the value', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(LoginPage, { initialPath: '/login' });
 
     const password = screen.getByLabelText(/^password/i);

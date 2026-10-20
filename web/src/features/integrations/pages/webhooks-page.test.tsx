@@ -2,11 +2,11 @@ import { WorkspaceRole } from '@coretask/contracts';
 import type { WebhookDelivery, WebhookEndpoint } from '@coretask/types';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { queryClient } from '@/lib/api/query-client';
+import { setupUser } from '@/test/test-utils';
 
 import { WebhooksPage } from './webhooks-page';
 
@@ -159,7 +159,7 @@ describe('WebhooksPage', () => {
   });
 
   it('flips the switch at once and rolls back when the server refuses', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let reject: (error: Error) => void = () => undefined;
     update.mockImplementation(() => new Promise((_resolve, rej) => (reject = rej)));
     renderPage();
@@ -191,7 +191,7 @@ describe('WebhooksPage', () => {
   });
 
   it('adds an endpoint and shows the signing secret once, masked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const secret = 'whsec_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg';
     create.mockResolvedValue({ endpoint: endpoint({ id: 'hook-2', name: 'Zapier' }), secret });
     renderPage();
@@ -227,7 +227,7 @@ describe('WebhooksPage', () => {
   });
 
   it('edits without ever showing a secret', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     update.mockResolvedValue(endpoint({ name: 'Renamed' }));
     renderPage();
 
@@ -253,7 +253,7 @@ describe('WebhooksPage', () => {
   });
 
   it('rotates the secret only after confirmation, then shows the new one', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     rotateSecret.mockResolvedValue({ secret: 'whsec_new_secret_value_0123456789abcdef' });
     renderPage();
 
@@ -272,7 +272,7 @@ describe('WebhooksPage', () => {
   });
 
   it('sends a test event and deletes after confirmation', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     test.mockResolvedValue({ deliveryId: 'del-9' });
     remove.mockResolvedValue(undefined);
     renderPage();
@@ -291,7 +291,7 @@ describe('WebhooksPage', () => {
   });
 
   it('shows recent deliveries and loads a payload on demand', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     deliveries.mockResolvedValue({ items: [deliveryRow()], hasMore: false, nextBefore: null });
     delivery.mockResolvedValue({
       ...deliveryRow(),
@@ -327,7 +327,7 @@ describe('WebhooksPage', () => {
   });
 
   it('queues a settled delivery again, and offers nothing for one still in flight', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     deliveries.mockResolvedValue({
       items: [
         deliveryRow({ id: 'del-failed', status: 'FAILED', responseStatus: 404, error: 'HTTP 404' }),

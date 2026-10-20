@@ -1,7 +1,7 @@
 import type { Goal } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser } from '@/test/test-utils';
 
 import { ConnectedGoals } from './connected-goals';
 
@@ -34,6 +34,7 @@ beforeEach(() => {
 
 describe('ConnectedGoals', () => {
   it('lists the goals a project moves, and lets a member let one go', async () => {
+    const user = setupUser();
     await renderWithRouter(() => <ConnectedGoals workspaceId="ws-1" projectId="p-1" canConnect />);
 
     expect(await screen.findByRole('link', { name: 'Fill every vacancy' })).toHaveAttribute(
@@ -41,7 +42,7 @@ describe('ConnectedGoals', () => {
       '/goals?goal=g-1',
     );
     expect(screen.queryByText('Cut turnover')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Disconnect “Fill every vacancy”' }));
+    await user.click(screen.getByRole('button', { name: 'Disconnect “Fill every vacancy”' }));
     expect(mutate).toHaveBeenCalledWith({ goalId: 'g-1', projectId: 'p-1', linked: false });
     expect(screen.getByRole('combobox', { name: 'Connect a goal' })).toBeVisible();
   });

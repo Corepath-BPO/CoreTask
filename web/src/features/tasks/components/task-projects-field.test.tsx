@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { AddToProjectPicker, OtherProjectRow } from './task-projects-field';
 
@@ -48,7 +49,7 @@ beforeEach(() => {
 
 describe('OtherProjectRow', () => {
   it('shows the project with its own section there, and takes the task out', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     wrap(
       <OtherProjectRow
         workspaceId="ws-1"
@@ -87,7 +88,7 @@ describe('OtherProjectRow', () => {
 
 describe('AddToProjectPicker', () => {
   it('offers only the live projects the task is not in, and adds it to the chosen one', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     wrap(<AddToProjectPicker workspaceId="ws-1" taskId="t-1" excludeIds={['home', 'p-2']} />);
 
     await user.click(screen.getByRole('button', { name: /Add to project/ }));

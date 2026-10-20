@@ -1,8 +1,9 @@
 import type { SavedSearch, TaskSearchPage } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import type { SearchParams } from '../lib/search-url';
 
@@ -89,7 +90,7 @@ beforeEach(() => {
 
 describe('AdvancedSearchPage', () => {
   it('searches what the address says, and lists what it found', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage({ q: 'leak', assignee: 'me', due: 'OVERDUE' });
 
     expect(searched).toHaveBeenLastCalledWith({
@@ -113,7 +114,7 @@ describe('AdvancedSearchPage', () => {
   });
 
   it('changes the search from its filters and its words', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Filter by assignee' }));
@@ -131,7 +132,7 @@ describe('AdvancedSearchPage', () => {
   });
 
   it('saves a search under a name, and opens it once saved', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save.mockImplementation((_payload, options: { onSuccess: (s: SavedSearch) => void }) =>
       options.onSuccess({
         id: 's-1',
@@ -157,7 +158,7 @@ describe('AdvancedSearchPage', () => {
   });
 
   it('offers to save changes to a saved search that no longer matches', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     saved = [
       { id: 's-1', name: 'Mine', filters: { assigneeIds: ['me'] }, createdAt: '', updatedAt: '' },
     ];

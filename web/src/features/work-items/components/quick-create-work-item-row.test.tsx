@@ -1,9 +1,8 @@
 import { WorkItemType } from '@coretask/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders } from '@/test/test-utils';
+import { renderWithProviders, setupUser } from '@/test/test-utils';
 
 import { QuickCreateWorkItemRow } from './quick-create-work-item-row';
 
@@ -32,7 +31,8 @@ const render = (props: Partial<Parameters<typeof QuickCreateWorkItemRow>[0]> = {
 
 /** Opens the row and returns its input. */
 const openRow = async () => {
-  await userEvent.click(screen.getByRole('button', { name: /add ticket/i }));
+  const user = setupUser();
+  await user.click(screen.getByRole('button', { name: /add ticket/i }));
   return screen.getByRole('textbox');
 };
 
@@ -144,6 +144,7 @@ describe('creating', () => {
 
 describe('choosing a different type', () => {
   it('creates the chosen type instead of the project default', async () => {
+    const user = setupUser();
     /*
      * A mostly-task project still files the occasional ticket. Making that a
      * trip to the toolbar is how people stop bothering and file it as a task.
@@ -151,8 +152,8 @@ describe('choosing a different type', () => {
     render({ defaultType: 'TICKET' });
     const input = await openRow();
 
-    await userEvent.click(screen.getByRole('button', { name: /type: ticket/i }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: /task/i }));
+    await user.click(screen.getByRole('button', { name: /type: ticket/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /task/i }));
 
     fireEvent.change(input, { target: { value: 'Actually a task' } });
     fireEvent.keyDown(input, { key: 'Enter' });

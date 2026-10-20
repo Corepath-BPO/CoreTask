@@ -2,7 +2,7 @@ import { WorkspaceRole } from '@coretask/contracts';
 import type { Team, TeamDetail } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, waitFor, within } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor, within } from '@/test/test-utils';
 import { useAuthStore } from '@/stores/auth.store';
 
 import { TeamsPage } from './teams-page';
@@ -137,11 +137,12 @@ describe('TeamsPage', () => {
     });
 
     it('lets a lead edit their own team without being an admin', async () => {
+      const user = setupUser();
       activeRole = WorkspaceRole.MEMBER;
       await renderPage();
 
       await screen.findByText('Platform');
-      await userEvent.click(screen.getByRole('button', { name: /actions for platform/i }));
+      await user.click(screen.getByRole('button', { name: /actions for platform/i }));
 
       expect(await screen.findByRole('menuitem', { name: /edit team/i })).toBeInTheDocument();
       // Dissolving a team stays an administrator's call.
@@ -160,11 +161,12 @@ describe('TeamsPage', () => {
     });
 
     it('shows a read-only roster to someone who cannot manage it', async () => {
+      const user = setupUser();
       activeRole = WorkspaceRole.MEMBER;
       listTeams.mockResolvedValue([team({ leadId: OTHER, lead: null })]);
       await renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: /view members/i }));
+      await user.click(await screen.findByRole('button', { name: /view members/i }));
 
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText('Jonas Feld')).toBeInTheDocument();
@@ -175,14 +177,15 @@ describe('TeamsPage', () => {
 
   describe('creating', () => {
     it('sends the form and closes the dialog', async () => {
+      const user = setupUser();
       createTeam.mockResolvedValue(team({ id: 'team-2', name: 'Design' }));
       await renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: /new team/i }));
+      await user.click(await screen.findByRole('button', { name: /new team/i }));
 
       const dialog = await screen.findByRole('dialog');
-      await userEvent.type(within(dialog).getByLabelText(/team name/i), 'Design');
-      await userEvent.click(within(dialog).getByRole('button', { name: /create team/i }));
+      await user.type(within(dialog).getByLabelText(/team name/i), 'Design');
+      await user.click(within(dialog).getByRole('button', { name: /create team/i }));
 
       await waitFor(() => {
         expect(createTeam).toHaveBeenCalledWith(
@@ -194,13 +197,14 @@ describe('TeamsPage', () => {
     });
 
     it('refuses a name that is too short before sending anything', async () => {
+      const user = setupUser();
       await renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: /new team/i }));
+      await user.click(await screen.findByRole('button', { name: /new team/i }));
 
       const dialog = await screen.findByRole('dialog');
-      await userEvent.type(within(dialog).getByLabelText(/team name/i), 'X');
-      await userEvent.click(within(dialog).getByRole('button', { name: /create team/i }));
+      await user.type(within(dialog).getByLabelText(/team name/i), 'X');
+      await user.click(within(dialog).getByRole('button', { name: /create team/i }));
 
       expect(await within(dialog).findByText(/at least 2 characters/i)).toBeInTheDocument();
       expect(createTeam).not.toHaveBeenCalled();
@@ -209,17 +213,18 @@ describe('TeamsPage', () => {
 
   describe('deleting', () => {
     it('warns that the projects survive, then deletes', async () => {
+      const user = setupUser();
       removeTeam.mockResolvedValue(undefined);
       await renderPage();
 
       await screen.findByText('Platform');
-      await userEvent.click(screen.getByRole('button', { name: /actions for platform/i }));
-      await userEvent.click(await screen.findByRole('menuitem', { name: /delete team/i }));
+      await user.click(screen.getByRole('button', { name: /actions for platform/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /delete team/i }));
 
       const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByText(/3 projects stay put/i)).toBeInTheDocument();
 
-      await userEvent.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+      await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
 
       await waitFor(() => expect(removeTeam).toHaveBeenCalledWith(WORKSPACE, 'team-1'));
     });
@@ -227,6 +232,7 @@ describe('TeamsPage', () => {
 
   describe('the roster', () => {
     it('adds someone and drops them again', async () => {
+      const user = setupUser();
       // Only the owner is on the team, so Jonas is the one candidate to add.
       teamDetail.mockResolvedValue(
         detail({
@@ -237,27 +243,28 @@ describe('TeamsPage', () => {
       removeTeamMember.mockResolvedValue(detail());
       await renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: /manage members/i }));
+      await user.click(await screen.findByRole('button', { name: /manage members/i }));
 
       const dialog = await screen.findByRole('dialog');
-      await userEvent.click(within(dialog).getByRole('combobox', { name: /person to add/i }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Jonas Feld' }));
-      await userEvent.click(within(dialog).getByRole('button', { name: /^add$/i }));
+      await user.click(within(dialog).getByRole('combobox', { name: /person to add/i }));
+      await user.click(await screen.findByRole('option', { name: 'Jonas Feld' }));
+      await user.click(within(dialog).getByRole('button', { name: /^add$/i }));
 
       await waitFor(() =>
         expect(addTeamMember).toHaveBeenCalledWith(WORKSPACE, 'team-1', { userId: OTHER }),
       );
 
-      await userEvent.click(
+      await user.click(
         within(dialog).getByRole('button', { name: /remove demo owner from platform/i }),
       );
       await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith(WORKSPACE, 'team-1', ME));
     });
 
     it('marks the lead on the roster', async () => {
+      const user = setupUser();
       await renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: /manage members/i }));
+      await user.click(await screen.findByRole('button', { name: /manage members/i }));
 
       const dialog = await screen.findByRole('dialog');
       expect(await within(dialog).findByText('Lead')).toBeInTheDocument();

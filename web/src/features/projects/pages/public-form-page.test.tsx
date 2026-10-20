@@ -2,10 +2,10 @@ import { FormQuestionKind } from '@coretask/contracts';
 import type { PublicForm } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api/api-error';
+import { setupUser } from '@/test/test-utils';
 
 import { PublicFormPage } from './public-form-page';
 
@@ -45,7 +45,7 @@ beforeEach(() => {
 
 describe('PublicFormPage', () => {
   it('shows the form, holds Submit until the required answers are in, and thanks the sender', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     get.mockResolvedValue(form);
     post.mockResolvedValue({ received: true });
     renderPage();
@@ -76,7 +76,7 @@ describe('PublicFormPage', () => {
   });
 
   it('says what the server refused, and keeps what was typed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     get.mockResolvedValue(form);
     post.mockRejectedValue(
       new ApiError({
@@ -106,7 +106,7 @@ describe('PublicFormPage', () => {
   });
 
   it('asks choice, date and number questions with the right controls', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     get.mockResolvedValue({
       ...form,
       questions: [

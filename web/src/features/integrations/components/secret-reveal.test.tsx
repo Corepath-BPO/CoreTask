@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { SecretReveal } from './secret-reveal';
 
@@ -23,7 +24,7 @@ describe('SecretReveal', () => {
   });
 
   it('starts masked and can be shown and hidden again', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecretReveal secret={SECRET} label="API key" />);
 
     const input = screen.getByLabelText('API key');
@@ -38,7 +39,7 @@ describe('SecretReveal', () => {
   });
 
   it('copies the raw secret even while it is masked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
 
@@ -51,7 +52,7 @@ describe('SecretReveal', () => {
 
   /** Plain http on a LAN has no clipboard API; the page must say so, not throw. */
   it('reports a missing clipboard instead of failing silently', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
 
     render(<SecretReveal secret={SECRET} label="API key" />);

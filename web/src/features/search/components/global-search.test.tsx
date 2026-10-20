@@ -2,7 +2,7 @@ import type { SearchKind, SearchResults } from '@coretask/types';
 import { act } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor } from '@/test/test-utils';
 import { useUiStore } from '@/stores/ui.store';
 
 import { useRecentItems } from '../lib/recent-items';
@@ -22,7 +22,7 @@ vi.mock('../hooks/use-search', () => ({
   },
 }));
 
-const user = { id: 'u-1', name: 'Ada Lovelace', email: 'ada@acme.test', avatarUrl: null };
+const person = { id: 'u-1', name: 'Ada Lovelace', email: 'ada@acme.test', avatarUrl: null };
 
 const fixture: SearchResults = {
   query: 'launch',
@@ -39,7 +39,7 @@ const fixture: SearchResults = {
   ],
   tickets: [],
   projects: [{ id: 'p-1', name: 'Launch Plan', key: 'LAUNCH', color: '#6366F1', status: 'ACTIVE' }],
-  people: [{ ...user, role: 'MEMBER' }],
+  people: [{ ...person, role: 'MEMBER' }],
 };
 
 const render = () => renderWithRouter(GlobalSearch);
@@ -61,9 +61,10 @@ describe('GlobalSearch', () => {
   });
 
   it('shows each kind of result under its own heading', async () => {
+    const user = setupUser();
     await render();
     open();
-    await userEvent.type(await screen.findByLabelText('Search the workspace'), 'launch');
+    await user.type(await screen.findByLabelText('Search the workspace'), 'launch');
 
     expect(await screen.findByText('Launch checklist')).toBeInTheDocument();
     // The chips are named Tasks/Projects/People too, so read the group headings.
@@ -75,10 +76,11 @@ describe('GlobalSearch', () => {
   });
 
   it('narrows the search to one kind when its chip is pressed', async () => {
+    const user = setupUser();
     await render();
     open();
-    await userEvent.click(await screen.findByRole('button', { name: 'People' }));
-    await userEvent.type(screen.getByLabelText('Search the workspace'), 'ada');
+    await user.click(await screen.findByRole('button', { name: 'People' }));
+    await user.type(screen.getByLabelText('Search the workspace'), 'ada');
 
     await waitFor(() =>
       expect(
@@ -88,10 +90,11 @@ describe('GlobalSearch', () => {
   });
 
   it('remembers what was opened, for the empty box next time', async () => {
+    const user = setupUser();
     await render();
     open();
-    await userEvent.type(await screen.findByLabelText('Search the workspace'), 'launch');
-    await userEvent.click(await screen.findByText('Launch checklist'));
+    await user.type(await screen.findByLabelText('Search the workspace'), 'launch');
+    await user.click(await screen.findByText('Launch checklist'));
 
     await waitFor(() =>
       expect(useRecentItems.getState().byWorkspace['ws-1']?.[0]).toMatchObject({

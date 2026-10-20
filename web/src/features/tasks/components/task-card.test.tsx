@@ -4,7 +4,7 @@ import { TaskPriority, TaskStatus } from '@coretask/contracts';
 import type { ProjectFieldMetadata, Task } from '@coretask/types';
 import { describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders, screen, userEvent } from '@/test/test-utils';
+import { renderWithProviders, screen, setupUser } from '@/test/test-utils';
 
 import { TaskCard } from './task-card';
 
@@ -114,7 +114,7 @@ describe('TaskCard', () => {
    * The handler wiring is identical either way, which is what this asserts.
    */
   it('opens the task when the title is activated', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onOpen, task } = renderCard({}, { draggable: false });
 
     await user.click(screen.getByText(task.title));
@@ -122,7 +122,7 @@ describe('TaskCard', () => {
   });
 
   it('is reachable by keyboard', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onOpen, task } = renderCard({}, { draggable: false });
 
     await user.tab();

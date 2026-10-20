@@ -2,10 +2,10 @@ import { WorkspaceRole } from '@coretask/contracts';
 import type { ApiKey } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { env } from '@/app/config/env';
+import { setupUser } from '@/test/test-utils';
 
 import { ApiKeysPage } from './api-keys-page';
 
@@ -121,8 +121,8 @@ describe('ApiKeysPage', () => {
   });
 
   it('creates a key, shows the secret once masked, and copies the raw value', async () => {
-    const user = userEvent.setup();
-    // `userEvent.setup()` installs its own clipboard stub, so the spy has to
+    const user = setupUser();
+    // `setupUser()` installs its own clipboard stub, so the spy has to
     // go in after it or the click lands on the stub instead.
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const secret = 'ctk_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg';
@@ -166,7 +166,7 @@ describe('ApiKeysPage', () => {
   });
 
   it('asks before revoking, and only then calls the API', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     revokeKey.mockResolvedValue(apiKey({ revokedAt: '2026-09-03T00:00:00.000Z' }));
     renderPage();
 

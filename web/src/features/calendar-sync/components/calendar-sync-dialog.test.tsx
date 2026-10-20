@@ -1,7 +1,8 @@
 import type { CalendarFeed } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { CalendarSyncDialog } from './calendar-sync-dialog';
 
@@ -37,13 +38,15 @@ beforeEach(() => {
 
 describe('CalendarSyncDialog', () => {
   it('offers to make a link when there is none', async () => {
+    const user = setupUser();
     renderDialog();
     expect(screen.getByRole('heading', { name: 'Sync My Tasks to your calendar' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Make a calendar link' }));
+    await user.click(screen.getByRole('button', { name: 'Make a calendar link' }));
     expect(create).toHaveBeenCalled();
   });
 
   it('shows the link, and asks twice before resetting it', async () => {
+    const user = setupUser();
     feed = {
       id: 'f-1',
       projectId: null,
@@ -59,13 +62,13 @@ describe('CalendarSyncDialog', () => {
       'webcal://api.example.org/api/v1/calendar/abc.ics',
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Reset link' }));
+    await user.click(screen.getByRole('button', { name: 'Reset link' }));
     expect(reset).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('stops working');
-    await userEvent.click(screen.getByRole('button', { name: 'Reset the link' }));
+    await user.click(screen.getByRole('button', { name: 'Reset the link' }));
     expect(reset).toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Stop syncing' }));
+    await user.click(screen.getByRole('button', { name: 'Stop syncing' }));
     expect(stop).toHaveBeenCalled();
   });
 });

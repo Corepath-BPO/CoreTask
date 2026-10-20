@@ -1,8 +1,9 @@
 import type { ProjectAppConnection } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { paste, setupUser } from '@/test/test-utils';
 
 import { CustomizeAppsSection } from './customize-apps-section';
 
@@ -77,6 +78,14 @@ const renderSection = (canEdit = true) =>
     </QueryClientProvider>,
   );
 
+/*
+ * Connecting Slack ran past Vitest's 5-second timeout once the whole suite ran
+ * in parallel, so these tests skip two costs neither is testing: the timer tick
+ * user-event waits between actions (a ~15ms timer slice on Windows), and typing
+ * 70-odd characters one at a time, which re-renders the dialog per keystroke.
+ * What is left still took up to 4.3 seconds under that load, so connecting
+ * Slack gets a 15-second timeout sized for a journey, not a single check.
+ */
 beforeEach(() => {
   for (const mock of [connect, update, test, disconnect]) mock.mockReset();
   apps = [];
@@ -85,7 +94,7 @@ beforeEach(() => {
 
 describe('CustomizeAppsSection', () => {
   it('connects Slack with the URL, a name and what to post', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     expect(screen.getByText('No apps yet.')).toBeInTheDocument();
@@ -93,17 +102,18 @@ describe('CustomizeAppsSection', () => {
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Connect' })).toBeDisabled();
 
-    await user.type(within(dialog).getByLabelText('Webhook URL'), 'https://example.org/x');
+    await paste(user, within(dialog).getByLabelText('Webhook URL'), 'https://example.org/x');
     expect(
       within(dialog).getByText('That does not look like a Slack webhook URL.'),
     ).toBeInTheDocument();
     await user.clear(within(dialog).getByLabelText('Webhook URL'));
-    await user.type(
+    await paste(
+      user,
       within(dialog).getByLabelText('Webhook URL'),
       'https://hooks.slack.com/services/T0/B0/x',
     );
     expect(within(dialog).queryByText(/does not look like/)).not.toBeInTheDocument();
-    await user.type(within(dialog).getByLabelText('Channel name'), '#maintenance');
+    await paste(user, within(dialog).getByLabelText('Channel name'), '#maintenance');
     await user.click(within(dialog).getByRole('checkbox', { name: 'Someone comments' }));
     await user.click(within(dialog).getByRole('checkbox', { name: 'A task is assigned' }));
     await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
@@ -117,10 +127,10 @@ describe('CustomizeAppsSection', () => {
       },
       expect.anything(),
     );
-  });
+  }, 15_000);
 
   it('lists a connection with what it posts and how its last post went', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     apps = [
       connection(),
       connection({
@@ -177,7 +187,7 @@ describe('CustomizeAppsSection', () => {
         slackChannel: { id: 'C0LEASING', name: 'leasing' },
       }),
     ];
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     expect(screen.getByRole('list', { name: 'Connected apps' })).toHaveTextContent(

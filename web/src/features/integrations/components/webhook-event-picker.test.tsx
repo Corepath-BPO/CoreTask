@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { WebhookEventPicker } from './webhook-event-picker';
 
@@ -17,7 +18,7 @@ describe('WebhookEventPicker', () => {
 
   /** Saved lists compare equal only if the order never depends on click order. */
   it('emits selections in the canonical order', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onChange = vi.fn();
     render(<WebhookEventPicker value={['task.completed']} onChange={onChange} />);
 
@@ -29,7 +30,7 @@ describe('WebhookEventPicker', () => {
   });
 
   it('selects and clears a whole group at once', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onChange = vi.fn();
     const { rerender } = render(<WebhookEventPicker value={[]} onChange={onChange} />);
 

@@ -84,6 +84,16 @@ export default defineConfig({
      */
     testTimeout: 30_000,
 
+    /*
+     * Vitest's default is one worker per CPU thread less one, 17 on a 4P+8E
+     * laptop. Past about half that, the extra workers mostly fight over the
+     * same cores and memory: the suite finished no sooner, but each test ran
+     * 2-4x slower and long journeys hit the 5-second timeout. At half, a full
+     * run took ~5% longer and the slowest test dropped from 5.3s to 3.7s.
+     * CI keeps the default. `--maxWorkers` on the command line still wins.
+     */
+    maxWorkers: process.env.CI ? undefined : '50%',
+
     // `e2e/` belongs to Playwright; Vitest would try to execute its
     // `test.describe` blocks and fail on the wrong runner.
     exclude: [...configDefaults.exclude, 'e2e/**'],

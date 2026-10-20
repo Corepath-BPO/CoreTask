@@ -1,8 +1,9 @@
 import type { TaskTime } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { TaskTimeField } from './task-time-field';
 
@@ -74,7 +75,7 @@ describe('TaskTimeField', () => {
   });
 
   it('logs time the way it is written, and removes only one’s own entries', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderField();
 
     await user.click(screen.getByRole('button', { name: 'Log time' }));
@@ -97,7 +98,7 @@ describe('TaskTimeField', () => {
   });
 
   it('runs a timer that logs at least a minute when stopped', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderField();
 
     await user.click(screen.getByRole('button', { name: 'Start timer' }));
@@ -108,7 +109,7 @@ describe('TaskTimeField', () => {
   });
 
   it('sets the estimate from what is typed, and clears it when emptied', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { onEstimate } = renderField({ estimatedMinutes: null });
 
     await user.click(screen.getByRole('button', { name: 'no estimate' }));

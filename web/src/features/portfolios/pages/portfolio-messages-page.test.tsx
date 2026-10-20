@@ -2,8 +2,9 @@ import { WorkspaceRole } from '@coretask/contracts';
 import type { PortfolioMessage } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { PortfolioMessagesPage } from './portfolio-messages-page';
 
@@ -68,7 +69,7 @@ beforeEach(() => {
 
 describe('PortfolioMessagesPage', () => {
   it('lets a member reply, and delete only their own message', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     expect(screen.getByText(/span the projects in Programme/)).toBeInTheDocument();

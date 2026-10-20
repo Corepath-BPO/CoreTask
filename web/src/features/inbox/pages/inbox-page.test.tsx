@@ -1,7 +1,7 @@
 import type { NotificationEntry } from '@coretask/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithRouter, screen, userEvent, waitFor, within } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor, within } from '@/test/test-utils';
 
 import { InboxPage } from './inbox-page';
 
@@ -77,7 +77,7 @@ describe('InboxPage', () => {
   });
 
   it('marks one as read', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /^mark ".*" read$/i }));
@@ -90,7 +90,7 @@ describe('InboxPage', () => {
    * the whole inbox", and an empty array would be a request to mark nothing.
    */
   it('clears the whole inbox with no ids at all', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /^mark all read$/i }));
@@ -102,7 +102,7 @@ describe('InboxPage', () => {
     pages = [
       { items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null },
     ];
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /^mark ".*" unread$/i }));
@@ -130,7 +130,7 @@ describe('InboxPage', () => {
   });
 
   it('opening an unread entry marks it read', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /^open "Ada mentioned you"$/i }));
@@ -142,7 +142,7 @@ describe('InboxPage', () => {
     pages = [
       { items: [entry({ readAt: new Date().toISOString() })], unreadCount: 0, nextCursor: null },
     ];
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /^open "Ada mentioned you"$/i }));
@@ -152,7 +152,7 @@ describe('InboxPage', () => {
 
   it('loads the next page on request', async () => {
     hasNextPage = true;
-    const user = userEvent.setup();
+    const user = setupUser();
     await render();
 
     await user.click(await screen.findByRole('button', { name: /load more/i }));

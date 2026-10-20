@@ -7,6 +7,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
+import userEvent, { type Options, type UserEvent } from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -145,5 +146,28 @@ export async function renderWithRouter(
   );
 }
 
+/**
+ * A user-event session for one test, without the pause between actions.
+ *
+ * user-event's default `delay: 0` still waits a timer tick after every keystroke
+ * and click. On Windows a tick is a ~15ms timer slice, so a journey of ~90
+ * actions sleeps for over a second, and under the full parallel suite that was
+ * enough to push journeys past Vitest's 5-second timeout. Nothing a test
+ * asserts on depends on the pause.
+ */
+export function setupUser(options?: Options): UserEvent {
+  return userEvent.setup({ delay: null, ...options });
+}
+
+/**
+ * Puts the whole text into a field at once, as pasting does. Typing re-renders
+ * per character, which on a full page costs tens of milliseconds a keystroke;
+ * paste where the per-character behaviour is not what the test is about.
+ */
+export async function paste(user: UserEvent, field: HTMLElement, text: string): Promise<void> {
+  await user.click(field);
+  await user.paste(text);
+}
+
 export * from '@testing-library/react';
-export { default as userEvent } from '@testing-library/user-event';
+export type { UserEvent } from '@testing-library/user-event';

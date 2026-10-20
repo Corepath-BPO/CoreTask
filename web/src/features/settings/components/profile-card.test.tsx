@@ -1,7 +1,8 @@
 import type { AuthUser } from '@coretask/types';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { paste, setupUser } from '@/test/test-utils';
 
 import { ProfileCard } from './profile-card';
 
@@ -11,7 +12,7 @@ vi.mock('../hooks/use-profile', () => ({
   useUpdateProfile: () => ({ mutate, isPending: false }),
 }));
 
-const user: AuthUser = {
+const profile: AuthUser = {
   id: 'u-1',
   email: 'bea@example.com',
   name: 'Bea Lin',
@@ -30,18 +31,21 @@ beforeEach(() => mutate.mockReset());
 
 describe('ProfileCard', () => {
   it('saves only once something changed, with the time off when it is on', async () => {
-    render(<ProfileCard user={user} />);
+    const user = setupUser();
+    render(<ProfileCard user={profile} />);
 
     const save = screen.getByRole('button', { name: 'Save profile' });
     expect(save).toBeDisabled();
 
-    await userEvent.type(screen.getByLabelText('Job title'), 'Leasing manager');
-    await userEvent.click(screen.getByRole('switch'));
-    await userEvent.clear(screen.getByLabelText('From'));
-    await userEvent.type(screen.getByLabelText('From'), '2026-10-19');
-    await userEvent.clear(screen.getByLabelText('Until'));
-    await userEvent.type(screen.getByLabelText('Until'), '2026-10-23');
-    await userEvent.click(save);
+    // Pasted, not typed: typing re-renders the card per keystroke, which pushed
+    // this journey past the timeout under the full parallel suite.
+    await paste(user, screen.getByLabelText('Job title'), 'Leasing manager');
+    await user.click(screen.getByRole('switch'));
+    await user.clear(screen.getByLabelText('From'));
+    await user.type(screen.getByLabelText('From'), '2026-10-19');
+    await user.clear(screen.getByLabelText('Until'));
+    await user.type(screen.getByLabelText('Until'), '2026-10-23');
+    await user.click(save);
 
     expect(mutate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -54,18 +58,19 @@ describe('ProfileCard', () => {
   });
 
   it('will not save time off that ends before it starts, or an empty name', async () => {
-    render(<ProfileCard user={user} />);
+    const user = setupUser();
+    render(<ProfileCard user={profile} />);
 
-    await userEvent.click(screen.getByRole('switch'));
-    await userEvent.clear(screen.getByLabelText('From'));
-    await userEvent.type(screen.getByLabelText('From'), '2026-10-23');
-    await userEvent.clear(screen.getByLabelText('Until'));
-    await userEvent.type(screen.getByLabelText('Until'), '2026-10-19');
+    await user.click(screen.getByRole('switch'));
+    await user.clear(screen.getByLabelText('From'));
+    await user.type(screen.getByLabelText('From'), '2026-10-23');
+    await user.clear(screen.getByLabelText('Until'));
+    await user.type(screen.getByLabelText('Until'), '2026-10-19');
     expect(screen.getByText('Time off has to end on or after it starts.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Save profile' })).toBeDisabled();
 
-    await userEvent.click(screen.getByRole('switch'));
-    await userEvent.clear(screen.getByLabelText('Name'));
+    await user.click(screen.getByRole('switch'));
+    await user.clear(screen.getByLabelText('Name'));
     expect(screen.getByText('Your name cannot be empty.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Save profile' })).toBeDisabled();
   });

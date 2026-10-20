@@ -1,8 +1,9 @@
 import type { Bundle, BundleApplyResult } from '@coretask/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setupUser } from '@/test/test-utils';
 
 import { describeApply } from '../../hooks/use-bundles';
 
@@ -84,7 +85,7 @@ beforeEach(() => {
 
 describe('CustomizeBundlesSection', () => {
   it('groups the bundles by how they relate to this project, and acts on each', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     const here = screen.getByRole('region', { name: 'On this project' });
@@ -106,7 +107,7 @@ describe('CustomizeBundlesSection', () => {
   });
 
   it('makes a bundle from this project with the parts left ticked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     await user.click(screen.getByRole('button', { name: /Make a bundle from this project/ }));
