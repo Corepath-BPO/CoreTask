@@ -100,6 +100,9 @@ export const queryKeys = {
     /** Logged time; under `tasks` so an estimate change refreshes its total line. */
     time: (workspaceId: string, taskId: string) =>
       [...queryKeys.tasks.all(workspaceId), 'time', taskId] as const,
+    /** Under `tasks` so an automation that adds one refreshes the open panel. */
+    checklists: (workspaceId: string, taskId: string) =>
+      [...queryKeys.tasks.all(workspaceId), 'checklists', taskId] as const,
   },
   tickets: {
     all: (workspaceId: string) => ['tickets', workspaceId] as const,

@@ -102,6 +102,11 @@ export function AutomationRunHistoryDialog({
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {formatRelativeTime(execution.startedAt)}
                             {execution.durationMs !== null ? ` · ${execution.durationMs} ms` : ''}
+                            {/* Which version ran: an old run reads against what
+                                the rule said then, not what it says now. */}
+                            {execution.ruleVersion
+                              ? ` · version ${execution.ruleVersion.version}`
+                              : ''}
                           </p>
                         </div>
                       </div>

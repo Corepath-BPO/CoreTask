@@ -9,6 +9,8 @@ import { FollowersModule } from '../followers/followers.module';
 import { ProjectAccessModule } from '../project-access/project-access.module';
 import { WorkspaceMembersModule } from '../workspace-members/workspace-members.module';
 
+import { TaskChecklistsController } from './task-checklists.controller';
+import { TaskChecklistsService } from './task-checklists.service';
 import { TaskProjectsService } from './task-projects.service';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
@@ -27,8 +29,8 @@ import { TimeEntriesService } from './time-entries.service';
     // custom-fields module imports this one back.
     CustomFieldsModule,
   ],
-  controllers: [TasksController, TimeEntriesController],
-  providers: [TasksService, TaskProjectsService, TimeEntriesService],
+  controllers: [TasksController, TimeEntriesController, TaskChecklistsController],
+  providers: [TasksService, TaskProjectsService, TimeEntriesService, TaskChecklistsService],
   exports: [TasksService],
 })
 export class TasksModule {}

@@ -106,6 +106,15 @@ export class TaskDto {
   @ApiProperty({ format: 'uuid', nullable: true })
   assigneeId!: string | null;
 
+  @ApiProperty({ format: 'uuid', nullable: true })
+  teamId!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'The team responsible for the task: id, name and colour.',
+  })
+  team!: { id: string; name: string; color: string } | null;
+
   @ApiProperty({ type: TaskUserDto, nullable: true })
   assignee!: TaskUserDto | null;
 

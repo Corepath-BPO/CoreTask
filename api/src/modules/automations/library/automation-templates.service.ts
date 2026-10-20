@@ -4,7 +4,10 @@ import {
   AutomationTrigger,
   WorkspaceRole,
   hasAtLeastRole,
+  conditionLeaves,
+  isConditionGroup,
   isFallbackBranch,
+  mapConditionLeaves,
 } from '@coretask/contracts';
 import type { AppliedAutomationTemplate, AutomationTemplateUnresolved } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
@@ -539,15 +542,17 @@ export class AutomationTemplatesService {
       const fieldId = readId(config['fieldId'] ?? config['customFieldId']);
       if (fieldId) fieldIds.add(fieldId);
 
-      if (nodeType === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
-        const conditionField = customFieldConditionId(config['field']);
+      // Every comparison a condition makes, grouped or not.
+      for (const leaf of nodeType === AutomationNodeType.CONDITION ? conditionLeaves(config) : []) {
+        const comparison = leaf.configuration;
+        const conditionField = customFieldConditionId(comparison['field']);
         if (conditionField) fieldIds.add(conditionField);
 
-        if (config['field'] === 'sectionId') {
-          for (const id of conditionValues(config)) sectionIds.add(id);
+        if (comparison['field'] === 'sectionId') {
+          for (const id of conditionValues(comparison)) sectionIds.add(id);
         }
-        if (config['field'] === 'status') {
-          for (const id of conditionValues(config)) if (!isLegacyStatus(id)) statusIds.add(id);
+        if (comparison['field'] === 'status') {
+          for (const id of conditionValues(comparison)) if (!isLegacyStatus(id)) statusIds.add(id);
         }
       }
     }
@@ -803,41 +808,53 @@ function translateConfiguration(
 
   // A condition: what it compares decides what its value is.
   if (node.nodeType === AutomationNodeType.CONDITION && !isFallbackBranch(config)) {
-    const conditionField = config['field'];
-    const conditionFieldId = customFieldConditionId(conditionField);
+    /*
+     * One comparison. Its own copy, so translating a group never edits the
+     * template it was read from.
+     */
+    const comparison = (original: Record<string, unknown>): Record<string, unknown> => {
+      const leaf = { ...original };
+      const conditionField = leaf['field'];
+      const conditionFieldId = customFieldConditionId(conditionField);
 
-    if (conditionFieldId) {
-      const resolved = field(conditionFieldId);
-      /*
-       * A condition about a field the project does not have is a question
-       * with no subject. Left with nothing rather than a dangling key, so the
-       * builder shows the row as unanswered — "Check if…" — and asks, instead
-       * of showing a comparison against a field it cannot name.
-       */
-      if (!resolved) return {};
-      config['field'] = customFieldKey(resolved.id);
-      if ('value' in config) {
-        const value = optionValue(conditionFieldId, resolved, config['value']);
-        if (value === undefined) delete config['value'];
-        else config['value'] = value;
-      }
-    } else if (conditionField === 'sectionId' || conditionField === 'status') {
-      const resolve = conditionField === 'sectionId' ? section : status;
-      const value = config['value'];
+      if (conditionFieldId) {
+        const resolved = field(conditionFieldId);
+        /*
+         * A condition about a field the project does not have is a question
+         * with no subject. Left with nothing rather than a dangling key, so the
+         * builder shows the row as unanswered — "Check if…" — and asks, instead
+         * of showing a comparison against a field it cannot name.
+         */
+        if (!resolved) return {};
+        leaf['field'] = customFieldKey(resolved.id);
+        if ('value' in leaf) {
+          const value = optionValue(conditionFieldId, resolved, leaf['value']);
+          if (value === undefined) delete leaf['value'];
+          else leaf['value'] = value;
+        }
+      } else if (conditionField === 'sectionId' || conditionField === 'status') {
+        const resolve = conditionField === 'sectionId' ? section : status;
+        const value = leaf['value'];
 
-      if (Array.isArray(value)) {
-        config['value'] = readIds(value)
-          .map(resolve)
-          .filter((id): id is string => id !== null);
-      } else {
-        const id = readId(value);
-        if (id) {
-          const resolved = resolve(id);
-          if (resolved) config['value'] = resolved;
-          else delete config['value'];
+        if (Array.isArray(value)) {
+          leaf['value'] = readIds(value)
+            .map(resolve)
+            .filter((id): id is string => id !== null);
+        } else {
+          const id = readId(value);
+          if (id) {
+            const resolved = resolve(id);
+            if (resolved) leaf['value'] = resolved;
+            else delete leaf['value'];
+          }
         }
       }
-    }
+
+      return leaf;
+    };
+
+    // A group keeps its shape; each comparison in it is translated alone.
+    return isConditionGroup(config) ? mapConditionLeaves(config, comparison) : comparison(config);
   }
 
   return config;

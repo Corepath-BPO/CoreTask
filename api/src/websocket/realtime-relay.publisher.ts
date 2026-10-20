@@ -14,6 +14,13 @@ export interface RealtimeRelayMessage {
    * as "the tickets list changed", to screens that are not in a project room.
    */
   workspaceId?: string;
+  /**
+   * Or everyone who may see this project, wherever they are in the app: the
+   * workspace room when it is public, its members' and admins' own rooms when
+   * it is private. Needs `workspaceId`. Resolved on the API side, where the
+   * rule of who may see what lives.
+   */
+  audienceOf?: string;
   /** The socket event name, exactly as the gateway would emit it. */
   event: string;
   payload: Record<string, unknown>;
@@ -47,6 +54,23 @@ export class RealtimeRelayPublisher {
     payload: Record<string, unknown>,
   ): Promise<void> {
     await this.publish({ projectId, event, payload });
+  }
+
+  /**
+   * To everyone who may see the project, not only the tabs open on it.
+   *
+   * A task panel opened from My Tasks, the inbox or search sits in no project
+   * room, so a change sent only to the room never reaches it. This reaches the
+   * people a person's own edit does — and, since they include everyone the
+   * room would admit, every tab on the project too.
+   */
+  async toProjectAudience(
+    workspaceId: string,
+    projectId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.publish({ workspaceId, audienceOf: projectId, event, payload });
   }
 
   /**

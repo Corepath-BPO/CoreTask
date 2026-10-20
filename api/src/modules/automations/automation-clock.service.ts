@@ -23,7 +23,11 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 
-import { AutomationEventPublisher, type AutomationEvent } from './automation-event.publisher';
+import {
+  AutomationEventPublisher,
+  derivedEventId,
+  type AutomationEvent,
+} from './automation-event.publisher';
 
 /**
  * How late a scheduled run may start and still be worth running.
@@ -99,6 +103,7 @@ export class AutomationClockService {
         id: true,
         ruleId: true,
         nodeId: true,
+        ruleVersionId: true,
         event: true,
         rule: { select: { status: true } },
       },
@@ -116,9 +121,12 @@ export class AutomationClockService {
       const event = asRecord(run.event) as unknown as AutomationEvent;
       await this.publisher.publish({
         ...event,
-        eventId: randomUUID(),
+        // Named after the waiting row, so this resumption is one job and one
+        // run however often it is published.
+        eventId: derivedEventId(run.id, 'resume'),
         ruleId: run.ruleId,
         resumeFromNodeId: run.nodeId,
+        resumeVersionId: run.ruleVersionId,
       });
       resumed += 1;
     }
@@ -133,14 +141,15 @@ export class AutomationClockService {
     const rules = await this.prisma.automationRule.findMany({
       where: {
         status: AutomationRuleStatus.ACTIVE,
-        triggerType: AutomationTrigger.SCHEDULED_TIME,
+        // The schedule that is running, not one being edited.
+        publishedVersion: { is: { triggerType: AutomationTrigger.SCHEDULED_TIME } },
         project: { archivedAt: null },
       },
       select: {
         id: true,
         workspaceId: true,
         projectId: true,
-        triggerConfig: true,
+        publishedVersion: { select: { triggerConfig: true } },
         publishedAt: true,
         scheduleCursor: true,
       },
@@ -149,7 +158,7 @@ export class AutomationClockService {
     let published = 0;
 
     for (const rule of rules) {
-      const schedule = readSchedule(asRecord(rule.triggerConfig));
+      const schedule = readSchedule(asRecord(rule.publishedVersion?.triggerConfig ?? {}));
       const due = latestOccurrence(schedule, now);
 
       // Owed only what came due after the rule went live, and after the run
@@ -270,15 +279,14 @@ export class AutomationClockService {
     const rules = await this.prisma.automationRule.findMany({
       where: {
         status: AutomationRuleStatus.ACTIVE,
-        triggerType: { in: [...DATE_TRIGGERS] },
+        publishedVersion: { is: { triggerType: { in: [...DATE_TRIGGERS] } } },
         project: { archivedAt: null },
       },
       select: {
         id: true,
         workspaceId: true,
         projectId: true,
-        triggerType: true,
-        triggerConfig: true,
+        publishedVersion: { select: { triggerType: true, triggerConfig: true } },
         publishedAt: true,
       },
     });
@@ -286,10 +294,11 @@ export class AutomationClockService {
     let published = 0;
 
     for (const rule of rules) {
-      if (!rule.publishedAt || !isDateTrigger(rule.triggerType)) continue;
+      const running = rule.publishedVersion;
+      if (!rule.publishedAt || !running || !isDateTrigger(running.triggerType)) continue;
 
-      const trigger = rule.triggerType;
-      const config = asRecord(rule.triggerConfig);
+      const trigger = running.triggerType;
+      const config = asRecord(running.triggerConfig);
       const days = isApproachingTrigger(trigger) ? approachingDays(config) : 0;
       const timeZone = isTimeZone(config['timezone']) ? config['timezone'] : 'UTC';
       const since = rule.publishedAt;

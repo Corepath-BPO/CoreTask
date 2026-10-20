@@ -1185,6 +1185,12 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     description: 'Membership is re-checked when the rule runs, not when it is written.',
   },
   {
+    subtype: AutomationAction.ASSIGN_TEAM,
+    label: 'Change team to…',
+    category: ACTION_CATEGORY.CHANGE_FIELD,
+    description: 'Makes a team of this workspace responsible for the task, or clears it.',
+  },
+  {
     subtype: AutomationAction.SET_DUE_DATE,
     label: 'Change due date to…',
     category: ACTION_CATEGORY.CHANGE_FIELD,
@@ -1317,6 +1323,12 @@ const ACTION_SPECS: readonly ActionSpec[] = [
     label: ACTION_LABEL.SEND_IN_APP_NOTIFICATION,
     category: ACTION_CATEGORY.ADD_TO_TASK,
     description: 'Notifies the configured person, or the assignee when none is chosen.',
+  },
+  {
+    subtype: AutomationAction.CREATE_CHECKLIST,
+    label: 'Checklist…',
+    category: ACTION_CATEGORY.ADD_TO_TASK,
+    description: 'Adds a named checklist with the items you list, each unticked.',
   },
 ];
 

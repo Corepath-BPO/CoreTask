@@ -34,6 +34,7 @@ describe('Automation triggers and actions (e2e)', () => {
     context = await createTestContext();
     runner = new AutomationRunnerService(context.prisma, {
       toProject: async () => undefined,
+      toProjectAudience: async () => undefined,
       toWorkspace: async () => undefined,
     } as never);
     clock = new AutomationClockService(context.prisma, {
@@ -613,8 +614,12 @@ describe('Automation triggers and actions (e2e)', () => {
       expect((await runner.handle(moved(scope.sectionId))).executed).toBe(0);
       expect((await runner.handle(moved(scope.otherSectionId))).executed).toBe(1);
 
-      await context.prisma.automationRule.update({
+      // Stored that way on the version that runs — what the runner reads.
+      const live = await context.prisma.automationRule.findUniqueOrThrow({
         where: { id: notFirst },
+      });
+      await context.prisma.automationRuleVersion.update({
+        where: { id: live.publishedVersionId ?? '' },
         data: {
           triggerConfig: { form: 'SECTION_CHANGED_TO_ANY_OF', sectionIds: [scope.sectionId] },
         },

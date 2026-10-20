@@ -207,3 +207,15 @@ export class ExecutionsQueryDto extends PaginationQueryDto {
   @Max(PAGINATION_MAX_LIMIT)
   override limit: number = AUTOMATION_EXECUTIONS_PAGE_SIZE;
 }
+
+export class RevertRuleDto {
+  @ApiPropertyOptional({
+    description:
+      'Publish the restored steps in the same call. Without it they wait in the draft for ' +
+      'somebody to review and publish.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  publish?: boolean;
+}

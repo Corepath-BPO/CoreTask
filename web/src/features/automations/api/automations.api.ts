@@ -1,5 +1,9 @@
 import { AUTOMATION_EXECUTIONS_PAGE_SIZE, type AutomationRuleStatus } from '@coretask/contracts';
-import type { PaginationMeta } from '@coretask/types';
+import type {
+  AutomationRuleVersionDetail,
+  AutomationRuleVersionSummary,
+  PaginationMeta,
+} from '@coretask/types';
 
 import { apiClient } from '@/lib/api/client';
 
@@ -21,6 +25,15 @@ export interface AutomationRule {
   triggerConfig: Record<string, unknown>;
   nodes: AutomationNode[];
   createdBy: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+  /**
+   * The version running — its number, and the trigger it listens for, which the
+   * draft's `triggerType` above may have moved on from. Null until published.
+   */
+  publishedVersion?: {
+    version: number;
+    triggerType: string;
+    triggerConfig: Record<string, unknown>;
+  } | null;
   /** Set when a bundle wrote this rule; the bundle replaces it when it changes. */
   bundleId?: string | null;
   lastRunAt: string | null;
@@ -39,6 +52,8 @@ export interface AutomationExecution {
   error: string | null;
   durationMs: number | null;
   startedAt: string;
+  /** The published version that ran. Null for runs from before versions were kept. */
+  ruleVersion: { version: number } | null;
   logs: {
     id: string;
     subtype: string;
@@ -123,6 +138,39 @@ export const automationsApi = {
       taskIds,
       ...(timezone ? { timezone } : {}),
     }),
+
+  /** The versions a rule has published, newest first. */
+  versions: (
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+  ): Promise<AutomationRuleVersionSummary[]> =>
+    apiClient.get<AutomationRuleVersionSummary[]>(
+      `${base(workspaceId, projectId)}/${ruleId}/versions`,
+    ),
+
+  version: (
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+    versionId: string,
+  ): Promise<AutomationRuleVersionDetail> =>
+    apiClient.get<AutomationRuleVersionDetail>(
+      `${base(workspaceId, projectId)}/${ruleId}/versions/${versionId}`,
+    ),
+
+  /** Puts a version's steps back in the draft — and live too, with `publish`. */
+  revert: (
+    workspaceId: string,
+    projectId: string,
+    ruleId: string,
+    versionId: string,
+    publish = false,
+  ): Promise<AutomationRule> =>
+    apiClient.post<AutomationRule>(
+      `${base(workspaceId, projectId)}/${ruleId}/versions/${versionId}/revert`,
+      { publish },
+    ),
 
   /** One page of a rule's runs, newest first. */
   executions: (

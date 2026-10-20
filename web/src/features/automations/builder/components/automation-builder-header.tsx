@@ -1,5 +1,14 @@
 import type { AutomationGraphIssue } from '@coretask/types';
-import { ArrowLeft, BookmarkPlus, LibraryBig, Save, Settings, Trash2, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  BookmarkPlus,
+  History,
+  LibraryBig,
+  Save,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +52,9 @@ const STATUS_TONE: Record<string, 'muted' | 'success' | 'warning' | 'destructive
 export function AutomationBuilderHeader({
   projectName,
   status,
+  publishedVersion,
+  hasUnpublishedChanges,
+  onShowHistory,
   name,
   onNameChange,
   settingsOpen,
@@ -67,6 +79,12 @@ export function AutomationBuilderHeader({
   /** Above the name, like a breadcrumb. Undefined until the project arrives. */
   projectName: string | undefined;
   status: string;
+  /** The number of the version running, null until the rule is published. */
+  publishedVersion: number | null;
+  /** Whether the draft says something the running version does not. */
+  hasUnpublishedChanges: boolean;
+  /** Open the rule's versions. Absent until there is one. */
+  onShowHistory?: () => void;
   name: string;
   onNameChange: (name: string) => void;
   /** Whether the rail is showing the rule's own settings rather than a step's. */
@@ -76,8 +94,9 @@ export function AutomationBuilderHeader({
   saving: boolean;
   canSave: boolean;
   /**
-   * True for a rule that is not running, which the page saves on its own a
-   * moment after each edit. Its Save button only shows when a save failed.
+   * True for a rule that has been saved once, which the page then saves on its
+   * own a moment after each edit — into the draft, which a live rule does not
+   * run until it is published. Its Save button only shows when a save failed.
    */
   autosaves: boolean;
   onSave: () => void;
@@ -134,15 +153,26 @@ export function AutomationBuilderHeader({
                 than a second colour to keep in step with the tone map. */}
             <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
             {status.charAt(0) + status.slice(1).toLowerCase()}
+            {/* Which version is running, beside the word saying that it is. */}
+            {publishedVersion !== null && <span className="opacity-80">· v{publishedVersion}</span>}
           </Badge>
+
+          {/* A saved draft a live rule is not running yet. The edits are safe —
+              they reach nothing until Publish — and this says so before
+              somebody wonders why the board did not change. */}
+          {hasUnpublishedChanges && (
+            <Badge variant="warning" title="Saved, and not running until you publish">
+              Unpublished changes
+            </Badge>
+          )}
         </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
         <SaveIndicator state={save} />
 
-        {/* An active rule's steps are its live steps, so its button says what
-            saving does; a rule that autosaves only needs one to retry. */}
+        {/* A saved rule saves itself; the button is how a failed save is
+            retried, and how a brand-new rule is first written. */}
         {(!autosaves || save === 'error') && (
           <Button
             variant="outline"
@@ -151,14 +181,23 @@ export function AutomationBuilderHeader({
             loading={saving}
             disabled={!canSave || saving}
             onClick={onSave}
-            title={
-              status === 'ACTIVE'
-                ? 'This rule is running: saving applies the change to the next task it acts on.'
-                : undefined
-            }
           >
             <Save className="size-4" aria-hidden="true" />
-            {status === 'ACTIVE' ? 'Save changes' : 'Save draft'}
+            Save draft
+          </Button>
+        )}
+
+        {/* What it ran before, and the way back to it. */}
+        {onShowHistory && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 cursor-pointer"
+            aria-label="Version history"
+            title="Version history"
+            onClick={onShowHistory}
+          >
+            <History className="size-4" aria-hidden="true" />
           </Button>
         )}
 
@@ -235,8 +274,13 @@ export function AutomationBuilderHeader({
           loading={publishing}
           disabled={!canPublish || publishing}
           onClick={onPublish}
+          title={
+            publishedVersion !== null && status === 'ACTIVE' && !canPublish
+              ? 'Nothing to publish: the rule is running what you see.'
+              : undefined
+          }
         >
-          Publish rule
+          {publishLabel(status, publishedVersion)}
         </Button>
 
         {/* Leaving is leaving, wherever it is pressed from: the dialog asks
@@ -253,6 +297,17 @@ export function AutomationBuilderHeader({
       </div>
     </header>
   );
+}
+
+/**
+ * What Publish does, in its own words. A live rule's button publishes the
+ * draft over the running version; a paused one's also turns it back on.
+ */
+function publishLabel(status: string, publishedVersion: number | null): string {
+  if (publishedVersion === null) return 'Publish rule';
+  if (status === 'ACTIVE') return 'Publish changes';
+  if (status === 'PAUSED') return 'Publish and resume';
+  return 'Publish rule';
 }
 
 /**

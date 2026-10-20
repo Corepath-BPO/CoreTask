@@ -4,7 +4,10 @@ import {
   BranchKey,
   CONDITION_OPERATOR,
   ConditionGroupOperator,
+  ConditionMatch,
   FilterOperator,
+  groupMatch,
+  isConditionGroup,
   type ConditionOperator,
 } from '@coretask/contracts';
 import type {
@@ -106,6 +109,9 @@ const NOTE = {
   DROPPED_SIBLINGS:
     'Steps placed beside a branch rather than on one of its arms were dropped — a branch ends ' +
     'the path it sits on.',
+  GROUP_DROPPED:
+    'A condition group asking “any of” these, or holding a group of its own, could not be ' +
+    'kept: a branch here holds one list of conditions, all of which must hold.',
 } as const;
 
 /** A comparison as it sits on a `CONDITION` or `BRANCH` node. */
@@ -202,7 +208,7 @@ function triggerFrom(
 function convertFlat(nodes: readonly LegacyNode[], newId: IdFactory): AutomationBranchDefinition[] {
   const conditions = ordered(nodes)
     .filter((node) => node.nodeType === AutomationNodeType.CONDITION)
-    .map(comparisonOf);
+    .flatMap((node) => comparisonsOf(node));
 
   const actions = ordered(nodes)
     .filter((node) => node.nodeType === AutomationNodeType.ACTION)
@@ -373,7 +379,7 @@ function armFrom(
       }
 
       if (node.nodeType === AutomationNodeType.CONDITION) {
-        found.conditions.push(comparisonOf(node));
+        found.conditions.push(...comparisonsOf(node, notes));
         walk(node.id, null, depth + 1);
         continue;
       }
@@ -453,6 +459,27 @@ function comparisonOf(node: LegacyNode): LegacyComparison {
     operator: OPERATOR_FROM_LEGACY[operator] ?? operator,
     value: config['value'] ?? null,
   };
+}
+
+/**
+ * The comparisons one condition step makes, as this model's list holds them.
+ *
+ * A step that is one comparison is one. An "all of" group of comparisons is
+ * those comparisons — the branch's list is itself "all of", so nothing changes.
+ * An "any of" group, or one holding another group, has no faithful place in a
+ * single all-of list, and is dropped and named rather than approximated.
+ */
+function comparisonsOf(node: LegacyNode, notes?: Set<string>): LegacyComparison[] {
+  const config = node.configuration ?? {};
+  if (!isConditionGroup(config)) return [comparisonOf(node)];
+
+  const leaves = config.conditions;
+  if (groupMatch(config) !== ConditionMatch.ALL || leaves.some(isConditionGroup)) {
+    notes?.add(NOTE.GROUP_DROPPED);
+    return [];
+  }
+
+  return leaves.map((leaf) => comparisonOf({ ...node, configuration: leaf }));
 }
 
 function actionOf(node: LegacyNode, newId: IdFactory): AutomationActionDefinition {

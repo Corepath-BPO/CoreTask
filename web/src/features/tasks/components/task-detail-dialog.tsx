@@ -97,6 +97,7 @@ import {
 } from '@/features/work-items/hooks/use-project-work-items';
 import { toWorkItemUpdate } from '@/features/work-items/lib/cell-payload';
 import { isTicketRow, toWorkItemRow } from '@/features/work-items/lib/work-item-row';
+import { useTeams } from '@/features/teams/hooks/use-teams';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { queryClient, queryKeys } from '@/lib/api/query-client';
 import { usePanelFocus } from '@/lib/hooks/use-panel-focus';
@@ -133,10 +134,13 @@ import { ApprovalDecision } from './approval-decision';
 import { TaskDatePopover } from './task-date-popover';
 import { AddToProjectPicker, OtherProjectRow, RemoveFromHomeButton } from './task-projects-field';
 import { TaskRepeatControl } from './task-repeat';
+import { TaskChecklists } from './task-checklists';
 import { TaskTimeField } from './task-time-field';
 import { DependenciesField, TaskLikeButton } from './task-relations';
 
 const UNASSIGNED = '__unassigned__';
+/* "No team" as a value the select can hold — Radix reads '' as nothing chosen. */
+const NO_TEAM = '__no_team__';
 const NO_SECTION = '__none__';
 
 interface TaskDetailDialogProps {
@@ -556,6 +560,7 @@ function TaskDetailBody({
   linkedCommentId,
 }: TaskDetailBodyProps) {
   const { data: members } = useWorkspaceMembers(workspaceId);
+  const { data: teams } = useTeams(workspaceId);
   const me = useCurrentUser();
   // Already cached by the board in the common case, so this is usually free.
   const { data: project } = useProject(workspaceId, task.projectId ?? '');
@@ -836,6 +841,48 @@ function TaskDetailBody({
             </SelectContent>
           </Select>
         </FieldRow>
+
+        {/* The team responsible, which an automation can also set. Offered once
+            the workspace has a team; a ticket's routes do not take one. */}
+        {!ticket && ((teams?.length ?? 0) > 0 || task.team) && (
+          <FieldRow label="Team">
+            <Select
+              value={task.teamId ?? NO_TEAM}
+              onValueChange={(value) => save({ teamId: value === NO_TEAM ? null : value })}
+              disabled={!canEdit}
+            >
+              <SelectTrigger
+                aria-label="Team"
+                className="h-8 w-fit min-w-44 border-0 bg-transparent px-2 shadow-none hover:bg-muted"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_TEAM}>
+                  <span className="text-muted-foreground">No team</span>
+                </SelectItem>
+                {[
+                  ...(teams ?? []),
+                  // A team the list has not caught up with still shows by name.
+                  ...(task.team && !(teams ?? []).some((team) => team.id === task.teamId)
+                    ? [task.team]
+                    : []),
+                ].map((team) => (
+                  <SelectItem key={team.id} value={team.id}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: team.color }}
+                      />
+                      {team.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        )}
 
         <FieldRow label="Due date">
           <TaskDatePopover
@@ -1340,6 +1387,9 @@ function TaskDetailBody({
             document.body,
           )}
       </section>
+
+      {/* Checklists live on tasks; a ticket's routes have none. */}
+      {!ticket && <TaskChecklists workspaceId={workspaceId} taskId={task.id} canEdit={canEdit} />}
 
       <Separator />
 

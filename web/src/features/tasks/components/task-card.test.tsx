@@ -33,6 +33,8 @@ const baseTask: Task = {
   approvalStatus: null,
   assigneeId: null,
   assignee: null,
+  teamId: null,
+  team: null,
   createdById: 'u',
   subtaskCount: 0,
   completedSubtaskCount: 0,

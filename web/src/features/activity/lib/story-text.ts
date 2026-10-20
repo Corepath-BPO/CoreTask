@@ -69,6 +69,10 @@ function fieldStory(metadata: FieldStoryMetadata, ctx: StoryContext): string | n
       return scheduleText('due date', metadata);
     case StoryField.START_DATE:
       return scheduleText('start date', metadata);
+    case StoryField.TEAM:
+      if (metadata.after === null) return `removed the team ${name(metadata.before, '')}`.trim();
+      if (metadata.before === null) return `set the team to ${name(metadata.after, 'a team')}`;
+      return `changed the team from ${name(metadata.before, 'none')} to ${name(metadata.after, 'none')}`;
     default:
       return null;
   }

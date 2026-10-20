@@ -9,6 +9,7 @@ import type {
   AutomationCatalogEntry,
   AutomationGraphNode,
   AutomationRuleGraph,
+  AutomationRuleVersionSummary,
 } from '@coretask/types';
 import { deriveEdges, validateGraphStructure } from '@coretask/validation';
 import { useNavigate } from '@tanstack/react-router';
@@ -36,7 +37,12 @@ import { RuleLibraryDialog } from '../../components/rule-library-dialog';
 import { SaveToLibraryDialog, type LibraryTarget } from '../../components/save-to-library-dialog';
 import { findStarter, makeStarterNodes } from '../../lib/starter-templates';
 import { collectRuleReferences } from '../../lib/template-references';
-import { useCreateRule, usePublishRule, useRemoveRule } from '../../hooks/use-automations';
+import {
+  useCreateRule,
+  usePublishRule,
+  useRemoveRule,
+  useRevertRule,
+} from '../../hooks/use-automations';
 import {
   useAutomationGraph,
   useAutomationMetadata,
@@ -59,8 +65,11 @@ import {
   makeBranchRow,
   makeDefaultNodes,
   makeNodeUnder,
+  moveBranchRow,
   NO_EDITS,
   readPlaceholderId,
+  rebaseEdits,
+  savedId,
   withDescendants,
   withPlaceholder,
   type CanvasNode,
@@ -69,6 +78,7 @@ import {
 
 import { AutomationBuilderHeader, type SaveState } from './automation-builder-header';
 import { AutomationCanvas } from './automation-canvas';
+import { VersionHistoryDialog } from './version-history-dialog';
 
 /**
  * The rule a blank canvas starts from.
@@ -108,6 +118,9 @@ function blankRule(
     // Nobody owns it yet — the panel says so rather than showing a blank row.
     createdBy: null,
     publishedAt: null,
+    // Never published, so nothing runs and there is nothing to differ from.
+    publishedVersion: null,
+    hasUnpublishedChanges: false,
     // The widening is the safe direction: a `CanvasNode` is a stored node plus
     // one type the database has no row for, and this one is a plain trigger.
     graph: { nodes: nodes as AutomationGraphNode[], edges: [] },
@@ -124,7 +137,7 @@ function blankRule(
  * and no address of its own — a rule could not be linked to, and Back went to
  * whatever the list was showing.
  */
-/** How long after the last edit a rule that is not running is saved. */
+/** How long after the last edit a saved rule is saved again. */
 const AUTOSAVE_DELAY_MS = 1_500;
 
 export function AutomationBuilderPage({
@@ -171,7 +184,9 @@ export function AutomationBuilderPage({
   const createRule = useCreateRule(workspaceId, projectId);
   const publishRule = usePublishRule(workspaceId, projectId);
   const removeRule = useRemoveRule(workspaceId, projectId);
+  const revertRule = useRevertRule(workspaceId, projectId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [libraryTarget, setLibraryTarget] = useState<LibraryTarget | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
@@ -417,6 +432,24 @@ export function AutomationBuilderPage({
         ? { kind: 'closed' }
         : previous,
     );
+  };
+
+  /**
+   * A branch row put somewhere else among the rows.
+   *
+   * The rows are tried top to bottom and the first that holds wins, so this
+   * changes which question is asked first — and nothing else: each row keeps
+   * its own actions. Held as an edit to the rows' order and saved with the
+   * rest, so a live rule takes the new order when it is published.
+   */
+  const moveRow = (rowId: string, toIndex: number) => {
+    const reordered = moveBranchRow(realNodes, rowId, toIndex);
+    if (Object.keys(reordered).length === 0) return;
+
+    setEdits((previous) => ({
+      ...previous,
+      reordered: { ...previous.reordered, ...reordered },
+    }));
   };
 
   /**
@@ -713,16 +746,15 @@ export function AutomationBuilderPage({
   const unnamed = currentName.trim() === '';
 
   /*
-   * Autosave, for a rule that is not running.
+   * Autosave, for every rule that exists.
    *
-   * Saving writes the rule's live steps — there is no separate draft copy for
-   * the runner to ignore — so saving an ACTIVE rule as somebody types would
-   * run their half-finished step on the next task. A draft, a paused rule or a
-   * never-published one runs nothing, so it is saved a moment after each edit.
-   * A brand-new rule waits for its first explicit save, which is what creates
+   * A save writes the draft. A live rule runs the version it was published
+   * with, so a half-finished step saved as somebody types reaches no task until
+   * they publish — which is what lets a running rule save itself too. A
+   * brand-new rule waits for its first explicit save, which is what creates
    * it; autosaving would leave a draft behind every builder anyone opened.
    */
-  const autosaves = !isNew && rule?.status !== AutomationRuleStatus.ACTIVE;
+  const autosaves = !isNew;
 
   /*
    * What the header reports about the last write.
@@ -794,13 +826,35 @@ export function AutomationBuilderPage({
         rule.id);
 
     /*
-     * Cleared only if nothing changed while the request was out. With
-     * autosave somebody is usually still typing when a save lands, and
-     * clearing then would throw away the keystrokes after the snapshot. Kept,
-     * they stay on screen and the next save sends them along with the rest.
+     * What the save carried is cleared; what changed while it was out stays.
+     *
+     * With autosave somebody is usually still typing when a save lands. The
+     * edits it sent are on the server now, and keeping them would add every
+     * new step a second time; the ones made since are not, and dropping them
+     * would lose the keystrokes after the snapshot. The steps the save created
+     * keep their uuid on the server (`new-<uuid>` becomes the uuid), so the
+     * panel open on one, and the selection, follow it rather than pointing at
+     * an id the rule no longer has.
      */
-    setSettingsEdits((current) => (current === sentSettings ? {} : current));
-    setEdits((current) => (current === sentEdits ? NO_EDITS : current));
+    const created = new Set(sentEdits.added.map((node) => node.id));
+    const follow = (id: string) => (created.has(id) ? savedId(id) : id);
+
+    setSettingsEdits((current) =>
+      current === sentSettings
+        ? {}
+        : (Object.fromEntries(
+            Object.entries(current).filter(
+              ([key, value]) => sentSettings[key as keyof RuleSettings] !== value,
+            ),
+          ) as Partial<RuleSettings>),
+    );
+    setEdits((current) => rebaseEdits(current, sentEdits));
+    setSelectedId((id) => (id ? follow(id) : id));
+    setRail((mode) =>
+      mode.kind === 'configure' ? { ...mode, nodeId: follow(mode.nodeId) } : mode,
+    );
+    setAddingAt((target) => (target ? { ...target, parentId: follow(target.parentId) } : target));
+    setAnswering((id) => (id ? follow(id) : id));
 
     return saved;
   };
@@ -848,6 +902,34 @@ export function AutomationBuilderPage({
     } finally {
       if (savedId && isNew) await goToSaved(savedId);
     }
+  };
+
+  /**
+   * An earlier version back in the draft — or the running one, which is how
+   * unpublished changes are discarded.
+   *
+   * The server's draft is replaced, so the edits on screen are let go of with
+   * it: the dialog asked first whenever there was anything to lose. The panel
+   * closes too, since the step it was open on may not be in what came back.
+   */
+  const restoreVersion = async (version: AutomationRuleVersionSummary) => {
+    if (!rule || isNew) return;
+
+    try {
+      await revertRule.mutateAsync({
+        ruleId: rule.id,
+        versionId: version.id,
+        version: version.version,
+        running: version.isPublished,
+      });
+    } catch {
+      return; // The mutation says what went wrong.
+    }
+
+    setEdits(NO_EDITS);
+    setSelectedId(null);
+    setRail({ kind: 'closed' });
+    setHistoryOpen(false);
   };
 
   /**
@@ -980,6 +1062,9 @@ export function AutomationBuilderPage({
       <AutomationBuilderHeader
         projectName={project?.name}
         status={rule.status}
+        publishedVersion={rule.publishedVersion?.version ?? null}
+        hasUnpublishedChanges={rule.hasUnpublishedChanges}
+        {...(rule.publishedVersion ? { onShowHistory: () => setHistoryOpen(true) } : {})}
         name={currentName}
         onNameChange={(name) => setSettingsEdits((previous) => ({ ...previous, name }))}
         settingsOpen={rail.kind === 'settings'}
@@ -996,7 +1081,15 @@ export function AutomationBuilderPage({
         issues={issues}
         onFocusIssue={(nodeId) => setSelectedId(nodeId)}
         publishing={publishRule.isPending}
-        canPublish={blocking.length === 0 && !saving}
+        canPublish={
+          blocking.length === 0 &&
+          !saving &&
+          // A live rule already running what is on screen has nothing to publish.
+          (rule.status !== AutomationRuleStatus.ACTIVE ||
+            rule.publishedVersion === null ||
+            rule.hasUnpublishedChanges ||
+            dirty)
+        }
         onPublish={() => void publish()}
         /*
          * Only a saved rule can be taken away; a brand-new canvas has nothing
@@ -1009,6 +1102,20 @@ export function AutomationBuilderPage({
         canBrowseLibrary={!dirty && !saving}
         onClose={onClose}
       />
+
+      {ruleId !== null && (
+        <VersionHistoryDialog
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          workspaceId={workspaceId}
+          projectId={projectId}
+          ruleId={ruleId}
+          ruleName={currentName}
+          hasUnpublishedChanges={rule.hasUnpublishedChanges || dirty}
+          restoring={revertRule.isPending}
+          onRestore={restoreVersion}
+        />
+      )}
 
       <SaveToLibraryDialog
         workspaceId={workspaceId}
@@ -1138,6 +1245,7 @@ export function AutomationBuilderPage({
           onDuplicateNode={duplicateNode}
           onDeleteNode={deleteNode}
           onInsertStep={insertStepAfter}
+          onMoveRow={moveRow}
         />
 
         {/*
