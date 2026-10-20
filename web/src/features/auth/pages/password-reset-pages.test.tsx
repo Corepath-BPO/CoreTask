@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api/api-error';
-import { renderWithRouter, screen, userEvent, waitFor } from '@/test/test-utils';
+import { renderWithRouter, screen, setupUser, waitFor } from '@/test/test-utils';
 
 import { ForgotPasswordPage } from './forgot-password-page';
 import { LoginPage } from './login-page';
@@ -46,7 +46,7 @@ describe('signing in', () => {
 describe('forgot password', () => {
   it('sends the link and says so without saying whether the account exists', async () => {
     forgotPassword.mockResolvedValue({ sent: true });
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(ForgotPasswordPage, { initialPath: '/forgot-password' });
 
     await user.type(screen.getByLabelText(/email/i), 'ada@example.com');
@@ -68,7 +68,7 @@ describe('choosing a new password', () => {
   it('takes the token from the link, out of the address bar, and sets the password', async () => {
     window.history.replaceState(null, '', '/reset-password?token=tok-123');
     resetPassword.mockResolvedValue(undefined);
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(ResetPasswordPage, {
       initialPath: '/reset-password',
     });
@@ -92,7 +92,7 @@ describe('choosing a new password', () => {
         message: 'This reset link is invalid, used or expired. Ask for a new one.',
       }),
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderWithRouter(ResetPasswordPage, {
       initialPath: '/reset-password',
     });

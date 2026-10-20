@@ -459,18 +459,20 @@ describe('ticket rules', () => {
 
   it('sets a ticket status from the ticket’s own list', async () => {
     const onChange = renderNode('ACTION', 'SET_TICKET_STATUS', {});
+    const user = setupUser();
 
-    await userEvent.click(screen.getByLabelText('Ticket status'));
-    await userEvent.click(await screen.findByRole('option', { name: 'Triaged' }));
+    await user.click(screen.getByLabelText('Ticket status'));
+    await user.click(await screen.findByRole('option', { name: 'Triaged' }));
     expect(onChange).toHaveBeenLastCalledWith({ status: 'TRIAGED' });
   });
 
   it('narrows "ticket status changes" to one status, or back to any', async () => {
     const onChange = renderNode('TRIGGER', 'TICKET_STATUS_CHANGED', {});
+    const user = setupUser();
 
     expect(screen.getByLabelText('When the status changes to')).toHaveTextContent('Any status');
-    await userEvent.click(screen.getByLabelText('When the status changes to'));
-    await userEvent.click(await screen.findByRole('option', { name: 'Resolved' }));
+    await user.click(screen.getByLabelText('When the status changes to'));
+    await user.click(await screen.findByRole('option', { name: 'Resolved' }));
     expect(onChange).toHaveBeenLastCalledWith({ status: 'RESOLVED' });
   });
 });
@@ -505,9 +507,10 @@ describe('the Wait step', () => {
 
   it('changes the unit and keeps the number', async () => {
     const onChange = renderWait({ amount: 3, unit: 'DAYS' });
+    const user = setupUser();
 
-    await userEvent.click(screen.getByLabelText('Unit'));
-    await userEvent.click(await screen.findByRole('option', { name: 'Hours' }));
+    await user.click(screen.getByLabelText('Unit'));
+    await user.click(await screen.findByRole('option', { name: 'Hours' }));
     expect(onChange).toHaveBeenLastCalledWith({ amount: 3, unit: 'HOURS' });
   });
 
@@ -564,14 +567,15 @@ describe('the AI steps', () => {
       { id: 'f-1', name: 'Request type', type: 'SINGLE_SELECT', options: [] },
       { id: 'f-2', name: 'Lease ends', type: 'DATE', options: [] },
     ]);
+    const user = setupUser();
 
     expect(screen.getByText('Choose at least one thing AI may change.')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Fill in Lease ends' })).toBeNull();
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Change its priority' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Change its priority' }));
     expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['PRIORITY'] });
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Fill in Request type' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Fill in Request type' }));
     expect(onChange).toHaveBeenLastCalledWith({ instructions: 'Triage', allow: ['field:f-1'] });
   });
 

@@ -187,7 +187,7 @@ describe('CustomizeAppsSection', () => {
         slackChannel: { id: 'C0LEASING', name: 'leasing' },
       }),
     ];
-    const user = userEvent.setup();
+    const user = setupUser();
     renderSection();
 
     expect(screen.getByRole('list', { name: 'Connected apps' })).toHaveTextContent(
