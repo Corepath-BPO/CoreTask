@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 
 import { API_PREFIX, AutomationTrigger, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
@@ -24,24 +25,50 @@ import {
 describe('OAuth apps and webhook subscriptions (e2e)', () => {
   let context: TestContext;
   let deliveries: WebhookDeliveryService;
+  /**
+   * The subscriber's server. It answers the X-Hook-Secret handshake by
+   * echoing the header, unless a test says how it should answer instead.
+   */
+  let listener: Server;
+  let HOOK = '';
+  let handshake: 'echo' | 'ignore' | 'refuse' = 'echo';
+  let handshakes: string[] = [];
 
   beforeAll(async () => {
     context = await createTestContext();
     deliveries = context.app.get(WebhookDeliveryService);
+    listener = createServer((req, res) => {
+      const secret = req.headers['x-hook-secret'];
+      if (typeof secret === 'string') {
+        handshakes.push(secret);
+        if (handshake === 'refuse') {
+          res.writeHead(410).end();
+          return;
+        }
+        res.writeHead(200, handshake === 'echo' ? { 'X-Hook-Secret': secret } : {}).end();
+        return;
+      }
+      res.writeHead(204).end();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+    const address = listener.address();
+    HOOK = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}/catch/1`;
   });
 
   beforeEach(async () => {
+    handshake = 'echo';
+    handshakes = [];
     await context.prisma.truncateAllTables();
   });
 
   afterAll(async () => {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
     await closeTestContext(context);
   });
 
   const server = () => context.app.getHttpServer();
   const url = (path: string) => `${API_PREFIX}${path}`;
   const REDIRECT = 'https://tool.example/oauth/callback';
-  const HOOK = 'https://hooks.example/catch/1';
 
   interface Actor {
     token: string;
@@ -463,6 +490,28 @@ describe('OAuth apps and webhook subscriptions (e2e)', () => {
         .post(subscriptionsUrl(scope))
         .set(credential)
         .send({ projectId, url: HOOK, events: ['task.created'] });
+
+    it('sends the new secret in the X-Hook-Secret handshake before saving anything', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      const created = await subscribe(scope, as(token.access_token), scope.projectId).expect(201);
+      expect(handshakes).toEqual([created.body.data.secret]);
+    });
+
+    it('refuses a URL that does not echo the handshake, or turns it away', async () => {
+      const scope = await setupScope();
+      const app = await registerApp(scope.owner);
+      const token = await connect(scope.member, app);
+
+      for (const answer of ['ignore', 'refuse'] as const) {
+        handshake = answer;
+        const refused = await subscribe(scope, as(token.access_token), scope.projectId).expect(422);
+        expect(refused.body.error.code).toBe('WEBHOOK_HANDSHAKE_FAILED');
+      }
+      expect(await context.prisma.webhookEndpoint.count()).toBe(0);
+    });
 
     it('lets an app subscribe to a project it can see, and hears what happens there', async () => {
       const scope = await setupScope();

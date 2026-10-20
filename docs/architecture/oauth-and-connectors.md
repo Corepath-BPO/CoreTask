@@ -67,6 +67,13 @@ app** subscribe a URL to one project's events when someone turns a trigger on,
 and delete it when they turn it off — what Zapier calls REST hooks. A person's
 own session gets `INTEGRATION_ONLY`; people use Settings › Webhooks.
 
+- **Handshake first** (Asana's `X-Hook-Secret`): before anything is saved,
+  CoreTask POSTs `{}` to the URL with an `X-Hook-Secret` header holding the
+  new signing secret. The receiver must answer 2xx with the same header and
+  value; anything else — another status, no echo, a redirect, a timeout — is
+  `422 WEBHOOK_HANDSHAKE_FAILED` and nothing is created. So a subscription
+  cannot aim CoreTask's deliveries at a server that did not ask for them. The
+  address is resolved and checked first, as a delivery's is.
 - Each subscription watches **one project the caller can see** (404 otherwise).
   It is a `webhook_endpoints` row with `projectId` set and `apiKeyId` or
   `oauthGrantId` naming its owner. An integration lists and deletes only its own.
@@ -93,5 +100,3 @@ an admin.
 - Public clients without a secret (PKCE-only, for mobile or desktop apps).
 - An app directory: apps are found by being sent their authorize link.
 - Admin controls over which apps members may connect.
-- A handshake on subscription (Asana's `X-Hook-Secret`): the signing secret
-  and the auto-disable after repeated failures cover the receiving side.

@@ -47,6 +47,7 @@ export const ErrorCode = {
   OAUTH_INVALID_REQUEST: 'OAUTH_INVALID_REQUEST',
   INTEGRATION_ONLY: 'INTEGRATION_ONLY',
   WEBHOOK_SUBSCRIPTION_LIMIT_REACHED: 'WEBHOOK_SUBSCRIPTION_LIMIT_REACHED',
+  WEBHOOK_HANDSHAKE_FAILED: 'WEBHOOK_HANDSHAKE_FAILED',
 
   // Webhooks
   WEBHOOK_URL_NOT_ALLOWED: 'WEBHOOK_URL_NOT_ALLOWED',
@@ -117,6 +118,8 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
     'Webhook subscriptions are made by API keys and OAuth apps. People add webhooks in Settings.',
   WEBHOOK_SUBSCRIPTION_LIMIT_REACHED:
     'This integration already has the maximum number of webhook subscriptions.',
+  WEBHOOK_HANDSHAKE_FAILED:
+    'The URL did not confirm the subscription: it must answer 2xx with the X-Hook-Secret header it was sent.',
 
   WEBHOOK_URL_NOT_ALLOWED: 'CoreTask cannot send webhooks to that address.',
   WEBHOOK_ENDPOINT_LIMIT_REACHED:

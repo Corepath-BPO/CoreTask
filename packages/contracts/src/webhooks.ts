@@ -176,6 +176,15 @@ export const WEBHOOK_DELIVERY_HEADER = 'x-coretask-delivery';
 export const WEBHOOK_WORKSPACE_HEADER = 'x-coretask-workspace';
 export const WEBHOOK_USER_AGENT = 'CoreTask-Webhooks/1.0';
 
+/**
+ * Asana's subscription handshake. Before a subscription is saved, CoreTask
+ * POSTs to its URL with this header holding the new signing secret, and the
+ * receiver answers 2xx with the same header and value. A URL that does not
+ * answer that way never receives anything — so a subscription cannot point
+ * CoreTask's deliveries at somebody else's server.
+ */
+export const WEBHOOK_HOOK_SECRET_HEADER = 'x-hook-secret';
+
 /** `t=<unix seconds>,v1=<hex hmac-sha256 of "<t>.<body>">`; receivers reject older timestamps. */
 export const WEBHOOK_SIGNATURE_TOLERANCE_SECONDS = 300;
 
