@@ -31,11 +31,7 @@ export function ColorTokenPicker({
   const { resolvedTheme } = useTheme();
 
   return (
-    <div
-      role="radiogroup"
-      aria-label="Colour"
-      className={cn('flex flex-wrap gap-1.5', className)}
-    >
+    <div role="radiogroup" aria-label="Colour" className={cn('flex flex-wrap gap-1.5', className)}>
       {COLOR_TOKENS.map((token) => {
         const swatch = resolveColorToken(token, resolvedTheme);
         const selected = token === value;

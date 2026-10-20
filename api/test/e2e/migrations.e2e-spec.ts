@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 import { PrismaClient } from '@prisma/client';
 
-import { buildE2eDatabaseUrl } from './test-database';
+import { buildE2eDatabaseUrl, E2E_SCHEMA } from './test-database';
 
 /**
  * Applies every committed migration to an empty schema, in the order Prisma
@@ -22,7 +22,9 @@ import { buildE2eDatabaseUrl } from './test-database';
  * kept working.
  */
 describe('Migrations (e2e)', () => {
-  const SCRATCH_SCHEMA = 'coretask_migration_check';
+  // This checkout's own, as the suite's schema is: dropped and rebuilt here,
+  // so a shared one would be pulled out from under another run's check.
+  const SCRATCH_SCHEMA = `${E2E_SCHEMA}_scratch`;
 
   const apiRoot = resolve(__dirname, '..', '..');
   const migrationsDir = resolve(apiRoot, 'prisma', 'migrations');

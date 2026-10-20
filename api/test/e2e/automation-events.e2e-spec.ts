@@ -80,9 +80,9 @@ describe('Automation event delivery (e2e)', () => {
       .send({ status: 'RESOLVED' })
       .expect(200);
 
-    // A developer worker may be running against the same Redis database while
-    // this suite uses its isolated PostgreSQL schema. Include every state so
-    // the assertion is stable whether that worker has claimed the jobs or not.
+    // Every state, so the assertion holds whether or not something claimed the
+    // jobs. A developer's worker no longer can: the suite queues under its own
+    // prefix (see test-database.ts).
     const jobs = await queue.getJobs([
       'waiting',
       'active',

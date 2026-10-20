@@ -64,6 +64,10 @@ export class AppConfigService {
     } as const;
   }
 
+  get queues() {
+    return { prefix: this.env.QUEUE_PREFIX } as const;
+  }
+
   get jwt() {
     return {
       accessSecret: this.env.JWT_ACCESS_SECRET,
@@ -149,6 +153,25 @@ export class AppConfigService {
       model: this.env.AI_MODEL,
       timeoutMs: this.env.AI_TIMEOUT_MS,
       enabled: Boolean(this.env.ANTHROPIC_API_KEY),
+    } as const;
+  }
+
+  /**
+   * The CoreTask Slack app. `enabled` checks one value because the schema
+   * refuses a partial set. Installs come back to the web app, which finishes
+   * them with the admin's session — that is what ties an install to the
+   * person who started it.
+   */
+  get slack() {
+    return {
+      clientId: this.env.SLACK_CLIENT_ID ?? null,
+      clientSecret: this.env.SLACK_CLIENT_SECRET ?? null,
+      signingSecret: this.env.SLACK_SIGNING_SECRET ?? null,
+      apiBaseUrl: this.env.SLACK_API_BASE_URL.replace(/\/+$/, ''),
+      authorizeUrl: this.env.SLACK_AUTHORIZE_URL,
+      timeoutMs: this.env.SLACK_TIMEOUT_MS,
+      redirectUri: `${this.corsOrigins[0] ?? this.env.WEB_URL}/integrations/slack/callback`,
+      enabled: Boolean(this.env.SLACK_CLIENT_ID),
     } as const;
   }
 

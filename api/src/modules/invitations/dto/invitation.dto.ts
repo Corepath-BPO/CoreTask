@@ -25,8 +25,7 @@ export class CreateInvitationDto {
   @ApiPropertyOptional({
     format: 'uuid',
     nullable: true,
-    description:
-      'Team to join on acceptance. Must belong to this workspace. Omit for no team.',
+    description: 'Team to join on acceptance. Must belong to this workspace. Omit for no team.',
   })
   @IsOptional()
   // An untouched picker sends '', which means "no team" rather than a bad uuid.
