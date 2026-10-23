@@ -17,6 +17,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d # pnpm pro
 
 The base file declares `image:` names for the application services, so it remains
 valid on its own for `docker compose config` while the overlays add `build:`.
+The exception is `coretask-site`, the marketing site: only the production overlay
+runs it, so it is declared there in full.
 
 ## Images
 
@@ -26,8 +28,9 @@ valid on its own for `docker compose config` while the overlays add `build:`.
 | `api/Dockerfile`     | `node:24-alpine` (multi-stage)       | `dist/`, production deps, Prisma client only           |
 | `web/Dockerfile.dev` | `node:24-alpine`                     | Vite dev server                                        |
 | `web/Dockerfile`     | `nginxinc/nginx-unprivileged:alpine` | Static bundle only — no Node.js at runtime             |
+| `site/Dockerfile`    | `nginxinc/nginx-unprivileged:alpine` | Marketing site's static export — no Node.js at runtime |
 
-All four use the **repository root** as build context, because a workspace
+All five use the **repository root** as build context, because a workspace
 package cannot be installed without the root lockfile and `pnpm-workspace.yaml`.
 
 Manifests are copied before source so the dependency layer survives a source
