@@ -3,6 +3,7 @@ import type {
   AuthSession,
   AuthUser,
   ResendVerificationResult,
+  TwoFactorChallenge,
   VerifyEmailResult,
 } from '@coretask/types';
 import {
@@ -10,6 +11,7 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  verifyTwoFactorSchema,
 } from '@coretask/validation';
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -21,15 +23,16 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AllowUnverifiedEmail } from '../../common/decorators/email-verification.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import type { AuthenticatedUser } from '../../common/types/api.types';
-import { buildClearCookieOptions, buildRefreshCookieOptions } from '../../common/utils/cookie.util';
+import { buildClearCookieOptions } from '../../common/utils/cookie.util';
 import { parseBody } from '../../common/utils/zod-body.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { AUTH_THROTTLE, SESSION_THROTTLE } from '../../config/throttle.config';
 
-import { AuthService, type AuthResult } from './auth.service';
+import { AuthService } from './auth.service';
 import {
   AuthSessionDto,
   AuthUserDto,
@@ -38,12 +41,18 @@ import {
   VerifyEmailResultDto,
 } from './dto/auth-response.dto';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
-import type { SessionContext } from './token.service';
+import {
+  completeSession,
+  isTwoFactorChallenge,
+  readRefreshCookie,
+  sessionContext,
+} from './lib/session-http';
 
 @ApiTags('Authentication')
 @Controller('auth')
 @Throttle(AUTH_THROTTLE)
 @SessionOnly()
+@AllowUnverifiedEmail()
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
@@ -67,7 +76,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSession> {
     const result = await this.auth.register(dto, sessionContext(request));
-    return this.completeSession(result, response);
+    return completeSession(result, response, this.config);
   }
 
   @Public()
@@ -104,7 +113,11 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Exchange credentials for a session' })
+  @ApiOperation({
+    summary: 'Exchange credentials for a session',
+    description:
+      'With two-step verification on, answers `{ twoFactorRequired: true, challenge }` instead and sets no cookie; finish at `POST /auth/two-factor/verify`.',
+  })
   @ApiEnvelopeResponse(AuthSessionDto)
   @ApiErrorResponseDoc(401, 'Invalid credentials')
   @ApiErrorResponseDoc(429, 'Too many attempts')
@@ -112,9 +125,32 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<AuthSession> {
+  ): Promise<AuthSession | TwoFactorChallenge> {
     const result = await this.auth.login(dto, sessionContext(request));
-    return this.completeSession(result, response);
+    if (isTwoFactorChallenge(result)) return result;
+    return completeSession(result, response, this.config);
+  }
+
+  @Public()
+  @Post('two-factor/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Finish signing in with a code',
+    description:
+      'The challenge from `login` (or from signing in with SSO) and a six-digit code from the authenticator app, or one recovery code. Five wrong codes end the challenge.',
+  })
+  @ApiEnvelopeResponse(AuthSessionDto)
+  @ApiErrorResponseDoc(400, 'The code is wrong')
+  @ApiErrorResponseDoc(401, 'The challenge is invalid, expired or used up')
+  @ApiErrorResponseDoc(429, 'Too many attempts')
+  async verifyTwoFactor(
+    @Body() body: unknown,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthSession> {
+    const input = parseBody(verifyTwoFactorSchema, body, 'Enter the code.');
+    const result = await this.auth.verifyTwoFactor(input, sessionContext(request));
+    return completeSession(result, response, this.config);
   }
 
   @Public()
@@ -137,7 +173,7 @@ export class AuthController {
   ): Promise<AuthSession> {
     const presented = readRefreshCookie(request);
     const result = await this.auth.refresh(presented, sessionContext(request));
-    return this.completeSession(result, response);
+    return completeSession(result, response, this.config);
   }
 
   @Public()
@@ -165,7 +201,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Sign out everywhere',
     description:
-      'Revokes every session the account has, this one included, and clears the cookie. Access tokens already issued expire on their own within 15 minutes.',
+      'Revokes every session the account has, this one included, and clears the cookie. Access tokens already issued stop working at once.',
   })
   @ApiEnvelopeResponse(LogoutResultDto)
   @ApiErrorResponseDoc(401, 'Missing or invalid access token')
@@ -234,30 +270,4 @@ export class AuthController {
   me(@CurrentUser('id') userId: string): Promise<AuthUser> {
     return this.auth.me(userId);
   }
-
-  /** Sets the rotated refresh cookie and returns only the body-safe half. */
-  private completeSession(result: AuthResult, response: Response): AuthSession {
-    response.cookie(
-      REFRESH_TOKEN_COOKIE,
-      result.refreshToken,
-      buildRefreshCookieOptions(this.config, result.refreshExpiresInMs),
-    );
-
-    return result.session;
-  }
-}
-
-function readRefreshCookie(request: Request): string | undefined {
-  const value = request.cookies?.[REFRESH_TOKEN_COOKIE];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function sessionContext(request: Request): SessionContext {
-  const context: SessionContext = {};
-  const userAgent = request.headers['user-agent'];
-
-  if (typeof userAgent === 'string') context.userAgent = userAgent;
-  if (request.ip) context.ipAddress = request.ip;
-
-  return context;
 }

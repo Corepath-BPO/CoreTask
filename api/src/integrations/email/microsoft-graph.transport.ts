@@ -35,7 +35,7 @@ export class MicrosoftGraphTransport {
   constructor(private readonly config: AppConfigService) {}
 
   async send(message: EmailMessage): Promise<void> {
-    const { baseUrl, fromAddress, timeoutMs } = this.config.microsoftGraph;
+    const { baseUrl, fromAddress, fromName, timeoutMs } = this.config.microsoftGraph;
     const accessToken = await this.accessToken();
 
     // The mailbox is in the path, not the payload: Graph sends *as* the user the
@@ -53,6 +53,10 @@ export class MicrosoftGraphTransport {
         body: JSON.stringify({
           message: {
             subject: message.subject,
+            // Without this Exchange stamps the mailbox's own directory display
+            // name, which is the tenant's name rather than the product's — the
+            // address is unchanged, so this needs no Send-As permission.
+            from: { emailAddress: { address: fromAddress as string, name: fromName } },
             body: message.html
               ? { contentType: 'HTML', content: message.html }
               : { contentType: 'Text', content: message.text },

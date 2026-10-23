@@ -34,6 +34,7 @@ import {
   ApiErrorResponseDoc,
 } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import { SessionOnly } from '../../common/decorators/session-only.decorator';
 import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorator';
 import { parseBody } from '../../common/utils/zod-body.util';
@@ -74,6 +75,7 @@ export class WebhooksController {
   }
 
   @Post()
+  @RequireVerifiedEmail()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Add a webhook endpoint',

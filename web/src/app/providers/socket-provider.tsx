@@ -10,6 +10,7 @@ import { queryClient } from '@/lib/api/query-client';
 import {
   connectSocket,
   disconnectSocket,
+  disconnectSocketSoon,
   getSocket,
   joinWorkspaceRoom,
   leaveWorkspaceRoom,
@@ -167,8 +168,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, workspaceId]);
 
-  // Tear the connection down when the whole app unmounts.
-  useEffect(() => disconnectSocket, []);
+  // Tear the connection down when the whole app unmounts — deferred, so the
+  // remount StrictMode rehearses in development cancels it instead of closing
+  // the socket mid-handshake.
+  useEffect(() => disconnectSocketSoon, []);
 
   return <>{children}</>;
 }

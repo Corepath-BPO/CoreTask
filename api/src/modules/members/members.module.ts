@@ -9,8 +9,10 @@ import { MembersController } from './members.controller';
 import { MembersService } from './members.service';
 
 /**
- * A leaf: nothing imports this, so it can depend on notifications without
- * closing a cycle back through the guard every other module needs.
+ * Nearly a leaf: only account deletion imports this, to leave workspaces the
+ * way "leave" does, and nothing imports that. So it can depend on
+ * notifications without closing a cycle back through the guard every other
+ * module needs.
  */
 @Module({
   imports: [
@@ -21,5 +23,6 @@ import { MembersService } from './members.service';
   ],
   controllers: [MembersController],
   providers: [MembersService],
+  exports: [MembersService],
 })
 export class MembersModule {}

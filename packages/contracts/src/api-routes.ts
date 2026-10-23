@@ -22,13 +22,59 @@ export const ApiRoutes = {
     changePassword: '/auth/change-password',
     verifyEmail: '/auth/verify-email',
     resendVerification: '/auth/resend-verification',
+    /** GET the pending change, POST to ask for one, DELETE to cancel it. */
+    emailChange: '/auth/email-change',
+    /** Public: the link may be opened on a device that is not signed in. */
+    confirmEmailChange: '/auth/email-change/confirm',
+    /** The sessions the account has open, one per signed-in browser or device. */
+    sessions: '/auth/sessions',
+    session: (sessionId: string) => `/auth/sessions/${sessionId}`,
+    revokeOtherSessions: '/auth/sessions/revoke-others',
+    twoFactor: {
+      /** GET: whether it is on, and how many recovery codes are left. */
+      status: '/auth/two-factor',
+      setup: '/auth/two-factor/setup',
+      enable: '/auth/two-factor/enable',
+      disable: '/auth/two-factor/disable',
+      recoveryCodes: '/auth/two-factor/recovery-codes',
+      /** Public: the second step of signing in, after the password or SSO. */
+      verify: '/auth/two-factor/verify',
+    },
+    sso: {
+      /** Public: which ways in this server offers, for the sign-in page. */
+      providers: '/auth/sso/providers',
+      /** Public, navigated to rather than fetched: it redirects to the provider. */
+      start: (provider: 'google' | 'microsoft') => `/auth/sso/${provider}/start`,
+      /** Signed in: the provider's page, to connect it to this account. */
+      link: (provider: 'google' | 'microsoft') => `/auth/sso/${provider}/link`,
+      callback: (provider: 'google' | 'microsoft') => `/auth/sso/${provider}/callback`,
+      /** Public, navigated to: `?workspace=<slug>` or `?email=<address>`. */
+      samlStart: '/auth/sso/saml/start',
+      /** Signed in: connect a workspace's SAML provider to this account. */
+      samlLink: (workspaceId: string) => `/auth/sso/saml/link/${workspaceId}`,
+      samlAcs: (connectionId: string) => `/auth/sso/saml/${connectionId}/acs`,
+      samlMetadata: (connectionId: string) => `/auth/sso/saml/${connectionId}/metadata`,
+      samlFinish: '/auth/sso/saml/finish',
+      /** The accounts connected to the caller's. */
+      identities: '/auth/sso/identities',
+      identity: (identityId: string) => `/auth/sso/identities/${identityId}`,
+    },
   },
   workspaces: {
     list: '/workspaces',
     create: '/workspaces',
     detail: (workspaceId: string) => `/workspaces/${workspaceId}`,
     update: (workspaceId: string) => `/workspaces/${workspaceId}`,
+    /** DELETE, owner only, with the name typed back and the owner's password. */
+    remove: (workspaceId: string) => `/workspaces/${workspaceId}`,
     members: (workspaceId: string) => `/workspaces/${workspaceId}/members`,
+    /** The workspace's SAML connection: GET, PUT, DELETE. */
+    saml: (workspaceId: string) => `/workspaces/${workspaceId}/saml`,
+    domains: (workspaceId: string) => `/workspaces/${workspaceId}/domains`,
+    domain: (workspaceId: string, domainId: string) =>
+      `/workspaces/${workspaceId}/domains/${domainId}`,
+    verifyDomain: (workspaceId: string, domainId: string) =>
+      `/workspaces/${workspaceId}/domains/${domainId}/verify`,
   },
   teams: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/teams`,
@@ -129,8 +175,18 @@ export const ApiRoutes = {
     `/workspaces/${workspaceId}/projects/${projectId}/resources`,
   projectResource: (workspaceId: string, projectId: string, resourceId: string) =>
     `/workspaces/${workspaceId}/projects/${projectId}/resources/${resourceId}`,
-  /** The caller's own profile. */
+  /** The caller's own profile. DELETE deletes the account. */
   profile: '/users/me',
+  /** What deleting the account would take with it, and what stands in the way. */
+  accountDeletion: '/users/me/deletion',
+  avatar: {
+    /** POST: somewhere to upload a picture. DELETE: remove the picture. */
+    upload: '/users/me/avatar',
+    confirm: '/users/me/avatar/confirm',
+    remove: '/users/me/avatar',
+    /** Public, used as an `<img src>`: redirects to the picture itself. */
+    view: (userId: string) => `/users/${userId}/avatar`,
+  },
   /** A person's calendar links: their My Tasks, or one project. */
   calendarFeeds: {
     mine: (workspaceId: string) => `/workspaces/${workspaceId}/calendar-feeds`,

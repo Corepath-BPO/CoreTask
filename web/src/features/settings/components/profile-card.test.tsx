@@ -12,6 +12,12 @@ vi.mock('../hooks/use-profile', () => ({
   useUpdateProfile: () => ({ mutate, isPending: false }),
 }));
 
+// The picture has its own tests (profile-picture.test.tsx).
+vi.mock('../hooks/use-avatar', () => ({
+  useUploadAvatar: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveAvatar: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 const profile: AuthUser = {
   id: 'u-1',
   email: 'bea@example.com',
@@ -19,6 +25,9 @@ const profile: AuthUser = {
   avatarUrl: null,
   timezone: 'UTC',
   emailVerified: true,
+  emailVerificationDueAt: null,
+  hasPassword: true,
+  twoFactorEnabled: false,
   createdAt: '2026-01-01T00:00:00.000Z',
   pronouns: 'she/her',
   jobTitle: null,

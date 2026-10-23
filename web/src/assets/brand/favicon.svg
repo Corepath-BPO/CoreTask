@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>.m{fill:#0A0A0A;stroke:#0A0A0A}.o{fill:none}@media (prefers-color-scheme:dark){.m{fill:#FFFFFF;stroke:#FFFFFF}}</style>
+  <rect class="m o" style="fill:none" x="8" y="8" width="18" height="18" stroke-width="4"/>
+  <rect class="m o" style="fill:none" x="38" y="8" width="18" height="18" stroke-width="4"/>
+  <rect class="m o" style="fill:none" x="8" y="38" width="18" height="18" stroke-width="4"/>
+  <rect class="m" x="36" y="36" width="22" height="22" stroke="none"/>
+</svg>

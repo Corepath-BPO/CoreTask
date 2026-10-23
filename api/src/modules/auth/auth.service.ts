@@ -5,14 +5,17 @@ import {
   EMAIL_VERIFICATION_TTL_HOURS,
   PASSWORD_RESET_RESEND_SECONDS,
   PASSWORD_RESET_TTL_MINUTES,
+  SignInMethod,
 } from '@coretask/contracts';
 import type {
   AuthSession,
   AuthUser,
   ResendVerificationResult,
+  TwoFactorChallenge,
   VerifyEmailResult,
 } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
+import type { User } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import { PrismaService } from '../../database/prisma.service';
@@ -22,6 +25,7 @@ import { UsersService } from '../users/users.service';
 import type { LoginDto, RegisterDto } from './dto/auth.dto';
 import { PasswordService } from './password.service';
 import { type SessionContext, TokenService } from './token.service';
+import { TwoFactorService } from './two-factor.service';
 
 export interface AuthResult {
   session: AuthSession;
@@ -39,6 +43,7 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly emailQueue: EmailQueue,
+    private readonly twoFactor: TwoFactorService,
   ) {}
 
   async register(dto: RegisterDto, context: SessionContext): Promise<AuthResult> {
@@ -49,7 +54,12 @@ export class AuthService {
     }
 
     const passwordHash = await this.passwords.hash(dto.password);
-    const user = await this.users.create({ email, name: dto.name, passwordHash });
+    const user = await this.users.create({
+      email,
+      name: dto.name,
+      passwordHash,
+      emailVerificationDueAt: this.users.emailVerificationDeadline(),
+    });
 
     const issued = await this.tokens.issueSession(user, context);
 
@@ -76,7 +86,7 @@ export class AuthService {
    */
   async requestPasswordReset(email: string): Promise<void> {
     const user = await this.users.findByEmail(UsersService.normalizeEmail(email));
-    if (!user || user.isServiceAccount || !user.isActive) return;
+    if (!user || user.isServiceAccount || !user.isActive || user.deletedAt) return;
 
     const recent = await this.prisma.passwordResetToken.findFirst({
       where: {
@@ -117,7 +127,7 @@ export class AuthService {
         id: true,
         usedAt: true,
         expiresAt: true,
-        user: { select: { id: true, isActive: true, isServiceAccount: true } },
+        user: { select: { id: true, isActive: true, isServiceAccount: true, deletedAt: true } },
       },
     });
     if (
@@ -125,7 +135,8 @@ export class AuthService {
       row.usedAt ||
       row.expiresAt.getTime() <= Date.now() ||
       !row.user.isActive ||
-      row.user.isServiceAccount
+      row.user.isServiceAccount ||
+      row.user.deletedAt
     ) {
       throw AppException.badRequest('PASSWORD_RESET_INVALID');
     }
@@ -146,14 +157,14 @@ export class AuthService {
       // The link was mailed to the address, so using it proves the address.
       this.prisma.user.updateMany({
         where: { id: row.user.id, emailVerifiedAt: null },
-        data: { emailVerifiedAt: new Date() },
+        data: { emailVerifiedAt: new Date(), emailVerificationDueAt: null },
       }),
     ]);
     await this.tokens.revokeAllForUser(row.user.id);
     this.logger.log({ userId: row.user.id }, 'Password reset');
   }
 
-  async login(dto: LoginDto, context: SessionContext): Promise<AuthResult> {
+  async login(dto: LoginDto, context: SessionContext): Promise<AuthResult | TwoFactorChallenge> {
     const user = await this.users.findByEmail(dto.email);
 
     // Burn the same CPU time when the account is unknown, so response latency
@@ -170,6 +181,12 @@ export class AuthService {
       throw AppException.unauthorized('INVALID_CREDENTIALS');
     }
 
+    // An account that signs in only with SSO has no password to match.
+    if (!user.passwordHash) {
+      await this.passwords.verifyAgainstDummy(dto.password);
+      throw AppException.unauthorized('INVALID_CREDENTIALS');
+    }
+
     if (!(await this.passwords.verify(user.passwordHash, dto.password))) {
       throw AppException.unauthorized('INVALID_CREDENTIALS');
     }
@@ -178,9 +195,40 @@ export class AuthService {
       throw AppException.forbidden('ACCOUNT_DISABLED');
     }
 
-    const issued = await this.tokens.issueSession(user, context);
-    await this.users.markLoggedIn(user.id);
+    return this.completeSignIn(user, context, SignInMethod.PASSWORD);
+  }
 
+  /**
+   * Where every way of signing in ends — the password, Google, Microsoft,
+   * SAML — once it has settled who the person is. With two-step verification
+   * on, that earns a challenge rather than a session; the code turns it into
+   * one at `verifyTwoFactor`.
+   */
+  async completeSignIn(
+    user: User,
+    context: SessionContext,
+    method: SignInMethod,
+  ): Promise<AuthResult | TwoFactorChallenge> {
+    if (user.totpEnabledAt) return this.twoFactor.createChallenge(user.id, method);
+    return this.startSession(user, context, method);
+  }
+
+  /** The second step: the challenge from the first, and a code. */
+  async verifyTwoFactor(
+    input: { challenge: string; code: string },
+    context: SessionContext,
+  ): Promise<AuthResult> {
+    const { user, method } = await this.twoFactor.redeemChallenge(input.challenge, input.code);
+    return this.startSession(user, context, method);
+  }
+
+  private async startSession(
+    user: User,
+    context: SessionContext,
+    method: SignInMethod,
+  ): Promise<AuthResult> {
+    const issued = await this.tokens.issueSession(user, context, method);
+    await this.users.markLoggedIn(user.id);
     return this.toAuthResult(UsersService.toAuthUser(user), issued);
   }
 
@@ -233,6 +281,12 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.users.requireById(userId);
 
+    if (!user.passwordHash) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Your account has no password yet. Use "Set a password" to get a link by e-mail.',
+      );
+    }
     if (!(await this.passwords.verify(user.passwordHash, input.currentPassword))) {
       throw AppException.badRequest('CURRENT_PASSWORD_INCORRECT');
     }
@@ -308,7 +362,7 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.updateMany({
         where: { id: row.user.id, emailVerifiedAt: null },
-        data: { emailVerifiedAt: new Date() },
+        data: { emailVerifiedAt: new Date(), emailVerificationDueAt: null },
       }),
       this.prisma.emailVerificationToken.deleteMany({
         where: { userId: row.user.id, id: { not: row.id } },

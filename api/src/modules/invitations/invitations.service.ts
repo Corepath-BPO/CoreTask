@@ -346,6 +346,13 @@ export class InvitationsService {
     });
 
     const workspace = await this.prisma.$transaction(async (tx) => {
+      // The link was mailed to this address, and the address is the account's:
+      // following it proves the address as well as a confirmation link would.
+      await tx.user.updateMany({
+        where: { id: userId, emailVerifiedAt: null },
+        data: { emailVerifiedAt: new Date(), emailVerificationDueAt: null },
+      });
+
       if (!existing) {
         await tx.workspaceMember.create({
           data: {

@@ -22,13 +22,12 @@ import type { SlackInstallation } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
 import type { ActorContext } from '../../common/types/api.types';
+import { openToken, sealToken } from '../../common/utils/sealed-token';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
 import { SlackApiClient, SlackApiError } from '../../integrations/slack/slack-api.client';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { decryptSecret, deriveKey, encryptSecret } from '../webhooks/lib/secret-cipher';
-
-import { openToken, sealToken } from './lib/sealed-token';
 
 const INSTALL_PURPOSE = 'slack-install';
 const LINK_PURPOSE = 'slack-link';

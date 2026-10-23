@@ -190,34 +190,72 @@ enum ActivityEntity {
 // Identity
 // ---------------------------------------------------------------------------
 
+/// Where a person's account lives outside CoreTask: Google, Microsoft, or a
+/// workspace's own SAML identity provider.
+enum IdentityProvider {
+  GOOGLE
+  MICROSOFT
+  SAML
+}
+
+/// How a session began. Kept on every refresh token of the family, so the
+/// session list can say "signed in with Google".
+enum SignInMethod {
+  PASSWORD
+  GOOGLE
+  MICROSOFT
+  SAML
+}
+
 model User {
-  id               String    @id @default(uuid(7)) @db.Uuid
+  id                     String    @id @default(uuid(7)) @db.Uuid
   /// Always stored lower-cased; the application normalises before writing.
-  email            String    @unique @db.VarChar(254)
-  passwordHash     String
-  name             String    @db.VarChar(120)
-  avatarUrl        String?
-  timezone         String    @default("UTC") @db.VarChar(64)
+  email                  String    @unique @db.VarChar(254)
+  /// Null for an account that has only ever signed in with Google, Microsoft
+  /// or SAML. A reset link sets one.
+  passwordHash           String?
+  name                   String    @db.VarChar(120)
+  /// Where the picture is served from: the API's own address for an uploaded
+  /// one (see `avatarKey`), so every projection that reads it keeps working.
+  avatarUrl              String?
+  /// The storage key of an uploaded picture; null when there is none.
+  avatarKey              String?   @db.VarChar(200)
+  timezone               String    @default("UTC") @db.VarChar(64)
   /// The profile: shown on member lists and beside a name in pickers.
-  pronouns         String?   @db.VarChar(40)
-  jobTitle         String?   @db.VarChar(80)
-  department       String?   @db.VarChar(80)
-  aboutMe          String?
+  pronouns               String?   @db.VarChar(40)
+  jobTitle               String?   @db.VarChar(80)
+  department             String?   @db.VarChar(80)
+  aboutMe                String?
   /// Time off, calendar days both inclusive; both set or both null.
-  outOfOfficeFrom  DateTime? @db.Date
-  outOfOfficeUntil DateTime? @db.Date
-  outOfOfficeNote  String?   @db.VarChar(200)
-  emailVerifiedAt  DateTime?
-  isActive         Boolean   @default(true)
+  outOfOfficeFrom        DateTime? @db.Date
+  outOfOfficeUntil       DateTime? @db.Date
+  outOfOfficeNote        String?   @db.VarChar(200)
+  emailVerifiedAt        DateTime?
+  /// While the address is unconfirmed, when CoreTask stops letting the account
+  /// in until it is. Null once confirmed, or for an account never held to it.
+  emailVerificationDueAt DateTime?
+  /// Two-step verification: the authenticator secret, encrypted at rest. Set
+  /// exactly while it is on.
+  totpSecret             String?
+  totpEnabledAt          DateTime?
+  /// The last 30-second step a code was accepted for, so each code works once.
+  totpLastStep           Int?
+  isActive               Boolean   @default(true)
   /// True for the hidden principal behind an API key. It never signs in, never
   /// receives mail (its address is under a reserved TLD) and is left out of
   /// people lists and counts — every query that lists members must filter it.
-  isServiceAccount Boolean   @default(false)
-  lastLoginAt      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  isServiceAccount       Boolean   @default(false)
+  lastLoginAt            DateTime?
+  /// Set when the person deleted their account. The row stays, scrubbed of
+  /// everything personal, so their comments and history still have an author.
+  deletedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   refreshTokens              RefreshToken[]
+  identities                 UserIdentity[]
+  recoveryCodes              TwoFactorRecoveryCode[]
+  emailChangeTokens          EmailChangeToken[]
   apiKey                     ApiKey?
   createdApiKeys             ApiKey[]                 @relation("ApiKeyCreatedBy")
   createdWebhookEndpoints    WebhookEndpoint[]        @relation("WebhookEndpointCreatedBy")
@@ -296,21 +334,25 @@ model User {
 /// previous one, so `sessionId` identifies a token *family* and lets a replayed
 /// token take the whole family down.
 model RefreshToken {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  userId       String    @db.Uuid
+  id               String       @id @default(uuid(7)) @db.Uuid
+  userId           String       @db.Uuid
   /// Stable across rotations — one browser/device session.
-  sessionId    String    @db.Uuid
+  sessionId        String       @db.Uuid
   /// SHA-256 of the token. High-entropy secrets do not need a slow KDF; the
   /// hash exists so a database leak cannot be replayed.
-  tokenHash    String    @unique @db.VarChar(64)
+  tokenHash        String       @unique @db.VarChar(64)
   /// Rotation counter, incremented on every refresh.
-  version      Int       @default(1)
-  userAgent    String?   @db.VarChar(400)
-  ipAddress    String?   @db.VarChar(64)
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  replacedById String?   @db.Uuid
-  createdAt    DateTime  @default(now())
+  version          Int          @default(1)
+  userAgent        String?      @db.VarChar(400)
+  ipAddress        String?      @db.VarChar(64)
+  /// How the session began, and when: both carried unchanged through every
+  /// rotation, so the newest row of a family describes the whole session.
+  method           SignInMethod @default(PASSWORD)
+  sessionStartedAt DateTime     @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  replacedById     String?      @db.Uuid
+  createdAt        DateTime     @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -318,6 +360,69 @@ model RefreshToken {
   @@index([sessionId])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+/// A way in other than the password: an account at Google or Microsoft, or a
+/// person at a workspace's SAML identity provider.
+///
+/// Matched on `subject`, never on the address — an address can change hands
+/// at the provider, the subject cannot. `email` is what the provider said at
+/// the last sign-in, kept for display.
+model UserIdentity {
+  id               String           @id @default(uuid(7)) @db.Uuid
+  userId           String           @db.Uuid
+  provider         IdentityProvider
+  /// Google's `sub`; Microsoft's `<tid>:<oid>`; for SAML `<connectionId>:<NameID>`,
+  /// so one unique index covers every provider.
+  subject          String           @db.VarChar(600)
+  /// The SAML connection that vouches for it; null for Google and Microsoft.
+  samlConnectionId String?          @db.Uuid
+  email            String           @db.VarChar(254)
+  lastUsedAt       DateTime?
+  createdAt        DateTime         @default(now())
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  samlConnection SamlConnection? @relation(fields: [samlConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([userId])
+  @@index([samlConnectionId])
+  @@map("user_identities")
+}
+
+/// One of the single-use codes that stand in for the authenticator app when
+/// it is lost. Shown once; only the hash is kept, and a new set replaces the old.
+model TwoFactorRecoveryCode {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  /// SHA-256 hex of the normalised code. The code carries 80 random bits.
+  codeHash  String    @unique @db.VarChar(64)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factor_recovery_codes")
+}
+
+/// A request to move an account to a new address, waiting for a link sent to
+/// that address. The address changes only when the link is used; asking again
+/// replaces the request.
+model EmailChangeToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  newEmail  String    @db.VarChar(254)
+  /// SHA-256 hex of the token in the link.
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("email_change_tokens")
 }
 
 /// A workspace API key: the credential a tool such as n8n presents.
@@ -635,10 +740,61 @@ model Workspace {
   notificationPreferences NotificationPreference[]
   tags                    Tag[]
   projectTemplates        ProjectTemplate[]
+  samlConnection          SamlConnection?
+  domains                 WorkspaceDomain[]
 
   @@index([createdById])
   @@index([archivedAt])
   @@map("workspaces")
+}
+
+/// A workspace's own SAML identity provider (Okta, Entra ID, Google Workspace…).
+///
+/// CoreTask is the service provider; its entity ID, ACS address and metadata
+/// all derive from this row's id. The IdP's certificate is public, so it is
+/// stored as given.
+model SamlConnection {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  workspaceId    String   @unique @db.Uuid
+  /// The IdP's entity ID: the Issuer its responses must carry.
+  idpEntityId    String   @db.VarChar(500)
+  /// Where sign-in requests are sent (HTTP-Redirect binding).
+  idpSsoUrl      String   @db.VarChar(2000)
+  /// The IdP's signing certificate, PEM. Responses signed by anything else are refused.
+  idpCertificate String
+  /// Off while an admin is still setting it up; nobody can sign in through it then.
+  enabled        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace  Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  identities UserIdentity[]
+
+  @@map("saml_connections")
+}
+
+/// An e-mail domain a workspace says is its own. Once a DNS TXT record proves
+/// it, the workspace's SAML provider speaks for every address in it: it may
+/// sign in existing accounts there and create new ones. Until then it speaks
+/// only for people who connected it themselves.
+///
+/// A domain can be claimed by several workspaces but verified by only one;
+/// the service checks that at verification time.
+model WorkspaceDomain {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  workspaceId       String    @db.Uuid
+  /// Lower-cased, no trailing dot.
+  domain            String    @db.VarChar(253)
+  /// What the TXT record must contain.
+  verificationToken String    @db.VarChar(64)
+  verifiedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, domain])
+  @@index([domain])
+  @@map("workspace_domains")
 }
 
 model WorkspaceMember {

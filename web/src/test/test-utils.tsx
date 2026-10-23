@@ -58,8 +58,23 @@ export async function renderWithRouter(
     getParentRoute: () => guestRoute,
     path: '/login',
     component,
-    validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
-      typeof search['redirect'] === 'string' ? { redirect: search['redirect'] } : {},
+    // Mirrors the real route: single sign-on sends failures back with `?ssoError=`.
+    validateSearch: (
+      search: Record<string, unknown>,
+    ): { redirect?: string; ssoError?: string } => ({
+      ...(typeof search['redirect'] === 'string' ? { redirect: search['redirect'] } : {}),
+      ...(typeof search['ssoError'] === 'string' ? { ssoError: search['ssoError'] } : {}),
+    }),
+  });
+  // "Sign in with SSO" on sign-in and sign-up links here.
+  const ssoRoute = createRoute({
+    getParentRoute: () => guestRoute,
+    path: '/sso',
+    component,
+    validateSearch: (search: Record<string, unknown>): { redirect?: string; error?: string } => ({
+      ...(typeof search['redirect'] === 'string' ? { redirect: search['redirect'] } : {}),
+      ...(typeof search['error'] === 'string' ? { error: search['error'] } : {}),
+    }),
   });
   const registerRoute = createRoute({
     getParentRoute: () => guestRoute,
@@ -132,7 +147,7 @@ export async function renderWithRouter(
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
-      guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute]),
+      guestRoute.addChildren([loginRoute, registerRoute, forgotPasswordRoute, ssoRoute]),
       resetPasswordRoute,
       verifyEmailRoute,
       settingsRoute,

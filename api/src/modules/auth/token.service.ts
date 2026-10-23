@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { AccessTokenPayload, RefreshTokenPayload } from '@coretask/types';
+import { SignInMethod } from '@coretask/contracts';
+import type { AccessTokenPayload, AccountSession, RefreshTokenPayload } from '@coretask/types';
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { RefreshToken } from '@prisma/client';
@@ -21,6 +22,12 @@ export interface IssuedTokens {
 export interface SessionContext {
   userAgent?: string;
   ipAddress?: string;
+}
+
+/** What a rotation carries forward from the token it replaces. */
+interface SessionOrigin {
+  method: SignInMethod;
+  startedAt: Date;
 }
 
 /**
@@ -49,12 +56,13 @@ export class TokenService {
     return durationToMs(this.config.jwt.refreshExpiresIn);
   }
 
-  /** Starts a brand-new token family (login / register). */
+  /** Starts a brand-new token family: signing in, registering, SSO. */
   async issueSession(
     user: { id: string; email: string },
     context: SessionContext = {},
+    method: SignInMethod = SignInMethod.PASSWORD,
   ): Promise<IssuedTokens> {
-    return this.issue(user, randomUUID(), 1, context);
+    return this.issue(user, randomUUID(), 1, context, { method, startedAt: new Date() });
   }
 
   /**
@@ -103,7 +111,13 @@ export class TokenService {
       { id: stored.userId, email: stored.user.email },
       stored.sessionId,
       stored.version + 1,
-      context,
+      // A refresh that says nothing about where it came from keeps what the
+      // session last knew, so the session list does not forget the device.
+      {
+        userAgent: context.userAgent ?? stored.userAgent ?? undefined,
+        ipAddress: context.ipAddress ?? stored.ipAddress ?? undefined,
+      },
+      { method: stored.method, startedAt: stored.sessionStartedAt },
       stored.id,
     );
 
@@ -138,6 +152,44 @@ export class TokenService {
     return count;
   }
 
+  /**
+   * The account's open sessions, newest activity first. Each family has one
+   * unrevoked row — the latest rotation — which carries everything the list
+   * shows; its `createdAt` is when the session last refreshed.
+   */
+  async listSessions(userId: string, currentSessionId: string | null): Promise<AccountSession[]> {
+    const rows = await this.prisma.refreshToken.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const seen = new Set<string>();
+    const sessions: AccountSession[] = [];
+    for (const row of rows) {
+      if (seen.has(row.sessionId)) continue;
+      seen.add(row.sessionId);
+      sessions.push({
+        id: row.sessionId,
+        current: row.sessionId === currentSessionId,
+        method: row.method,
+        userAgent: row.userAgent,
+        ipAddress: row.ipAddress,
+        signedInAt: row.sessionStartedAt.toISOString(),
+        lastActiveAt: row.createdAt.toISOString(),
+        expiresAt: row.expiresAt.toISOString(),
+      });
+    }
+    return sessions;
+  }
+
+  /** Ends one of the account's sessions. False when it has no such open session. */
+  async revokeSessionOf(userId: string, sessionId: string): Promise<boolean> {
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: { userId, sessionId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return count > 0;
+  }
+
   /** Housekeeping for a scheduled job: drop rows that can no longer be used. */
   async purgeExpired(before: Date = new Date()): Promise<number> {
     const { count } = await this.prisma.refreshToken.deleteMany({
@@ -167,6 +219,7 @@ export class TokenService {
     sessionId: string,
     version: number,
     context: SessionContext,
+    origin: SessionOrigin,
     replacesTokenId?: string,
   ): Promise<IssuedTokens> {
     const accessPayload: AccessTokenPayload = {
@@ -208,6 +261,8 @@ export class TokenService {
           expiresAt,
           userAgent: context.userAgent?.slice(0, 400) ?? null,
           ipAddress: context.ipAddress?.slice(0, 64) ?? null,
+          method: origin.method,
+          sessionStartedAt: origin.startedAt,
         },
       });
 

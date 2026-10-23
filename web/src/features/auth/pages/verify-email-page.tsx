@@ -50,7 +50,9 @@ export function VerifyEmailPage() {
     authApi.verifyEmail(token).then(
       (result) => {
         const { user, setUser } = useAuthStore.getState();
-        if (user && user.email === result.email) setUser({ ...user, emailVerified: true });
+        if (user && user.email === result.email) {
+          setUser({ ...user, emailVerified: true, emailVerificationDueAt: null });
+        }
         setOutcome({ status: 'done', result });
       },
       (error: unknown) => setOutcome({ status: 'failed', error }),

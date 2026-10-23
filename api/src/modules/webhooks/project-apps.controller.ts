@@ -16,6 +16,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 
 import { ApiErrorResponseDoc } from '../../common/decorators/api-envelope.decorator';
 import { Actor } from '../../common/decorators/workspace.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import type { ActorContext } from '../../common/types/api.types';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
@@ -44,6 +45,7 @@ export class ProjectAppsController {
   }
 
   @Post()
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary: 'Connect a chat app',
     description: 'Posts a hello to the channel straight away, so a wrong URL shows at once.',

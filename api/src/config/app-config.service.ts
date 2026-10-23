@@ -175,6 +175,44 @@ export class AppConfigService {
     } as const;
   }
 
+  /** Days a new account may run before its address must be confirmed. */
+  get emailVerificationGraceDays(): number {
+    return this.env.EMAIL_VERIFICATION_GRACE_DAYS;
+  }
+
+  /**
+   * "Sign in with Google / Microsoft". Callbacks land on the API, which sets
+   * the session cookie and sends the browser on to the web app.
+   */
+  get sso() {
+    const apiBase = `${this.env.API_URL.replace(/\/+$/, '')}/api/v1`;
+    const microsoftBase = `${this.env.MICROSOFT_SSO_LOGIN_URL.replace(/\/+$/, '')}/${this.env.MICROSOFT_SSO_TENANT}`;
+    return {
+      apiBase,
+      webUrl: this.corsOrigins[0] ?? this.env.WEB_URL,
+      timeoutMs: this.env.SSO_TIMEOUT_MS,
+      google: {
+        enabled: Boolean(this.env.GOOGLE_SSO_CLIENT_ID),
+        clientId: this.env.GOOGLE_SSO_CLIENT_ID ?? null,
+        clientSecret: this.env.GOOGLE_SSO_CLIENT_SECRET ?? null,
+        issuer: this.env.GOOGLE_SSO_ISSUER.replace(/\/+$/, ''),
+        authorizeUrl: this.env.GOOGLE_SSO_AUTHORIZE_URL,
+        tokenUrl: this.env.GOOGLE_SSO_TOKEN_URL,
+        redirectUri: `${apiBase}/auth/sso/google/callback`,
+      },
+      microsoft: {
+        enabled: Boolean(this.env.MICROSOFT_SSO_CLIENT_ID),
+        clientId: this.env.MICROSOFT_SSO_CLIENT_ID ?? null,
+        clientSecret: this.env.MICROSOFT_SSO_CLIENT_SECRET ?? null,
+        loginUrl: this.env.MICROSOFT_SSO_LOGIN_URL.replace(/\/+$/, ''),
+        tenant: this.env.MICROSOFT_SSO_TENANT,
+        authorizeUrl: `${microsoftBase}/oauth2/v2.0/authorize`,
+        tokenUrl: `${microsoftBase}/oauth2/v2.0/token`,
+        redirectUri: `${apiBase}/auth/sso/microsoft/callback`,
+      },
+    } as const;
+  }
+
   get microsoftGraph() {
     return {
       tenantId: this.env.MICROSOFT_GRAPH_TENANT_ID,
@@ -183,6 +221,8 @@ export class AppConfigService {
       baseUrl: normalizeGraphBaseUrl(this.env.MICROSOFT_GRAPH_BASE_URL),
       /** The mailbox mail is sent as. Must exist in the tenant. */
       fromAddress: this.env.MAIL_FROM_ADDRESS,
+      /** The display name shown beside it in an inbox. */
+      fromName: this.env.MAIL_FROM_NAME,
       timeoutMs: this.env.MAIL_CONNECTION_TIMEOUT_MS,
       enabled: Boolean(this.env.MICROSOFT_GRAPH_TENANT_ID),
     } as const;

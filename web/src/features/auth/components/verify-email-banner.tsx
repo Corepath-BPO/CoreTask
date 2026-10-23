@@ -2,6 +2,7 @@ import { MailWarning, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { formatDate } from '@/lib/utils/format';
 import { useCurrentUser } from '@/stores/auth.store';
 
 import { useResendVerification } from '../hooks/use-email-verification';
@@ -44,8 +45,10 @@ export function VerifyEmailBanner() {
     >
       <MailWarning className="size-4 shrink-0 text-warning-strong" aria-hidden="true" />
       <p className="min-w-0 flex-1">
-        Confirm your e-mail address, <span className="font-medium">{user.email}</span>, so we know
-        it reaches you.
+        Confirm your e-mail address, <span className="font-medium">{user.email}</span>
+        {user.emailVerificationDueAt
+          ? `, by ${formatDate(user.emailVerificationDueAt)} to keep using CoreTask.`
+          : ', so we know it reaches you.'}
       </p>
       <Button
         variant="outline"

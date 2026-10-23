@@ -71,6 +71,8 @@ export const EmailJob = {
   /** A message already written by the API — a task's update to its email thread. */
   MESSAGE: 'message',
   PASSWORD_RESET: 'password-reset',
+  /** "Confirm your new address", to the address the account is moving to. */
+  EMAIL_CHANGE: 'email-change',
 } as const;
 export type EmailJob = (typeof EmailJob)[keyof typeof EmailJob];
 
@@ -142,7 +144,18 @@ export interface PasswordResetEmailJobData {
   expiresAt: string;
 }
 
+/** Carries the *raw* token, like a reset; removed on completion. */
+export interface EmailChangeJobData {
+  userId: string;
+  /** The new address — where the link goes. */
+  email: string;
+  name: string;
+  token: string;
+  expiresAt: string;
+}
+
 export type EmailJobData =
+  | EmailChangeJobData
   | EmailVerificationJobData
   | InvitationEmailJobData
   | MessageEmailJobData

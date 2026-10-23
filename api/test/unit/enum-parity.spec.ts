@@ -13,6 +13,7 @@ import {
   CUSTOM_FIELD_TYPES,
   GOAL_PROGRESS_SOURCES,
   GOAL_STATUSES,
+  IDENTITY_PROVIDERS,
   MY_TASKS_BUCKETS,
   NOTIFICATION_TYPES,
   PROJECT_MEMBER_ROLES,
@@ -21,6 +22,7 @@ import {
   PROJECT_STATUSES,
   PROJECT_STATUS_VALUES,
   PROJECT_VISIBILITIES,
+  SIGN_IN_METHODS,
   STATUS_CATEGORIES,
   TASK_KINDS,
   TASK_PRIORITIES,
@@ -76,6 +78,8 @@ describe('shared enums match the Prisma schema', () => {
     ['GoalStatus', GOAL_STATUSES],
     ['GoalProgressSource', GOAL_PROGRESS_SOURCES],
     ['OAuthAppPolicy', OAUTH_APP_POLICIES],
+    ['IdentityProvider', IDENTITY_PROVIDERS],
+    ['SignInMethod', SIGN_IN_METHODS],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

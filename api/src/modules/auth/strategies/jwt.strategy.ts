@@ -22,16 +22,23 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   /**
-   * Re-reads the user on every request.
+   * Re-reads the user, and their session, on every request.
    *
    * A 15-minute access token would otherwise keep working after the account is
-   * disabled; one indexed primary-key lookup is a fair price for that.
+   * disabled or the session is signed out from another device; one indexed
+   * lookup that joins the session's live token is a fair price for that.
    */
   async validate(payload: AccessTokenPayload): Promise<AuthenticatedUser> {
-    const user = await this.users.findById(payload.sub);
+    const found = await this.users.findWithSession(payload.sub, payload.sid);
 
-    if (!user) {
+    if (!found) {
       throw AppException.unauthorized('ACCESS_TOKEN_INVALID');
+    }
+    const { user, sessionLive } = found;
+    // Signed out — here, elsewhere, or everywhere. The client refreshes on
+    // this code, which fails too, and lands on the sign-in page.
+    if (!sessionLive) {
+      throw AppException.unauthorized('ACCESS_TOKEN_EXPIRED');
     }
     // A service account authenticates with its API key, never with a session
     // token — there is no way to mint one, so one that names it is forged.
@@ -42,6 +49,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw AppException.forbidden('ACCOUNT_DISABLED');
     }
 
-    return { id: user.id, email: user.email, sessionId: payload.sid };
+    const verified = user.emailVerifiedAt !== null;
+    return {
+      id: user.id,
+      email: user.email,
+      sessionId: payload.sid,
+      emailVerification: {
+        verified,
+        overdue:
+          !verified &&
+          user.emailVerificationDueAt !== null &&
+          user.emailVerificationDueAt.getTime() <= Date.now(),
+      },
+    };
   }
 }

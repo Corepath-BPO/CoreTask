@@ -5,6 +5,9 @@ import { env } from '@/app/config/env';
 
 let socket: Socket | null = null;
 
+/** A teardown queued by `disconnectSocketSoon`, cancelled by a reconnect. */
+let pendingTeardown: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Connects (or reuses) the realtime socket.
  *
@@ -14,6 +17,11 @@ let socket: Socket | null = null;
  * 15 minutes while a socket may live far longer.
  */
 export function connectSocket(getToken: () => string | null): Socket {
+  if (pendingTeardown) {
+    clearTimeout(pendingTeardown);
+    pendingTeardown = null;
+  }
+
   if (socket?.connected) return socket;
 
   socket ??= io(`${env.wsUrl}${SOCKET_NAMESPACE}`, {
@@ -32,9 +40,28 @@ export function connectSocket(getToken: () => string | null): Socket {
 }
 
 export function disconnectSocket(): void {
+  if (pendingTeardown) {
+    clearTimeout(pendingTeardown);
+    pendingTeardown = null;
+  }
   socket?.removeAllListeners();
   socket?.disconnect();
   socket = null;
+}
+
+/**
+ * Disconnects on the next tick, unless something connects again first.
+ *
+ * For unmount cleanup. React's StrictMode unmounts and remounts every component
+ * once in development, and an immediate disconnect there closed the socket
+ * mid-handshake — the browser logged "WebSocket is closed before the connection
+ * is established" — then opened a second one. Deferred, the remount's
+ * `connectSocket` cancels the teardown and the first handshake carries on. A
+ * real unmount still disconnects, one tick later.
+ */
+export function disconnectSocketSoon(): void {
+  if (pendingTeardown) clearTimeout(pendingTeardown);
+  pendingTeardown = setTimeout(disconnectSocket, 0);
 }
 
 export function getSocket(): Socket | null {

@@ -32,6 +32,11 @@ export interface AuthenticatedUser {
   apiKey?: ApiKeyPrincipal;
   /** Present when an OAuth access token did: the request acts as the person who allowed the app. */
   oauth?: OAuthPrincipal;
+  /**
+   * For a session only: whether the address is confirmed, and if not, whether
+   * the deadline to confirm it has passed. Read by `EmailVerificationGuard`.
+   */
+  emailVerification?: { verified: boolean; overdue: boolean };
 }
 
 /**

@@ -35,8 +35,13 @@ import { useCurrentUser } from '@/stores/auth.store';
 import { type Theme, useTheme } from '@/stores/theme.store';
 
 import { AccountSecurityCard } from '../components/account-security-card';
+import { ConnectedAccountsCard } from '../components/connected-accounts-card';
+import { DeleteAccountCard } from '../components/delete-account-card';
+import { DeleteWorkspaceCard } from '../components/delete-workspace-card';
 import { NotificationEmailsCard } from '../components/notification-emails-card';
 import { ProfileCard } from '../components/profile-card';
+import { SessionsCard } from '../components/sessions-card';
+import { WorkspaceSsoCard } from '../components/workspace-sso-card';
 
 export function SettingsPage() {
   const { workspace, isLoading } = useActiveWorkspace();
@@ -142,6 +147,8 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
             </CardContent>
           </Card>
 
+          <WorkspaceSsoCard workspaceId={workspace.id} role={workspace.role} />
+
           <Card>
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
@@ -180,11 +187,17 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
           <NotificationEmailsCard workspaceId={workspace.id} />
 
           <WorkspaceTagsCard workspaceId={workspace.id} role={workspace.role} userId={user?.id} />
+
+          {user && workspace.role === WorkspaceRole.OWNER && (
+            <DeleteWorkspaceCard workspace={workspace} user={user} />
+          )}
         </div>
 
         <div className="space-y-5">
           {user && <ProfileCard key={user.id} user={user} />}
           {user && <AccountSecurityCard user={user} />}
+          {user && <ConnectedAccountsCard user={user} />}
+          {user && <SessionsCard />}
           <Card className="bg-muted/25">
             <CardHeader>
               <CardTitle>Team access</CardTitle>
@@ -231,6 +244,7 @@ function SettingsContent({ workspace }: { workspace: WorkspaceSummary }) {
               </Button>
             </CardContent>
           </Card>
+          {user && <DeleteAccountCard user={user} />}
         </div>
       </div>
     </div>

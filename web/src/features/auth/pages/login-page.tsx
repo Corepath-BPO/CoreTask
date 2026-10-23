@@ -1,6 +1,7 @@
 import { loginSchema, type LoginInput } from '@coretask/validation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { FormError } from '@/components/feedback/form-error';
@@ -10,7 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api/api-error';
 
+import { isTwoFactorChallenge } from '../api/auth.api';
 import { PasswordInput } from '../components/password-input';
+import { SsoOptions } from '../components/sso-options';
+import { TwoFactorStep } from '../components/two-factor-step';
 import { useAuth } from '../hooks/use-auth';
 
 export function LoginPage() {
@@ -18,13 +22,16 @@ export function LoginPage() {
   // Read non-strictly rather than by route id. Addressing `/guest/login`
   // directly couples this page to where it sits in the route tree, and throws
   // during unmount when no match is active.
-  const search: Partial<{ redirect: string }> = useSearch({ strict: false });
+  const search: Partial<{ redirect: string; ssoError: string }> = useSearch({ strict: false });
   const redirect = search.redirect;
   const { login } = useAuth();
+  // Set when the password was right and the account wants a code as well.
+  const [challenge, setChallenge] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    resetField,
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -33,9 +40,28 @@ export function LoginPage() {
   });
 
   const onSubmit = handleSubmit(async (values) => {
-    await login.mutateAsync(values);
+    const result = await login.mutateAsync(values);
+    if (isTwoFactorChallenge(result)) {
+      setChallenge(result.challenge);
+      return;
+    }
     await navigate({ to: redirect ?? '/', replace: true });
   });
+
+  if (challenge) {
+    return (
+      <TwoFactorStep
+        challenge={challenge}
+        onVerified={() => navigate({ to: redirect ?? '/', replace: true })}
+        onRestart={() => {
+          setChallenge(null);
+          login.reset();
+          // The password goes back to blank: starting again means typing it again.
+          resetField('password');
+        }}
+      />
+    );
+  }
 
   const submitError =
     login.error instanceof ApiError
@@ -54,6 +80,8 @@ export function LoginPage() {
           Enter your credentials to continue to your workspace.
         </p>
       </div>
+
+      <SsoOptions redirect={redirect} error={search.ssoError} />
 
       <FormError message={submitError} />
 
