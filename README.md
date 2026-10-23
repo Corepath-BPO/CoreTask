@@ -82,6 +82,7 @@ CoreTask/
 │   ├── src/lib/              api client, socket, mock fixtures, utils
 │   ├── src/stores/           Zustand stores (auth, workspace, ui, theme)
 │   └── e2e/                  Playwright specs
+├── site/                     Marketing site (Next.js, static export) — see site/README.md
 ├── api/                      NestJS REST + WebSocket API
 │   ├── src/config/           environment schema and typed config
 │   ├── src/common/           filters, guards, interceptors, decorators, DTOs, utils
