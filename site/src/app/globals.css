@@ -1,0 +1,144 @@
+@import 'tailwindcss';
+
+/*
+ * The site is dark only. It shares the app's brand green (#85C854) and its
+ * near-black (#08080B, the app's dark --background) so a visitor who signs up
+ * walks into a product that looks like the page that sold it.
+ *
+ * Text colours, measured on --color-ink and on --color-panel-2, the lightest
+ * surface text sits on:
+ *   fg     #F4F4F6  18.2:1 / 16.1:1
+ *   muted  #A1A1AB   7.8:1 /  6.9:1
+ *   faint  #84848F   5.4:1 /  4.8:1   (the dimmest text allowed)
+ *   brand  #85C854   9.9:1 /  8.7:1
+ */
+@theme {
+  --color-ink: #08080b;
+  --color-ink-2: #0d0d11;
+  --color-panel: #121217;
+  --color-panel-2: #18181e;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-2: rgb(255 255 255 / 0.14);
+  --color-fg: #f4f4f6;
+  --color-muted: #a1a1ab;
+  --color-faint: #84848f;
+  --color-brand: #85c854;
+  --color-brand-soft: rgb(133 200 84 / 0.14);
+  --color-amber: #f2b33d;
+  --color-rose: #fb7185;
+  --color-sky: #38bdf8;
+  --color-violet: #a78bfa;
+
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background: var(--color-ink);
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background: rgb(133 200 84 / 0.35);
+    color: var(--color-fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  /* Section anchors land below the fixed header. */
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+}
+
+@layer components {
+  /* Headings that read as one line on desktop and never shrink below legible. */
+  .display {
+    font-size: clamp(2.6rem, 6.4vw, 5.6rem);
+    line-height: 0.98;
+    letter-spacing: -0.045em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .headline {
+    font-size: clamp(2rem, 4.2vw, 3.6rem);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-size: clamp(1.05rem, 1.35vw, 1.25rem);
+    line-height: 1.6;
+    color: var(--color-muted);
+    text-wrap: pretty;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-brand);
+  }
+
+  /* A hairline that fades out at both ends. */
+  .rule-fade {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--color-line-2), transparent);
+  }
+
+  /* Faint engineering grid, masked to a soft circle. */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.045) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  }
+
+  .glass {
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.02));
+    border: 1px solid var(--color-line);
+    backdrop-filter: blur(14px);
+  }
+}
+
+/* Hides the native disclosure triangle; the FAQ draws its own. */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

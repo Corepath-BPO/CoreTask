@@ -1,0 +1,13 @@
+{
+  "extends": "@coretask/tsconfig/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "plugins": [{ "name": "next" }],
+    "types": ["node"]
+  },
+  "include": ["next-env.d.ts", "src", "scripts", "next.config.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next", "out"]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@coretask/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CoreTask marketing site (Next.js, exported as static HTML)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "next dev --port 3200",
+    "build": "next build",
+    "preview": "node scripts/preview.ts",
+    "lint": "eslint src scripts --max-warnings 0",
+    "typecheck": "next typegen && tsc --noEmit",
+    "studio": "remotion studio src/remotion/index.ts",
+    "assets": "node scripts/render-assets.ts"
+  },
+  "dependencies": {
+    "@react-three/drei": "10.7.9",
+    "@react-three/fiber": "9.8.2",
+    "@remotion/player": "4.0.537",
+    "framer-motion": "14.5.0",
+    "lenis": "1.3.27",
+    "lucide-react": "^0.545.0",
+    "next": "16.3.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "4.0.537",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@coretask/eslint-config": "workspace:*",
+    "@coretask/tsconfig": "workspace:*",
+    "@remotion/bundler": "4.0.537",
+    "@remotion/cli": "4.0.537",
+    "@remotion/google-fonts": "4.0.537",
+    "@remotion/renderer": "4.0.537",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@types/three": "0.186.0",
+    "eslint": "^9.39.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5.9.3"
+  }
+}
