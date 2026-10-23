@@ -501,6 +501,49 @@ describe('Automation templates (e2e)', () => {
       });
     });
 
+    /*
+     * Two sections can carry the same name, and the board shows one of them
+     * above the other. The match has to land on the top one every time. While
+     * the lookup went unordered, whichever row the database handed back first
+     * won: the same template could land on either section, and the suite above
+     * passed in one CI run and failed in the next on the very same commit.
+     *
+     * This pins the rule rather than reproducing the race: which row comes
+     * back first without an ORDER BY is down to where the rows physically sit
+     * — the planner reads them through a bitmap heap scan, which hands them
+     * over in page order — so the old code cannot be made to fail on demand.
+     * The section that should win is the one created last, so a reader can at
+     * least see that insertion order is not what decides it.
+     */
+    it('picks the top-most section when two of them share a name', async () => {
+      const scope = await setupScope();
+      const [sourceIncoming, sourceDone] = scope.source.sectionIds as [string, string];
+      const [targetIncoming, lowerDone] = scope.target.sectionIds as [string, string];
+      const upperDone = scope.target.sectionIds[3] as string;
+
+      await renameSection(sourceIncoming, 'Incoming');
+      await renameSection(sourceDone, 'Done');
+      await renameSection(targetIncoming, 'Incoming');
+      // Both are called "Done"; the positions are what says which comes first.
+      await context.prisma.section.update({
+        where: { id: upperDone },
+        data: { name: 'Done', position: 1 },
+      });
+      await context.prisma.section.update({
+        where: { id: lowerDone },
+        data: { name: 'Done', position: 99 },
+      });
+
+      const rule = await createSourceRule(scope);
+      const template = await saveTemplate(scope, rule.id);
+      const applied = await applyTemplate(scope, template.id);
+
+      expect(applied.unresolved).toEqual([]);
+      expect(configurationOf(applied.rule.nodes, 'MOVE_TO_SECTION')).toEqual({
+        sectionId: upperDone,
+      });
+    });
+
     it('still matches after the source project renamed the section', async () => {
       const scope = await setupScope();
       const [sourceIncoming, sourceDone] = scope.source.sectionIds as [string, string];
