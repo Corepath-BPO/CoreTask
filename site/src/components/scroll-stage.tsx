@@ -39,10 +39,13 @@ export function ScrollStage({
       aria-labelledby={labelledBy}
       className={cx('relative', reduce ? 'py-28' : height, className)}
     >
-      {/* pt-16 keeps pinned content clear of the fixed header. */}
+      {/* Padded clear of the fixed header; `-safe` alignment means content too
+          tall for a short screen spills downward, never up under the header. */}
       <div
         className={
-          reduce ? undefined : 'sticky top-0 flex h-svh items-center overflow-hidden pt-16'
+          reduce
+            ? undefined
+            : 'sticky top-0 flex h-svh items-center-safe overflow-hidden pt-20 pb-6'
         }
       >
         {children(scrollYProgress, reduce)}

@@ -93,7 +93,7 @@ export function Hero() {
           className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-ink via-ink/70 to-transparent lg:hidden"
         />
 
-        <Container className="relative z-10 flex h-full min-h-svh items-end pb-20 lg:items-center lg:pb-0">
+        <Container className="relative z-10 flex h-full min-h-svh items-end-safe pt-24 pb-20 lg:items-center-safe lg:pb-10">
           <motion.div
             style={reduce ? undefined : { y: textY, opacity: textOpacity }}
             className="max-w-[640px]"

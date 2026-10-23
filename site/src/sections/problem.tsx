@@ -232,7 +232,7 @@ export function Problem() {
           ))}
         </div>
 
-        <Container className="relative z-10 flex h-full flex-col items-center justify-center text-center">
+        <Container className="relative z-10 flex h-full flex-col items-center justify-center-safe pt-20 pb-6 text-center">
           <Reveal>
             <p className="eyebrow">{problem.eyebrow}</p>
           </Reveal>

@@ -73,9 +73,12 @@
 }
 
 @layer components {
-  /* Headings that read as one line on desktop and never shrink below legible. */
+  /*
+   * Headings that never shrink below legible. They scale with the window's
+   * height as well as its width, so a short window keeps room for the rest.
+   */
   .display {
-    font-size: clamp(2.6rem, 6.4vw, 5.6rem);
+    font-size: clamp(2.6rem, min(6.4vw, 11svh), 5.6rem);
     line-height: 0.98;
     letter-spacing: -0.045em;
     font-weight: 600;
@@ -83,7 +86,7 @@
   }
 
   .headline {
-    font-size: clamp(2rem, 4.2vw, 3.6rem);
+    font-size: clamp(2rem, min(4.2vw, 7.5svh), 3.6rem);
     line-height: 1.04;
     letter-spacing: -0.035em;
     font-weight: 600;
