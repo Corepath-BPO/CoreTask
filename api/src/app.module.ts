@@ -4,6 +4,7 @@ import { ThrottlerModule, seconds } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
+import { EmailVerificationGuard } from './common/guards/email-verification.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { AppConfigModule } from './config/app-config.module';
@@ -14,6 +15,7 @@ import { EmailModule } from './integrations/email/email.module';
 import { NotificationsIntegrationModule } from './integrations/notifications/notifications-integration.module';
 import { StorageModule } from './integrations/storage/storage.module';
 import { JobsModule } from './jobs/jobs.module';
+import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
@@ -59,6 +61,7 @@ import { TeamsModule } from './modules/teams/teams.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 import { SlackModule } from './modules/slack/slack.module';
+import { SsoModule } from './modules/sso/sso.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { MembersModule } from './modules/members/members.module';
@@ -100,6 +103,7 @@ import { WebsocketModule } from './websocket/websocket.module';
 
     // Domain
     AuthModule,
+    SsoModule,
     ApiKeysModule,
     OAuthModule,
     WebhooksModule,
@@ -108,6 +112,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     WorkspacesModule,
     WorkspaceMembersModule,
     MembersModule,
+    AccountDeletionModule,
     InvitationsModule,
     TeamsModule,
     ProjectAccessModule,
@@ -153,6 +158,8 @@ import { WebsocketModule } from './websocket/websocket.module';
     // Authentication is the default; `@Public()` opts a route out. Session or
     // API key — the throttler runs after it so it can key on the principal.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // An unconfirmed address past its deadline stops here, before any work.
+    { provide: APP_GUARD, useClass: EmailVerificationGuard },
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
   ],

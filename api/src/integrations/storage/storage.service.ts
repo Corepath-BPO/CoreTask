@@ -3,8 +3,10 @@ import { extname } from 'node:path';
 
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -261,7 +263,75 @@ export class StorageService implements OnModuleDestroy {
       throw error;
     }
   }
+
+  /**
+   * Deletes many objects, a thousand per request — the most S3 takes in one.
+   * For deleting a workspace or an account, where one call per file would be
+   * thousands of round trips. Keys that are not there count as deleted.
+   *
+   * Answers how many could not be deleted rather than throwing: the callers
+   * have already removed the rows that pointed at the bytes, and a stray
+   * object is a cost, not something to undo that for.
+   */
+  async deleteObjects(objectKeys: readonly string[]): Promise<{ failed: number }> {
+    const keys = [...new Set(objectKeys)];
+    let failed = 0;
+
+    for (let start = 0; start < keys.length; start += DELETE_BATCH_SIZE) {
+      const batch = keys.slice(start, start + DELETE_BATCH_SIZE);
+      try {
+        const result = await this.client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+          }),
+        );
+        const errors = (result.Errors ?? []).filter((entry) => entry.Code !== 'NoSuchKey');
+        failed += errors.length;
+        if (errors.length > 0) {
+          this.logger.error(
+            { failed: errors.length, sample: errors.slice(0, 3) },
+            'Some stored objects could not be deleted',
+          );
+        }
+      } catch (error) {
+        failed += batch.length;
+        this.logger.error({ count: batch.length, error }, 'Failed to delete stored objects');
+      }
+    }
+
+    return { failed };
+  }
+
+  /**
+   * Every key under a prefix — `workspaces/<id>/` — for sweeping up what no
+   * row points at any more, such as an upload that landed after its
+   * attachment was deleted.
+   */
+  async listObjectKeys(prefix: string): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const page = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+        }),
+      );
+      for (const entry of page.Contents ?? []) {
+        if (entry.Key) keys.push(entry.Key);
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    return keys;
+  }
 }
+
+/** The most keys S3's DeleteObjects accepts in one request. */
+const DELETE_BATCH_SIZE = 1000;
 
 function isNotFound(error: unknown): boolean {
   const name = (error as { name?: string }).name;

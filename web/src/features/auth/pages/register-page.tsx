@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api/api-error';
 
 import { PasswordInput } from '../components/password-input';
+import { SsoOptions } from '../components/sso-options';
 import { useAuth } from '../hooks/use-auth';
 
 export function RegisterPage() {
@@ -72,6 +73,8 @@ export function RegisterPage() {
           Start organising work in minutes. No credit card required.
         </p>
       </div>
+
+      <SsoOptions redirect={search.redirect} />
 
       <FormError message={submitError} />
 

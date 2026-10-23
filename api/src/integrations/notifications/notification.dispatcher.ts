@@ -11,6 +11,7 @@ import {
   NotificationsService,
 } from '../../modules/notifications/notifications.service';
 import { RealtimeGateway } from '../../websocket/realtime.gateway';
+import { paragraph, renderEmailHtml } from '../email/email.layout';
 
 /**
  * Fan-out layer for notifications.
@@ -85,12 +86,13 @@ export class NotificationDispatcher {
         '',
         `Choose which emails you get: ${settings}`,
       ].join('\n'),
-      html: [
-        `<p><strong>${escapeHtml(input.title)}</strong></p>`,
-        ...(body ? [`<p>${escapeHtml(body)}</p>`] : []),
-        `<p><a href="${escapeHtml(link)}">Open in CoreTask</a></p>`,
-        `<p style="color:#6b7280;font-size:12px">You get this because of your notification settings. <a href="${escapeHtml(settings)}">Choose which emails you get</a>.</p>`,
-      ].join(''),
+      html: renderEmailHtml({
+        preheader: body || input.title,
+        heading: input.title,
+        bodyHtml: body ? paragraph(escapeHtml(body)) : '',
+        cta: { label: 'Open in CoreTask', href: link },
+        footnote: `You get this because of your notification settings. <a href="${escapeHtml(settings)}" style="color:#52525b;">Choose which e-mails you get</a>.`,
+      }),
     });
   }
 }

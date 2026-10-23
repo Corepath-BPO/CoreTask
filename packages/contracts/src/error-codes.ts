@@ -28,6 +28,36 @@ export const ErrorCode = {
   PASSWORD_RESET_INVALID: 'PASSWORD_RESET_INVALID',
   CURRENT_PASSWORD_INCORRECT: 'CURRENT_PASSWORD_INCORRECT',
   EMAIL_VERIFICATION_INVALID: 'EMAIL_VERIFICATION_INVALID',
+  /** The address is unconfirmed: past its deadline, or for an action that needs it confirmed. */
+  EMAIL_NOT_VERIFIED: 'EMAIL_NOT_VERIFIED',
+  EMAIL_CHANGE_INVALID: 'EMAIL_CHANGE_INVALID',
+  /** A sensitive change needs the password (or a code) typed again. */
+  REAUTH_REQUIRED: 'REAUTH_REQUIRED',
+  /** An account with no password and no second step: only a fresh sign-in proves it is them. */
+  RECENT_SIGN_IN_REQUIRED: 'RECENT_SIGN_IN_REQUIRED',
+  TWO_FACTOR_CODE_INVALID: 'TWO_FACTOR_CODE_INVALID',
+  TWO_FACTOR_CHALLENGE_INVALID: 'TWO_FACTOR_CHALLENGE_INVALID',
+  TWO_FACTOR_SETUP_INVALID: 'TWO_FACTOR_SETUP_INVALID',
+  TWO_FACTOR_ALREADY_ENABLED: 'TWO_FACTOR_ALREADY_ENABLED',
+  TWO_FACTOR_NOT_ENABLED: 'TWO_FACTOR_NOT_ENABLED',
+  SESSION_IS_CURRENT: 'SESSION_IS_CURRENT',
+
+  // Single sign-on
+  SSO_NOT_CONFIGURED: 'SSO_NOT_CONFIGURED',
+  SSO_FAILED: 'SSO_FAILED',
+  SSO_EMAIL_UNVERIFIED: 'SSO_EMAIL_UNVERIFIED',
+  SSO_ACCOUNT_NOT_FOUND: 'SSO_ACCOUNT_NOT_FOUND',
+  /** An account has the address, but never confirmed it: it may not be its owner's. */
+  SSO_ACCOUNT_UNCONFIRMED: 'SSO_ACCOUNT_UNCONFIRMED',
+  SSO_IDENTITY_IN_USE: 'SSO_IDENTITY_IN_USE',
+  SSO_LAST_SIGN_IN_METHOD: 'SSO_LAST_SIGN_IN_METHOD',
+  SAML_NOT_CONFIGURED: 'SAML_NOT_CONFIGURED',
+  DOMAIN_ALREADY_VERIFIED: 'DOMAIN_ALREADY_VERIFIED',
+  DOMAIN_VERIFICATION_FAILED: 'DOMAIN_VERIFICATION_FAILED',
+
+  // Deleting things
+  ACCOUNT_OWNS_SHARED_WORKSPACES: 'ACCOUNT_OWNS_SHARED_WORKSPACES',
+  CONFIRMATION_MISMATCH: 'CONFIRMATION_MISMATCH',
 
   // API keys
   API_KEY_INVALID: 'API_KEY_INVALID',
@@ -110,6 +140,38 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   CURRENT_PASSWORD_INCORRECT: 'Your current password is not right.',
   EMAIL_VERIFICATION_INVALID:
     'This confirmation link is invalid, used or expired. Send a new one from Settings.',
+  EMAIL_NOT_VERIFIED:
+    'Confirm your e-mail address first. Use the link we sent you, or send a new one from Settings.',
+  EMAIL_CHANGE_INVALID: 'This link is invalid, used or expired. Ask for a new one from Settings.',
+  REAUTH_REQUIRED: 'Confirm it is you: enter your password.',
+  RECENT_SIGN_IN_REQUIRED:
+    'For your security, sign in again, then come back and try this within 15 minutes.',
+  TWO_FACTOR_CODE_INVALID: 'That code is not right. Check your authenticator app and try again.',
+  TWO_FACTOR_CHALLENGE_INVALID: 'This sign-in took too long. Start again.',
+  TWO_FACTOR_SETUP_INVALID: 'The setup took too long. Start again.',
+  TWO_FACTOR_ALREADY_ENABLED: 'Two-step verification is already on.',
+  TWO_FACTOR_NOT_ENABLED: 'Two-step verification is not on.',
+  SESSION_IS_CURRENT: 'That is this session. Sign out instead.',
+
+  SSO_NOT_CONFIGURED: 'This CoreTask server does not offer that way to sign in.',
+  SSO_FAILED: 'Signing in with that provider did not finish. Try again.',
+  SSO_EMAIL_UNVERIFIED:
+    'That account’s e-mail address is not verified by its provider. Sign in with your password, then connect it from Settings.',
+  SSO_ACCOUNT_NOT_FOUND:
+    'No CoreTask account is connected to that sign-in. Sign in another way, or ask a workspace admin to invite you.',
+  SSO_ACCOUNT_UNCONFIRMED:
+    'A CoreTask account already uses this address, but the address was never confirmed. Confirm it from the e-mail we sent, or use “Forgot password?”, then try again.',
+  SSO_IDENTITY_IN_USE: 'That account is already connected to a different CoreTask account.',
+  SSO_LAST_SIGN_IN_METHOD:
+    'This is your only way to sign in. Set a password before disconnecting it.',
+  SAML_NOT_CONFIGURED: 'This workspace does not have single sign-on turned on.',
+  DOMAIN_ALREADY_VERIFIED: 'Another workspace has already verified that domain.',
+  DOMAIN_VERIFICATION_FAILED:
+    'The TXT record was not found. DNS changes can take a while to show up; try again later.',
+
+  ACCOUNT_OWNS_SHARED_WORKSPACES:
+    'You own workspaces other people use. Transfer them to someone else, or delete them, first.',
+  CONFIRMATION_MISMATCH: 'What you typed does not match. Type it exactly as shown.',
 
   API_KEY_INVALID: 'The API key is not recognised.',
   API_KEY_REVOKED: 'The API key has been revoked.',

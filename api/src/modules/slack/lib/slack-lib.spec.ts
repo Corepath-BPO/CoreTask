@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { SlackAction } from '@coretask/contracts';
 
-import { openToken, sealToken } from './sealed-token';
+import { openToken, sealToken } from '../../../common/utils/sealed-token';
 import {
   acknowledgedBlocks,
   createTaskModal,

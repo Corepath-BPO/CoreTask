@@ -6,6 +6,15 @@ export interface AuthUser {
   avatarUrl: string | null;
   timezone: string;
   emailVerified: boolean;
+  /**
+   * While the address is unconfirmed, when CoreTask stops letting the account
+   * in until it is; null once confirmed. The client counts down to it and
+   * shows the gate once it passes — the API enforces it either way.
+   */
+  emailVerificationDueAt: string | null;
+  /** False for an account that signs in only with Google, Microsoft or SAML. */
+  hasPassword: boolean;
+  twoFactorEnabled: boolean;
   createdAt: string;
   pronouns: string | null;
   jobTitle: string | null;

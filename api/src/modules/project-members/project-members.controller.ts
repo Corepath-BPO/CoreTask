@@ -28,6 +28,7 @@ import {
   CurrentProject,
   RequireProjectAdmin,
 } from '../../common/decorators/workspace.decorator';
+import { RequireVerifiedEmail } from '../../common/decorators/email-verification.decorator';
 import type { ActorContext, ProjectAccessContext } from '../../common/types/api.types';
 import { WorkspaceInvitationDto } from '../invitations/dto/invitation-response.dto';
 import { InvitationsService } from '../invitations/invitations.service';
@@ -175,6 +176,7 @@ export class ProjectMembersController {
   }
 
   @Post('invitations')
+  @RequireVerifiedEmail()
   @RequireProjectAdmin()
   @ApiOperation({
     summary: 'Invite someone outside the workspace into this project',

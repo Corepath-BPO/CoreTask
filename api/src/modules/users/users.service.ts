@@ -4,18 +4,32 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma, User } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
 
 export interface CreateUserInput {
   email: string;
   name: string;
-  passwordHash: string;
+  /** Null for an account created by signing in with Google, Microsoft or SAML. */
+  passwordHash: string | null;
   timezone?: string;
+  /** Set when the address is already known to be theirs, as from an SSO provider. */
+  emailVerifiedAt?: Date | null;
+  /** When the account has to have confirmed its address by; see `emailVerificationDeadline`. */
+  emailVerificationDueAt?: Date | null;
 }
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: AppConfigService,
+  ) {}
+
+  /** When an account made now has to have confirmed its address by. */
+  emailVerificationDeadline(now = Date.now()): Date {
+    return new Date(now + this.config.emailVerificationGraceDays * 86_400_000);
+  }
 
   /** E-mail comparison is case-insensitive; the normalised form is what we store. */
   static normalizeEmail(email: string): string {
@@ -30,6 +44,29 @@ export class UsersService {
 
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  /**
+   * The user, and whether the session an access token names is still open:
+   * one query, for the check every authenticated request makes.
+   */
+  async findWithSession(
+    id: string,
+    sessionId: string,
+  ): Promise<{ user: User; sessionLive: boolean } | null> {
+    const row = await this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        refreshTokens: {
+          where: { sessionId, revokedAt: null, expiresAt: { gt: new Date() } },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!row) return null;
+    const { refreshTokens, ...user } = row;
+    return { user, sessionLive: refreshTokens.length > 0 };
   }
 
   async requireById(id: string): Promise<User> {
@@ -49,6 +86,10 @@ export class UsersService {
         name: input.name.trim(),
         passwordHash: input.passwordHash,
         timezone: input.timezone ?? 'UTC',
+        emailVerifiedAt: input.emailVerifiedAt ?? null,
+        emailVerificationDueAt: input.emailVerifiedAt
+          ? null
+          : (input.emailVerificationDueAt ?? null),
       },
     });
   }
@@ -69,6 +110,12 @@ export class UsersService {
       avatarUrl: user.avatarUrl,
       timezone: user.timezone,
       emailVerified: user.emailVerifiedAt !== null,
+      emailVerificationDueAt:
+        user.emailVerifiedAt === null && user.emailVerificationDueAt
+          ? user.emailVerificationDueAt.toISOString()
+          : null,
+      hasPassword: user.passwordHash !== null,
+      twoFactorEnabled: user.totpEnabledAt !== null,
       createdAt: user.createdAt.toISOString(),
       pronouns: user.pronouns,
       jobTitle: user.jobTitle,

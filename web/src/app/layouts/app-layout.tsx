@@ -5,11 +5,25 @@ import { ErrorBoundary } from '@/components/feedback/error-boundary';
 import { ShortcutsHelpDialog } from '@/components/navigation/shortcuts-help-dialog';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Topbar } from '@/components/navigation/topbar';
+import { EmailVerificationGate } from '@/features/auth/components/email-verification-gate';
 import { VerifyEmailBanner } from '@/features/auth/components/verify-email-banner';
+import { useEmailVerificationOverdue } from '@/features/auth/hooks/use-email-verification';
 import { useGlobalShortcuts } from '@/lib/shortcuts/use-global-shortcuts';
+import { useCurrentUser } from '@/stores/auth.store';
 
 /** Authenticated shell: sidebar, top bar, and the routed content area. */
 export function AppLayout() {
+  const user = useCurrentUser();
+  const overdue = useEmailVerificationOverdue(user);
+
+  // Past the deadline the API refuses nearly everything, so the shell would
+  // only fill with errors: the gate takes its place until the address is
+  // confirmed (or changed to one that can be).
+  if (user && overdue) return <EmailVerificationGate user={user} />;
+  return <AppShell />;
+}
+
+function AppShell() {
   // One keyboard listener for the whole signed-in app; screens register what
   // they can do with each chord — see `useShortcutActions`.
   useGlobalShortcuts();

@@ -6,9 +6,16 @@ import { UsersModule } from '../users/users.module';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { EmailChangeController } from './email-change.controller';
+import { EmailChangeService } from './email-change.service';
 import { PasswordService } from './password.service';
+import { ReauthService } from './reauth.service';
+import { SecurityNotices } from './security-notices';
+import { SessionsController } from './sessions.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
+import { TwoFactorController } from './two-factor.controller';
+import { TwoFactorService } from './two-factor.service';
 
 @Module({
   imports: [
@@ -18,8 +25,17 @@ import { TokenService } from './token.service';
     // use different keys — see TokenService.
     JwtModule.register({}),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, PasswordService, TokenService, JwtStrategy],
-  exports: [AuthService, TokenService, PasswordService],
+  controllers: [AuthController, TwoFactorController, SessionsController, EmailChangeController],
+  providers: [
+    AuthService,
+    PasswordService,
+    TokenService,
+    JwtStrategy,
+    TwoFactorService,
+    ReauthService,
+    SecurityNotices,
+    EmailChangeService,
+  ],
+  exports: [AuthService, TokenService, PasswordService, ReauthService, SecurityNotices],
 })
 export class AuthModule {}

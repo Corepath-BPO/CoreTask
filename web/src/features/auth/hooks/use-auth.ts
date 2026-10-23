@@ -9,7 +9,7 @@ import { markSignedOut } from '@/lib/api/session-hint';
 import { useAuthStore } from '@/stores/auth.store';
 import { useWorkspaceStore } from '@/stores/workspace.store';
 
-import { authApi } from '../api/auth.api';
+import { authApi, isTwoFactorChallenge } from '../api/auth.api';
 
 /** Login / register / logout, each wired to the auth store and the router. */
 export function useAuth() {
@@ -18,11 +18,16 @@ export function useAuth() {
   const clear = useAuthStore((state) => state.clear);
   const setActiveWorkspaceId = useWorkspaceStore((state) => state.setActiveWorkspaceId);
 
+  /**
+   * Resolves to the session, or to a challenge when the account has two-step
+   * verification on — the page then asks for the code (`TwoFactorStep`).
+   */
   const login = useMutation({
     mutationFn: (payload: LoginPayload) => authApi.login(payload),
-    onSuccess: (session) => {
-      setSession(session);
-      toast.success(`Welcome back, ${session.user.name.split(' ')[0]}`);
+    onSuccess: (result) => {
+      if (isTwoFactorChallenge(result)) return;
+      setSession(result);
+      toast.success(`Welcome back, ${result.user.name.split(' ')[0]}`);
     },
   });
 

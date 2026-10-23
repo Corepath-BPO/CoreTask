@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import {
   EmailJob,
   QueueName,
+  type EmailChangeJobData,
   type InvitationEmailJobData,
   type MessageEmailJobData,
   type EmailVerificationJobData,
@@ -77,6 +78,27 @@ export class EmailQueue {
       });
     } catch (error) {
       this.logger.error({ err: error, to: data.to }, 'Failed to enqueue an e-mail message');
+    }
+  }
+
+  /**
+   * Enqueues "confirm your new address". Never rejects: the request is saved,
+   * and asking again sends a new link.
+   */
+  async enqueueEmailChange(data: EmailChangeJobData): Promise<void> {
+    try {
+      await this.queue.add(EmailJob.EMAIL_CHANGE, data, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+        // Removed on completion so the raw token does not linger in Redis.
+        removeOnComplete: true,
+        removeOnFail: { age: 3_600 },
+      });
+    } catch (error) {
+      this.logger.error(
+        { err: error, userId: data.userId },
+        'Failed to enqueue an e-mail change link',
+      );
     }
   }
 

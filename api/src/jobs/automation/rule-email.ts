@@ -1,4 +1,5 @@
 import { escapeHtml } from '../../common/utils/rich-text.util';
+import { paragraph, renderEmailHtml } from '../../integrations/email/email.layout';
 import type { MessageEmailJobData, RuleEmailRequest } from '../queue-names';
 
 /**
@@ -15,11 +16,14 @@ export function composeRuleEmail(request: RuleEmailRequest, webUrl: string): Mes
   const paragraphs = request.body
     .split(/\n{2,}/)
     .filter((part) => part.trim() !== '')
-    .map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
+    .map((part) => paragraph(escapeHtml(part).replace(/\n/g, '<br>')))
     .join('');
-  const html =
-    `${paragraphs}` +
-    `<p><a href="${escapeHtml(link)}">${escapeHtml(request.taskTitle)}</a></p>` +
-    `<p style="color:#6b7280;font-size:12px">${escapeHtml(footer)}</p>`;
+  const html = renderEmailHtml({
+    preheader: request.body.trim() || request.taskTitle,
+    heading: request.subject,
+    bodyHtml: paragraphs,
+    cta: { label: request.taskTitle, href: link },
+    footnote: escapeHtml(footer),
+  });
   return { to: request.to, subject: request.subject, text, html };
 }

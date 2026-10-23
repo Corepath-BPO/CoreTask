@@ -32,6 +32,18 @@ export async function closeTestContext(context: TestContext): Promise<void> {
   await context.app.close();
 }
 
+/**
+ * Marks an account's address confirmed, as following the e-mailed link would.
+ * Inviting people and connecting integrations need a confirmed address, and
+ * the link itself is the worker's business, not these specs'.
+ */
+export async function confirmEmail(context: TestContext, userId: string): Promise<void> {
+  await context.prisma.user.update({
+    where: { id: userId },
+    data: { emailVerifiedAt: new Date(), emailVerificationDueAt: null },
+  });
+}
+
 /** Random address so parallel specs cannot collide on a unique constraint. */
 export function uniqueEmail(prefix = 'user'): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}@coretask.test`;

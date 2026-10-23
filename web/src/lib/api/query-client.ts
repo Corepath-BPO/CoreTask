@@ -26,6 +26,9 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   auth: {
     me: ['auth', 'me'] as const,
+    sessions: ['auth', 'sessions'] as const,
+    twoFactor: ['auth', 'two-factor'] as const,
+    emailChange: ['auth', 'email-change'] as const,
   },
   workspaces: {
     all: ['workspaces'] as const,
@@ -50,6 +53,13 @@ export const queryKeys = {
     all: (workspaceId: string) => ['slack', workspaceId] as const,
     status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
     channels: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'channels'] as const,
+  },
+  /** Single sign-on: the ways in this server offers, the caller's connections, a workspace's setup. */
+  sso: {
+    providers: ['sso', 'providers'] as const,
+    identities: ['sso', 'identities'] as const,
+    saml: (workspaceId: string) => ['sso', 'saml', workspaceId] as const,
+    domains: (workspaceId: string) => ['sso', 'domains', workspaceId] as const,
   },
   webhooks: {
     all: (workspaceId: string) => ['webhooks', workspaceId] as const,
