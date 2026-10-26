@@ -54,10 +54,10 @@ export function OgImage() {
       <div
         style={{
           position: 'absolute',
-          right: 120,
-          top: 125,
-          width: 230,
-          height: 380,
+          right: 80,
+          top: 175,
+          width: 400,
+          height: 281,
           perspective: 900,
         }}
       >
@@ -67,10 +67,10 @@ export function OgImage() {
             height: '100%',
             transform: 'rotateY(-24deg) rotateX(14deg)',
             filter:
-              'drop-shadow(0 40px 60px rgba(0,0,0,0.8)) drop-shadow(0 0 50px rgba(0,240,6,0.3))',
+              'drop-shadow(0 40px 60px rgba(0,0,0,0.8)) drop-shadow(0 0 50px rgba(113,205,44,0.3))',
           }}
         >
-          <MarkGlyph size={380} done={1} />
+          <MarkGlyph id="og" size={281} done={1} />
         </div>
       </div>
     </AbsoluteFill>

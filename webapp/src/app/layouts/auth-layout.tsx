@@ -40,15 +40,15 @@ export function AuthLayout() {
           <img
             src="/logo-stacked-light.svg"
             alt="CoreTask"
-            width={182}
-            height={209}
+            width={317}
+            height={286}
             className="mb-10 w-40 dark:hidden"
           />
           <img
             src="/logo-stacked-dark.svg"
             alt="CoreTask"
-            width={182}
-            height={209}
+            width={317}
+            height={286}
             className="mb-10 hidden w-40 dark:block"
           />
 

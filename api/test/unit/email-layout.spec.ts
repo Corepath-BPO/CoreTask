@@ -15,6 +15,6 @@ describe('renderEmailHtml header', () => {
   it('shows the logo from the app, with the product name for clients that hold images back', () => {
     expect(html).toContain('src="https://app.coretask.org/email/coretask-logo.png"');
     expect(html).toContain('alt="CoreTask"');
-    expect(html).toMatch(/width="78" height="30"/);
+    expect(html).toMatch(/width="87" height="30"/);
   });
 });

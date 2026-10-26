@@ -7,26 +7,31 @@ import { useMemo, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 
-import { LOGO_GREEN, MARK } from '@/components/brand';
+import { CHECK_GREEN, LOGO_GREEN, MARK } from '@/components/brand';
 
 /*
- * The CoreTask mark in 3D, extruded from the logo pack's own paths: the two
- * halves of the shell, the green crescent, and the core — a green disc with
- * the check cut out of it.
+ * The CoreTask mark in 3D, extruded from the logo pack's own paths: the green
+ * C, the T whose bar blends from green into white, the check circle, and the
+ * white check that sits in it.
  *
  * The hero's scroll position tells the story. At the top the pieces drift
  * apart — scattered work. Scrolling pulls them into the mark, and then the
- * core turns to face you and lights up: the request is done.
+ * circle turns to face you, lights up green, and the check drops into it: the
+ * request is done.
  */
 
 const GREEN = new THREE.Color(LOGO_GREEN);
-const WHITE = new THREE.Color('#F1F1F4');
+const CHECK = new THREE.Color(CHECK_GREEN);
+const WHITE = new THREE.Color('#F4F4F6');
 const UNLIT = new THREE.Color('#34343c');
 
-/** One SVG unit in world units: the 148-unit-tall mark stands about 4.4 high. */
-const UNIT = 0.03;
+/** One SVG unit in world units: the 273.5 × 192 mark is about 4.6 × 3.3. */
+const UNIT = 0.017;
+const MARK_WIDTH = 273.5 * UNIT;
+/** The mark's centre in its own coordinates, so it sits on the origin. */
+const CENTRE = { x: 213.75, y: 206.5 };
 
-type PieceName = 'shellLower' | 'shellUpper' | 'crescent' | 'core';
+type PieceName = 'c' | 't' | 'circle' | 'check';
 
 type Piece = {
   name: PieceName;
@@ -35,12 +40,12 @@ type Piece = {
   spin: [number, number, number];
 };
 
-// Offsets keep every piece right of centre, so none crosses the headline.
+// Offsets lean right of centre, so no piece drifts across the headline.
 const PIECES: Piece[] = [
-  { name: 'shellLower', from: [-0.6, -2.2, 1.0], spin: [1.0, 0.6, -0.8] },
-  { name: 'shellUpper', from: [-1.2, 1.9, -1.8], spin: [-0.8, -1.1, 0.6] },
-  { name: 'crescent', from: [2.0, 2.4, -2.8], spin: [0.7, 1.3, -0.5] },
-  { name: 'core', from: [2.6, -1.0, -1.2], spin: [-1.2, -0.7, 1.0] },
+  { name: 'c', from: [-0.2, -1.5, 0.5], spin: [1.0, 0.6, -0.8] },
+  { name: 't', from: [1.5, 1.1, -2.4], spin: [-0.7, 1.2, 0.5] },
+  { name: 'circle', from: [1.6, -2.0, -1.2], spin: [-1.2, -0.7, 1.0] },
+  { name: 'check', from: [2.8, 0.6, 1.4], spin: [0.9, -1.0, -0.6] },
 ];
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -54,19 +59,38 @@ const smooth = (v: number) => {
  * the origin and flips SVG's downward y; the geometry is then re-centred on its
  * own middle, so each piece turns about itself, and `offset` says where that
  * middle sits in the assembled mark.
+ *
+ * `blend` paints the T's bar from green to white as vertex colours, the way the
+ * logo's gradient runs; `depth` lets the check stand a little proud of the
+ * circle it sits in, so their touching walls never flicker.
  */
-function pieceGeometry(d: string) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1 0 0 -1 -54.52 83.5)"><path d="${d}"/></g></svg>`;
+function pieceGeometry(d: string, { depth = 12, blend = false } = {}) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1 0 0 -1 ${-CENTRE.x} ${CENTRE.y})"><path d="${d}"/></g></svg>`;
   const shapes = new SVGLoader().parse(svg).paths.flatMap((path) => SVGLoader.createShapes(path));
   const geometry = new THREE.ExtrudeGeometry(shapes, {
-    depth: 12,
+    depth,
     bevelEnabled: true,
     bevelThickness: 1.6,
     bevelSize: 1.1,
     bevelSegments: 4,
     curveSegments: 48,
   });
+  geometry.translate(0, 0, -depth / 2);
   geometry.scale(UNIT, UNIT, UNIT);
+
+  if (blend) {
+    const position = geometry.getAttribute('position');
+    const colors = new Float32Array(position.count * 3);
+    const mixed = new THREE.Color();
+    for (let i = 0; i < position.count; i++) {
+      const svgX = position.getX(i) / UNIT + CENTRE.x;
+      const t = clamp01((svgX - MARK.blend.x1) / (MARK.blend.x2 - MARK.blend.x1));
+      mixed.copy(GREEN).lerp(WHITE, t);
+      colors.set([mixed.r, mixed.g, mixed.b], i * 3);
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
   geometry.computeBoundingBox();
   const offset = new THREE.Vector3();
   geometry.boundingBox?.getCenter(offset);
@@ -77,16 +101,21 @@ function pieceGeometry(d: string) {
 function Mark({ progress }: { progress: MotionValue<number> }) {
   const group = useRef<THREE.Group>(null);
   const pieces = useRef<(THREE.Group | null)[]>([]);
-  const coreMaterial = useRef<THREE.MeshPhysicalMaterial>(null);
-  const coreLight = useRef<THREE.PointLight>(null);
+  const circleMaterial = useRef<THREE.MeshPhysicalMaterial>(null);
+  const doneLight = useRef<THREE.PointLight>(null);
   const eased = useRef(0);
   const intro = useRef(0);
   const { viewport, size } = useThree();
 
   const built = useMemo(
-    () => Object.fromEntries(PIECES.map(({ name }) => [name, pieceGeometry(MARK[name])])),
+    () => ({
+      c: pieceGeometry(MARK.c),
+      t: pieceGeometry(MARK.t, { blend: true }),
+      circle: pieceGeometry(MARK.circle),
+      check: pieceGeometry(MARK.check, { depth: 15 }),
+    }),
     [],
-  ) as Record<PieceName, ReturnType<typeof pieceGeometry>>;
+  );
 
   // Placed by the page's own breakpoints, in CSS pixels, so the mark always
   // sits where the headline is not: beside it from lg (1024) up, beside it but
@@ -97,13 +126,13 @@ function Mark({ progress }: { progress: MotionValue<number> }) {
     layout === 'wide'
       ? THREE.MathUtils.clamp(viewport.width / 16, 0.5, 0.82)
       : layout === 'medium'
-        ? Math.min(0.5, (viewport.width * 0.28) / 2.7)
-        : Math.min(0.32, viewport.width / 11);
+        ? Math.min(0.45, (viewport.width * 0.24) / MARK_WIDTH)
+        : Math.min(0.42, (viewport.width * 0.5) / MARK_WIDTH);
   const anchor: [number, number] =
     layout === 'wide'
       ? [viewport.width * 0.25, 0]
       : layout === 'medium'
-        ? [viewport.width * 0.33, 0]
+        ? [viewport.width * 0.375, 0]
         : [0, viewport.height / 2 - 1.45];
   const spread = layout === 'narrow' ? 0.45 : layout === 'medium' ? 0.7 : 1;
 
@@ -115,6 +144,8 @@ function Mark({ progress }: { progress: MotionValue<number> }) {
     const arrive = smooth(intro.current);
     const assemble = smooth((p - 0.03) / 0.45);
     const done = smooth((p - 0.5) / 0.14);
+    // The check lands just after the circle lights.
+    const checked = smooth((p - 0.56) / 0.1);
 
     pieces.current.forEach((piece, i) => {
       if (!piece) return;
@@ -136,34 +167,37 @@ function Mark({ progress }: { progress: MotionValue<number> }) {
         spin[1] * (1 - a),
         spin[2] * (1 - a),
       );
-      if (name === 'core') {
-        // Once in place the core turns a half-turn to face you as it lights,
-        // and swells a little past full size before it settles.
+      if (name === 'circle') {
+        // Once in place the circle turns a half-turn to face you as it lights.
         piece.rotation.y += (1 - done) * Math.PI * a;
-        piece.scale.setScalar(0.72 + 0.28 * done + Math.sin(done * Math.PI) * 0.08);
+        piece.scale.setScalar(0.8 + 0.2 * done + Math.sin(done * Math.PI) * 0.06);
+      }
+      if (name === 'check') {
+        // Hidden until the circle is lit, then it drops in with a small bounce.
+        piece.scale.setScalar(Math.max(checked, 0.001) + Math.sin(checked * Math.PI) * 0.15);
       }
     });
 
-    const core = coreMaterial.current;
-    if (core) {
-      core.color.copy(UNLIT).lerp(GREEN, done);
-      core.emissive.copy(GREEN);
-      core.emissiveIntensity = done * (0.28 + Math.sin(t * 2.2) * 0.05);
+    const circle = circleMaterial.current;
+    if (circle) {
+      circle.color.copy(UNLIT).lerp(CHECK, done);
+      circle.emissive.copy(CHECK);
+      circle.emissiveIntensity = done * (0.22 + Math.sin(t * 2.2) * 0.04);
     }
-    if (coreLight.current) coreLight.current.intensity = done * 9;
+    if (doneLight.current) doneLight.current.intensity = done * 8;
 
     const g = group.current;
     if (g) {
       const pointer = state.pointer;
       g.rotation.y = THREE.MathUtils.damp(
         g.rotation.y,
-        -0.5 + assemble * 0.26 + pointer.x * 0.22,
+        -0.45 + assemble * 0.24 + pointer.x * 0.2,
         3,
         delta,
       );
       g.rotation.x = THREE.MathUtils.damp(
         g.rotation.x,
-        0.28 - assemble * 0.12 - pointer.y * 0.14,
+        0.26 - assemble * 0.12 - pointer.y * 0.14,
         3,
         delta,
       );
@@ -183,19 +217,28 @@ function Mark({ progress }: { progress: MotionValue<number> }) {
           }}
         >
           <mesh geometry={built[name].geometry}>
-            {name === 'shellLower' || name === 'shellUpper' ? (
+            {name === 'c' ? (
               <meshPhysicalMaterial
-                color={WHITE}
+                color={GREEN}
+                emissive={GREEN}
+                emissiveIntensity={0.12}
+                metalness={0.1}
+                roughness={0.3}
+                clearcoat={1}
+                clearcoatRoughness={0.2}
+              />
+            ) : name === 't' ? (
+              <meshPhysicalMaterial
+                vertexColors
                 metalness={0.05}
                 roughness={0.28}
                 clearcoat={1}
                 clearcoatRoughness={0.12}
               />
-            ) : name === 'crescent' ? (
+            ) : name === 'circle' ? (
               <meshPhysicalMaterial
-                color={GREEN}
-                emissive={GREEN}
-                emissiveIntensity={0.18}
+                ref={circleMaterial}
+                color={UNLIT}
                 metalness={0.1}
                 roughness={0.3}
                 clearcoat={1}
@@ -203,22 +246,21 @@ function Mark({ progress }: { progress: MotionValue<number> }) {
               />
             ) : (
               <meshPhysicalMaterial
-                ref={coreMaterial}
-                color={UNLIT}
-                metalness={0.1}
-                roughness={0.3}
+                color={WHITE}
+                metalness={0.05}
+                roughness={0.25}
                 clearcoat={1}
-                clearcoatRoughness={0.2}
+                clearcoatRoughness={0.12}
               />
             )}
           </mesh>
-          {name === 'core' && (
+          {name === 'circle' && (
             <pointLight
-              ref={coreLight}
-              color={GREEN}
+              ref={doneLight}
+              color={CHECK}
               distance={5}
               decay={1.6}
-              position={[0, 0, 1.4]}
+              position={[0, 0, 1.2]}
             />
           )}
         </group>

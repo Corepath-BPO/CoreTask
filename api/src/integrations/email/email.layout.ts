@@ -63,8 +63,8 @@ export interface EmailLayout {
 function logoHtml(webUrl: string): string {
   const src = `${webUrl.replace(/\/$/, '')}/email/coretask-logo.png`;
   return (
-    `<img src="${escapeHtml(src)}" alt="CoreTask" width="78" height="30" ` +
-    `style="display:block;border:0;outline:none;text-decoration:none;height:30px;width:78px;` +
+    `<img src="${escapeHtml(src)}" alt="CoreTask" width="87" height="30" ` +
+    `style="display:block;border:0;outline:none;text-decoration:none;height:30px;width:87px;` +
     `font-family:${FONT};font-size:17px;font-weight:600;color:${INK};">`
   );
 }
