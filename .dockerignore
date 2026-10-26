@@ -2,7 +2,7 @@
 **/dist
 **/build
 **/.next
-site/out
+website/out
 **/coverage
 **/generated
 **/.turbo

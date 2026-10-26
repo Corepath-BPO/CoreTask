@@ -255,9 +255,9 @@ services:
   # ---------------------------------------------------------------------------
   # Web client
   # ---------------------------------------------------------------------------
-  coretask-web:
-    image: coretask/web:local
-    container_name: coretask-web
+  coretask-webapp:
+    image: coretask/webapp:local
+    container_name: coretask-webapp
     restart: unless-stopped
     depends_on:
       - coretask-api

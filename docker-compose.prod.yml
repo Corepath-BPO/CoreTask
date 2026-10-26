@@ -7,7 +7,7 @@
 # This is a production-*shaped* stack, not a deployment manifest: multi-stage
 # images, no source mounts, no dev tooling, non-root users, resource limits and
 # restart policies. A real deployment supplies the same environment from a
-# secret store and puts its own ingress and TLS in front of `coretask-web`.
+# secret store and puts its own ingress and TLS in front of `coretask-webapp`.
 # =============================================================================
 
 services:
@@ -81,17 +81,19 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
-  coretask-web:
+  coretask-webapp:
     build:
       context: .
-      dockerfile: web/Dockerfile
+      dockerfile: webapp/Dockerfile
       target: runtime
       args:
         # Baked into the bundle at build time — rebuild the image to change it.
+        # Defaults suit a local run; for app.coretask.org set both to
+        # api.coretask.org (see "Production domains" in .env.example).
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
         VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
         VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
-    image: coretask/web:${IMAGE_TAG:-latest}
+    image: coretask/webapp:${IMAGE_TAG:-latest}
     depends_on:
       coretask-api:
         condition: service_healthy
@@ -106,23 +108,24 @@ services:
       options: { max-size: "10m", max-file: "5" }
 
   # Declared here in full rather than in the base file: the dev stack has no
-  # marketing site (`pnpm --filter @coretask/site dev` runs it on the host), and
+  # marketing site (`pnpm --filter @coretask/website dev` runs it on the host), and
   # a base entry would have `pnpm dev` start an image it never builds. It talks
   # to nothing, so nothing waits on it and it waits on nothing.
-  coretask-site:
+  coretask-website:
     build:
       context: .
-      dockerfile: site/Dockerfile
+      dockerfile: website/Dockerfile
       target: runtime
       args:
         # Baked into the HTML at build time — rebuild the image to change them.
-        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://coretask.example}
-        NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-hello@coretask.example}
-    image: coretask/site:${IMAGE_TAG:-latest}
-    container_name: coretask-site
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://coretask.org}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://app.coretask.org}
+        NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-hello@coretask.org}
+    image: coretask/website:${IMAGE_TAG:-latest}
+    container_name: coretask-website
     restart: unless-stopped
     ports:
-      - "${SITE_HTTP_PORT:-8081}:8080"
+      - "${WEBSITE_HTTP_PORT:-8081}:8080"
     networks: [coretask]
     deploy:
       resources:

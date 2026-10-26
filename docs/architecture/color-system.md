@@ -23,7 +23,7 @@ the spec names.
 
 ## One resolution point
 
-`web/src/features/colors/lib/color-tokens.ts` is the only place a token becomes
+`webapp/src/features/colors/lib/color-tokens.ts` is the only place a token becomes
 a colour. Each resolves to three values, because a colour is used three ways:
 
 |             | Used for                      |

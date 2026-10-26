@@ -5,43 +5,46 @@ finished work. Next.js, exported as static files — see
 [ADR 0017](../docs/decisions/0017-marketing-site-is-a-static-next-export.md).
 
 ```bash
-pnpm --filter @coretask/site dev        # http://localhost:3200
-pnpm --filter @coretask/site build      # static export to site/out/
-pnpm --filter @coretask/site preview    # serve out/ at http://localhost:3201
-pnpm --filter @coretask/site studio     # edit the product clips in Remotion Studio
-pnpm --filter @coretask/site assets     # re-render posters and the share card
+pnpm --filter @coretask/website dev        # http://localhost:3200
+pnpm --filter @coretask/website build      # static export to website/out/
+pnpm --filter @coretask/website preview    # serve out/ at http://localhost:3201
+pnpm --filter @coretask/website studio     # edit the product clips in Remotion Studio
+pnpm --filter @coretask/website assets     # re-render posters and the share card
 ```
 
-## Before it goes public
+## Domains and settings
 
-| What                   | Where                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------- |
-| The domain             | `NEXT_PUBLIC_SITE_URL` at build time (canonical URLs, sitemap, share cards)     |
-| The early-access inbox | `NEXT_PUBLIC_CONTACT_EMAIL` at build time (every "Request early access" button) |
-| A Remotion license     | Required for organisations of more than three people — remotion.dev/license     |
+The website is served at **coretask.org**; its Sign in link and the app live at
+**app.coretask.org**. All three settings are read at build time and default to
+the production values:
 
-Both variables default to `coretask.example` placeholders, which are not real
-addresses.
+| Variable                    | Default                    | Used for                                          |
+| --------------------------- | -------------------------- | ------------------------------------------------- |
+| `NEXT_PUBLIC_SITE_URL`      | `https://coretask.org`     | Canonical URLs, sitemap, robots, share cards      |
+| `NEXT_PUBLIC_APP_URL`       | `https://app.coretask.org` | The Sign in link in the header and footer         |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | `hello@coretask.org`       | Every "Request early access" button (a `mailto:`) |
+
+Before it goes public: the `hello@coretask.org` mailbox must exist and receive
+mail, and Remotion needs a Company License for organisations of more than three
+people (remotion.dev/license).
 
 ## Docker image
 
-`site/Dockerfile` builds the export and serves it with nginx on port 8080, the
-way `coretask-web` ships ([`infrastructure/nginx/site.conf`](../infrastructure/nginx/site.conf)).
-Build from the repository root; both variables are baked in, so changing either
+`website/Dockerfile` builds the export and serves it with nginx on port 8080, the
+way `coretask-webapp` ships ([`infrastructure/nginx/website.conf`](../infrastructure/nginx/website.conf)).
+Build from the repository root; the settings above are baked in, so changing one
 means rebuilding the image.
 
 ```bash
-docker build -f site/Dockerfile -t coretask/site \
-  --build-arg NEXT_PUBLIC_SITE_URL=https://coretask.example \
-  --build-arg NEXT_PUBLIC_CONTACT_EMAIL=hello@coretask.example .
-docker run --rm -p 8081:8080 coretask/site    # http://localhost:8081
+docker build -f website/Dockerfile -t coretask/website .
+docker run --rm -p 8081:8080 coretask/website    # http://localhost:8081
 ```
 
-In the production stack it is the `coretask-site` service, published on
-`SITE_HTTP_PORT` (8081 by default):
+In the production stack it is the `coretask-website` service, published on
+`WEBSITE_HTTP_PORT` (8081 by default):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build coretask-site
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build coretask-website
 ```
 
 nginx caches `/_next/static/` and `/media/` for a year and makes everything else

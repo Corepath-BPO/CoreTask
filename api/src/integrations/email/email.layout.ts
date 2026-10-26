@@ -16,7 +16,7 @@ import { escapeHtml } from '../../common/utils/rich-text.util';
 
 /*
  * The app's own tokens, resolved to hex: `oklch()` reaches no mail client, and
- * a colour here has to be literal. Kept in step with web/src/styles/globals.css
+ * a colour here has to be literal. Kept in step with webapp/src/styles/globals.css
  * by hand — there are five of them and they change about once a year.
  */
 const CANVAS = '#f4f4f5';

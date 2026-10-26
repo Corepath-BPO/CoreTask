@@ -75,14 +75,14 @@ and the decision records in [`docs/decisions/`](docs/decisions/).
 
 ```
 CoreTask/
-├── web/                      React + Vite client
+├── webapp/                   React + Vite client — the app, at app.coretask.org
 │   ├── src/app/              providers, layouts, router, config
 │   ├── src/components/       ui (ShadCN), common, forms, navigation, feedback, data-display
 │   ├── src/features/         auth, workspaces, dashboard, … (vertical slices)
 │   ├── src/lib/              api client, socket, mock fixtures, utils
 │   ├── src/stores/           Zustand stores (auth, workspace, ui, theme)
 │   └── e2e/                  Playwright specs
-├── site/                     Marketing site (Next.js, static export) — see site/README.md
+├── website/                  Marketing site, at coretask.org (Next.js, static export)
 ├── api/                      NestJS REST + WebSocket API
 │   ├── src/config/           environment schema and typed config
 │   ├── src/common/           filters, guards, interceptors, decorators, DTOs, utils
@@ -208,7 +208,7 @@ pnpm down:volumes
 
 ### How the dev containers are wired
 
-- `api/` and `web/` are bind-mounted for hot reload.
+- `api/` and `webapp/` are bind-mounted for hot reload.
 - A **named volume** shadows `node_modules` inside each of those mounts. Docker
   seeds a named volume from the image the first time it is used, so dependencies
   are already installed, are never reinstalled on restart, and Linux-native
@@ -231,7 +231,7 @@ pnpm prod:up
 Multi-stage images, no source mounts, no dev tooling, non-root users, health
 checks and resource limits. This is a shape to deploy from, not a deployment
 manifest — supply the same environment from your secret store and put your own
-ingress and TLS in front of `coretask-web`.
+ingress and TLS in front of `coretask-webapp`.
 
 ---
 
@@ -384,7 +384,7 @@ disambiguation, tenant isolation and role enforcement.
 ### Browser end-to-end tests
 
 ```bash
-pnpm --filter @coretask/web test:e2e:install
+pnpm --filter @coretask/webapp test:e2e:install
 ```
 
 ```bash
@@ -392,7 +392,7 @@ pnpm dev
 ```
 
 ```bash
-pnpm test:e2e:web
+pnpm test:e2e:webapp
 ```
 
 Playwright drives real Chromium and mobile-viewport browsers against the running
@@ -402,7 +402,7 @@ Two constraints shape how it authenticates, and both are worth knowing before
 adding specs:
 
 - `/auth/login` is rate-limited at a credential-guessing pace, so the suite signs
-  in **once per worker** rather than once per test (`web/e2e/fixtures.ts`).
+  in **once per worker** rather than once per test (`webapp/e2e/fixtures.ts`).
 - Refresh tokens rotate, and replaying a spent one revokes the session family.
   That rules out Playwright's usual `storageState` trick — the first test would
   rotate the saved token and every later one would look like an attacker. Sharing
@@ -415,7 +415,7 @@ Even so, the suite signs in more often in a minute than a person would. Set
 
 ```bash
 pnpm --filter @coretask/api test:cov
-pnpm --filter @coretask/web test:cov
+pnpm --filter @coretask/webapp test:cov
 ```
 
 ---
@@ -432,7 +432,7 @@ Individually:
 
 ```bash
 pnpm --filter @coretask/api build
-pnpm --filter @coretask/web build
+pnpm --filter @coretask/webapp build
 ```
 
 Full verification gate — formatting, linting, types, tests and builds:
@@ -755,7 +755,7 @@ Bind mounts from a Windows or macOS host do not deliver filesystem events to the
 Linux container, so every watcher has to poll. Both are already configured:
 
 - **web** — `CHOKIDAR_USEPOLLING=true`, read by `server.watch.usePolling` in
-  `web/vite.config.ts`.
+  `webapp/vite.config.ts`.
 - **api / worker** — `TSC_WATCHFILE` and `TSC_WATCHDIRECTORY`, which is what
   `nest start --watch` compiles through.
 

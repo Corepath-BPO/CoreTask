@@ -146,7 +146,7 @@ Wait-Until 'Worker build output' { Test-Path "$root\api\dist\worker.js" } 30
 Start-ServiceWindow 'CoreTask worker' "$root\api" "node --watch --enable-source-maps `"$root\api\dist\worker.js`"" 'worker'
 
 Write-Host '5/5 Web' -ForegroundColor Cyan
-Start-ServiceWindow 'CoreTask web' "$root\web" 'pnpm dev' 'web'
+Start-ServiceWindow 'CoreTask web' "$root\webapp" 'pnpm dev' 'web'
 Wait-Until 'Web' { Test-Http 'http://localhost:5173/' } 120
 
 if (-not $NoBrowser) { Start-Process 'http://localhost:5173/' }

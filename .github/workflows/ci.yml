@@ -134,7 +134,7 @@ jobs:
             logs --no-color --tail 200
 
 # =============================================================================
-# Not covered here: the browser suite (web/e2e, 13 Playwright specs)
+# Not covered here: the browser suite (webapp/e2e, 13 Playwright specs)
 # =============================================================================
 # Playwright drives a browser against a *running* stack — API, web, PostgreSQL,
 # Redis and RustFS together — rather than importing the app the way the Supertest
@@ -145,9 +145,9 @@ jobs:
 # It is left out rather than half-wired, because a browser job that flakes gets
 # ignored and then tells you nothing. Run it locally:
 #
-#   pnpm --filter @coretask/web test:e2e:install
+#   pnpm --filter @coretask/webapp test:e2e:install
 #   pnpm dev
-#   pnpm test:e2e:web
+#   pnpm test:e2e:webapp
 #
 # Set AUTH_RATE_LIMIT_MAX=100 in .env and restart the API first: the suite signs
 # in far more often in a minute than a person would, and the default ceiling of

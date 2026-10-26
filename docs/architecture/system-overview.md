@@ -2,14 +2,18 @@
 
 ## Components
 
-| Component           | Runtime                 | Responsibility                                   |
-| ------------------- | ----------------------- | ------------------------------------------------ |
-| `coretask-web`      | Vite dev server / nginx | Browser client. Static assets in production.     |
-| `coretask-api`      | Node — `dist/main.js`   | REST API and Socket.IO gateway.                  |
-| `coretask-worker`   | Node — `dist/worker.js` | BullMQ consumer. Same codebase, no HTTP surface. |
-| `coretask-postgres` | PostgreSQL 17           | System of record.                                |
-| `coretask-redis`    | Redis 7                 | Queues, cache, future Socket.IO adapter.         |
-| `coretask-storage`  | RustFS                  | S3-compatible object storage for attachments.    |
+| Component           | Runtime                 | Responsibility                                    | Production         |
+| ------------------- | ----------------------- | ------------------------------------------------- | ------------------ |
+| `coretask-website`  | nginx                   | Marketing site (`website/`). Static export.       | `coretask.org`     |
+| `coretask-webapp`   | Vite dev server / nginx | The app (`webapp/`). Static assets in production. | `app.coretask.org` |
+| `coretask-api`      | Node — `dist/main.js`   | REST API and Socket.IO gateway.                   | `api.coretask.org` |
+| `coretask-worker`   | Node — `dist/worker.js` | BullMQ consumer. Same codebase, no HTTP surface.  | —                  |
+| `coretask-postgres` | PostgreSQL 17           | System of record.                                 | —                  |
+| `coretask-redis`    | Redis 7                 | Queues, cache, future Socket.IO adapter.          | —                  |
+| `coretask-storage`  | RustFS                  | S3-compatible object storage for attachments.     | —                  |
+
+See [ADR 0018](../decisions/0018-three-origins-on-coretask-org.md) for why each
+public piece has an origin of its own.
 
 ## Boundaries
 
@@ -17,7 +21,7 @@ The browser never talks to PostgreSQL, Redis or RustFS. Every read and write goe
 through the API, which is the only component holding credentials for those
 services.
 
-`web` and `api` are independently deployable. They share three packages, and
+`webapp` and `api` are independently deployable. They share three packages, and
 what those packages may contain is a hard rule:
 
 | Allowed                                | Forbidden                                    |

@@ -24,6 +24,9 @@ export function Footer() {
               {item.label}
             </a>
           ))}
+          <a href={site.signInHref} className="text-muted transition-colors hover:text-fg">
+            Sign in
+          </a>
           <a href={site.earlyAccessHref} className="text-brand transition-colors hover:text-fg">
             Early access
           </a>

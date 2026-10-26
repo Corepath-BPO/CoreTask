@@ -1,22 +1,21 @@
 # =============================================================================
-# CoreTask marketing site — production image
+# CoreTask web client — production image
 # =============================================================================
-# Next.js exports the site as static files; nginx serves them. The runtime
-# carries no Node.js and no build tooling.
+# Vite builds a static bundle; nginx serves it. The runtime carries no Node.js
+# and no build tooling.
 #
 # Build context is the repository root.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage 1 — build the static export
+# Stage 1 — build the static bundle
 # -----------------------------------------------------------------------------
 FROM node:24-alpine AS builder
 
 RUN apk add --no-cache libc6-compat
 
 ENV PNPM_HOME=/pnpm \
-    PATH=/pnpm:$PATH \
-    NEXT_TELEMETRY_DISABLED=1
+    PATH=/pnpm:$PATH
 RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
 
 WORKDIR /app
@@ -24,26 +23,27 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/tsconfig/package.json      ./packages/tsconfig/
 COPY packages/eslint-config/package.json ./packages/eslint-config/
-COPY site/package.json                   ./site/
+COPY packages/contracts/package.json     ./packages/contracts/
+COPY packages/types/package.json         ./packages/types/
+COPY packages/validation/package.json    ./packages/validation/
+COPY webapp/package.json                 ./webapp/
 
-RUN pnpm install --frozen-lockfile --filter "@coretask/site..."
+RUN pnpm install --frozen-lockfile --filter "@coretask/webapp..."
 
-# Only the shared packages the site depends on. Neither has a build step: one
-# is JSON, the other plain JavaScript.
-COPY packages/tsconfig      ./packages/tsconfig
-COPY packages/eslint-config ./packages/eslint-config
-COPY site ./site
+COPY packages ./packages
+COPY webapp ./webapp
 
-# Next inlines NEXT_PUBLIC_* variables at build time, so the domain and the
-# contact address are baked into the HTML here rather than read at run time.
-# The defaults match site/src/content/site.ts: an empty value would not fall
-# back to them, because the code uses `??`.
-ARG NEXT_PUBLIC_SITE_URL=https://coretask.example
-ARG NEXT_PUBLIC_CONTACT_EMAIL=hello@coretask.example
-ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL \
-    NEXT_PUBLIC_CONTACT_EMAIL=$NEXT_PUBLIC_CONTACT_EMAIL
+# Vite inlines VITE_* variables at build time, so the API origin is baked into
+# the bundle here rather than read at run time.
+ARG VITE_API_URL=/api/v1
+ARG VITE_WS_URL=/
+ARG VITE_APP_NAME=CoreTask
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_WS_URL=$VITE_WS_URL \
+    VITE_APP_NAME=$VITE_APP_NAME
 
-RUN pnpm --filter @coretask/site build
+RUN pnpm --filter "./packages/*" build \
+ && pnpm --filter @coretask/webapp build
 
 # -----------------------------------------------------------------------------
 # Stage 2 — runtime
@@ -52,11 +52,11 @@ RUN pnpm --filter @coretask/site build
 # is needed to bind the port.
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 
-COPY --chown=nginx:nginx infrastructure/nginx/site.conf /etc/nginx/conf.d/default.conf
+COPY --chown=nginx:nginx infrastructure/nginx/webapp.conf /etc/nginx/conf.d/default.conf
 # Not under conf.d/: nginx auto-loads every conf.d/*.conf into the http context,
 # which would apply these at http level as well as inside each location.
 COPY --chown=nginx:nginx infrastructure/nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
-COPY --from=builder --chown=nginx:nginx /app/site/out /usr/share/nginx/html
+COPY --from=builder --chown=nginx:nginx /app/webapp/dist /usr/share/nginx/html
 
 EXPOSE 8080
 

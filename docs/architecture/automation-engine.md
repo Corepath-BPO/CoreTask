@@ -123,7 +123,7 @@ reason that refusal exists on the structural validator at all. Refusing the
 apply instead would make the library useless for exactly the rules it is for.
 
 **Starters are the client's, not the database's.** The library dialog also
-offers a fixed list of common rules (`web/src/features/automations/lib/
+offers a fixed list of common rules (`webapp/src/features/automations/lib/
 starter-templates.ts`). A starter names no section, person or field, so nothing
 about it belongs to a workspace; choosing one opens the builder with the shape
 drawn and the blanks unanswered, and nothing is written until the draft is
