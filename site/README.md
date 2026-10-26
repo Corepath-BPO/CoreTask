@@ -23,6 +23,31 @@ pnpm --filter @coretask/site assets     # re-render posters and the share card
 Both variables default to `coretask.example` placeholders, which are not real
 addresses.
 
+## Docker image
+
+`site/Dockerfile` builds the export and serves it with nginx on port 8080, the
+way `coretask-web` ships ([`infrastructure/nginx/site.conf`](../infrastructure/nginx/site.conf)).
+Build from the repository root; both variables are baked in, so changing either
+means rebuilding the image.
+
+```bash
+docker build -f site/Dockerfile -t coretask/site \
+  --build-arg NEXT_PUBLIC_SITE_URL=https://coretask.example \
+  --build-arg NEXT_PUBLIC_CONTACT_EMAIL=hello@coretask.example .
+docker run --rm -p 8081:8080 coretask/site    # http://localhost:8081
+```
+
+In the production stack it is the `coretask-site` service, published on
+`SITE_HTTP_PORT` (8081 by default):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build coretask-site
+```
+
+nginx caches `/_next/static/` and `/media/` for a year and makes everything else
+revalidate. The posters in `public/media/` are not content-hashed, so a poster
+that changes needs a new file name, or returning visitors keep the old one.
+
 ## Where things are
 
 | Path                  | What                                                                   |

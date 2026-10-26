@@ -104,3 +104,29 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
+
+  # Declared here in full rather than in the base file: the dev stack has no
+  # marketing site (`pnpm --filter @coretask/site dev` runs it on the host), and
+  # a base entry would have `pnpm dev` start an image it never builds. It talks
+  # to nothing, so nothing waits on it and it waits on nothing.
+  coretask-site:
+    build:
+      context: .
+      dockerfile: site/Dockerfile
+      target: runtime
+      args:
+        # Baked into the HTML at build time — rebuild the image to change them.
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://coretask.example}
+        NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-hello@coretask.example}
+    image: coretask/site:${IMAGE_TAG:-latest}
+    container_name: coretask-site
+    restart: unless-stopped
+    ports:
+      - "${SITE_HTTP_PORT:-8081}:8080"
+    networks: [coretask]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
