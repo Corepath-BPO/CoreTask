@@ -265,6 +265,16 @@ services:
       - coretask-api
     networks: [coretask]
 
+  # ---------------------------------------------------------------------------
+  # Marketing website — coretask.org. Static, so it talks to nothing and
+  # nothing waits on it.
+  # ---------------------------------------------------------------------------
+  coretask-website:
+    image: coretask/website:local
+    container_name: coretask-website
+    restart: unless-stopped
+    networks: [coretask]
+
 networks:
   coretask:
     name: coretask

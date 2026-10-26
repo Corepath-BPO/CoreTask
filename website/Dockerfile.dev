@@ -1,0 +1,43 @@
+# =============================================================================
+# CoreTask marketing website — development image
+# =============================================================================
+# Same shape as the webapp dev image: dependencies baked in, `website/`
+# bind-mounted at run time with named volumes shadowing `website/node_modules`
+# and `website/.next`, so neither Linux-built dependencies nor Next's cache
+# are written back to the host.
+#
+# Build context is the repository root.
+# =============================================================================
+FROM node:24-alpine
+
+RUN apk add --no-cache libc6-compat tini
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    NODE_ENV=development \
+    NEXT_TELEMETRY_DISABLED=1
+RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/tsconfig/package.json      ./packages/tsconfig/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+COPY website/package.json                ./website/
+
+RUN pnpm install --frozen-lockfile --filter "@coretask/website..."
+
+# Only the shared packages the website depends on. Neither has a build step.
+COPY packages/tsconfig      ./packages/tsconfig
+COPY packages/eslint-config ./packages/eslint-config
+COPY website ./website
+
+WORKDIR /app/website
+EXPOSE 3200
+
+ENTRYPOINT ["/sbin/tini", "--"]
+# `--hostname` binds 0.0.0.0 so the port is reachable from the Windows host.
+# `--webpack` because Turbopack's watcher misses edits made through a Windows
+# bind mount even when polling; webpack's polls reliably (WATCHPACK_POLLING).
+# On the host, `pnpm dev` still runs Turbopack.
+CMD ["pnpm", "dev", "--hostname", "0.0.0.0", "--webpack"]

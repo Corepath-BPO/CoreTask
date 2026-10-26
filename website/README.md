@@ -5,7 +5,7 @@ finished work. Next.js, exported as static files — see
 [ADR 0017](../docs/decisions/0017-marketing-site-is-a-static-next-export.md).
 
 ```bash
-pnpm --filter @coretask/website dev        # http://localhost:3200
+pnpm --filter @coretask/website dev        # http://localhost:3200 (also in `pnpm dev`)
 pnpm --filter @coretask/website build      # static export to website/out/
 pnpm --filter @coretask/website preview    # serve out/ at http://localhost:3201
 pnpm --filter @coretask/website studio     # edit the product clips in Remotion Studio
