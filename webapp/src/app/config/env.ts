@@ -16,6 +16,7 @@ const envSchema = z.object({
     .default('http://localhost:3000/api/v1'),
   VITE_WS_URL: z.string().min(1, 'VITE_WS_URL is required.').default('http://localhost:3000'),
   VITE_APP_NAME: z.string().min(1).default('CoreTask'),
+  VITE_SUPPORT_EMAIL: z.email().default('support@coretask.org'),
 });
 
 const parsed = envSchema.safeParse(import.meta.env);
@@ -29,6 +30,7 @@ export const env = Object.freeze({
   apiUrl: parsed.data.VITE_API_URL.replace(/\/$/, ''),
   wsUrl: parsed.data.VITE_WS_URL.replace(/\/$/, ''),
   appName: parsed.data.VITE_APP_NAME,
+  supportEmail: parsed.data.VITE_SUPPORT_EMAIL,
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
 });

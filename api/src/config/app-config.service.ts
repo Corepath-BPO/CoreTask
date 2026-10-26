@@ -223,6 +223,8 @@ export class AppConfigService {
       fromAddress: this.env.MAIL_FROM_ADDRESS,
       /** The display name shown beside it in an inbox. */
       fromName: this.env.MAIL_FROM_NAME,
+      /** Where replies go when a message names no reply address of its own. */
+      replyTo: this.env.MAIL_REPLY_TO,
       timeoutMs: this.env.MAIL_CONNECTION_TIMEOUT_MS,
       enabled: Boolean(this.env.MICROSOFT_GRAPH_TENANT_ID),
     } as const;

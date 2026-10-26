@@ -9,7 +9,7 @@ references rather than text.
 
 ## Status: none of this is built
 
-There is no variable support in CoreTask. Searching `api/src`, `web/src` and
+There is no variable support in CoreTask. Searching `api/src`, `webapp/src` and
 `packages` for a template, segment or variable representation in the automation
 modules returns nothing. `ADD_COMMENT` takes a literal `body` string and posts
 it verbatim; `SEND_IN_APP_NOTIFICATION` takes a literal `title` and `body`.
@@ -71,7 +71,7 @@ return list?.find((entry) => entry.id === id)?.name ?? "something that no longer
 ```
 
 That behaviour is only possible because the id is what is stored. `summariseParts`
-in `web/src/features/automations/builder/lib/node-summary.ts` resolves ids
+in `webapp/src/features/automations/builder/lib/node-summary.ts` resolves ids
 against the project's metadata at render time and returns `SummarySegment[]` —
 text and chips — for the card to draw. It is the same pattern as the one
 proposed here, applied to a step's summary rather than to a body of text, and it

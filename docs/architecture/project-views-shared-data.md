@@ -66,7 +66,7 @@ It is a seam, not a destination:
 went to `PATCH /tasks/:id` — a 404 for any ticket row, so editing a ticket in
 the grid quietly did nothing and the cell reverted.
 
-Both live in `web/src/features/work-items/lib/`. Deleting them means moving the
+Both live in `webapp/src/features/work-items/lib/`. Deleting them means moving the
 cells onto `ProjectWorkItem` directly, which is a contained change once nothing
 else is moving.
 

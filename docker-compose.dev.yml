@@ -5,7 +5,7 @@
 #   pnpm dev:build   (same, with --build)
 #
 # Mount strategy — this is what keeps restarts fast and Windows hosts clean:
-#   * `./api` and `./web` are bind-mounted for hot reload.
+#   * `./api` and `./webapp` are bind-mounted for hot reload.
 #   * A *named* volume shadows each `node_modules` inside those mounts. Docker
 #     seeds a named volume from the image the first time it is used, so
 #     dependencies are already installed and are never written back to the
@@ -110,11 +110,11 @@ services:
       - *types-dist
       - *validation-dist
 
-  coretask-web:
+  coretask-webapp:
     build:
       context: .
-      dockerfile: web/Dockerfile.dev
-    image: coretask/web:dev
+      dockerfile: webapp/Dockerfile.dev
+    image: coretask/webapp:dev
     environment:
       NODE_ENV: development
       # Resolved by the browser, not by the container, so it is the host origin.
@@ -123,13 +123,13 @@ services:
       VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
       # Bind mounts from a Windows or macOS host do not deliver inotify events
       # into the Linux container, so the watcher has to poll. Read by
-      # `server.watch.usePolling` in web/vite.config.ts.
+      # `server.watch.usePolling` in webapp/vite.config.ts.
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${WEB_PORT:-5173}:5173"
     volumes:
-      - ./web:/app/web
-      - coretask-web-node-modules:/app/web/node_modules
+      - ./webapp:/app/webapp
+      - coretask-webapp-node-modules:/app/webapp/node_modules
       - *contracts-dist
       - *types-dist
       - *validation-dist
@@ -151,5 +151,5 @@ volumes:
     name: coretask-api-node-modules
   coretask-worker-node-modules:
     name: coretask-worker-node-modules
-  coretask-web-node-modules:
-    name: coretask-web-node-modules
+  coretask-webapp-node-modules:
+    name: coretask-webapp-node-modules

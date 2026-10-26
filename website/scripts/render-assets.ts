@@ -8,7 +8,7 @@
  * The outputs are committed, so building the site never needs a browser. Run
  * again after changing a clip or the share card:
  *
- *   pnpm --filter @coretask/site assets
+ *   pnpm --filter @coretask/website assets
  *
  * Remotion downloads its own headless Chrome on first use. To use one that is
  * already installed instead (Playwright's, say), point

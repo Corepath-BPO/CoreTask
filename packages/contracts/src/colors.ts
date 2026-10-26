@@ -7,7 +7,7 @@
  * framework, and Tailwind's JIT cannot see a class that only exists in a row.
  *
  * The mapping from token to actual colour lives in one place on the client
- * (`web/src/features/colors`), which is what lets light and dark mode differ
+ * (`webapp/src/features/colors`), which is what lets light and dark mode differ
  * without every consumer knowing.
  */
 

@@ -57,7 +57,7 @@ runs:
 
     # Each packages/* entry resolves through its `dist/`, and `dist/` is
     # gitignored. On a clean checkout there is therefore nothing for api/ and
-    # web/ to import from `@coretask/contracts` until the shared packages are
+    # webapp/ to import from `@coretask/contracts` until the shared packages are
     # built. Both Dockerfiles build them first for exactly this reason, and it
     # is why the root `pnpm verify` script — which builds last — cannot serve
     # as the CI gate.

@@ -65,7 +65,7 @@ backfilled, and the runner is untouched.
 because nothing reads them.
 
 **Status: done, at the schema level only.** The tables exist. No application
-code reads or writes them — grep `api/src`, `web/src` and `packages` for
+code reads or writes them — grep `api/src`, `webapp/src` and `packages` for
 `automationRuleVersion`, `automationBranch` or `publishedVersionId` and you get
 nothing. Phase 1 is complete in the sense that the storage is available; the
 "read both" adapter that its name implies has not been written.

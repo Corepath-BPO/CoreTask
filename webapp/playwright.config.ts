@@ -9,8 +9,8 @@ const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
  * does not own the dev server here, because the API needs PostgreSQL, Redis and
  * a seeded database that Compose already provides.
  *
- *   pnpm --filter @coretask/web test:e2e:install   (once, downloads Chromium)
- *   pnpm --filter @coretask/web test:e2e
+ *   pnpm --filter @coretask/webapp test:e2e:install   (once, downloads Chromium)
+ *   pnpm --filter @coretask/webapp test:e2e
  */
 export default defineConfig({
   testDir: './e2e',

@@ -135,6 +135,13 @@ export const envSchema = z
      * cosmetic problem, not a broken transport.
      */
     MAIL_FROM_NAME: z.string().min(1).default('CoreTask'),
+    /*
+     * Where a reply goes when a message names no reply address of its own.
+     * Mail is sent as a no-reply mailbox; this points answers to invitations,
+     * password resets and the like at one somebody reads. Optional, and outside
+     * the group below for the same reason as the display name.
+     */
+    MAIL_REPLY_TO: optionalString,
     MAIL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
 
     /*

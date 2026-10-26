@@ -7,21 +7,34 @@
  * There are no customers, numbers or quotes yet, so the page invents none.
  */
 
-// Placeholders until the domain is chosen. Canonical URLs, the sitemap, share
-// cards and the early-access button all read these; set both at build time.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://coretask.example';
-const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'hello@coretask.example';
+// The website lives at coretask.org and the webapp at app.coretask.org.
+// Canonical URLs, the sitemap, share cards, the early-access buttons and the
+// sign-in link read these; each can be overridden at build time.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://coretask.org';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.coretask.org';
+const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'hello@coretask.org';
 
 export const site = {
   name: 'CoreTask',
   url: SITE_URL.replace(/\/$/, ''),
+  appUrl: APP_URL.replace(/\/$/, ''),
+  signInHref: `${APP_URL.replace(/\/$/, '')}/login`,
   contactEmail: CONTACT_EMAIL,
+  supportEmail: 'support@coretask.org',
+  officialEmail: 'official@coretask.org',
   earlyAccessHref: `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('CoreTask early access')}`,
   title: 'CoreTask — Project Management & Ticketing Software for Teams',
   description:
     'Project management and ticketing software in one workspace. Turn emails, Slack messages and forms into tracked work, plan it in any view, and automate the rest.',
   ogImageAlt: 'CoreTask — where every request becomes finished work.',
 } as const;
+
+/** Who to write to, in the footer and the structured data. */
+export const contacts = [
+  { label: 'Early access & sales', email: CONTACT_EMAIL },
+  { label: 'Support', email: site.supportEmail },
+  { label: 'Official enquiries', email: site.officialEmail },
+] as const;
 
 export const nav = [
   { label: 'Capture', href: '#capture' },

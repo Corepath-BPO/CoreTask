@@ -102,7 +102,7 @@ fires on another is indistinguishable from a rule that does not work.
 ## The canvas is a projection
 
 The layout is derived, never stored. `layoutGraph` in
-`web/src/features/automations/builder/lib/layout.ts` already computes positions
+`webapp/src/features/automations/builder/lib/layout.ts` already computes positions
 from the rule's shape; today it walks parentage, and under this model it walks
 branches instead:
 

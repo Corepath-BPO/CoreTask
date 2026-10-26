@@ -43,7 +43,7 @@ through it:
 
 A task with a time is late the moment that instant passes. One without is late
 only once its calendar day is over. The rollup in `TasksService.summarize` and
-`isOverdue` in `web/src/lib/utils/dates.ts` apply the same rule; before this,
+`isOverdue` in `webapp/src/lib/utils/dates.ts` apply the same rule; before this,
 comparing the date column against "now" made a task due today overdue from a
 minute past midnight UTC — seven in the evening the day before, in Texas.
 
@@ -51,7 +51,7 @@ minute past midnight UTC — seven in the evening the day before, in Texas.
 
 `new Date('2026-09-05T00:00:00.000Z')` in a timezone west of Greenwich is the
 evening of the fourth, and every due date in the app rendered a day early for
-anyone in the Americas. `asLocalDate` in `web/src/lib/utils/format.ts`
+anyone in the Americas. `asLocalDate` in `webapp/src/lib/utils/format.ts`
 recognises the calendar-date shape and rebuilds it from its year, month and day
 at local midnight; `formatDate`, `daysUntil` and `formatDueDate` all go through
 it. An instant with a clock — `createdAt`, a `dueAt` — is left alone.
@@ -73,7 +73,7 @@ Tickets keep a date-only deadline: no start, no time, and the picker knows it.
 
 ## Descriptions are sanitised HTML
 
-The description is a Tiptap editor (`web/src/components/forms/rich-text-editor.tsx`)
+The description is a Tiptap editor (`webapp/src/components/forms/rich-text-editor.tsx`)
 with the marks and blocks Asana's description offers and nothing beyond them:
 bold, italic, underline, strikethrough, lists, links, inline code, two heading
 sizes, a quote. Its output is HTML, and HTML is what the `description` column

@@ -26,6 +26,7 @@ the original choice made sense at the time.
 | [0015](0015-formula-fields-computed-on-read.md)        | Formula fields are computed on read                             | Accepted |
 | [0016](0016-project-privacy-is-a-membership-list.md)   | Project privacy is a membership list; teams stay organisational | Accepted |
 | [0017](0017-marketing-site-is-a-static-next-export.md) | The marketing site is a static Next.js export                   | Accepted |
+| [0018](0018-three-origins-on-coretask-org.md)          | Three origins on coretask.org                                   | Accepted |
 
 ## Template
 

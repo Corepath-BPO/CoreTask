@@ -7,7 +7,7 @@ pnpm-lock.yaml
 playwright-report
 test-results
 api/prisma/migrations
-web/src/components/ui
+webapp/src/components/ui
 CHANGELOG.md
 
 # PowerShell helpers: prettier has no parser for them

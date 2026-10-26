@@ -45,13 +45,21 @@ export function Nav() {
             ))}
           </ul>
         </nav>
-        <a
-          href={site.earlyAccessHref}
-          className="inline-flex h-9 items-center rounded-full bg-fg px-4 text-[0.85rem] font-medium whitespace-nowrap text-ink transition-colors hover:bg-white"
-        >
-          <span className="sm:hidden">Early access</span>
-          <span className="hidden sm:inline">Request early access</span>
-        </a>
+        <div className="flex shrink-0 items-center gap-1">
+          <a
+            href={site.signInHref}
+            className="rounded-full px-3.5 py-2 text-[0.85rem] font-medium whitespace-nowrap text-muted transition-colors hover:text-fg"
+          >
+            Sign in
+          </a>
+          <a
+            href={site.earlyAccessHref}
+            className="inline-flex h-9 items-center rounded-full bg-fg px-4 text-[0.85rem] font-medium whitespace-nowrap text-ink transition-colors hover:bg-white"
+          >
+            <span className="sm:hidden">Early access</span>
+            <span className="hidden sm:inline">Request early access</span>
+          </a>
+        </div>
       </div>
     </motion.header>
   );

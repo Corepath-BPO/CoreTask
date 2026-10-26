@@ -2,8 +2,8 @@
 # CoreTask web client — development image
 # =============================================================================
 # Same shape as the API dev image: dependencies and shared packages baked in,
-# `web/` bind-mounted at run time with a named volume shadowing
-# `web/node_modules`.
+# `webapp/` bind-mounted at run time with a named volume shadowing
+# `webapp/node_modules`.
 #
 # Build context is the repository root.
 # =============================================================================
@@ -24,16 +24,16 @@ COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY packages/contracts/package.json     ./packages/contracts/
 COPY packages/types/package.json         ./packages/types/
 COPY packages/validation/package.json    ./packages/validation/
-COPY web/package.json                    ./web/
+COPY webapp/package.json                 ./webapp/
 
-RUN pnpm install --frozen-lockfile --filter "@coretask/web..."
+RUN pnpm install --frozen-lockfile --filter "@coretask/webapp..."
 
 COPY packages ./packages
 RUN pnpm --filter "./packages/*" build
 
-COPY web ./web
+COPY webapp ./webapp
 
-WORKDIR /app/web
+WORKDIR /app/webapp
 EXPOSE 5173
 
 ENTRYPOINT ["/sbin/tini", "--"]

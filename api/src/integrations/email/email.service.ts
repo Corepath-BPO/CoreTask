@@ -33,15 +33,32 @@ export class EmailService {
   async send(message: EmailMessage): Promise<void> {
     if (!this.canReachRecipient(message)) return;
 
+    const outgoing = this.withDefaultReplyTo(message);
+
     if (this.config.microsoftGraph.enabled) {
-      await this.graph.send(message);
+      await this.graph.send(outgoing);
       return;
     }
 
     this.logger.log(
-      { to: message.to, subject: message.subject, body: message.text },
+      {
+        to: outgoing.to,
+        replyTo: outgoing.replyTo,
+        subject: outgoing.subject,
+        body: outgoing.text,
+      },
       'E-mail suppressed (no MICROSOFT_GRAPH_* configured)',
     );
+  }
+
+  /**
+   * Fills in MAIL_REPLY_TO when the message names no reply address. A message's
+   * own address always wins: a task update's routes the answer back into the
+   * task, and sending it to the support inbox instead would lose the thread.
+   */
+  private withDefaultReplyTo(message: EmailMessage): EmailMessage {
+    const fallback = this.config.microsoftGraph.replyTo;
+    return message.replyTo || !fallback ? message : { ...message, replyTo: fallback };
   }
 
   /**

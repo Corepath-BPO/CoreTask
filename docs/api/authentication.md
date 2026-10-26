@@ -471,7 +471,7 @@ leak cannot be replayed. Passwords, which have low entropy, use Argon2id
 4. On `401 ACCESS_TOKEN_EXPIRED`, refresh once and retry.
 5. **De-duplicate concurrent refreshes.** Several requests can 401 at once; if
    each triggers its own rotation, the second looks like a replay and revokes the
-   session. `web/src/lib/api/client.ts` implements this single-flight.
+   session. `webapp/src/lib/api/client.ts` implements this single-flight.
 
 ## Error codes
 

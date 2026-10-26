@@ -14,6 +14,11 @@ export function JsonLd() {
         name: site.name,
         url: site.url,
         logo: `${site.url}/apple-touch-icon.png`,
+        email: site.officialEmail,
+        contactPoint: [
+          { '@type': 'ContactPoint', contactType: 'sales', email: site.contactEmail },
+          { '@type': 'ContactPoint', contactType: 'customer support', email: site.supportEmail },
+        ],
       },
       {
         '@type': 'WebSite',

@@ -119,7 +119,7 @@ CoreTask workspace is refused, naming it.
 | Request signatures                                | `api/src/modules/slack/lib/slack-signature.ts`, the guard |
 | Slack's Web API                                   | `api/src/integrations/slack/slack-api.client.ts`          |
 | Posting as the bot                                | `WebhookDeliveryService.postAsSlackBot`                   |
-| Integrations › Slack, the callback and link pages | `web/src/features/integrations/pages/slack-*.tsx`         |
+| Integrations › Slack, the callback and link pages | `webapp/src/features/integrations/pages/slack-*.tsx`      |
 | The channel picker                                | `customize-apps-section.tsx`                              |
 
 **Installing.** `POST /workspaces/:id/slack/install` (admins, signed in)

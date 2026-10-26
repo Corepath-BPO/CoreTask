@@ -6,9 +6,9 @@ This documents the shape each took and why.
 
 ## Selecting rows
 
-Selection lives in the List view (`web/src/features/projects/components/project-list-view.tsx`)
+Selection lives in the List view (`webapp/src/features/projects/components/project-list-view.tsx`)
 as a set of ids plus an anchor — the last plain click, which a shift range
-extends from. The rules are pure functions in `web/src/features/projects/lib/selection.ts`:
+extends from. The rules are pure functions in `webapp/src/features/projects/lib/selection.ts`:
 
 - **A click on the row's own padding selects.** A click on a control — the
   title, a cell, the drag grip — is that control's, so `isInteractiveTarget`
@@ -87,7 +87,7 @@ Asana's chords — hold Tab, press a letter — with the same letters:
 | Esc            | Clear selection, close task |
 | ?              | The shortcut sheet          |
 
-Three pieces, all under `web/src/lib/shortcuts/`:
+Three pieces, all under `webapp/src/lib/shortcuts/`:
 
 - **`shortcut-definitions.ts`** is the one table behind both the listener and
   the help sheet, so the sheet cannot promise a key the listener does not know.

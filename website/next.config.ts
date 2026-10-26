@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 
 /*
  * Exported as plain HTML, CSS and JS: nginx (or any CDN) serves `out/` with no
- * Node.js at run time, the same way coretask-web ships. That rules out
+ * Node.js at run time, the same way coretask-webapp ships. That rules out
  * server-only features such as on-demand image optimisation, so images are
  * served as they are committed.
  */
