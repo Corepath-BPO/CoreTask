@@ -4,7 +4,7 @@
 
 | Component           | Runtime                 | Responsibility                                    | Production         |
 | ------------------- | ----------------------- | ------------------------------------------------- | ------------------ |
-| `coretask-website`  | nginx                   | Marketing site (`website/`). Static export.       | `coretask.org`     |
+| `coretask-website`  | Next dev server / nginx | Marketing site (`website/`). Static export.       | `coretask.org`     |
 | `coretask-webapp`   | Vite dev server / nginx | The app (`webapp/`). Static assets in production. | `app.coretask.org` |
 | `coretask-api`      | Node — `dist/main.js`   | REST API and Socket.IO gateway.                   | `api.coretask.org` |
 | `coretask-worker`   | Node — `dist/worker.js` | BullMQ consumer. Same codebase, no HTTP surface.  | —                  |
