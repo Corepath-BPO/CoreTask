@@ -272,7 +272,8 @@ cheap on a small laptop.
 
 | Service         | URL                                   |
 | --------------- | ------------------------------------- |
-| Frontend        | http://localhost:5173                 |
+| Webapp          | http://localhost:5173                 |
+| Website         | http://localhost:3200                 |
 | API             | http://localhost:3000                 |
 | REST base       | http://localhost:3000/api/v1          |
 | Swagger UI      | http://localhost:3000/api/docs        |
@@ -673,6 +674,7 @@ API_PORT=3010
 POSTGRES_PORT=55432
 REDIS_PORT=56379
 WEB_PORT=5173
+WEBSITE_PORT=3200
 STORAGE_API_PORT=9000
 STORAGE_CONSOLE_PORT=9001
 ```

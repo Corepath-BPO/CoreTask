@@ -5,7 +5,7 @@
 #   pnpm dev:build   (same, with --build)
 #
 # Mount strategy — this is what keeps restarts fast and Windows hosts clean:
-#   * `./api` and `./webapp` are bind-mounted for hot reload.
+#   * `./api`, `./webapp` and `./website` are bind-mounted for hot reload.
 #   * A *named* volume shadows each `node_modules` inside those mounts. Docker
 #     seeds a named volume from the image the first time it is used, so
 #     dependencies are already installed and are never written back to the
@@ -146,6 +146,40 @@ services:
       retries: 10
       start_period: 45s
 
+  coretask-website:
+    build:
+      context: .
+      dockerfile: website/Dockerfile.dev
+    image: coretask/website:dev
+    environment:
+      NODE_ENV: development
+      # Sign in should open the local webapp, not app.coretask.org.
+      NEXT_PUBLIC_APP_URL: http://localhost:${WEB_PORT:-5173}
+      # The container runs `next dev --webpack`, which polls when these are
+      # set (WATCHPACK_POLLING by webpack, CHOKIDAR_USEPOLLING by
+      # website/next.config.ts); see the webapp above for why.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${WEBSITE_PORT:-3200}:3200"
+    volumes:
+      - ./website:/app/website
+      - coretask-website-node-modules:/app/website/node_modules
+      # Next's build cache, kept off the host for the same reason.
+      - coretask-website-next:/app/website/.next
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3200/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
 volumes:
   coretask-api-node-modules:
     name: coretask-api-node-modules
@@ -153,3 +187,7 @@ volumes:
     name: coretask-worker-node-modules
   coretask-webapp-node-modules:
     name: coretask-webapp-node-modules
+  coretask-website-node-modules:
+    name: coretask-website-node-modules
+  coretask-website-next:
+    name: coretask-website-next

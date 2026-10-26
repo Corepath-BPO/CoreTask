@@ -17,6 +17,12 @@ const config: NextConfig = {
   // The monorepo root, stated rather than inferred: a git worktree nested
   // inside another checkout would otherwise resolve to the outer lockfile.
   turbopack: { root: path.resolve(process.cwd(), '..') },
+  // Bind mounts from a Windows or macOS host deliver no file events into the
+  // Linux container, so the Docker dev stack polls — the same switch the
+  // webapp's Vite reads. Set in docker-compose.dev.yml only.
+  ...(process.env.CHOKIDAR_USEPOLLING === 'true' && {
+    watchOptions: { pollIntervalMs: 1000 },
+  }),
 };
 
 export default config;

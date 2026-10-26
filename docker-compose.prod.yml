@@ -108,10 +108,7 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
-  # Declared here in full rather than in the base file: the dev stack has no
-  # marketing site (`pnpm --filter @coretask/website dev` runs it on the host), and
-  # a base entry would have `pnpm dev` start an image it never builds. It talks
-  # to nothing, so nothing waits on it and it waits on nothing.
+  # The static export behind nginx; the dev overlay runs `next dev` instead.
   coretask-website:
     build:
       context: .
@@ -123,11 +120,8 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://app.coretask.org}
         NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-hello@coretask.org}
     image: coretask/website:${IMAGE_TAG:-latest}
-    container_name: coretask-website
-    restart: unless-stopped
     ports:
       - "${WEBSITE_HTTP_PORT:-8081}:8080"
-    networks: [coretask]
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 128M }
