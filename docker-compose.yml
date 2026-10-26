@@ -225,9 +225,12 @@ services:
       # hostname that no client can resolve, and a presigned URL is signed for
       # the host it will be fetched from, so the two cannot be the same here.
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-coretask}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-coretask_minio}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-coretask_minio_dev_password}
+      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
+      STORAGE_MAX_FILE_SIZE_MB: ${STORAGE_MAX_FILE_SIZE_MB:-25}
       # The worker is what actually drains the e-mail queue, so these matter
       # more here than on the API — without them invitations are only logged.
       MICROSOFT_GRAPH_TENANT_ID: ${MICROSOFT_GRAPH_TENANT_ID:-}

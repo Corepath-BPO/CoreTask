@@ -29,7 +29,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:reset": "dotenv -e ../.env -- prisma migrate reset --force --skip-seed && pnpm db:seed",
     "db:seed": "dotenv -e ../.env -- tsx prisma/seed.ts",
-    "db:studio": "dotenv -e ../.env -- prisma studio"
+    "db:studio": "dotenv -e ../.env -- prisma studio",
+    "storage:check": "tsx src/scripts/storage-check.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
