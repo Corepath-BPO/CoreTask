@@ -481,7 +481,7 @@ export function RuleRun() {
               flexShrink: 0,
             }}
           >
-            <MarkGlyph size={20} />
+            <MarkGlyph id="slack" size={17} />
           </div>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600 }}>CoreTask</div>

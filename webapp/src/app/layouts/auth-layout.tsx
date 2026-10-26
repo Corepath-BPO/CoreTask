@@ -32,24 +32,24 @@ export function AuthLayout() {
           {/* The stacked lockup gets its one showing here — the wordmark needs
               this much width to read, which the sidebar never has.
 
-              Two ink variants swapped by CSS rather than one asset: the lockup
-              is monochrome, so each theme shows the variant drawn for it and
-              the panel's own gradient stays visible behind it. The hidden one
-              is `display:none`, so only the painted variant reaches the
+              The logo's light and dark versions, swapped by CSS: each theme
+              shows the one drawn for its background, and both are transparent
+              so the panel's gradient shows through. The hidden one is
+              `display:none`, so only the painted version reaches the
               accessibility tree. */}
           <img
-            src="/logo-stacked-black.svg"
+            src="/logo-stacked-light.svg"
             alt="CoreTask"
-            width={219}
-            height={183}
-            className="mb-10 w-48 dark:hidden"
+            width={317}
+            height={286}
+            className="mb-10 w-40 dark:hidden"
           />
           <img
-            src="/logo-stacked-white.svg"
+            src="/logo-stacked-dark.svg"
             alt="CoreTask"
-            width={219}
-            height={183}
-            className="mb-10 hidden w-48 dark:block"
+            width={317}
+            height={286}
+            className="mb-10 hidden w-40 dark:block"
           />
 
           <blockquote className="max-w-md space-y-6">

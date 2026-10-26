@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { AbsoluteFill, Easing, type InterpolateOptions } from 'remotion';
 
+import { CHECK_GREEN, LOGO_GREEN, MARK } from '../components/brand';
+
 /*
  * Shared look for the product clips. Compositions are rendered two ways — live
  * in the page by @remotion/player, and to still images by the Remotion
@@ -150,31 +152,50 @@ export function KeyTag({ children, style }: { children: ReactNode; style?: CSSPr
   );
 }
 
-/** The CoreTask mark; the last square fills green as `done` goes 0 → 1. */
+/**
+ * The CoreTask mark, `size` pixels tall. The check circle grows into the C as
+ * `done` goes 0 → 1: the request is finished. `id` names the T's gradient and
+ * must be unique within the frame.
+ */
 export function MarkGlyph({
+  id,
   size,
   done = 1,
   color = C.fg,
 }: {
+  id: string;
   size: number;
   done?: number;
   color?: string;
 }) {
+  const scale = 0.35 + 0.65 * done;
+  const [cx, cy] = MARK.circleCentre;
+  const gradient = `glyph-blend-${id}`;
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64">
-      <g fill="none" stroke={color} strokeWidth={4}>
-        <rect x={8} y={8} width={18} height={18} />
-        <rect x={38} y={8} width={18} height={18} />
-        <rect x={8} y={38} width={18} height={18} />
-        <rect x={38} y={38} width={18} height={18} opacity={1 - done} />
+    <svg width={size * MARK.aspect} height={size} viewBox={MARK.viewBox}>
+      <defs>
+        <linearGradient
+          id={gradient}
+          gradientUnits="userSpaceOnUse"
+          x1={MARK.blend.x1}
+          x2={MARK.blend.x2}
+          y1="0"
+          y2="0"
+        >
+          <stop offset="0" stopColor={LOGO_GREEN} />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <path fill={LOGO_GREEN} d={MARK.c} />
+      <path fill={`url(#${gradient})`} d={MARK.t} />
+      {/* Scaled about the circle's own centre. */}
+      <g
+        opacity={done}
+        transform={`translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`}
+      >
+        <path fill={CHECK_GREEN} d={MARK.circle} />
+        <path fill="#FFFFFF" d={MARK.check} />
       </g>
-      <rect
-        x={47 - 11 * done}
-        y={47 - 11 * done}
-        width={22 * done}
-        height={22 * done}
-        fill={C.brand}
-      />
     </svg>
   );
 }

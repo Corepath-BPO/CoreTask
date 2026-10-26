@@ -18,8 +18,8 @@ function StillMark() {
   return (
     <div className="pointer-events-none absolute inset-0 flex items-start justify-center pt-[16svh] lg:items-center lg:justify-end lg:pt-0 lg:pr-[9%]">
       <Mark
-        done
-        className="size-44 text-fg drop-shadow-[0_0_60px_rgb(133_200_84/0.25)] sm:size-56 lg:size-72"
+        id="hero"
+        className="h-32 w-auto text-fg drop-shadow-[0_0_60px_rgb(113_205_44/0.25)] sm:h-40 lg:h-56"
       />
     </div>
   );

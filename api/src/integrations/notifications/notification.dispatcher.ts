@@ -87,6 +87,7 @@ export class NotificationDispatcher {
         `Choose which emails you get: ${settings}`,
       ].join('\n'),
       html: renderEmailHtml({
+        webUrl,
         preheader: body || input.title,
         heading: input.title,
         bodyHtml: body ? paragraph(escapeHtml(body)) : '',

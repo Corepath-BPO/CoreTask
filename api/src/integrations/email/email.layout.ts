@@ -38,6 +38,8 @@ const FONT =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
 export interface EmailLayout {
+  /** The app's public origin, which serves the logo image in the header. */
+  webUrl: string;
   /** The line an inbox shows after the subject. Never rendered in the body. */
   preheader: string;
   heading: string;
@@ -50,27 +52,25 @@ export interface EmailLayout {
   footnote?: string;
 }
 
-/** The mark, drawn in table cells: three outlined squares and a filled one. */
-function markHtml(): string {
-  const cell = `width:13px;height:13px;font-size:0;line-height:0;mso-line-height-rule:exactly;`;
-  const outlined = `${cell}border:3px solid ${INK};`;
-  const filled = `${cell}background:${INK};`;
-  return [
-    `<table role="presentation" cellpadding="0" cellspacing="3" border="0" style="border-collapse:separate;">`,
-    `<tr>`,
-    `<td style="${outlined}">&nbsp;</td>`,
-    `<td style="${outlined}">&nbsp;</td>`,
-    `</tr>`,
-    `<tr>`,
-    `<td style="${outlined}">&nbsp;</td>`,
-    `<td style="${filled}">&nbsp;</td>`,
-    `</tr>`,
-    `</table>`,
-  ].join('');
+/**
+ * The horizontal logo, light version, as a PNG the app serves.
+ *
+ * An image rather than markup: the mark is curves, which no table layout can
+ * draw, and SVG is stripped by Gmail and ignored by Outlook. The PNG is 128 px
+ * tall and shown at 30, so it stays sharp on high-density screens. Clients that
+ * hold images back until asked show the alt text, the product's name.
+ */
+function logoHtml(webUrl: string): string {
+  const src = `${webUrl.replace(/\/$/, '')}/email/coretask-logo.png`;
+  return (
+    `<img src="${escapeHtml(src)}" alt="CoreTask" width="87" height="30" ` +
+    `style="display:block;border:0;outline:none;text-decoration:none;height:30px;width:87px;` +
+    `font-family:${FONT};font-size:17px;font-weight:600;color:${INK};">`
+  );
 }
 
 export function renderEmailHtml(layout: EmailLayout): string {
-  const { preheader, heading, bodyHtml, cta, note, footnote } = layout;
+  const { webUrl, preheader, heading, bodyHtml, cta, note, footnote } = layout;
 
   const button = cta
     ? [
@@ -126,13 +126,7 @@ export function renderEmailHtml(layout: EmailLayout): string {
 
     `<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:${CARD};border:1px solid ${BORDER};border-radius:12px;">`,
 
-    // Mark and wordmark, side by side.
-    `<tr><td style="padding:30px 32px 0;">`,
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>`,
-    `<td valign="middle">${markHtml()}</td>`,
-    `<td valign="middle" style="padding-left:12px;font-family:${FONT};font-size:17px;font-weight:600;letter-spacing:-0.01em;color:${INK};">CoreTask</td>`,
-    `</tr></table>`,
-    `</td></tr>`,
+    `<tr><td style="padding:30px 32px 0;">${logoHtml(webUrl)}</td></tr>`,
 
     `<tr><td style="padding:26px 32px 0;font-family:${FONT};font-size:21px;font-weight:600;line-height:1.3;letter-spacing:-0.01em;color:${INK};">${escapeHtml(heading)}</td></tr>`,
 

@@ -34,7 +34,7 @@ describe('composeRuleEmail', () => {
     const html = composeRuleEmail(request, 'http://localhost:5173').html ?? '';
 
     expect(html).toMatch(/^<!doctype html>/);
-    expect(html).toContain('>CoreTask</td>');
+    expect(html).toContain('src="http://localhost:5173/email/coretask-logo.png" alt="CoreTask"');
     // The rule's name belongs below the card, not in the body.
     expect(html).toContain('Sent by the rule “Renewal nudge”.');
     // Every `<tr>` the shell emits has to sit inside a table — a loose row is

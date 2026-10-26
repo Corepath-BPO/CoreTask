@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { useId } from 'react';
 
 import { env } from '@/app/config/env';
 import { Button } from '@/components/ui/button';
@@ -71,30 +72,49 @@ export function Sidebar() {
 }
 
 /**
- * The CoreTask mark.
+ * The CoreTask mark: a green C flowing into a T, with a check circle inside.
  *
- * Inline rather than an <img> so the artwork paints in `currentColor`: the mark
- * is monochrome, so it rides the surrounding text colour across a theme switch
- * instead of needing a second asset — and with no fixed ink it no longer needs
- * the white tile the old navy-on-white artwork was mounted on.
+ * Inline rather than an <img> so one drawing serves both themes. The T's bar
+ * blends from Core Green into navy in the light theme and into white in the
+ * dark one — exactly the logo's light and dark versions. The paths are the
+ * logo pack's, unaltered; the mark is wider than it is tall, so it is sized by
+ * height and its width follows.
  *
- * The geometry is the brand mark at its native 64-unit grid; the 8-unit inset
- * is the lockup's own padding, so it stays optically centred at any size.
+ * The gradient's id comes from `useId`: the sidebar holding one copy is
+ * `display: none` on small screens, and a gradient defined inside a hidden
+ * element paints nothing for the copies that point at it.
  */
 export function BrandMark({ className }: { className?: string }) {
+  const blend = `brand-mark-${useId().replace(/:/g, '')}`;
   return (
     <svg
-      viewBox="0 0 64 64"
+      viewBox="77 110.5 273.5 192"
       aria-hidden="true"
       focusable="false"
-      className={cn('size-8 shrink-0', className)}
+      className={cn('h-7 w-auto shrink-0', className)}
     >
-      <g fill="none" stroke="currentColor" strokeWidth={4}>
-        <rect x="8" y="8" width="18" height="18" />
-        <rect x="38" y="8" width="18" height="18" />
-        <rect x="8" y="38" width="18" height="18" />
-      </g>
-      <rect x="36" y="36" width="22" height="22" fill="currentColor" />
+      <defs>
+        <linearGradient id={blend} gradientUnits="userSpaceOnUse" x1="180" y1="0" x2="266" y2="0">
+          <stop offset="0" stopColor="#71CD2C" />
+          <stop offset="1" className="[stop-color:#03377B] dark:[stop-color:#FFFFFF]" />
+        </linearGradient>
+      </defs>
+      <path
+        fill="#71CD2C"
+        d="M172 111L190 111L190 148L172 148A57.5 57.5 0 0 0 172 263L227.11 263A9 9 0 0 1 236 271.89L236 291.11A9 9 0 0 1 227.11 300L172 300A94.5 94.5 0 0 1 172 111Z"
+      />
+      <path
+        fill={`url(#${blend})`}
+        d="M265 148L172 148L172 111L343.09 111A7 7 0 0 1 350 117.91L350 141.09A7 7 0 0 1 343.09 148L300 148L300 295.09A7 7 0 0 1 293.09 302L271.91 302A7 7 0 0 1 265 295.09L265 148Z"
+      />
+      <path
+        fill="#31A736"
+        d="M241.5 206A45 45 0 1 1 151.5 206A45 45 0 1 1 241.5 206ZM186.68 225.46A5.5 5.5 0 0 0 194.46 225.32L221.59 196.17A5.5 5.5 0 0 0 213.54 188.68L190.36 213.58L180.32 203.54A5.5 5.5 0 0 0 172.54 211.32L186.68 225.46Z"
+      />
+      <path
+        fill="#FFFFFF"
+        d="M172.54 211.32A5.5 5.5 0 0 1 180.32 203.54L190.36 213.58L213.54 188.68A5.5 5.5 0 0 1 221.59 196.17L194.46 225.32A5.5 5.5 0 0 1 186.68 225.46L172.54 211.32Z"
+      />
     </svg>
   );
 }

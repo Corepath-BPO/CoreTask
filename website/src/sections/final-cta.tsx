@@ -18,8 +18,8 @@ export function FinalCta() {
       <Container className="relative text-center">
         <Reveal>
           <Mark
-            done
-            className="mx-auto size-20 text-fg drop-shadow-[0_0_40px_rgb(133_200_84/0.35)]"
+            id="cta"
+            className="mx-auto h-20 w-auto text-fg drop-shadow-[0_0_40px_rgb(113_205_44/0.35)]"
           />
         </Reveal>
         <Reveal delay={0.05}>
