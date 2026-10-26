@@ -1,4 +1,4 @@
-import { AbsoluteFill } from 'remotion';
+import { AbsoluteFill, Img, staticFile } from 'remotion';
 
 import { C, FONT, MarkGlyph, MONO } from './theme';
 
@@ -25,19 +25,10 @@ export function OgImage() {
         }}
       />
 
-      <div
-        style={{
-          position: 'absolute',
-          left: 80,
-          top: 72,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-        }}
-      >
-        <MarkGlyph size={40} done={0} />
-        <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.5 }}>CoreTask</span>
-      </div>
+      <Img
+        src={staticFile('brand/coretask-logo-dark.svg')}
+        style={{ position: 'absolute', left: 80, top: 64, height: 64 }}
+      />
 
       <div style={{ position: 'absolute', left: 80, top: 196, width: 660 }}>
         <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 3, color: C.brand }}>
@@ -63,10 +54,10 @@ export function OgImage() {
       <div
         style={{
           position: 'absolute',
-          right: 70,
-          top: 150,
-          width: 330,
-          height: 330,
+          right: 120,
+          top: 125,
+          width: 230,
+          height: 380,
           perspective: 900,
         }}
       >
@@ -76,10 +67,10 @@ export function OgImage() {
             height: '100%',
             transform: 'rotateY(-24deg) rotateX(14deg)',
             filter:
-              'drop-shadow(0 40px 60px rgba(0,0,0,0.8)) drop-shadow(0 0 50px rgba(133,200,84,0.35))',
+              'drop-shadow(0 40px 60px rgba(0,0,0,0.8)) drop-shadow(0 0 50px rgba(0,240,6,0.3))',
           }}
         >
-          <MarkGlyph size={330} done={1} />
+          <MarkGlyph size={380} done={1} />
         </div>
       </div>
     </AbsoluteFill>

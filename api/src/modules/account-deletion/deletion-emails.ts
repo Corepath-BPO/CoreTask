@@ -25,6 +25,7 @@ export function workspaceDeletedEmail(params: {
     subject: `The workspace “${params.workspaceName}” was deleted`,
     text: [`Hi ${firstName},`, '', ...lines, '', '— The CoreTask team'].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: lines[0] as string,
       heading: 'A workspace was deleted',
       bodyHtml: [

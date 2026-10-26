@@ -49,6 +49,7 @@ export function emailVerificationEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: params.welcome
         ? 'Confirm your address and your CoreTask account is ready.'
         : 'Confirm your e-mail address for CoreTask.',
@@ -104,6 +105,7 @@ export function invitationEmail(params: {
         '— The CoreTask team',
       ].join('\n'),
       html: renderEmailHtml({
+        webUrl: params.webUrl,
         preheader: `${params.invitedByName} invited you to ${params.projectName}.`,
         heading: `${params.invitedByName} invited you to ${params.projectName}`,
         bodyHtml: paragraph(
@@ -129,6 +131,7 @@ export function invitationEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: `${params.invitedByName} invited you to ${params.workspaceName}.`,
       heading: `${params.invitedByName} invited you to ${params.workspaceName}`,
       bodyHtml: paragraph(
@@ -170,6 +173,7 @@ export function passwordResetEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: 'Choose a new password for your CoreTask account.',
       heading: 'Reset your password',
       bodyHtml: [
@@ -213,6 +217,7 @@ export function emailChangeEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: 'Confirm the new address for your CoreTask account.',
       heading: 'Confirm your new e-mail address',
       bodyHtml: [
@@ -261,6 +266,7 @@ export function securityNoticeEmail(params: {
       '— The CoreTask team',
     ].join('\n'),
     html: renderEmailHtml({
+      webUrl: params.webUrl,
       preheader: params.lines[0] ?? params.heading,
       heading: params.heading,
       bodyHtml: [

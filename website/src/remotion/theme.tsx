@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { AbsoluteFill, Easing, type InterpolateOptions } from 'remotion';
 
+import { LOGO_GREEN, MARK } from '../components/brand';
+
 /*
  * Shared look for the product clips. Compositions are rendered two ways — live
  * in the page by @remotion/player, and to still images by the Remotion
@@ -150,7 +152,10 @@ export function KeyTag({ children, style }: { children: ReactNode; style?: CSSPr
   );
 }
 
-/** The CoreTask mark; the last square fills green as `done` goes 0 → 1. */
+/**
+ * The CoreTask mark, `size` pixels tall. The core — the green disc with the
+ * check — grows into the C as `done` goes 0 → 1: the request is finished.
+ */
 export function MarkGlyph({
   size,
   done = 1,
@@ -160,21 +165,16 @@ export function MarkGlyph({
   done?: number;
   color?: string;
 }) {
+  const scale = 0.35 + 0.65 * done;
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64">
-      <g fill="none" stroke={color} strokeWidth={4}>
-        <rect x={8} y={8} width={18} height={18} />
-        <rect x={38} y={8} width={18} height={18} />
-        <rect x={8} y={38} width={18} height={18} />
-        <rect x={38} y={38} width={18} height={18} opacity={1 - done} />
+    <svg width={(size * 89.96) / 148} height={size} viewBox={MARK.viewBox}>
+      <path fill={color} d={MARK.shellLower} />
+      <path fill={color} d={MARK.shellUpper} />
+      <path fill={LOGO_GREEN} d={MARK.crescent} />
+      {/* Scaled about the core's own centre, (68, 87) in the mark's units. */}
+      <g opacity={done} transform={`translate(68 87) scale(${scale}) translate(-68 -87)`}>
+        <path fill={LOGO_GREEN} d={MARK.core} />
       </g>
-      <rect
-        x={47 - 11 * done}
-        y={47 - 11 * done}
-        width={22 * done}
-        height={22 * done}
-        fill={C.brand}
-      />
     </svg>
   );
 }

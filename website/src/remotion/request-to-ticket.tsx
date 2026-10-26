@@ -376,7 +376,7 @@ export function RequestToTicket() {
           opacity: intro,
         }}
       >
-        <MarkGlyph size={64} done={interpolate(frame, [start(0) + 18, start(0) + 30], [0, 1], K)} />
+        <MarkGlyph size={76} done={interpolate(frame, [start(0) + 18, start(0) + 30], [0, 1], K)} />
       </div>
 
       {/* Packets in flight. */}

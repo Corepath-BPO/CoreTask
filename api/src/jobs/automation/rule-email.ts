@@ -19,6 +19,7 @@ export function composeRuleEmail(request: RuleEmailRequest, webUrl: string): Mes
     .map((part) => paragraph(escapeHtml(part).replace(/\n/g, '<br>')))
     .join('');
   const html = renderEmailHtml({
+    webUrl,
     preheader: request.body.trim() || request.taskTitle,
     heading: request.subject,
     bodyHtml: paragraphs,

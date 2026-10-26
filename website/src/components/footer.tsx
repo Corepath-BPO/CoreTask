@@ -8,7 +8,7 @@ export function Footer() {
     <footer className="relative border-t border-line py-14">
       <Container className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
         <div className="max-w-sm">
-          <Lockup className="h-6 w-auto" />
+          <Lockup className="h-10 w-auto" />
           <p className="mt-4 text-[0.92rem] leading-relaxed text-muted">
             Project management and ticketing software for teams that want every request tracked,
             planned and finished in one place.

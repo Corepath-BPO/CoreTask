@@ -149,7 +149,7 @@ export function Connect() {
               />
             ))}
             <div className="absolute top-1/2 left-1/2 z-10 grid size-24 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-3xl border border-line-2 bg-panel shadow-[0_0_80px_-10px_rgb(133_200_84/0.45)] sm:size-28">
-              <Mark done className="size-12 text-fg sm:size-14" title="CoreTask" />
+              <Mark className="h-14 w-auto text-fg sm:h-16" title="CoreTask" />
             </div>
             <ul aria-label="Integrations">
               {CHIPS.map(({ ring, name, index }, slot) => (

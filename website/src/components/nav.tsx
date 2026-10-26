@@ -29,7 +29,7 @@ export function Nav() {
         )}
       >
         <a href="#top" aria-label="CoreTask, back to top" className="shrink-0">
-          <Lockup className="h-[22px] w-auto" />
+          <Lockup className="h-9 w-auto" />
         </a>
         <nav aria-label="Main" className="hidden lg:block">
           <ul className="flex items-center gap-1">

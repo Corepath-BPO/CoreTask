@@ -12,7 +12,7 @@ export default function NotFound() {
   return (
     <main className="grid min-h-svh place-items-center px-6 text-center">
       <div>
-        <Mark className="mx-auto size-14 text-fg" />
+        <Mark className="mx-auto h-16 w-auto text-fg" />
         <h1 className="headline mt-8">This page isn’t on the board.</h1>
         <p className="lede mx-auto mt-4 max-w-md">
           The link may be old, or the page may have moved.

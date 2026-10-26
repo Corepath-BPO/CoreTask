@@ -71,30 +71,39 @@ export function Sidebar() {
 }
 
 /**
- * The CoreTask mark.
+ * The CoreTask mark: a cut C round a green core with a check in it.
  *
- * Inline rather than an <img> so the artwork paints in `currentColor`: the mark
- * is monochrome, so it rides the surrounding text colour across a theme switch
- * instead of needing a second asset — and with no fixed ink it no longer needs
- * the white tile the old navy-on-white artwork was mounted on.
+ * Inline rather than an <img> so the shell paints in `currentColor` and follows
+ * the theme — black on light, white on dark, which is exactly the logo's light
+ * and dark versions — while the crescent and the core keep Core Green in both.
  *
- * The geometry is the brand mark at its native 64-unit grid; the 8-unit inset
- * is the lockup's own padding, so it stays optically centred at any size.
+ * The paths are the logo pack's mark, unaltered. It is taller than it is wide,
+ * so it is sized by height and its width follows.
  */
 export function BrandMark({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 64 64"
+      viewBox="9.54 9.5 89.96 148"
       aria-hidden="true"
       focusable="false"
-      className={cn('size-8 shrink-0', className)}
+      className={cn('h-8 w-auto shrink-0', className)}
     >
-      <g fill="none" stroke="currentColor" strokeWidth={4}>
-        <rect x="8" y="8" width="18" height="18" />
-        <rect x="38" y="8" width="18" height="18" />
-        <rect x="8" y="38" width="18" height="18" />
-      </g>
-      <rect x="36" y="36" width="22" height="22" fill="currentColor" />
+      <path
+        fill="currentColor"
+        d="M99 134.02L99 154.37A70 70 0 0 1 10.04 89.5L32.06 89.5A50 50 0 0 0 99 134.02Z"
+      />
+      <path
+        fill="currentColor"
+        d="M26.78 84.5L10.04 84.5A70 70 0 0 1 41.85 28.31A60 60 0 0 0 26.78 84.5Z"
+      />
+      <path
+        fill="#00F006"
+        d="M99 11.66L99 39.98A50 50 0 0 0 32.06 84.5L26.78 84.5A60 60 0 0 1 99 11.66Z"
+      />
+      <path
+        fill="#00F006"
+        d="M94 87A26 26 0 1 1 42 87A26 26 0 1 1 94 87ZM54.23 89.77L64.11 99.65L80.87 80.65L77.13 77.35L63.89 92.35L57.77 86.23Z"
+      />
     </svg>
   );
 }

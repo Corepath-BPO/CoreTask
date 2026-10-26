@@ -17,10 +17,7 @@ export function FinalCta() {
       <div aria-hidden className="grid-bg pointer-events-none absolute inset-0 opacity-50" />
       <Container className="relative text-center">
         <Reveal>
-          <Mark
-            done
-            className="mx-auto size-20 text-fg drop-shadow-[0_0_40px_rgb(133_200_84/0.35)]"
-          />
+          <Mark className="mx-auto h-24 w-auto text-fg drop-shadow-[0_0_40px_rgb(0_240_6/0.3)]" />
         </Reveal>
         <Reveal delay={0.05}>
           <h2 id="early-access-title" className="display mx-auto mt-10 max-w-4xl">

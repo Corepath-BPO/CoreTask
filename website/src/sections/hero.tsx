@@ -17,10 +17,7 @@ const MarkScene = dynamic(() => import('@/three/mark-scene'), { ssr: false });
 function StillMark() {
   return (
     <div className="pointer-events-none absolute inset-0 flex items-start justify-center pt-[16svh] lg:items-center lg:justify-end lg:pt-0 lg:pr-[9%]">
-      <Mark
-        done
-        className="size-44 text-fg drop-shadow-[0_0_60px_rgb(133_200_84/0.25)] sm:size-56 lg:size-72"
-      />
+      <Mark className="h-48 w-auto text-fg drop-shadow-[0_0_60px_rgb(0_240_6/0.22)] sm:h-60 lg:h-80" />
     </div>
   );
 }

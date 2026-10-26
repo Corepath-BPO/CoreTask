@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <style>.m{fill:#0A0A0A;stroke:#0A0A0A}.o{fill:none}@media (prefers-color-scheme:dark){.m{fill:#FFFFFF;stroke:#FFFFFF}}</style>
-  <rect class="m o" style="fill:none" x="8" y="8" width="18" height="18" stroke-width="4"/>
-  <rect class="m o" style="fill:none" x="38" y="8" width="18" height="18" stroke-width="4"/>
-  <rect class="m o" style="fill:none" x="8" y="38" width="18" height="18" stroke-width="4"/>
-  <rect class="m" x="36" y="36" width="22" height="22" stroke="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="CoreTask icon"><title>CoreTask</title><rect width="64" height="64" rx="14.08" fill="#0A0A0A"/><g transform="translate(13.96 4.37) scale(0.330884)"><path fill="#FFFFFF" d="M99 134.02L99 154.37A70 70 0 0 1 10.04 89.5L32.06 89.5A50 50 0 0 0 99 134.02Z"/><path fill="#FFFFFF" d="M26.78 84.5L10.04 84.5A70 70 0 0 1 41.85 28.31A60 60 0 0 0 26.78 84.5Z"/><path fill="#00F006" d="M99 11.66L99 39.98A50 50 0 0 0 32.06 84.5L26.78 84.5A60 60 0 0 1 99 11.66Z"/><path fill="#00F006" d="M94 87A26 26 0 1 1 42 87A26 26 0 1 1 94 87ZM54.23 89.77L64.11 99.65L80.87 80.65L77.13 77.35L63.89 92.35L57.77 86.23Z"/></g></svg>
