@@ -34,8 +34,8 @@ export interface StoredObject {
 }
 
 /**
- * Object-storage foundation (RustFS locally, any S3-compatible service in
- * production).
+ * Object-storage foundation (RustFS locally, Cloudflare R2 in production — or
+ * any other S3-compatible service; only the `STORAGE_*` settings differ).
  *
  * Validation lives here rather than in a controller so every future upload path
  * — REST multipart, presigned direct-to-bucket, worker-side imports — is held to
@@ -67,6 +67,14 @@ export class StorageService implements OnModuleDestroy {
       // virtual-host addressing would resolve to a hostname that does not exist.
       forcePathStyle,
       credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+      // Since 3.729 the SDK adds a CRC32 checksum to every request that can
+      // carry one, and R2 has refused those headers. On a presigned PUT it is
+      // worse: the checksum signed into the URL is of an empty body, which no
+      // real upload matches (RustFS ignores it, so only a stricter server
+      // shows it). WHEN_REQUIRED keeps them to operations that demand one —
+      // DeleteObjects — and `storage:check` confirms a bucket accepts that.
+      requestChecksumCalculation: 'WHEN_REQUIRED' as const,
+      responseChecksumValidation: 'WHEN_REQUIRED' as const,
     };
 
     this.client = new S3Client({ ...base, endpoint });

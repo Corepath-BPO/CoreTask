@@ -147,7 +147,7 @@ to `index.html` — otherwise the SPA fallback would make every path look health
 | ------------------------- | ------------------------ |
 | `coretask-postgres-data`  | Database                 |
 | `coretask-redis-data`     | AOF persistence          |
-| `coretask-storage-data`   | Objects                  |
+| `coretask-storage-data`   | Objects (not in prod)    |
 | `coretask-*-node-modules` | Per-service dependencies |
 
 ```bash
@@ -160,3 +160,55 @@ pnpm down:volumes    # stop and delete everything
 `coretask-storage-init` creates the bucket with the AWS CLI unless it already
 exists, then exits 0. Seeing it as
 `exited` in `docker compose ps` is the success state, not a failure.
+
+## Production storage: Cloudflare R2
+
+The production overlay points the API and worker at R2, whose S3 API
+`StorageService` already speaks — the code path is the one RustFS exercises
+locally and in CI. `coretask-storage` and `coretask-storage-init` carry the
+`local-storage` profile there, so they start only on request
+(`--profile local-storage`, with `STORAGE_ENDPOINT=http://coretask-storage:9000`).
+
+Once per bucket, in the Cloudflare dashboard:
+
+1. **R2 → Create bucket.** Leave public access off: no `r2.dev` URL and no
+   custom domain. Files are served on presigned URLs, which R2 accepts only on
+   the account's S3 endpoint, so a custom domain would serve nothing.
+2. **R2 → Manage API tokens → Create API token**, permission _Object Read &
+   Write_, applied to that bucket alone. Its Access Key ID and Secret Access Key
+   are `STORAGE_ACCESS_KEY` and `STORAGE_SECRET_KEY`; the rest of the settings
+   are listed under "Object storage" in `.env.example`.
+3. **Bucket → Settings → CORS policy.** Browsers PUT uploads and GET downloads
+   straight to the bucket, and without this rule they refuse the preflight:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://app.coretask.org"],
+       "AllowedMethods": ["GET", "PUT", "HEAD"],
+       "AllowedHeaders": ["content-type"],
+       "ExposeHeaders": ["ETag"],
+       "MaxAgeSeconds": 3000
+     }
+   ]
+   ```
+
+   A bucket-scoped token cannot change CORS, which is why nothing sets it at
+   boot the way `coretask-storage-init` does for RustFS.
+
+4. **Check it** from an env file holding the production `STORAGE_*` values
+   (and `WEB_URL`, for the CORS step):
+
+   ```bash
+   pnpm --filter @coretask/api storage:check .env.r2
+   ```
+
+   It writes, reads, presigns and deletes a few objects under `storage-check/`
+   and prints a line per step. It covers what R2 has to get right: a presigned
+   PUT with the wrong `Content-Type` is refused; a download comes back as
+   `Content-Disposition: attachment` (the guard against script in an uploaded
+   SVG); batch delete works; and the CORS preflight from `WEB_URL` is allowed.
+
+Two R2 differences shape `StorageService`: the region is `auto`, and the
+SDK's default CRC32 request checksums are off (`WHEN_REQUIRED`), since R2 has
+refused them.

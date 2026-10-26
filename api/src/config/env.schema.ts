@@ -32,6 +32,38 @@ const secret = z
     "Must be at least 32 characters. Generate one with: node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"",
   );
 
+/**
+ * Object storage on its own, so a tool that only touches the bucket — the
+ * `storage:check` script — can validate these without a database or JWT secrets.
+ */
+export const storageEnv = {
+  /**
+   * The S3 API the server calls. Cloudflare R2 is
+   * `https://<account_id>.r2.cloudflarestorage.com` with STORAGE_REGION=auto;
+   * the default is the RustFS the dev stack publishes on the host.
+   */
+  STORAGE_ENDPOINT: z.string().min(1).default('http://localhost:9000'),
+  /**
+   * Where a *browser* reaches storage, when that differs from where the API
+   * does. In Docker the API talks to `coretask-storage:9000`, a hostname that
+   * exists only on the compose network — presigning with it produces URLs no
+   * client can resolve. The signature covers the Host header, so this cannot
+   * be patched in afterwards; the URL has to be signed for the host the
+   * browser will actually connect to. Empty means the two are the same, which
+   * is the normal case against R2 or S3.
+   */
+  STORAGE_PUBLIC_ENDPOINT: z.string().default(''),
+  STORAGE_REGION: z.string().min(1).default('us-east-1'),
+  STORAGE_BUCKET: z.string().min(1).default('coretask'),
+  STORAGE_ACCESS_KEY: z.string().min(1).default('coretask_minio'),
+  STORAGE_SECRET_KEY: z.string().min(1).default('coretask_minio_dev_password'),
+  STORAGE_FORCE_PATH_STYLE: booleanFlag(true),
+  STORAGE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).default(25),
+};
+
+/** The RustFS credentials the compose files and `.env.example` ship with. */
+const DEV_STORAGE_CREDENTIALS = new Set(['coretask_minio', 'coretask_minio_dev_password']);
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -99,23 +131,7 @@ export const envSchema = z
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
 
-    STORAGE_ENDPOINT: z.string().min(1).default('http://localhost:9000'),
-    /**
-     * Where a *browser* reaches storage, when that differs from where the API
-     * does. In Docker the API talks to `coretask-storage:9000`, a hostname that
-     * exists only on the compose network — presigning with it produces URLs no
-     * client can resolve. The signature covers the Host header, so this cannot
-     * be patched in afterwards; the URL has to be signed for the host the
-     * browser will actually connect to. Empty means the two are the same, which
-     * is the normal case against real S3.
-     */
-    STORAGE_PUBLIC_ENDPOINT: z.string().default(''),
-    STORAGE_REGION: z.string().min(1).default('us-east-1'),
-    STORAGE_BUCKET: z.string().min(1).default('coretask'),
-    STORAGE_ACCESS_KEY: z.string().min(1).default('coretask_minio'),
-    STORAGE_SECRET_KEY: z.string().min(1).default('coretask_minio_dev_password'),
-    STORAGE_FORCE_PATH_STYLE: booleanFlag(true),
-    STORAGE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).default(25),
+    ...storageEnv,
 
     /*
      * Microsoft Graph, the e-mail transport, used when all four values are set;
@@ -285,6 +301,30 @@ export const envSchema = z
           message: 'The development placeholder secret cannot be used in production.',
         });
       }
+    }
+
+    // The compose defaults are in this repository for anyone to read, so a
+    // bucket that still answers to them is not private.
+    for (const key of ['STORAGE_ACCESS_KEY', 'STORAGE_SECRET_KEY'] as const) {
+      if (DEV_STORAGE_CREDENTIALS.has(env[key])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'The development storage credential cannot be used in production.',
+        });
+      }
+    }
+
+    // Browsers PUT and GET presigned URLs from the app's own page, and an
+    // https page may not call an http address: every upload would fail as
+    // mixed content, long after boot.
+    const browserStorage = env.STORAGE_PUBLIC_ENDPOINT || env.STORAGE_ENDPOINT;
+    if (env.WEB_URL.startsWith('https://') && !browserStorage.startsWith('https://')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [env.STORAGE_PUBLIC_ENDPOINT ? 'STORAGE_PUBLIC_ENDPOINT' : 'STORAGE_ENDPOINT'],
+        message: 'Must be https:// when the web app is served over HTTPS.',
+      });
     }
 
     if (env.COOKIE_SAME_SITE === 'none' && !env.WEB_URL.startsWith('https://')) {

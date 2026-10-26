@@ -35,10 +35,18 @@ services:
       resources:
         limits: { cpus: "1.0", memory: 768M }
 
+  # Production files live in Cloudflare R2, so the bundled RustFS and its bucket
+  # job start only when asked for: `--profile local-storage`, with
+  # STORAGE_ENDPOINT=http://coretask-storage:9000, for a stack that keeps its
+  # files on this machine instead.
   coretask-storage:
+    profiles: [local-storage]
     deploy:
       resources:
         limits: { cpus: "1.0", memory: 1G }
+
+  coretask-storage-init:
+    profiles: [local-storage]
 
   coretask-api:
     build:
@@ -46,9 +54,18 @@ services:
       dockerfile: api/Dockerfile
       target: runtime
     image: coretask/api:${IMAGE_TAG:-latest}
-    environment:
+    environment: &production-env
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # R2's S3 API (see "Object storage" in .env.example). The base file pins
+      # the compose-network RustFS; here the address is the operator's to give.
+      # The browser fetches presigned URLs from the same host, so the public
+      # endpoint stays empty.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:?STORAGE_ENDPOINT is required — the R2 S3 API address}
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
+      STORAGE_REGION: ${STORAGE_REGION:-auto}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY is required — an R2 API token}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY is required — an R2 API token}
     command: ["node", "dist/main.js"]
     deploy:
       resources:
@@ -63,9 +80,9 @@ services:
       dockerfile: api/Dockerfile
       target: runtime
     image: coretask/api:${IMAGE_TAG:-latest}
-    environment:
-      NODE_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # The sweeper and workspace deletion remove files, so the worker needs the
+    # same bucket as the API.
+    environment: *production-env
     command: ["node", "dist/worker.js"]
     # A queue consumer has no HTTP surface; liveness is "the process is up".
     healthcheck:

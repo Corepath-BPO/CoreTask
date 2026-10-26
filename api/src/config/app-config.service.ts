@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { getEnv } from './env';
-import { type Env } from './env.schema';
+import { type Env, type storageEnv } from './env.schema';
 
 /**
  * Typed, structured view over the validated environment.
@@ -95,18 +95,8 @@ export class AppConfigService {
     } as const;
   }
 
-  get storage() {
-    return {
-      endpoint: this.env.STORAGE_ENDPOINT,
-      /** Falls back to the internal endpoint when they are the same host. */
-      publicEndpoint: this.env.STORAGE_PUBLIC_ENDPOINT || this.env.STORAGE_ENDPOINT,
-      region: this.env.STORAGE_REGION,
-      bucket: this.env.STORAGE_BUCKET,
-      accessKey: this.env.STORAGE_ACCESS_KEY,
-      secretKey: this.env.STORAGE_SECRET_KEY,
-      forcePathStyle: this.env.STORAGE_FORCE_PATH_STYLE,
-      maxFileSizeBytes: this.env.STORAGE_MAX_FILE_SIZE_MB * 1024 * 1024,
-    } as const;
+  get storage(): StorageConfig {
+    return storageConfig(this.env);
   }
 
   /**
@@ -242,4 +232,35 @@ export class AppConfigService {
 export function normalizeGraphBaseUrl(value: string): string {
   const trimmed = value.replace(/\/+$/, '');
   return /\/(v\d+(\.\d+)?|beta)$/i.test(trimmed) ? trimmed : `${trimmed}/v1.0`;
+}
+
+type StorageEnv = Pick<Env, keyof typeof storageEnv>;
+
+export interface StorageConfig {
+  readonly endpoint: string;
+  /** Falls back to the internal endpoint when they are the same host. */
+  readonly publicEndpoint: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly accessKey: string;
+  readonly secretKey: string;
+  readonly forcePathStyle: boolean;
+  readonly maxFileSizeBytes: number;
+}
+
+/**
+ * The storage settings alone, for {@link AppConfigService.storage} and for the
+ * `storage:check` script, which parses only `STORAGE_*`.
+ */
+export function storageConfig(env: StorageEnv): StorageConfig {
+  return {
+    endpoint: env.STORAGE_ENDPOINT,
+    publicEndpoint: env.STORAGE_PUBLIC_ENDPOINT || env.STORAGE_ENDPOINT,
+    region: env.STORAGE_REGION,
+    bucket: env.STORAGE_BUCKET,
+    accessKey: env.STORAGE_ACCESS_KEY,
+    secretKey: env.STORAGE_SECRET_KEY,
+    forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
+    maxFileSizeBytes: env.STORAGE_MAX_FILE_SIZE_MB * 1024 * 1024,
+  };
 }
