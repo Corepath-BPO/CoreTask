@@ -38,9 +38,11 @@ COPY webapp ./webapp
 ARG VITE_API_URL=/api/v1
 ARG VITE_WS_URL=/
 ARG VITE_APP_NAME=CoreTask
+ARG VITE_SUPPORT_EMAIL=support@coretask.org
 ENV VITE_API_URL=$VITE_API_URL \
     VITE_WS_URL=$VITE_WS_URL \
-    VITE_APP_NAME=$VITE_APP_NAME
+    VITE_APP_NAME=$VITE_APP_NAME \
+    VITE_SUPPORT_EMAIL=$VITE_SUPPORT_EMAIL
 
 RUN pnpm --filter "./packages/*" build \
  && pnpm --filter @coretask/webapp build

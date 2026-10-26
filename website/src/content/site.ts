@@ -20,12 +20,21 @@ export const site = {
   appUrl: APP_URL.replace(/\/$/, ''),
   signInHref: `${APP_URL.replace(/\/$/, '')}/login`,
   contactEmail: CONTACT_EMAIL,
+  supportEmail: 'support@coretask.org',
+  officialEmail: 'official@coretask.org',
   earlyAccessHref: `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('CoreTask early access')}`,
   title: 'CoreTask — Project Management & Ticketing Software for Teams',
   description:
     'Project management and ticketing software in one workspace. Turn emails, Slack messages and forms into tracked work, plan it in any view, and automate the rest.',
   ogImageAlt: 'CoreTask — where every request becomes finished work.',
 } as const;
+
+/** Who to write to, in the footer and the structured data. */
+export const contacts = [
+  { label: 'Early access & sales', email: CONTACT_EMAIL },
+  { label: 'Support', email: site.supportEmail },
+  { label: 'Official enquiries', email: site.officialEmail },
+] as const;
 
 export const nav = [
   { label: 'Capture', href: '#capture' },

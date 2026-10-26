@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
-import { Keyboard, LogOut, Monitor, Moon, Settings, Sun, UserRound } from 'lucide-react';
+import { Keyboard, LifeBuoy, LogOut, Monitor, Moon, Settings, Sun, UserRound } from 'lucide-react';
 
+import { env } from '@/app/config/env';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -61,6 +62,12 @@ export function UserMenu() {
         <DropdownMenuItem onSelect={() => openShortcuts(true)}>
           <Keyboard />
           Keyboard shortcuts
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a href={`mailto:${env.supportEmail}`}>
+            <LifeBuoy />
+            Contact support
+          </a>
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

@@ -161,6 +161,11 @@ Three details are load-bearing:
 - **Every request has a timeout.** `fetch` has none of its own, and a send that
   hangs would occupy a BullMQ worker slot until the process restarts.
 
+Mail is sent as `MAIL_FROM_ADDRESS` (`noreply@coretask.org` in production), so
+`MAIL_REPLY_TO` (`support@coretask.org`) gives every message without a reply
+address of its own a `Reply-To` somebody reads. A task's update e-mail keeps its
+own: that address threads the answer back into the task.
+
 A 401 discards the cached token, so a rejected credential is not replayed on the
 next attempt. Sending happens on the queue, so a transient Graph failure is
 retried by BullMQ rather than failing the HTTP request that triggered it.

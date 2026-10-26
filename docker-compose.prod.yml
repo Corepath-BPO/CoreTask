@@ -93,6 +93,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
         VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
         VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
+        VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-support@coretask.org}
     image: coretask/webapp:${IMAGE_TAG:-latest}
     depends_on:
       coretask-api:

@@ -24,9 +24,12 @@ the production values:
 | `NEXT_PUBLIC_APP_URL`       | `https://app.coretask.org` | The Sign in link in the header and footer         |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | `hello@coretask.org`       | Every "Request early access" button (a `mailto:`) |
 
-Before it goes public: the `hello@coretask.org` mailbox must exist and receive
-mail, and Remotion needs a Company License for organisations of more than three
-people (remotion.dev/license).
+The footer lists the other two addresses as well: `support@coretask.org` for
+help and `official@coretask.org` for official enquiries. Both also appear in the
+structured data, beside `hello@` for sales.
+
+The product clips use Remotion under its free license, as the team's other
+projects do.
 
 ## Docker image
 

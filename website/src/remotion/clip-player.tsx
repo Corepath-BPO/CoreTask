@@ -13,9 +13,9 @@ import { CLIPS } from './clips';
  * Loaded only when its section is near, so @remotion/player never weighs on
  * the first paint.
  *
- * Remotion needs a paid Company License for organisations of more than three
- * people (remotion.dev/license); `acknowledgeRemotionLicense` records that
- * this site is used under one.
+ * CoreTask uses Remotion under its free license, as the team's other projects
+ * do; `acknowledgeRemotionLicense` records that and keeps the license notice
+ * out of the console.
  */
 export default function ClipPlayer({
   id,
