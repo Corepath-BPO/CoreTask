@@ -1,7 +1,6 @@
 'use client';
 
 import { motion, useInView, useScroll, useTransform } from 'framer-motion';
-import { Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRef, useState } from 'react';
 
@@ -38,8 +37,6 @@ export function Hero() {
   const textY = useTransform(scrollYProgress, [0.55, 1], [0, -90]);
   const textOpacity = useTransform(scrollYProgress, [0.62, 0.95], [1, 0]);
   const cueOpacity = useTransform(scrollYProgress, [0, 0.06], [1, 0]);
-  const chipOpacity = useTransform(scrollYProgress, [0.58, 0.66, 0.86, 0.95], [0, 1, 1, 0]);
-  const chipY = useTransform(scrollYProgress, [0.58, 0.66], [14, 0]);
 
   return (
     <section
@@ -70,20 +67,6 @@ export function Hero() {
               fallback={<StillMark />}
               onReady={() => setReady(true)}
             />
-          </motion.div>
-        )}
-
-        {!reduce && (
-          <motion.div
-            aria-hidden
-            style={{ opacity: chipOpacity, y: chipY }}
-            className="glass pointer-events-none absolute top-[30svh] left-1/2 hidden -translate-x-1/2 items-center gap-2.5 rounded-full py-2 pr-4 pl-2 text-sm lg:top-auto lg:bottom-[22svh] lg:left-auto lg:right-[13%] lg:flex lg:translate-x-0"
-          >
-            <span className="grid size-6 place-items-center rounded-full bg-brand text-ink">
-              <Check className="size-3.5" strokeWidth={3} />
-            </span>
-            <span className="font-mono text-xs text-muted">CORE-1042</span>
-            <span className="text-fg">Done</span>
           </motion.div>
         )}
 
