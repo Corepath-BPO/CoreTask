@@ -2,8 +2,10 @@ import {
   AUTOMATION_TEXT_VARIABLES,
   MAX_SUBTASKS_PER_ACTION,
   isCalendarDate,
+  isWeekday,
   subtaskEntry,
   variableToken,
+  WEEKDAY_LABEL,
   type SubtaskEntry,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
@@ -59,7 +61,12 @@ import { cn, formatDate, fromYmd, initials } from '@/lib/utils';
 type Member = AutomationMetadata['members'][number];
 
 /** How a subtask's due date is decided. */
-const DUE_MODE = { NONE: 'NONE', DATE: 'DATE', RELATIVE: 'RELATIVE' } as const;
+const DUE_MODE = {
+  NONE: 'NONE',
+  DATE: 'DATE',
+  RELATIVE: 'RELATIVE',
+  NEXT_WEEK: 'NEXT_WEEK',
+} as const;
 type DueMode = (typeof DUE_MODE)[keyof typeof DUE_MODE];
 
 /**
@@ -72,8 +79,12 @@ type DueMode = (typeof DUE_MODE)[keyof typeof DUE_MODE];
 function dueModeOf(row: SubtaskEntry): DueMode {
   if (row.dueDate !== undefined) return DUE_MODE.DATE;
   if (row.dueInDays !== undefined) return DUE_MODE.RELATIVE;
+  if (row.dueWeekdayNextWeek !== undefined) return DUE_MODE.NEXT_WEEK;
   return DUE_MODE.NONE;
 }
+
+/** Every due-date key cleared, so choosing one shape drops whichever the row held. */
+const NO_DUE = { dueDate: undefined, dueInDays: undefined, dueWeekdayNextWeek: undefined };
 
 /** The rows as stored, blank ones included — see `SubtaskListFields`. */
 function readRows(configuration: Record<string, unknown>): SubtaskEntry[] {
@@ -101,6 +112,9 @@ function dueLabel(row: SubtaskEntry): string | null {
     if (row.dueInDays === 0) return 'Same day';
     return `${row.dueInDays} day${row.dueInDays === 1 ? '' : 's'} after`;
   }
+
+  if (isWeekday(row.dueWeekdayNextWeek))
+    return `${WEEKDAY_LABEL[row.dueWeekdayNextWeek]} next week`;
 
   return null;
 }
@@ -444,9 +458,10 @@ function VariableMenu({ noun, onInsert }: { noun: string; onInsert: (token: stri
 }
 
 /**
- * When the subtask is due: nothing, a day somebody picks, or a number of days
+ * When the subtask is due: nothing, a day somebody picks, a number of days
  * after the rule runs — which is what a checklist usually means by "due", since
- * a fixed date written into a rule is stale the week after.
+ * a fixed date written into a rule is stale the week after — or a day of next
+ * week, for a team that plans the week ahead.
  */
 function DueDateControl({
   nth,
@@ -486,10 +501,7 @@ function DueDateControl({
       <PopoverContent align="end" className="w-72 p-2">
         <div role="radiogroup" aria-label={`${nth} due date`}>
           <p className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted-foreground">Due date</p>
-          <ModeRow
-            active={mode === DUE_MODE.NONE}
-            onSelect={() => onChange({ dueDate: undefined, dueInDays: undefined })}
-          >
+          <ModeRow active={mode === DUE_MODE.NONE} onSelect={() => onChange(NO_DUE)}>
             No due date
           </ModeRow>
           <ModeRow
@@ -497,7 +509,7 @@ function DueDateControl({
             // One day rather than zero: "the day it runs" is a choice worth
             // making on purpose, and a zero looks like a box nobody filled in.
             onSelect={() => {
-              if (mode !== DUE_MODE.RELATIVE) onChange({ dueDate: undefined, dueInDays: 1 });
+              if (mode !== DUE_MODE.RELATIVE) onChange({ ...NO_DUE, dueInDays: 1 });
             }}
           >
             Days after the rule runs
@@ -524,9 +536,36 @@ function DueDateControl({
             </div>
           )}
           <ModeRow
+            active={mode === DUE_MODE.NEXT_WEEK}
+            // Monday: the start of the working week, and the day a weekly plan
+            // most often lands on.
+            onSelect={() => {
+              if (mode !== DUE_MODE.NEXT_WEEK) onChange({ ...NO_DUE, dueWeekdayNextWeek: 1 });
+            }}
+          >
+            A day next week
+          </ModeRow>
+          {mode === DUE_MODE.NEXT_WEEK && (
+            <div className="flex items-center gap-2 py-1.5 pl-8 pr-2">
+              <select
+                value={row.dueWeekdayNextWeek ?? 1}
+                onChange={(event) => onChange({ dueWeekdayNextWeek: Number(event.target.value) })}
+                aria-label={`${nth} day next week`}
+                className="h-8 rounded-md border border-input bg-card px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/25"
+              >
+                {WEEKDAY_LABEL.map((name, weekday) => (
+                  <option key={name} value={weekday}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">next week</span>
+            </div>
+          )}
+          <ModeRow
             active={mode === DUE_MODE.DATE}
             onSelect={() => {
-              if (mode !== DUE_MODE.DATE) onChange({ dueDate: '', dueInDays: undefined });
+              if (mode !== DUE_MODE.DATE) onChange({ ...NO_DUE, dueDate: '' });
             }}
           >
             A specific date
@@ -539,7 +578,7 @@ function DueDateControl({
               month={month}
               onMonthChange={setMonth}
               rangeEnd={isCalendarDate(row.dueDate) ? row.dueDate : null}
-              onSelect={(day) => onChange({ dueDate: day, dueInDays: undefined })}
+              onSelect={(day) => onChange({ ...NO_DUE, dueDate: day })}
               ariaLabel={`${nth} due on`}
             />
           </div>

@@ -364,10 +364,12 @@ export const MAX_SUBTASKS_PER_ACTION = 20;
  * One subtask a CREATE_SUBTASK action will create.
  *
  * A title, and optionally who it goes to and when it is due. The due date is
- * one of two shapes: a fixed calendar date, or a number of days after the rule
+ * one of three shapes: a fixed calendar date, a number of days after the rule
  * runs — "due three days after the request comes in" is what a checklist
- * usually wants, and a fixed date written into a rule is stale the week after.
- * A row holding both keeps the fixed date.
+ * usually wants, and a fixed date written into a rule is stale the week after —
+ * or a weekday of next week, for a team that plans its week ahead ("send the
+ * owner update on Tuesday next week"). A row holding more than one keeps the
+ * first of those.
  */
 export interface SubtaskEntry {
   title: string;
@@ -377,6 +379,28 @@ export interface SubtaskEntry {
   dueDate?: string;
   /** Days after the rule runs; zero is the day it runs. */
   dueInDays?: number;
+  /** That weekday of the week after the rule runs, 0 Sunday to 6 Saturday — see `dayNextWeek`. */
+  dueWeekdayNextWeek?: number;
+}
+
+/** Whether a value is a weekday as `Date#getUTCDay` counts them: 0 Sunday to 6 Saturday. */
+export function isWeekday(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 6;
+}
+
+/**
+ * That weekday of the week after the one `at` falls in, weeks starting on
+ * Sunday, counted in UTC as every date a rule writes is.
+ *
+ * Always the following week, even when the day is still to come in this one:
+ * on a Monday, "Wednesday next week" is nine days off, not two. That is what
+ * the Asana teams' n8n workflows did for every subtask a rule made, and what
+ * "next week" means in a weekly plan.
+ */
+export function dayNextWeek(at: Date, weekday: number): Date {
+  const day = new Date(at);
+  day.setUTCDate(day.getUTCDate() + weekday - day.getUTCDay() + 7);
+  return day;
 }
 
 /** Whether a value is a real calendar day written `YYYY-MM-DD`. */
@@ -413,6 +437,8 @@ export function subtaskEntry(raw: unknown): SubtaskEntry {
     entry.dueDate = row['dueDate'];
   } else if (typeof row['dueInDays'] === 'number') {
     entry.dueInDays = row['dueInDays'];
+  } else if (typeof row['dueWeekdayNextWeek'] === 'number') {
+    entry.dueWeekdayNextWeek = row['dueWeekdayNextWeek'];
   }
 
   return entry;
@@ -494,6 +520,10 @@ export function subtaskProblems(configuration: Record<string, unknown>): Subtask
       !(Number.isInteger(entry.dueInDays) && entry.dueInDays >= 0)
     ) {
       add('Days after the rule runs has to be a whole number, zero or more.', false);
+    }
+
+    if (entry.dueWeekdayNextWeek !== undefined && !isWeekday(entry.dueWeekdayNextWeek)) {
+      add('A subtask’s day next week has to be Sunday to Saturday.', false);
     }
   }
 

@@ -35,6 +35,8 @@ import {
   groupMatch,
   isConditionGroup,
   ConditionMatch,
+  isWeekday,
+  WEEKDAY_LABEL,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 
@@ -634,8 +636,14 @@ function actionSummary(
     case 'SET_DUE_DATE':
     case 'SET_START_DATE': {
       const days = Number(config['daysFromNow'] ?? 0);
+      const weekday = config['weekdayNextWeek'];
       const what = subtype === 'SET_DUE_DATE' ? 'due date' : 'start date';
-      const when = days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`;
+      const when =
+        subtype === 'SET_DUE_DATE' && isWeekday(weekday)
+          ? `${WEEKDAY_LABEL[weekday]} next week`
+          : days === 0
+            ? 'today'
+            : `in ${days} day${days === 1 ? '' : 's'}`;
       return [{ text: `Set ${what} to` }, { text: when, chip: true }];
     }
 

@@ -75,6 +75,15 @@ describe('what a node says', () => {
     );
   });
 
+  it('reads a due date as the day it lands on', () => {
+    expect(
+      summarise(node({ subtype: 'SET_DUE_DATE', configuration: { daysFromNow: 3 } }), metadata),
+    ).toBe('Set due date to in 3 days');
+    expect(
+      summarise(node({ subtype: 'SET_DUE_DATE', configuration: { weekdayNextWeek: 2 } }), metadata),
+    ).toBe('Set due date to Tuesday next week');
+  });
+
   it('says a reference is gone rather than printing its id', () => {
     /*
      * Falling back to the raw id makes a broken rule look merely technical,

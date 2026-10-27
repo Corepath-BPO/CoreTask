@@ -130,7 +130,11 @@ AI…" is described under [AI entries](#ai-entries).
 
 `SET_DUE_DATE` and `SET_START_DATE` take `daysFromNow`, not a date. A fixed date
 written into a rule is stale the week after; "due in three days" stays
-meaningful for as long as the rule exists.
+meaningful for as long as the rule exists. `SET_DUE_DATE` may take
+`weekdayNextWeek` instead (0 Sunday to 6 Saturday): that day of the following
+week, weeks starting on Sunday and counted in UTC, even when the day is still
+to come this week (`dayNextWeek` in `@coretask/contracts`). It is how the Asana
+teams' n8n workflows dated the subtasks their rules made.
 
 `ASSIGN_USER` re-checks workspace membership when it runs, and fails with "That
 person is no longer in this workspace" rather than writing an assignee id that
@@ -177,9 +181,10 @@ runs.
 
 `CREATE_SUBTASK` inherits the parent's project and section and is authored by
 whoever caused the trigger, falling back to the task's creator. Each row may
-name an assignee and a due date of its own: a fixed calendar date, or a number
-of days after the rule runs (`subtaskEntries` in `@coretask/contracts` is the
-one reading of the row). Assignees are re-checked at run time as the assign
+name an assignee and a due date of its own: a fixed calendar date, a number of
+days after the rule runs, or a day of next week (`dueWeekdayNextWeek`, as
+`weekdayNextWeek` above; `subtaskEntries` in `@coretask/contracts` is the one
+reading of the row). Assignees are re-checked at run time as the assign
 action's is; a row whose person has left is created unassigned and the
 execution log says so, rather than the step losing every row.
 

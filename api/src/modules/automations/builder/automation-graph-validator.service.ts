@@ -43,6 +43,7 @@ import {
   aiActionProblem,
   aiPermissionFieldId,
   aiPermissionsOf,
+  isWeekday,
 } from '@coretask/contracts';
 import type { AutomationGraphIssue, AutomationGraphValidation } from '@coretask/types';
 import { validateCondition, validateGraphStructure } from '@coretask/validation';
@@ -490,6 +491,11 @@ export class AutomationGraphValidatorService {
           break;
         case AutomationAction.SET_TASK_DESCRIPTION:
           flagUnknown('text');
+          break;
+        case AutomationAction.SET_DUE_DATE:
+          if (config['weekdayNextWeek'] !== undefined && !isWeekday(config['weekdayNextWeek'])) {
+            error(node.id, 'weekdayNextWeek', 'Choose a day of next week, Sunday to Saturday.');
+          }
           break;
         case AutomationAction.ADD_COMMENT:
           flagUnknown('body');
