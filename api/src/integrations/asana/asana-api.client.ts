@@ -25,9 +25,21 @@ export type AsanaParams = Record<string, string | number | boolean | undefined>;
 const PAGE_SIZE = 100;
 /** Retries for a 429, which Asana answers with how long to wait. */
 const MAX_RATE_LIMIT_RETRIES = 8;
-/** Retries for a 5xx or a dropped connection, with doubling waits. */
+/** Retries for a 5xx, with doubling waits. */
 const MAX_SERVER_RETRIES = 3;
 const SERVER_RETRY_BASE_MS = 2_000;
+/**
+ * Retries for a connection that failed outright: the network dropped, or
+ * nothing answered in time.
+ *
+ * More than for a 5xx, which is Asana answering. A drop is on this side, and
+ * when these shared the 5xx budget, a drop of 15 seconds failed every request
+ * in flight and switched the import's search off for the whole run. Waits
+ * double from 2 to 30 seconds — 2, 4, 8, 16, 30, 30 — a minute and a half in
+ * all.
+ */
+const MAX_DROPPED_RETRIES = 6;
+const DROPPED_RETRY_MAX_MS = 30_000;
 /** When a 429 carries no Retry-After, which Asana's docs say it always does. */
 const DEFAULT_RETRY_AFTER_S = 30;
 
@@ -147,24 +159,49 @@ export class AsanaApiClient {
       throw new AsanaApiError('download', 0, 'The file address is not https.');
     }
 
-    const response = await this.gate.run(() =>
-      fetchWithTimeout(url, { method: 'GET' }, this.config.asana.timeoutMs * 4, 'Asana storage'),
-    );
-    if (!response.ok) {
-      throw new AsanaApiError('download', response.status, 'The file could not be downloaded.');
-    }
+    // The body is read inside the attempt: a drop can cut a large file off
+    // half way, and the signed address still works for the next try.
+    for (let dropped = 0; ; dropped += 1) {
+      try {
+        const response = await this.gate.run(() =>
+          fetchWithTimeout(
+            url,
+            { method: 'GET' },
+            this.config.asana.timeoutMs * 4,
+            'Asana storage',
+          ),
+        );
+        if (!response.ok) {
+          throw new AsanaApiError('download', response.status, 'The file could not be downloaded.');
+        }
 
-    const declared = Number(response.headers.get('content-length') ?? 0);
-    if (declared > maxBytes) {
-      throw new AsanaApiError('download', 413, `The file is larger than ${maxBytes} bytes.`);
-    }
+        const declared = Number(response.headers.get('content-length') ?? 0);
+        if (declared > maxBytes) {
+          throw new AsanaApiError('download', 413, `The file is larger than ${maxBytes} bytes.`);
+        }
 
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > maxBytes) {
-      throw new AsanaApiError('download', 413, `The file is larger than ${maxBytes} bytes.`);
-    }
+        const body = Buffer.from(await response.arrayBuffer());
+        if (body.length > maxBytes) {
+          throw new AsanaApiError('download', 413, `The file is larger than ${maxBytes} bytes.`);
+        }
 
-    return { body, contentType: response.headers.get('content-type') ?? '' };
+        return { body, contentType: response.headers.get('content-type') ?? '' };
+      } catch (error) {
+        if (error instanceof AsanaApiError || dropped >= MAX_DROPPED_RETRIES) throw error;
+        await this.waitAfterDrop('download', dropped, error);
+      }
+    }
+  }
+
+  /** The wait before trying a dropped connection again, said once per request. */
+  private async waitAfterDrop(path: string, dropped: number, error: unknown): Promise<void> {
+    if (dropped === 0) {
+      this.logger.warn(
+        { path, err: error instanceof Error ? error.message : String(error) },
+        'Asana could not be reached; trying again',
+      );
+    }
+    await this.wait(Math.min(SERVER_RETRY_BASE_MS * 2 ** dropped, DROPPED_RETRY_MAX_MS));
   }
 
   private async request<T>(path: string, params: AsanaParams): Promise<T> {
@@ -178,6 +215,7 @@ export class AsanaApiClient {
 
     let rateLimited = 0;
     let failed = 0;
+    let dropped = 0;
 
     for (;;) {
       let response: Response;
@@ -195,9 +233,9 @@ export class AsanaApiClient {
           );
         });
       } catch (error) {
-        if (failed >= MAX_SERVER_RETRIES) throw error;
-        failed += 1;
-        await this.wait(SERVER_RETRY_BASE_MS * 2 ** (failed - 1));
+        if (dropped >= MAX_DROPPED_RETRIES) throw error;
+        await this.waitAfterDrop(path, dropped, error);
+        dropped += 1;
         continue;
       }
 

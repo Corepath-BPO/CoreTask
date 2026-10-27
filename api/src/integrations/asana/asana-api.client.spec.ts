@@ -109,6 +109,61 @@ describe('AsanaApiClient', () => {
     await expect(makeClient().get('/workspaces/100')).rejects.not.toThrow(TOKEN);
   });
 
+  it('rides out a dropped connection for a minute and a half', async () => {
+    const dropped = () => Promise.reject(new TypeError('fetch failed'));
+    fetchMock
+      .mockImplementationOnce(dropped)
+      .mockImplementationOnce(dropped)
+      .mockImplementationOnce(dropped)
+      .mockImplementationOnce(dropped)
+      .mockImplementationOnce(dropped)
+      .mockImplementationOnce(dropped)
+      .mockResolvedValueOnce(json({ data: { gid: '1' } }));
+    const client = makeClient();
+
+    await expect(client.get('/tasks/1')).resolves.toEqual({ gid: '1' });
+    // The gate's own spacing between starts goes through `wait` too; these are the retries.
+    const waits = (client.wait as jest.Mock).mock.calls
+      .map(([ms]) => ms as number)
+      .filter((ms) => ms >= 1_000);
+    expect(waits).toEqual([2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+  });
+
+  it('gives up on a connection that stays down', async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+    const client = makeClient();
+
+    await expect(client.get('/tasks/1')).rejects.toThrow('fetch failed');
+    expect(client.requestCount).toBe(7);
+  });
+
+  it('keeps the shorter budget for a server error', async () => {
+    fetchMock.mockImplementation(async () => json({}, 503));
+    const client = makeClient();
+
+    await expect(client.get('/tasks/1')).rejects.toMatchObject({ status: 503 });
+    expect(client.requestCount).toBe(4);
+  });
+
+  it('downloads a file again when the connection drops part way', async () => {
+    const cut = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError('terminated'));
+      },
+    });
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new TypeError('fetch failed')))
+      .mockResolvedValueOnce(new Response(cut))
+      .mockResolvedValueOnce(
+        new Response(Buffer.from('pdf-bytes'), { headers: { 'content-type': 'application/pdf' } }),
+      );
+
+    const file = await makeClient().download('https://files.asana.test/signed', 1_000);
+
+    expect(file.body.toString()).toBe('pdf-bytes');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('downloads a file without the token, and refuses one over the limit', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(Buffer.from('png-bytes'), { headers: { 'content-type': 'image/png' } }),

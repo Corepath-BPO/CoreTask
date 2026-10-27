@@ -93,6 +93,12 @@ plan; without it, every subtask's stories are read. A subtask whose only
 comment is from someone no longer in the Asana workspace is the one case
 search misses.
 
+A request whose connection drops is tried again for about a minute and a half
+(a 5xx, which is Asana answering, three times). Only Asana refusing search
+switches it off; a search that still cannot be reached after that ends the run
+with "Asana search did not answer", and **Sync again** finishes it, rather than
+the run spending most of a day reading every subtask.
+
 A run stopped part way (a deploy restarting the worker) is handed to the next
 worker and starts again from the top, updating rather than duplicating. That
 holds when the worker shuts down cleanly too: the run cannot record its outcome

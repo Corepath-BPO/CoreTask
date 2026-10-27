@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 
 import type { PrismaService } from '../../database/prisma.service';
-import type { AsanaApiClient, AsanaParams } from '../../integrations/asana/asana-api.client';
+import {
+  AsanaApiError,
+  type AsanaApiClient,
+  type AsanaParams,
+} from '../../integrations/asana/asana-api.client';
 import type { StorageService } from '../../integrations/storage/storage.service';
 
 import { AsanaImportRun, pool, readableError } from './asana-import-run';
@@ -335,9 +339,12 @@ function fakeAsana(routes: (path: string, params: AsanaParams) => unknown[], sea
     }),
     get: jest.fn(async (path: string, params: AsanaParams = {}) => {
       client.requestCount += 1;
-      if (search && path.endsWith('/tasks/search')) return search(params);
-      // The contractor is not in the workspace, and Asana will not say who they are;
-      // and without `search`, this organisation has no search (a free Asana plan).
+      if (path.endsWith('/tasks/search')) {
+        if (search) return search(params);
+        // Without `search`, this organisation has no search: a free Asana plan, refused.
+        throw new AsanaApiError(path, 402, 'Search is only available to premium users.');
+      }
+      // The contractor is not in the workspace, and Asana will not say who they are.
       throw new Error(`Not found: ${path}`);
     }),
     download: jest.fn(async () => ({ body: Buffer.from('png-bytes'), contentType: 'image/png' })),
@@ -703,6 +710,26 @@ describe('AsanaImportRun', () => {
 
     expect(afters).toEqual([undefined, '2026-01-01T00:01:38.999Z']);
     expect(job.snapshot().counts['historySearch']).toEqual({ done: 101 });
+  });
+
+  it('reads every subtask’s history when Asana refuses search', async () => {
+    const context = await setUp();
+    // No `search`: the fake answers 402, as Asana does on a plan without it.
+    const { job, status } = await runImport(context);
+
+    expect(status).toBe('SUCCEEDED');
+    expect(job.snapshot().counts['historySearch']).toEqual({ done: 0, skipped: 1 });
+  });
+
+  it('ends the run, rather than reading every subtask, when search cannot be reached', async () => {
+    const context = await setUp();
+    const search: Search = () => {
+      throw new TypeError('fetch failed');
+    };
+
+    await expect(runImport(context, organisation(), fakeStorage(), search)).rejects.toThrow(
+      'Asana search did not answer: fetch failed',
+    );
   });
 
   it('links a file storage refuses back to Asana, and reports it', async () => {
