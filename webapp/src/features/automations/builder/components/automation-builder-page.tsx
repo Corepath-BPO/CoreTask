@@ -1185,6 +1185,7 @@ export function AutomationBuilderPage({
         <AutomationCanvas
           graph={graph}
           metadata={metadata}
+          {...(project?.name ? { projectName: project.name } : {})}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onOpenNode={(nodeId) => {

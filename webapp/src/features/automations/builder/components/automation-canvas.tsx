@@ -1,74 +1,78 @@
-import { GRAPH_LAYOUT } from '@coretask/contracts';
 import type { AutomationGraphEdge, AutomationMetadata } from '@coretask/types';
 import {
   Background,
   BackgroundVariant,
-  Controls,
+  MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   type Edge,
   type Node,
 } from '@xyflow/react';
+import {
+  List,
+  ListCollapse,
+  Map as MapIcon,
+  Maximize,
+  Minus,
+  Plus,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
 import { useTheme } from '@/stores/theme.store';
+import { cn } from '@/lib/utils';
 
-import { AutomationEdge } from '../nodes/automation-edge';
-import { AutomationNode, type AutomationNodeData } from '../nodes/automation-node';
 import {
-  branchRows,
-  fallbackRow,
-  isUnansweredRow,
-  withDescendants,
-  type CanvasNode,
-} from '../lib/graph-edits';
-import { layoutGraph } from '../lib/layout';
-import { isNodeIncomplete, nodeHeading, summarise, summariseParts } from '../lib/node-summary';
+  AddPathNode,
+  FlowBlockNode,
+  type AddPathData,
+  type FlowBlockData,
+  type FlowLine,
+} from '../nodes/flow-block-node';
+import { FLOW_CARD_WIDTH, FLOW_COLUMN_GAP, flowLayout } from '../lib/flow-blocks';
+import { branchRows, fallbackRow, type CanvasNode } from '../lib/graph-edits';
+import { isNodeIncomplete, summarise, summariseParts } from '../lib/node-summary';
 
-/** Registered once, outside render: a new object each time remounts every node. */
-const nodeTypes = { automation: AutomationNode };
-const edgeTypes = { automation: AutomationEdge };
+/** Registered once, outside render: a new object each time remounts every card. */
+const nodeTypes = { block: FlowBlockNode, addPath: AddPathNode };
 
 interface Props {
   /** Widened for the placeholder, which the canvas draws and the database has
       no row for — see `CanvasNode`. */
   graph: { nodes: CanvasNode[]; edges: AutomationGraphEdge[] };
   metadata: AutomationMetadata | undefined;
+  /** The project the rule belongs to, named on the trigger card. */
+  projectName?: string;
   selectedId: string | null;
   onSelect: (nodeId: string | null) => void;
   onOpenNode: (nodeId: string) => void;
   /** Add a step directly after `parentId`, before whatever follows it. */
   onInsertStep: (parentId: string) => void;
-  /** Add another question on a row of its own. */
+  /** Add another path beside the others. */
   onAddElseIf: () => void;
-  /** Add the row that runs when nothing else matched. */
+  /** Add the path that runs when nothing else matched. */
   onAddOtherwise: () => void;
-  /**
-   * Copy a step. A branch comes with its actions and lands on a row of its own
-   * — the page decides which of the two this is, so every control agrees.
-   */
+  /** Copy a step; a path comes with its actions. */
   onDuplicateNode: (nodeId: string) => void;
   onChangeTrigger: () => void;
-  /** Remove a step, or a whole branch when the step is one. */
+  /** Remove a step, or a whole path when the step is one. */
   onDeleteNode: (nodeId: string) => void;
-  /** Put a branch row at another place among the rows, counted from the top. */
+  /** Put a path at another place among the paths, counted from the left. */
   onMoveRow: (rowId: string, toIndex: number) => void;
 }
 
 /**
- * The rule, drawn.
- *
- * React Flow rather than hand-rolled panning: viewport transforms, edge routing
- * around a moving node, and pointer maths that behaves the same on a trackpad
- * and a touchscreen are a great deal of subtle work, and none of it is what
- * makes this builder good.
+ * The rule, drawn the way the Asana teams read rules: the trigger at the top,
+ * its paths side by side beneath it, and each path's actions in one numbered
+ * card. See `docs/architecture/automation-builder-layout.md`.
  *
  * The canvas owns nothing. It renders the graph it is given and reports what
- * somebody did to it — which keeps the rule's shape in one place instead of
- * being half in the editor state and half in a graph library's internals.
+ * somebody did to it, so the rule's shape stays in one place.
  */
 export function AutomationCanvas(props: Props) {
   return (
@@ -81,6 +85,7 @@ export function AutomationCanvas(props: Props) {
 function Canvas({
   graph,
   metadata,
+  projectName,
   selectedId,
   onSelect,
   onOpenNode,
@@ -92,329 +97,257 @@ function Canvas({
   onChangeTrigger,
   onMoveRow,
 }: Props) {
-  // React Flow draws its own zoom controls; told the theme, they match it.
   const { resolvedTheme } = useTheme();
   const { fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [showMap, setShowMap] = useState(false);
 
   /*
-   * Which steps already have something after them.
+   * Card heights once drawn.
    *
-   * Placeholders count: a card inviting somebody to choose an action *is* the
-   * add control for that spot, so a plus beside its parent would be a second
-   * one pointing at the same place.
+   * A card's height depends on how its sentences wrap, which only the browser
+   * knows. The first frame places cards by estimate; this reads what React Flow
+   * measured and the layout runs again with real heights. Read as one string so
+   * an unchanged measurement is no change at all.
+   *
+   * Each height is handed back on its node as `measured`. React Flow forgets a
+   * node's size when it is given a node without one, and a card that did not
+   * change size is never measured again — so without this, the re-render the
+   * heights cause would make every card forget its size and stay hidden.
    */
-  const hasFollower = useMemo(
-    () => new Set(graph.nodes.map((node) => node.parentId).filter(Boolean) as string[]),
-    [graph.nodes],
+  const measured = useStore((state) =>
+    [...state.nodeLookup.values()]
+      .filter((node) => (node.measured?.height ?? 0) > 0 && (node.measured?.width ?? 0) > 0)
+      .map(
+        (node) =>
+          `${node.id}\u0000${Math.round(node.measured?.width ?? 0)}\u0000${Math.round(node.measured?.height ?? 0)}`,
+      )
+      .join('\u0001'),
+  );
+  const sizes = useMemo(
+    () =>
+      new Map(
+        measured
+          .split('\u0001')
+          .filter(Boolean)
+          .map((entry) => entry.split('\u0000') as [string, string, string])
+          .map(
+            ([id, width, height]) =>
+              [id, { width: Number(width), height: Number(height) }] as const,
+          ),
+      ),
+    [measured],
   );
 
-  /*
-   * Positions come from the shape, not from the stored coordinates.
-   *
-   * A rule's meaning is what follows what, so the drawing has to be derived
-   * from that or it describes a different rule than the one that will run —
-   * insert a step in the middle and every stored position after it is recording
-   * where things used to be.
-   */
-  const placement = useMemo(() => layoutGraph(graph.nodes), [graph.nodes]);
-
-  const triggerIds = useMemo(
-    () => new Set(graph.nodes.filter((node) => node.type === 'TRIGGER').map((node) => node.id)),
-    [graph.nodes],
+  const layout = useMemo(
+    () =>
+      flowLayout(graph.nodes, {
+        collapsed,
+        heights: new Map([...sizes].map(([id, size]) => [id, size.height])),
+      }),
+    [graph.nodes, collapsed, sizes],
   );
 
-  /*
-   * Which conditions are rows, and which of those is the first.
-   *
-   * A card cannot tell on its own: being the rule's leading question is a fact
-   * about the rule rather than about the step, and it decides both what the
-   * unanswered card says and whether it carries a control to remove itself.
-   */
+  const byId = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const rows = useMemo(() => branchRows(graph.nodes), [graph.nodes]);
-  const alternatives = useMemo(() => new Set(rows.slice(1).map((row) => row.id)), [rows]);
   const fallbackId = useMemo(() => fallbackRow(graph.nodes)?.id ?? null, [graph.nodes]);
-
-  /*
-   * The rows that can be put in another order: every one but the fallback,
-   * which runs when nothing above it held and so is always last. One row has
-   * nowhere to go.
-   */
+  // The fallback runs when nothing above it held, so it stays last and cannot move.
   const movableRows = useMemo(
     () => rows.filter((row) => row.id !== fallbackId),
     [rows, fallbackId],
   );
 
-  /*
-   * A row being dragged, and how far it has moved.
-   *
-   * The canvas owns no positions — they are derived from the rule — so a drag
-   * is held here as an offset over the layout until it is dropped, and the
-   * drop becomes an edit to the rule's order. The row's actions move with it:
-   * a question dragged away from its answers would be a different rule for as
-   * long as the drag lasted.
-   */
-  const [drag, setDrag] = useState<{ id: string; dy: number } | null>(null);
-  const dragged = useMemo(
-    () => (drag ? new Set(withDescendants(graph.nodes, drag.id)) : null),
-    [drag, graph.nodes],
-  );
-
-  /**
-   * Where among the movable rows a row dropped at this height lands: the
-   * nearest line. A row passes another once it is more than halfway to the
-   * next line, so dropping it mostly over a row takes that row's place rather
-   * than needing to be pushed past its top edge.
-   */
-  const dropIndex = (rowId: string, y: number) =>
-    movableRows.filter(
-      (row) =>
-        row.id !== rowId && (placement.get(row.id)?.y ?? 0) + GRAPH_LAYOUT.BRANCH_GAP / 2 < y,
-    ).length;
-
-  /*
-   * The one connection that carries the "Add branch" pill.
-   *
-   * Every branch hangs off the trigger, so every one of those connections looks
-   * alike to an edge — and offering the pill on each drew three identical
-   * buttons down the spine of a three-branch rule. The last row's is the one
-   * that means anything: a branch added from there appears directly beneath it.
-   *
-   * A rule with no branches at all still needs somewhere to start one, so it
-   * falls back to whatever the trigger leads to first.
-   */
-  const branchTailId = useMemo(() => {
-    const last = rows.at(-1);
-    if (last) return last.id;
-
-    const trigger = graph.nodes.find((node) => node.type === 'TRIGGER');
-    if (!trigger) return null;
-
-    return (
-      graph.nodes
-        .filter((node) => node.parentId === trigger.id)
-        .sort((a, b) => a.order - b.order)[0]?.id ?? null
-    );
-  }, [rows, graph.nodes]);
-
-  const nodes = useMemo<Node<AutomationNodeData>[]>(
+  const blockNodes = useMemo<Node<FlowBlockData>[]>(
     () =>
-      graph.nodes.map((node) => {
-        const place = { alternative: alternatives.has(node.id) };
-        const laidOut = placement.get(node.id) ?? node.position;
-        const rowIndex = movableRows.findIndex((row) => row.id === node.id);
-        const movable = rowIndex >= 0 && movableRows.length > 1;
+      layout.blocks.map((block) => {
+        const lineFor = (nodeId: string, index: number): FlowLine => {
+          const node = byId.get(nodeId) as CanvasNode;
+          // A path's own question is moved, copied and removed with the path,
+          // from the card's menu; the checks after it are steps of their own.
+          const isRow = block.kind === 'PATH' && index === 0;
+          const number = layout.numbers.get(nodeId);
+
+          return {
+            nodeId,
+            category: node.type,
+            ...(number !== undefined ? { number } : {}),
+            summary: summariseParts(node, metadata),
+            label: summarise(node, metadata),
+            invalid: isNodeIncomplete(node),
+            ...(node.id === fallbackId ? { isFallback: true } : {}),
+            selected: nodeId === selectedId,
+            ...(node.type === 'TRIGGER' ? { onChangeTrigger } : {}),
+            ...(node.type !== 'TRIGGER' && node.type !== 'PLACEHOLDER' && !isRow
+              ? { onDuplicate: () => onDuplicateNode(nodeId), onDelete: () => onDeleteNode(nodeId) }
+              : {}),
+          };
+        };
+
+        const rowId = block.kind === 'PATH' ? block.nodeIds[0] : undefined;
+        const rowIndex = rowId ? movableRows.findIndex((row) => row.id === rowId) : -1;
+        const lastId = block.nodeIds[block.nodeIds.length - 1] as string;
+        const last = byId.get(lastId);
+        const paths = rows.filter((row) => row.id !== fallbackId).length;
+
+        const data: FlowBlockData = {
+          kind: block.kind,
+          title:
+            block.kind === 'TASK'
+              ? 'Task'
+              : block.kind === 'TRIGGER'
+                ? 'Trigger'
+                : (block.pathLabel ?? 'Check if'),
+          ...(block.kind === 'TRIGGER' && projectName ? { projectName } : {}),
+          lines: block.nodeIds.map(lineFor),
+          collapsed,
+          onOpenLine: onOpenNode,
+          ...(rowId
+            ? {
+                pathMenu: {
+                  ...(rowIndex > 0 ? { onMoveLeft: () => onMoveRow(rowId, rowIndex - 1) } : {}),
+                  ...(rowIndex >= 0 && rowIndex < movableRows.length - 1
+                    ? { onMoveRight: () => onMoveRow(rowId, rowIndex + 1) }
+                    : {}),
+                  // A rule falls back once, so the fallback cannot be copied.
+                  ...(rowId === fallbackId ? {} : { onDuplicate: () => onDuplicateNode(rowId) }),
+                  onDelete: () => onDeleteNode(rowId),
+                },
+              }
+            : {}),
+          // A step still being chosen is already the invitation to add one.
+          ...(block.endsColumn && last?.type !== 'PLACEHOLDER'
+            ? {
+                add: {
+                  onAddAction: () => onInsertStep(lastId),
+                  pathLabel: paths === 0 ? 'Check if' : 'Else if',
+                  onAddPath: onAddElseIf,
+                  ...(fallbackId === null && paths > 0 ? { onAddOtherwise } : {}),
+                },
+              }
+            : {}),
+        };
 
         return {
-          id: node.id,
-          type: 'automation',
-          // Down or up by the drag, never sideways: a row's place is its line.
-          position:
-            drag && dragged?.has(node.id) ? { x: laidOut.x, y: laidOut.y + drag.dy } : laidOut,
-          ...(movable ? { draggable: true, dragHandle: '.branch-drag-handle' } : {}),
-          selected: node.id === selectedId,
-          data: {
-            category: node.type,
-            // The fallback is a condition by node type and reads as nothing
-            // like one, so the card is told which it is rather than inferring
-            // it from the words above the sentence.
-            isFallback: node.id === fallbackId,
-            heading: nodeHeading(node, place),
-            summary: summariseParts(node, metadata, place),
-            label: summarise(node, metadata, place),
-            invalid: isNodeIncomplete(node),
-            onOpen: () => onOpenNode(node.id),
-            ...(movable
-              ? {
-                  draggable: true,
-                  ...(rowIndex > 0 ? { onMoveUp: () => onMoveRow(node.id, rowIndex - 1) } : {}),
-                  ...(rowIndex < movableRows.length - 1
-                    ? { onMoveDown: () => onMoveRow(node.id, rowIndex + 1) }
-                    : {}),
-                }
-              : {}),
-            /*
-             * Only where nothing follows yet.
-             *
-             * The plus means "and then", so on a step that already leads
-             * somewhere it would have to mean "insert between" instead — which
-             * is what the control on the connection itself does. Two controls a
-             * few pixels apart doing subtly different things is how somebody
-             * ends up with a step in the wrong place.
-             *
-             * Never on a placeholder either: that card is already the
-             * invitation.
-             */
-            ...(node.type === 'PLACEHOLDER' || hasFollower.has(node.id)
-              ? {}
-              : { onAddAfter: () => onInsertStep(node.id) }),
-
-            /*
-             * No menu on a placeholder: there is nothing yet to copy or remove,
-             * and the card already offers the only thing that applies to it.
-             */
-            ...(node.type === 'PLACEHOLDER'
-              ? {}
-              : {
-                  /*
-                   * Everything but the fallback can be copied.
-                   *
-                   * A rule falls back once — a second "otherwise" is a branch
-                   * that can never run — so the offer is withdrawn rather than
-                   * taken and then refused at publish.
-                   */
-                  ...(node.id === fallbackId
-                    ? {}
-                    : { onDuplicate: () => onDuplicateNode(node.id) }),
-                  // Only the trigger can be swapped for a different kind; every
-                  // other step is replaced by deleting it and choosing again.
-                  ...(node.type === 'TRIGGER' ? { onChangeTrigger } : {}),
-                  // Every step but the trigger. A rule with nothing to start it
-                  // is not a rule; the way to change what starts one is to pick a
-                  // different trigger.
-                  ...(node.type === 'TRIGGER' ? {} : { onDelete: () => onDeleteNode(node.id) }),
-                }),
-
-            /*
-             * A question nobody has answered carries its own way out.
-             *
-             * The connector's menu can remove any branch, but one still reading
-             * "+ Otherwise if…" is a half-finished thing in the middle of a
-             * rule — the way back from it has to be visible on the card rather
-             * than a hover away, or the only obvious move is to answer a
-             * question that was a mis-click.
-             *
-             * Never on the first row: that one is the rule's own question, and
-             * removing it leaves a rule that runs every time.
-             */
-            ...(alternatives.has(node.id) && isUnansweredRow(node)
-              ? { onRemove: () => onDeleteNode(node.id) }
-              : {}),
-          },
+          id: block.id,
+          type: 'block',
+          position: layout.positions.get(block.id) ?? { x: 0, y: 0 },
+          // Handed back so a re-render does not make React Flow forget it; see `heights`.
+          ...(sizes.has(block.id)
+            ? { measured: sizes.get(block.id) as { width: number; height: number } }
+            : {}),
+          data,
+          draggable: false,
+          selectable: false,
         };
       }),
     [
-      graph.nodes,
+      layout,
+      sizes,
+      byId,
+      rows,
+      movableRows,
+      fallbackId,
       metadata,
+      projectName,
       selectedId,
+      collapsed,
       onOpenNode,
       onInsertStep,
-      hasFollower,
-      placement,
-      alternatives,
-      fallbackId,
-      onDuplicateNode,
-      onDeleteNode,
-      onChangeTrigger,
-      onMoveRow,
-      movableRows,
-      drag,
-      dragged,
-    ],
-  );
-
-  const edges = useMemo<Edge[]>(
-    () =>
-      graph.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        ...(edge.kind === 'DEFAULT' ? {} : { sourceHandle: 'branch' }),
-        ...(edge.label ? { label: edge.label } : {}),
-        type: 'automation',
-        animated: false,
-        data: {
-          onAddElseIf,
-          // A rule falls back once, so the row that does cannot be copied.
-          ...(edge.target === fallbackId ? {} : { onDuplicate: onDuplicateNode }),
-          onDelete: onDeleteNode,
-          onAddOtherwise,
-
-          /*
-           * Offered once, because a rule can only fall back once.
-           *
-           * A second "otherwise" is a row that can never run — the first one
-           * always holds — so the menu stops offering it rather than letting
-           * somebody build a branch and be told about it at publish.
-           */
-          hasFallback: fallbackId !== null,
-
-          /*
-           * Only the trigger's own connection carries the branch controls.
-           *
-           * Every branch is a row hanging off the trigger, so there is one place
-           * to add one — and a control between a check and its action would be
-           * offering a branch where none can go.
-           */
-          ...(triggerIds.has(edge.source) ? { isJunction: true } : {}),
-
-          // And exactly one of them carries the pill — see `branchTailId`.
-          ...(triggerIds.has(edge.source) && edge.target === branchTailId
-            ? { isBranchTail: true }
-            : {}),
-        },
-      })),
-    [
-      graph.edges,
       onAddElseIf,
       onAddOtherwise,
       onDuplicateNode,
       onDeleteNode,
-      fallbackId,
-      branchTailId,
-      triggerIds,
+      onChangeTrigger,
+      onMoveRow,
     ],
   );
 
   /*
-   * Fit once the graph has a shape, not on every change.
-   *
-   * Refitting whenever a node moves fights the person moving it — the viewport
-   * jumps as they drag. Keyed on the node count so adding or removing a step
-   * brings the new shape into view and nothing else does.
+   * "Add path", to the right of the last path, at the paths' height — Asana's
+   * "Add branch". Only once there is a path: before that, the + under the
+   * trigger's column offers the first one as "Check if".
    */
-  useEffect(() => {
-    if (graph.nodes.length === 0) return;
+  const nodes = useMemo<Node[]>(() => {
+    const paths = layout.blocks.filter((block) => block.kind === 'PATH');
+    const first = paths[0] ? layout.positions.get(paths[0].id) : undefined;
+    if (!first) return blockNodes;
 
-    const frame = requestAnimationFrame(() => {
-      void fitView({ padding: 0.2, maxZoom: 1, duration: 200 });
-    });
+    const lastColumn = Math.max(...layout.blocks.map((block) => block.column));
+    const data: AddPathData = {
+      onAddPath: onAddElseIf,
+      ...(fallbackId === null ? { onAddOtherwise } : {}),
+    };
+    return [
+      ...blockNodes,
+      {
+        id: 'add-path',
+        type: 'addPath',
+        // Handed back like every card's; see `sizes`.
+        ...(sizes.has('add-path')
+          ? { measured: sizes.get('add-path') as { width: number; height: number } }
+          : {}),
+        position: { x: (lastColumn + 1) * (FLOW_CARD_WIDTH + FLOW_COLUMN_GAP), y: first.y },
+        data,
+        draggable: false,
+        selectable: false,
+      },
+    ];
+  }, [blockNodes, layout, sizes, fallbackId, onAddElseIf, onAddOtherwise]);
 
-    return () => cancelAnimationFrame(frame);
-  }, [graph.nodes.length, fitView]);
+  const edges = useMemo<Edge[]>(
+    () =>
+      layout.blocks
+        .filter((block) => block.parentId !== null)
+        .map((block) => ({
+          id: `${block.parentId}->${block.id}`,
+          source: block.parentId as string,
+          target: block.id,
+          type: 'smoothstep',
+          pathOptions: { borderRadius: 10 },
+          style: { strokeWidth: 1.5 },
+          focusable: false,
+        })),
+    [layout.blocks],
+  );
 
   /*
-   * And again whenever the canvas itself changes size.
-   *
-   * Opening the side panel takes 360px off the drawing surface without changing
-   * the rule, so nothing about the graph says to look again and the last step
-   * ends up behind the panel. Watching the element rather than the thing that
-   * moved it means this is right for a resized window too, and it cannot fire
-   * before the new width exists — which is what made keying it on the panel's
-   * own state measure the layout one frame too early.
+   * Fit once the rule has a shape, and again when a card is added or removed —
+   * not on every change, which would fight somebody panning around it.
+   */
+  const blockCount = layout.blocks.length;
+  // Once every card has its real height too: the first fit is on estimates, and
+  // a tall card measured afterwards would push the last one out of view.
+  const allMeasured = layout.blocks.every((block) => sizes.has(block.id));
+  useEffect(() => {
+    if (blockCount === 0) return;
+    const frame = requestAnimationFrame(() => {
+      void fitView({ padding: 0.15, maxZoom: 1, duration: 200 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [blockCount, collapsed, allMeasured, fitView]);
+
+  /*
+   * And when the canvas itself changes size: opening the side panel narrows the
+   * drawing without changing the rule, and the last column would end up behind
+   * it.
    */
   useEffect(() => {
     const element = wrapper.current;
     if (!element) return;
-
     let frame = 0;
     let first = true;
-
     const observer = new ResizeObserver(() => {
-      // The observer fires once on attach, which would refit for no reason.
       if (first) {
         first = false;
         return;
       }
-
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        void fitView({ padding: 0.2, maxZoom: 1, duration: 200 });
+        void fitView({ padding: 0.15, maxZoom: 1, duration: 200 });
       });
     });
-
     observer.observe(element);
-
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
@@ -427,47 +360,113 @@ function Canvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        // Connections are made by adding steps, never by dragging between dots.
-        // This is a workflow builder, not a diagram editor.
+        // Steps are added from the cards, never by drawing lines between them,
+        // and where a card sits follows from the rule, so nothing is dragged.
         nodesConnectable={false}
-        /*
-         * And steps are not dragged either.
-         *
-         * The arrangement is what says which arm a step is on and what follows
-         * what, so a step dragged somewhere else would be drawing a rule that
-         * does not exist. Position is a consequence of the rule here rather
-         * than a property of it, which also means it can never be saved wrong.
-         */
         nodesDraggable={false}
-        /*
-         * …except a branch row, by its handle. Moving a row changes nothing
-         * about what follows what — only which question is asked first — so
-         * it is the one drag that draws a rule that exists. Dropped, it is an
-         * edit to the rows' order, and the layout puts it on its new line.
-         */
-        onNodeDrag={(_event, node) => {
-          const from = placement.get(node.id);
-          if (from) setDrag({ id: node.id, dy: node.position.y - from.y });
-        }}
-        onNodeDragStop={(_event, node) => {
-          setDrag(null);
-          onMoveRow(node.id, dropIndex(node.id, node.position.y));
-        }}
         edgesFocusable={false}
-        onNodeClick={(_event, node) => onSelect(node.id)}
+        /*
+         * A node that can be neither selected nor dragged and has no click
+         * handler gets no pointer events from React Flow, so every click on a
+         * card fell through to the canvas. The lines inside each card handle
+         * their own clicks; this only keeps the cards clickable.
+         */
+        onNodeClick={() => undefined}
         onPaneClick={() => onSelect(null)}
         proOptions={{ hideAttribution: false }}
-        minZoom={0.3}
+        minZoom={0.2}
         maxZoom={1.5}
         colorMode={resolvedTheme}
         className="bg-background"
       >
-        {/* A very faint grid: enough to say the surface pans, quiet enough that
-          the nodes stay the thing being read. */}
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-40" />
-        <Controls showInteractive={false} className="!shadow-sm" />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} className="opacity-60" />
+        <Panel position="top-left" className="!m-3">
+          <Toolbar
+            collapsed={collapsed}
+            onCollapsedChange={setCollapsed}
+            showMap={showMap}
+            onShowMapChange={setShowMap}
+          />
+        </Panel>
+        {showMap && <MiniMap pannable zoomable className="!rounded-lg !border !border-border" />}
       </ReactFlow>
     </div>
+  );
+}
+
+/** Fit, zoom, the minimap, and expanded or collapsed cards: the left-hand tools. */
+function Toolbar({
+  collapsed,
+  onCollapsedChange,
+  showMap,
+  onShowMapChange,
+}: {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  showMap: boolean;
+  onShowMapChange: (show: boolean) => void;
+}) {
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col rounded-lg border border-border bg-card p-1 shadow-sm">
+        <ToolButton
+          icon={Maximize}
+          label="Fit to view"
+          onClick={() => void fitView({ padding: 0.15, duration: 200 })}
+        />
+        <ToolButton icon={Plus} label="Zoom in" onClick={() => void zoomIn({ duration: 150 })} />
+        <ToolButton icon={Minus} label="Zoom out" onClick={() => void zoomOut({ duration: 150 })} />
+        <ToolButton
+          icon={MapIcon}
+          label={showMap ? 'Hide minimap' : 'Show minimap'}
+          pressed={showMap}
+          onClick={() => onShowMapChange(!showMap)}
+        />
+      </div>
+      <div className="flex flex-col rounded-lg border border-border bg-card p-1 shadow-sm">
+        <ToolButton
+          icon={List}
+          label="Expanded view"
+          pressed={!collapsed}
+          onClick={() => onCollapsedChange(false)}
+        />
+        <ToolButton
+          icon={ListCollapse}
+          label="Collapsed view"
+          pressed={collapsed}
+          onClick={() => onCollapsedChange(true)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ToolButton({
+  icon: Icon,
+  label,
+  onClick,
+  pressed,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  pressed?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      {...(pressed !== undefined ? { 'aria-pressed': pressed } : {})}
+      onClick={onClick}
+      className={cn(
+        'flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+        pressed && 'bg-muted text-foreground',
+      )}
+    >
+      <Icon className="size-4" aria-hidden="true" />
+    </button>
   );
 }
