@@ -99,8 +99,14 @@ early phases take about 20 minutes on that organisation.
 ## People who were imported
 
 A placeholder account has no password, no sign-in and an unconfirmed address.
-Its owner takes it over with "Forgot password", which confirms the address,
-so outgoing e-mail has to be working for that. Google and Microsoft sign-in
-cannot claim it until then: CoreTask never hands an unconfirmed account to
-whoever a provider vouches for by address (see `assertCanClaimByAddress` in
-`sso-accounts.service.ts`). Nobody is told they were imported.
+Its owner takes it over in either of two ways:
+
+- **Google or Microsoft sign-in**, with the same address. CoreTask hands an
+  unconfirmed account to whoever a provider vouches for only when nobody can
+  sign in to it, which a placeholder is (see `assertCanClaimByAddress` in
+  `sso-accounts.service.ts`). Signing in confirms the address.
+- **"Forgot password"**, which confirms the address too, once outgoing e-mail
+  is working.
+
+Nobody is told they were imported. Once the account has a password or a
+connected sign-in, the exception no longer applies to it.

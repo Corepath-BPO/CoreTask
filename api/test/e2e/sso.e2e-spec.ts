@@ -427,6 +427,46 @@ describe('Single sign-on (e2e)', () => {
       expect(await context.prisma.userIdentity.count()).toBe(0);
     });
 
+    it('hands over an account nobody can sign in to yet, as an import makes', async () => {
+      // No password and nothing connected: there is no way in for anyone to
+      // have kept, so its owner may have it as they would a new account.
+      const imported = await context.prisma.user.create({
+        data: { email: uniqueEmail('imported'), name: 'Ivy Imported', passwordHash: null },
+      });
+      const session = await sessionFrom(
+        await signInWith('google', googleClaims({ email: imported.email })),
+      );
+
+      expect(session.user.id).toBe(imported.id);
+      expect(session.user.hasPassword).toBe(false);
+      const after = await context.prisma.user.findUniqueOrThrow({ where: { id: imported.id } });
+      expect(after.emailVerifiedAt).not.toBeNull();
+      expect(
+        await context.prisma.userIdentity.count({
+          where: { userId: imported.id, provider: 'GOOGLE' },
+        }),
+      ).toBe(1);
+    });
+
+    it('still refuses an unconfirmed account that has another sign-in connected', async () => {
+      const connected = await context.prisma.user.create({
+        data: { email: uniqueEmail('connected'), name: 'Cal Connected', passwordHash: null },
+      });
+      await context.prisma.userIdentity.create({
+        data: {
+          userId: connected.id,
+          provider: 'MICROSOFT',
+          subject: `${WORK_TENANT}:${randomUUID()}`,
+          email: connected.email,
+        },
+      });
+      const response = await signInWith('google', googleClaims({ email: connected.email }));
+
+      expect(response.headers['location']).toBe(web('/login?ssoError=SSO_ACCOUNT_UNCONFIRMED'));
+      expect(cookieFrom(response, REFRESH_TOKEN_COOKIE)).toBeNull();
+      expect(await context.prisma.userIdentity.count({ where: { userId: connected.id } })).toBe(1);
+    });
+
     it('opens nothing for an address Google has not verified', async () => {
       const ada = await registerUser('Ada Password');
       const response = await signInWith(
@@ -882,6 +922,25 @@ describe('Single sign-on (e2e)', () => {
       expect(
         await context.prisma.workspaceMember.count({
           where: { workspaceId: setup.workspaceId, userId: kim.userId },
+        }),
+      ).toBe(1);
+    });
+
+    it('hands over an account nobody can sign in to yet at a verified domain', async () => {
+      const setup = await setupSaml();
+      const domain = `acme-${randomUUID().slice(0, 8)}.test`;
+      await verifyDomain(setup, domain);
+      const imported = await context.prisma.user.create({
+        data: { email: `ivy@${domain}`, name: 'Ivy Imported', passwordHash: null },
+      });
+
+      const session = await sessionFrom(
+        await samlSignIn(setup, { nameId: 'ivy-1', email: imported.email }),
+      );
+      expect(session.user.id).toBe(imported.id);
+      expect(
+        await context.prisma.workspaceMember.count({
+          where: { workspaceId: setup.workspaceId, userId: imported.id },
         }),
       ).toBe(1);
     });
