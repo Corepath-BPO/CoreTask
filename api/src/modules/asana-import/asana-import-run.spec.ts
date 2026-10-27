@@ -745,6 +745,35 @@ describe('AsanaImportRun', () => {
     ]);
   });
 
+  it('skips an empty file rather than reporting it or linking to it', async () => {
+    const context = await setUp();
+    const org = organisation();
+    const routes = org.routes;
+    const { job, asana, storage } = await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        path === '/attachments'
+          ? [
+              {
+                gid: 'A0',
+                name: 'void(0).url',
+                host: 'asana',
+                size: 0,
+                download_url: 'https://files.asana.test/a0',
+              },
+            ]
+          : routes(path, params),
+    });
+
+    expect(job.snapshot().errors).toEqual([]);
+    expect(job.snapshot().counts['emptyFiles']).toEqual({ done: 1 });
+    expect(rows(context, 'attachment')).toHaveLength(0);
+    expect(asana.download).not.toHaveBeenCalled();
+    expect(storage.putObject).not.toHaveBeenCalled();
+    const task = rows(context, 'task').find((row) => row['title'] === 'Fix the boiler') as Row;
+    expect(String(task['description'])).not.toContain('void(0).url');
+  });
+
   it('records a failed record and carries on', async () => {
     const context = await setUp();
     const org = organisation();

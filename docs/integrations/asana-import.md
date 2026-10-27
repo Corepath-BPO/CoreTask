@@ -33,31 +33,32 @@ made and adds what is new.
 
 The work happens in the worker (`coretask.import` queue, one run at a time).
 The page polls the run's progress every few seconds. A run that has written
-no progress for 15 minutes is treated as dead, so another can start.
+no progress for 15 minutes is treated as dead and closed as failed, the next
+time the page looks, so **Sync again** is never left disabled by it.
 
-| Asana                                                                 | CoreTask                                                                                                                                                       |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| People                                                                | Matched by e-mail. Anyone without an account gets a **placeholder**: an account with no password.                                                              |
-| Admin, member, guest                                                  | ADMIN, MEMBER, GUEST in the new workspace (whoever ran it stays OWNER)                                                                                         |
-| Team and its people                                                   | Team, TeamMember                                                                                                                                               |
-| Project                                                               | Project: name, notes, colour, owner as lead, team, dates                                                                                                       |
-| Project privacy                                                       | Public to workspace → PUBLIC; private or team-private → PRIVATE                                                                                                |
-| Archived or completed project                                         | ARCHIVED with `archivedAt`, or COMPLETED                                                                                                                       |
-| Project members (admin, editor, commenter, viewer)                    | ProjectMember with the same role                                                                                                                               |
-| Section                                                               | Section, in Asana's order                                                                                                                                      |
-| Task                                                                  | Task: title, notes as rich text, done, assignee, start and due dates and times, milestone or approval                                                          |
-| A task in several projects                                            | Home project, plus TaskProject rows for the others                                                                                                             |
-| Subtask                                                               | Subtask. CoreTask nests one level, so deeper ones go under the top task (counted as "moved up").                                                               |
-| Custom field: text, number, single-select, multi-select, date, people | The same types, with number formats and option colours                                                                                                         |
-| Custom field: reference, formula, ID                                  | A text field holding the value Asana displays                                                                                                                  |
-| Custom task type ("Ticket")                                           | A tag of that name                                                                                                                                             |
-| Tags, followers, likes, dependencies, actual time                     | Tag, Follower, TaskLike, TaskDependency, one TimeEntry                                                                                                         |
-| Comment                                                               | Comment, with its author, date, @mentions, pin and likes                                                                                                       |
-| System history ("assigned", "marked complete")                        | Not kept                                                                                                                                                       |
-| File stored by Asana                                                  | Copied into CoreTask's storage when it is an accepted type within `STORAGE_MAX_FILE_SIZE_MB`; otherwise linked back to Asana under Linked files, and reported. |
-| File elsewhere (Drive, Dropbox, a link)                               | Listed under "Linked files" at the end of the description                                                                                                      |
-| Status update, portfolio                                              | ProjectStatusUpdate, Portfolio (only portfolios the token's owner owns)                                                                                        |
-| Rules                                                                 | Not readable through Asana's API. Rebuild them in Customize › Rules.                                                                                           |
+| Asana                                                                 | CoreTask                                                                                                                                                                                             |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| People                                                                | Matched by e-mail. Anyone without an account gets a **placeholder**: an account with no password.                                                                                                    |
+| Admin, member, guest                                                  | ADMIN, MEMBER, GUEST in the new workspace (whoever ran it stays OWNER)                                                                                                                               |
+| Team and its people                                                   | Team, TeamMember                                                                                                                                                                                     |
+| Project                                                               | Project: name, notes, colour, owner as lead, team, dates                                                                                                                                             |
+| Project privacy                                                       | Public to workspace → PUBLIC; private or team-private → PRIVATE                                                                                                                                      |
+| Archived or completed project                                         | ARCHIVED with `archivedAt`, or COMPLETED                                                                                                                                                             |
+| Project members (admin, editor, commenter, viewer)                    | ProjectMember with the same role                                                                                                                                                                     |
+| Section                                                               | Section, in Asana's order                                                                                                                                                                            |
+| Task                                                                  | Task: title, notes as rich text, done, assignee, start and due dates and times, milestone or approval                                                                                                |
+| A task in several projects                                            | Home project, plus TaskProject rows for the others                                                                                                                                                   |
+| Subtask                                                               | Subtask. CoreTask nests one level, so deeper ones go under the top task (counted as "moved up").                                                                                                     |
+| Custom field: text, number, single-select, multi-select, date, people | The same types, with number formats and option colours                                                                                                                                               |
+| Custom field: reference, formula, ID                                  | A text field holding the value Asana displays                                                                                                                                                        |
+| Custom task type ("Ticket")                                           | A tag of that name                                                                                                                                                                                   |
+| Tags, followers, likes, dependencies, actual time                     | Tag, Follower, TaskLike, TaskDependency, one TimeEntry                                                                                                                                               |
+| Comment                                                               | Comment, with its author, date, @mentions, pin and likes                                                                                                                                             |
+| System history ("assigned", "marked complete")                        | Not kept                                                                                                                                                                                             |
+| File stored by Asana                                                  | Copied into CoreTask's storage when it is an accepted type within `STORAGE_MAX_FILE_SIZE_MB`; otherwise linked back to Asana under Linked files, and reported. An empty file is skipped and counted. |
+| File elsewhere (Drive, Dropbox, a link)                               | Listed under "Linked files" at the end of the description                                                                                                                                            |
+| Status update, portfolio                                              | ProjectStatusUpdate, Portfolio (only portfolios the token's owner owns)                                                                                                                              |
+| Rules                                                                 | Not readable through Asana's API. Rebuild them in Customize › Rules.                                                                                                                                 |
 
 Writes go straight to the database. Imported tasks therefore fire no rules,
 webhooks, notifications or e-mails. Anyone who is assigned a task in a private
@@ -93,7 +94,9 @@ comment is from someone no longer in the Asana workspace is the one case
 search misses.
 
 A run stopped part way (a deploy restarting the worker) is handed to the next
-worker and starts again from the top, updating rather than duplicating. The
+worker and starts again from the top, updating rather than duplicating. That
+holds when the worker shuts down cleanly too: the run cannot record its outcome
+once the database is closed, so its job is tried again 30 seconds later. The
 early phases take about 20 minutes on that organisation.
 
 ## People who were imported

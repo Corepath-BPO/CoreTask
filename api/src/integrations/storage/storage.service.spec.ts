@@ -158,6 +158,16 @@ describe('StorageService', () => {
       ).toBeNull();
     });
 
+    it('accepts the video types screen recordings come in', () => {
+      for (const mimeType of ['video/mp4', 'video/webm', 'video/quicktime']) {
+        expect(
+          code(() =>
+            build().assertUploadAllowed({ filename: 'walkthrough', mimeType, sizeBytes: 10 }),
+          ),
+        ).toBeNull();
+      }
+    });
+
     it('refuses a file over the size limit', () => {
       expect(
         code(() =>
