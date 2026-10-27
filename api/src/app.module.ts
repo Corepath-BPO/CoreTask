@@ -61,6 +61,7 @@ import { TeamsModule } from './modules/teams/teams.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 import { SlackModule } from './modules/slack/slack.module';
+import { AsanaImportModule } from './modules/asana-import/asana-import.module';
 import { SsoModule } from './modules/sso/sso.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
@@ -108,6 +109,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     OAuthModule,
     WebhooksModule,
     SlackModule,
+    AsanaImportModule,
     UsersModule,
     WorkspacesModule,
     WorkspaceMembersModule,

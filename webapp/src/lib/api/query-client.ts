@@ -54,6 +54,9 @@ export const queryKeys = {
     status: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'status'] as const,
     channels: (workspaceId: string) => [...queryKeys.slack.all(workspaceId), 'channels'] as const,
   },
+  asanaImport: {
+    status: (workspaceId: string) => ['asana-import', workspaceId, 'status'] as const,
+  },
   /** Single sign-on: the ways in this server offers, the caller's connections, a workspace's setup. */
   sso: {
     providers: ['sso', 'providers'] as const,

@@ -9,6 +9,7 @@ export const QueueName = {
   MAINTENANCE: 'coretask.maintenance',
   AUTOMATION: 'coretask.automation',
   WEBHOOK: 'coretask.webhook',
+  IMPORT: 'coretask.import',
 } as const;
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 
@@ -53,6 +54,16 @@ export const AutomationJob = {
   EVENT: 'automation-event',
 } as const;
 export type AutomationJob = (typeof AutomationJob)[keyof typeof AutomationJob];
+
+export const ImportJob = {
+  /** One run of the Asana importer, start to finish. */
+  ASANA: 'asana-import',
+} as const;
+export type ImportJob = (typeof ImportJob)[keyof typeof ImportJob];
+
+export interface ImportJobData {
+  runId: string;
+}
 
 export const MaintenanceJob = {
   /** Removes uploads that were started and never finished. */

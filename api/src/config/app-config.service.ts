@@ -152,6 +152,18 @@ export class AppConfigService {
    * them with the admin's session — that is what ties an install to the
    * person who started it.
    */
+  get asana() {
+    return {
+      accessToken: this.env.ASANA_ACCESS_TOKEN ?? null,
+      workspaceGid: this.env.ASANA_WORKSPACE_ID ?? null,
+      apiBaseUrl: this.env.ASANA_API_BASE_URL.replace(/\/+$/, ''),
+      timeoutMs: this.env.ASANA_TIMEOUT_MS,
+      maxRequestsPerMinute: this.env.ASANA_MAX_REQUESTS_PER_MINUTE,
+      concurrency: this.env.ASANA_CONCURRENCY,
+      enabled: Boolean(this.env.ASANA_ACCESS_TOKEN && this.env.ASANA_WORKSPACE_ID),
+    } as const;
+  }
+
   get slack() {
     return {
       clientId: this.env.SLACK_CLIENT_ID ?? null,

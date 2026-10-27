@@ -17,4 +17,6 @@ export const INTEGRATIONS_TABS: IntegrationsTab[] = [
   { label: 'Connected apps', segment: 'connected-apps' },
   // Everyone links their own account; connecting the workspace is gated inside.
   { label: 'Slack', segment: 'slack' },
+  // Reads a whole Asana organisation into a new workspace: administration.
+  { label: 'Asana', segment: 'asana', adminOnly: true },
 ];

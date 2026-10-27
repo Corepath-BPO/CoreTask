@@ -77,8 +77,9 @@ export class SsoAccountsService {
   /**
    * Signing in with Google or Microsoft. The account the subject is
    * connected to; else the account with the vouched-for address — once that
-   * account has confirmed it — which it is connected to now; else a new
-   * account. An address the provider does not vouch for opens nothing.
+   * account has confirmed it, or when nobody can sign in to it yet — which it
+   * is connected to now; else a new account. An address the provider does not
+   * vouch for opens nothing.
    */
   async signInWithSocial(
     name: SocialSsoProvider,
@@ -104,7 +105,7 @@ export class SsoAccountsService {
     try {
       const existing = await this.users.findByEmail(identity.email);
       if (existing) {
-        assertCanClaimByAddress(existing);
+        assertCanClaimByAddress(existing, await this.connections(existing.id));
         const user = await this.connect(existing, input, { emailProven: true });
         this.logger.log(
           { userId: user.id, provider },
@@ -203,7 +204,7 @@ export class SsoAccountsService {
     try {
       const existing = await this.users.findByEmail(email);
       if (existing) {
-        assertCanClaimByAddress(existing);
+        assertCanClaimByAddress(existing, await this.connections(existing.id));
         const user = await this.connect(existing, input, { emailProven: true });
         if (!(await this.members.findMembership(connection.workspaceId, user.id))) {
           await this.members.addMember({
@@ -352,6 +353,11 @@ export class SsoAccountsService {
     return identity;
   }
 
+  /** How many outside sign-ins the account has connected. */
+  private connections(userId: string): Promise<number> {
+    return this.prisma.userIdentity.count({ where: { userId } });
+  }
+
   /** At each sign-in: when it was used, and the address the provider has for them now. */
   private async touch(identityId: string, email: string | null): Promise<void> {
     await this.prisma.userIdentity.update({
@@ -441,10 +447,17 @@ export class SsoAccountsService {
  * SSO and share the account with them ("pre-hijacking"). Confirming the
  * address — the e-mailed link, or a reset link, which also signs out every
  * session — is what makes the account its owner's.
+ *
+ * Except an account nobody can get into: no password and nothing connected,
+ * as an import makes for someone who has not signed up yet. There is no way
+ * in for anyone to have kept, so handing it over is the same as making its
+ * owner a new account, with the work already assigned to them in it.
  */
-function assertCanClaimByAddress(user: User): void {
+function assertCanClaimByAddress(user: User, connections: number): void {
   assertCanSignIn(user);
-  if (!user.emailVerifiedAt) throw AppException.forbidden('SSO_ACCOUNT_UNCONFIRMED');
+  if (user.emailVerifiedAt) return;
+  if (!user.passwordHash && connections === 0) return;
+  throw AppException.forbidden('SSO_ACCOUNT_UNCONFIRMED');
 }
 
 /** Deleted and service accounts are no one to sign in as; a disabled one says so. */

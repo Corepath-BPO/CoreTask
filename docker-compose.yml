@@ -194,6 +194,8 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      ASANA_ACCESS_TOKEN: ${ASANA_ACCESS_TOKEN:-}
+      ASANA_WORKSPACE_ID: ${ASANA_WORKSPACE_ID:-}
     networks: [coretask]
 
   # ---------------------------------------------------------------------------
@@ -252,6 +254,8 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      ASANA_ACCESS_TOKEN: ${ASANA_ACCESS_TOKEN:-}
+      ASANA_WORKSPACE_ID: ${ASANA_WORKSPACE_ID:-}
       # Migrations are the API container's job; two processes racing
       # `migrate deploy` on start would deadlock on the advisory lock.
       RUN_MIGRATIONS: "false"

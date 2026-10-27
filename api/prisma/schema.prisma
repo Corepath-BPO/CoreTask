@@ -266,6 +266,7 @@ model User {
   oauthGrants                OAuthGrant[]
   slackInstallations         SlackInstallation[]
   slackLinks                 SlackUserLink[]
+  importRunsStarted          ImportRun[]              @relation("ImportRunStartedBy")
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -742,6 +743,8 @@ model Workspace {
   projectTemplates        ProjectTemplate[]
   samlConnection          SamlConnection?
   domains                 WorkspaceDomain[]
+  importRuns              ImportRun[]
+  externalRefs            ExternalRef[]
 
   @@index([createdById])
   @@index([archivedAt])
@@ -3127,4 +3130,89 @@ model SlackUserLink {
   @@unique([installationId, userId])
   @@index([userId])
   @@map("slack_user_links")
+}
+
+// ---------------------------------------------------------------------------
+// Imports from other tools
+// ---------------------------------------------------------------------------
+
+/// The tool an import read from. One value today; the tables below are shaped
+/// so a second importer adds a value rather than a column.
+enum ImportSource {
+  ASANA
+}
+
+enum ImportRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  /// Finished, but some records could not be brought across; `errors` names them.
+  PARTIAL
+  FAILED
+}
+
+/// One run of an import into a workspace — what the Integrations page shows
+/// while it runs and keeps afterwards.
+///
+/// Progress is written by the worker as it goes rather than derived from the
+/// rows it made, so the page can show a moving count without counting tables.
+model ImportRun {
+  id                  String          @id @default(uuid(7)) @db.Uuid
+  workspaceId         String          @db.Uuid
+  source              ImportSource
+  /// The other tool's id for what was read — Asana's workspace gid.
+  externalWorkspaceId String          @db.VarChar(64)
+  status              ImportRunStatus @default(QUEUED)
+  /// The step under way, e.g. `people`, `projects`, `tasks`, `details`.
+  phase               String?         @db.VarChar(40)
+  /// Counters by kind, `{ tasks: { done, total }, comments: { done }, … }`.
+  counts              Json            @default("{}")
+  /// The first failures, `{ kind, externalId, name, message }[]`, capped so a
+  /// run that fails on every record cannot grow the row without limit.
+  errors              Json            @default("[]")
+  /// Every failure, including those past the cap.
+  errorCount          Int             @default(0)
+  startedById         String?         @db.Uuid
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  startedBy User?     @relation("ImportRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([source, externalWorkspaceId])
+  @@map("import_runs")
+}
+
+/// A CoreTask row that came from another tool, by that tool's id.
+///
+/// What makes an import re-runnable: a second run finds the row it made the
+/// first time and updates it, rather than making another. One table rather
+/// than a column on every imported model, so the models stay what they are
+/// and an import's footprint can be listed or removed in one place.
+model ExternalRef {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  workspaceId String       @db.Uuid
+  source      ImportSource
+  /// What kind of record: `project`, `section`, `task`, `story`, `attachment`…
+  entityType  String       @db.VarChar(40)
+  externalId  String       @db.VarChar(64)
+  /// The CoreTask row. No foreign key: by `entityType` it is a row of a
+  /// different table, and a row deleted in CoreTask just makes this a miss.
+  entityId    String       @db.Uuid
+  /// The record as the other tool last sent it, every field it asked for.
+  /// CoreTask's tables hold what they have columns for; this keeps the rest
+  /// (a reference field's target, a custom task type, formatting the editor
+  /// drops), so it can still be mapped later without reading the tool again.
+  snapshot    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, source, entityType, externalId])
+  @@index([workspaceId, entityType, entityId])
+  @@map("external_refs")
 }

@@ -33,6 +33,7 @@ import { WebhookQueue } from './webhook/webhook.queue';
     BullModule.registerQueue({ name: QueueName.MAINTENANCE }),
     BullModule.registerQueue({ name: QueueName.AUTOMATION }),
     BullModule.registerQueue({ name: QueueName.WEBHOOK }),
+    BullModule.registerQueue({ name: QueueName.IMPORT }),
   ],
   providers: [EmailQueue, WebhookQueue],
   exports: [BullModule, EmailQueue, WebhookQueue],

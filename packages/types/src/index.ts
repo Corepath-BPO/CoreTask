@@ -20,6 +20,7 @@ export type * from './portfolios.js';
 export type * from './project-members.js';
 export type * from './project-apps.js';
 export type * from './slack.js';
+export type * from './asana-import.js';
 export type * from './project-email.js';
 export type * from './calendar-feeds.js';
 export type * from './project-note.js';

@@ -533,6 +533,12 @@ export const ApiRoutes = {
     commands: '/integrations/slack/commands',
     interactions: '/integrations/slack/interactions',
   },
+  asanaImport: {
+    status: (workspaceId: string) => `/workspaces/${workspaceId}/integrations/asana`,
+    start: (workspaceId: string) => `/workspaces/${workspaceId}/integrations/asana/imports`,
+    run: (workspaceId: string, runId: string) =>
+      `/workspaces/${workspaceId}/integrations/asana/imports/${runId}`,
+  },
   webhookSubscriptions: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,
     one: (workspaceId: string, subscriptionId: string) =>

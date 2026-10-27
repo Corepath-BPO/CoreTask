@@ -404,7 +404,11 @@ address, which can change hands. Who is signed in:
    password. An existing account must have confirmed its address first
    (`SSO_ACCOUNT_UNCONFIRMED`): anyone can register someone else's address
    and wait for its owner to arrive by SSO, and confirming — or a reset link,
-   which signs out every session — is what makes the account its owner's;
+   which signs out every session — is what makes the account its owner's.
+   The exception is an account nobody can sign in to — no password, nothing
+   connected — such as one an import made for someone who has not signed up:
+   no one can have kept a way into it, so it is handed over as a new account
+   would be;
 3. else `SSO_EMAIL_UNVERIFIED`: sign in another way and connect it from
    Settings, where the address need not be vouched for.
 
