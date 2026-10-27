@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MAX_SUBTASKS_PER_ACTION,
+  dayNextWeek,
   isCalendarDate,
   subtaskEntries,
   subtaskEntry,
@@ -65,6 +66,13 @@ describe('subtaskEntries', () => {
     ]);
   });
 
+  it('carries a day of next week', () => {
+    expect(subtaskEntry({ title: 'Update the owner', dueWeekdayNextWeek: 2 })).toEqual({
+      title: 'Update the owner',
+      dueWeekdayNextWeek: 2,
+    });
+  });
+
   it('keeps the fixed date when a row holds both shapes', () => {
     expect(subtaskEntry({ title: 'Both', dueDate: '2030-01-15', dueInDays: 2 })).toEqual({
       title: 'Both',
@@ -125,6 +133,18 @@ describe('subtaskProblems', () => {
     ]);
   });
 
+  it('refuses a day of next week that is not Sunday to Saturday', () => {
+    expect(
+      subtaskProblems({
+        subtasks: [
+          { title: 'A', dueWeekdayNextWeek: 7 },
+          { title: 'B', dueWeekdayNextWeek: 1.5 },
+          { title: 'C', dueWeekdayNextWeek: 6 },
+        ],
+      }),
+    ).toEqual([{ message: expect.stringContaining('Sunday to Saturday'), incomplete: false }]);
+  });
+
   it('refuses days that are negative or not whole', () => {
     expect(
       subtaskProblems({
@@ -149,5 +169,23 @@ describe('subtaskProblems', () => {
 
   it('ignores a blank row, which is dropped before it could be created', () => {
     expect(subtaskProblems({ subtasks: [{ title: '', dueDate: 'garbage' }] })).toEqual([]);
+  });
+});
+
+describe('dayNextWeek', () => {
+  const day = (iso: string, weekday: number) =>
+    dayNextWeek(new Date(iso), weekday).toISOString().slice(0, 10);
+
+  it('is always the following week, even when the day is still to come in this one', () => {
+    // Monday 26 October 2026: Wednesday next week is the 4th, not the 28th.
+    expect(day('2026-10-26T15:00:00Z', 3)).toBe('2026-11-04');
+    expect(day('2026-10-26T15:00:00Z', 1)).toBe('2026-11-02');
+  });
+
+  it('starts the week on Sunday, as the n8n workflows it replaces did', () => {
+    // Saturday 31 October: Monday next week is two days off.
+    expect(day('2026-10-31T23:59:00Z', 1)).toBe('2026-11-02');
+    // Sunday 1 November begins a week, so Monday next week is the 9th.
+    expect(day('2026-11-01T00:00:00Z', 1)).toBe('2026-11-09');
   });
 });

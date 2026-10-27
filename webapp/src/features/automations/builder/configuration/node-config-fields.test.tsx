@@ -133,6 +133,29 @@ describe('the subtask list', () => {
     expect(written(onChange)).toEqual([{ title: 'Review', dueInDays: 1 }]);
   });
 
+  it('dates a row on a day of next week, and drops the day count it had', async () => {
+    const user = setupUser();
+    const onChange = renderSubtasks([{ title: 'Update the owner', dueInDays: 3 }]);
+
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 due date' }));
+    await user.click(await screen.findByRole('radio', { name: 'A day next week' }));
+    expect(written(onChange)).toEqual([{ title: 'Update the owner', dueWeekdayNextWeek: 1 }]);
+  });
+
+  it('shows and changes the day of next week a row is due', async () => {
+    const user = setupUser();
+    const onChange = renderSubtasks([{ title: 'Update the owner', dueWeekdayNextWeek: 2 }]);
+
+    const button = screen.getByRole('button', { name: 'Subtask 1 due date' });
+    expect(button).toHaveTextContent('Tuesday next week');
+
+    await user.click(button);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Subtask 1 day next week' }), {
+      target: { value: '4' },
+    });
+    expect(written(onChange)).toEqual([{ title: 'Update the owner', dueWeekdayNextWeek: 4 }]);
+  });
+
   it('counts those days as whole days, none below zero', async () => {
     const user = setupUser();
     const onChange = renderSubtasks([{ title: 'Review', dueInDays: 1 }]);
@@ -262,6 +285,28 @@ describe('the day-count and minute forms', () => {
 
     fireEvent.change(days, { target: { value: '3' } });
     expect(onChange).toHaveBeenLastCalledWith({ daysFromNow: 3 });
+  });
+
+  it('switches a due date to a day of next week, Monday first', async () => {
+    const user = setupUser();
+    const onChange = renderAction('SET_DUE_DATE', { daysFromNow: 7 });
+
+    await user.click(screen.getByLabelText('When'));
+    await user.click(screen.getByRole('option', { name: 'A day next week' }));
+
+    expect(onChange).toHaveBeenLastCalledWith({ weekdayNextWeek: 1, daysFromNow: undefined });
+  });
+
+  it('shows a stored day of next week and changes it', async () => {
+    const user = setupUser();
+    const onChange = renderAction('SET_DUE_DATE', { weekdayNextWeek: 2 });
+
+    expect(screen.queryByLabelText('Days from now')).toBeNull();
+    expect(screen.getByLabelText('Day')).toHaveTextContent('Tuesday');
+
+    await user.click(screen.getByLabelText('Day'));
+    await user.click(screen.getByRole('option', { name: 'Friday' }));
+    expect(onChange).toHaveBeenLastCalledWith({ weekdayNextWeek: 5 });
   });
 
   it('offers the start date the same form as the due date', () => {

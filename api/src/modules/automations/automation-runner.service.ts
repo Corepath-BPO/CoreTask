@@ -21,6 +21,8 @@ import {
   webhookExtraFields,
   ServerEvent,
   isCalendarDate,
+  isWeekday,
+  dayNextWeek,
   aiDecidesSubtasks,
   subtaskEntries,
   toFilterOperator,
@@ -2142,16 +2144,14 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.SET_DUE_DATE: {
-        // Relative rather than absolute: "due in three days" stays meaningful,
-        // where a fixed date written into a rule is stale the week after.
-        const days = Number(config['daysFromNow'] ?? 0);
-        const due = new Date();
-        due.setUTCDate(due.getUTCDate() + days);
-
+        // Relative rather than absolute: "due in three days" or "Tuesday next
+        // week" stays meaningful, where a fixed date written into a rule is
+        // stale the week after.
+        //
         // A rule sets a day, not a moment: the calendar date at UTC midnight,
         // the shape every date column holds, and no time of day carried over
         // from whatever the task had before.
-        const dueDate = toCalendarDate(due);
+        const dueDate = dueDateFor(config, new Date());
         const before = task.dueDate;
         const events = await this.updateTask(task, { dueDate, dueAt: null }, rule, event);
         return { succeeded: true, before, after: dueDate.toISOString(), events };
@@ -3778,10 +3778,7 @@ export class AutomationRunnerService {
       }
 
       case AutomationAction.SET_DUE_DATE: {
-        const days = Number(config['daysFromNow'] ?? 0);
-        const due = new Date(at);
-        due.setUTCDate(due.getUTCDate() + days);
-        const dueDate = toCalendarDate(due);
+        const dueDate = dueDateFor(config, at);
         const before = ticket.dueDate?.toISOString() ?? null;
         await write({ dueDate });
         return { succeeded: true, before, after: dueDate.toISOString() };
@@ -4063,7 +4060,24 @@ function subtaskDueDate(entry: SubtaskEntry, at: Date): Date | null {
     return toCalendarDate(due);
   }
 
+  if (isWeekday(entry.dueWeekdayNextWeek)) {
+    return toCalendarDate(dayNextWeek(at, entry.dueWeekdayNextWeek));
+  }
+
   return null;
+}
+
+/**
+ * Where "Set due date" lands: that weekday of next week when the step says so,
+ * otherwise its count of days from `from`.
+ */
+function dueDateFor(config: Record<string, unknown>, from: Date): Date {
+  const weekday = config['weekdayNextWeek'];
+  if (isWeekday(weekday)) return toCalendarDate(dayNextWeek(from, weekday));
+
+  const due = new Date(from);
+  due.setUTCDate(due.getUTCDate() + Number(config['daysFromNow'] ?? 0));
+  return toCalendarDate(due);
 }
 
 function resolveValue(value: unknown, at: Date): unknown {

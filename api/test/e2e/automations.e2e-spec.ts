@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   AI_CHECK_FIELD,
+  dayNextWeek,
   API_PREFIX,
   MAX_AUTOMATION_DEPTH,
   WorkspaceRole,
@@ -900,6 +901,47 @@ describe('Automations (e2e)', () => {
       const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
       expect(task?.startDate?.toISOString().slice(0, 10)).toBe(expected.toISOString().slice(0, 10));
       expect(task?.startAt).toBeNull();
+    });
+
+    it('sets a due date on a day of next week', async () => {
+      const scope = await setupScope();
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        { nodeType: 'ACTION', subtype: 'SET_DUE_DATE', configuration: { weekdayNextWeek: 2 } },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUnique({ where: { id: scope.taskId } });
+      expect(task?.dueDate?.toISOString().slice(0, 10)).toBe(
+        dayNextWeek(new Date(), 2).toISOString().slice(0, 10),
+      );
+      expect(task?.dueDate?.getUTCDay()).toBe(2);
+      expect(task?.dueAt).toBeNull();
+    });
+
+    it('refuses to publish a day of next week that is not a weekday', async () => {
+      const scope = await setupScope();
+      const created = await request(server())
+        .post(rulesUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({
+          name: 'Bad weekday',
+          triggerType: 'TASK_MOVED_TO_SECTION',
+          triggerConfig: { sectionId: scope.sectionId },
+          nodes: [
+            { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+            { nodeType: 'ACTION', subtype: 'SET_DUE_DATE', configuration: { weekdayNextWeek: 9 } },
+          ],
+        })
+        .expect(201);
+
+      const refused = await request(server())
+        .post(`${rulesUrl(scope)}/${created.body.data.id}/publish`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(400);
+      expect(JSON.stringify(refused.body.error.details)).toContain('Sunday to Saturday');
     });
 
     it('sets an estimate, in whole minutes', async () => {
@@ -2857,6 +2899,35 @@ describe('Automations (e2e)', () => {
         expect.objectContaining({ title: 'Review', assigneeId: scope.member.userId }),
         expect.objectContaining({ title: 'Sign off', dueDate: '2030-01-15T00:00:00.000Z' }),
         expect.objectContaining({ title: 'File it', assigneeId: null, dueDate: null }),
+      ]);
+    });
+
+    it('dates a subtask on the day of next week its row names', async () => {
+      const scope = await setupScope();
+
+      await publishRule(scope, 'Weekly plan', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'CREATE_SUBTASK',
+          configuration: {
+            subtasks: [
+              { title: 'Update the owner', dueWeekdayNextWeek: 2 },
+              { title: 'Schedule paint', dueWeekdayNextWeek: 4 },
+            ],
+          },
+        },
+      ]);
+
+      await runner.handle(moveEvent(scope));
+
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+        orderBy: { position: 'asc' },
+      });
+      const now = new Date();
+      expect(subtasks.map((subtask) => subtask.dueDate?.toISOString().slice(0, 10))).toEqual([
+        dayNextWeek(now, 2).toISOString().slice(0, 10),
+        dayNextWeek(now, 4).toISOString().slice(0, 10),
       ]);
     });
 

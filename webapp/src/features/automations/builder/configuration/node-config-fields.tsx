@@ -10,6 +10,8 @@ import {
   AutomationDelayUnit,
   delayProblem,
   AI_CHECK_FIELD,
+  isWeekday,
+  WEEKDAY_LABEL,
 } from '@coretask/contracts';
 import type { AutomationMetadata } from '@coretask/types';
 import { ChevronDown, X } from 'lucide-react';
@@ -495,9 +497,79 @@ function ActionFields({
      * A count of days, not a date: "due in three days" stays meaningful for as
      * long as the rule exists, where a fixed date is stale the week after. The
      * due-date step had no form at all, so the action could only ever set
-     * today.
+     * today. A due date can also be a day of next week, the way a team that
+     * plans its week ahead says it.
      */
-    case 'SET_DUE_DATE':
+    case 'SET_DUE_DATE': {
+      const weekday = configuration['weekdayNextWeek'];
+      const nextWeek = isWeekday(weekday);
+      return (
+        <>
+          <Field label="When" htmlFor="step-due-when">
+            <Select
+              value={nextWeek ? 'NEXT_WEEK' : 'DAYS'}
+              onValueChange={(value) =>
+                onChange({
+                  ...configuration,
+                  ...(value === 'NEXT_WEEK'
+                    ? { weekdayNextWeek: 1, daysFromNow: undefined }
+                    : { weekdayNextWeek: undefined, daysFromNow: 0 }),
+                })
+              }
+            >
+              <SelectTrigger id="step-due-when" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <RadioItem value="DAYS">Days from now</RadioItem>
+                <RadioItem value="NEXT_WEEK">A day next week</RadioItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {nextWeek ? (
+            <Field
+              label="Day"
+              htmlFor="step-weekdayNextWeek"
+              hint="Always next week, even when the day is still to come this week."
+            >
+              <Select
+                value={String(weekday)}
+                onValueChange={(value) =>
+                  onChange({ ...configuration, weekdayNextWeek: Number(value) })
+                }
+              >
+                <SelectTrigger id="step-weekdayNextWeek" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WEEKDAY_LABEL.map((name, day) => (
+                    <RadioItem key={name} value={String(day)}>
+                      {name}
+                    </RadioItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : (
+            <Field
+              label="Days from now"
+              htmlFor="step-daysFromNow"
+              hint="0 sets it to the day the rule runs."
+            >
+              <Input
+                id="step-daysFromNow"
+                type="number"
+                min={0}
+                step={1}
+                value={readNumber('daysFromNow')}
+                onChange={(event) => setNumber('daysFromNow', event.target.value)}
+              />
+            </Field>
+          )}
+        </>
+      );
+    }
+
     case 'SET_START_DATE':
       return (
         <Field
