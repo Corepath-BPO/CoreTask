@@ -1662,6 +1662,8 @@ export class AutomationRunnerService {
         return task.kind;
       case 'APPROVAL_STATUS':
         return task.approvalStatus;
+      case 'IS_SUBTASK':
+        return task.parentTaskId !== null;
 
       default:
         return event.after?.[field];

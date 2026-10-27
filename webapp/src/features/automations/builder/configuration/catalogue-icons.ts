@@ -18,6 +18,7 @@ import {
   FolderSymlink,
   ListChecks,
   ListPlus,
+  ListTree,
   Mail,
   MessageSquare,
   MessageSquarePlus,
@@ -159,6 +160,7 @@ const BY_SUBTYPE: Record<string, ReactNode> = {
   APPROVAL_STATUS: glyph(ShieldCheck),
   NO_LONGER_BLOCKED: glyph(CircleSlash),
   IN_ANY_PROJECT: glyph(FolderSymlink),
+  IS_SUBTASK: glyph(ListTree),
   HAS_ATTACHMENT: glyph(Paperclip),
   HAS_COMMENT: glyph(MessageSquare),
 

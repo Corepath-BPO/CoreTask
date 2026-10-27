@@ -172,6 +172,7 @@ export const READABLE_TASK_FIELDS: readonly string[] = [
   'NO_LONGER_BLOCKED',
   'TASK_TYPE',
   'APPROVAL_STATUS',
+  'IS_SUBTASK',
 ];
 
 const READABLE = new Set(READABLE_TASK_FIELDS);
@@ -211,6 +212,7 @@ export const CONDITION_FIELD_KINDS = {
   NO_LONGER_BLOCKED: ConditionValueKind.BOOLEAN,
   TASK_TYPE: ConditionValueKind.ENUM,
   APPROVAL_STATUS: ConditionValueKind.ENUM,
+  IS_SUBTASK: ConditionValueKind.BOOLEAN,
 } as const satisfies Record<string, ConditionValueKind>;
 
 /** The kind for a field key off the wire, which may be anything at all. */
@@ -917,6 +919,20 @@ const CONDITION_SPECS: readonly ConditionSpec[] = [
   },
 
   // Task details
+  {
+    subtype: 'IS_SUBTASK',
+    label: 'Task is a subtask',
+    category: CONDITION_CATEGORY.TASK_DETAILS,
+    valueType: CONDITION_VALUE_TYPE.CHECKBOX,
+    /*
+     * A subtask is a task in its parent's project, so "a task is added to this
+     * project" fires for every subtask made there, a rule's included. "Is not
+     * checked" keeps a rule to the tasks a person sees in the list, as Asana's
+     * own trigger does, and stops a rule that adds subtasks adding them under
+     * the subtasks it, or another rule, has just made.
+     */
+    description: 'Holds for a subtask; “is not checked” keeps a rule to top-level tasks.',
+  },
   {
     subtype: 'IN_ANY_PROJECT',
     label: 'Task is in any of these projects…',
