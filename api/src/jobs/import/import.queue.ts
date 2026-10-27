@@ -20,9 +20,18 @@ export class ImportQueue {
     const data: ImportJobData = { runId };
     await this.queue.add(ImportJob.ASANA, data, {
       jobId: `asana-${runId}`,
-      // Re-running is the user's call: a run that failed half way is finished
-      // by starting another, which picks up where the rows already are.
-      attempts: 1,
+      /*
+       * Re-running a failed run is still the user's call: `AsanaImporter`
+       * records a failure on the run and returns, so the job completes.
+       *
+       * The job only throws when that record could not be written — the
+       * worker shutting down mid-run, with the database already closed. The
+       * run row is left RUNNING and nothing would ever pick it up again, so
+       * the job is tried again a little later, by the worker that replaced
+       * this one, and the run starts again from the top as it is built to.
+       */
+      attempts: 20,
+      backoff: { type: 'fixed', delay: 30_000 },
       removeOnComplete: { age: 86_400, count: 100 },
       removeOnFail: { age: 7 * 86_400 },
     });

@@ -213,6 +213,11 @@ export const ALLOWED_UPLOAD_MIME_TYPES: readonly string[] = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  // Screen recordings and walkthroughs. Kept as downloads, like every type
+  // outside INLINE_IMAGE_MIME_TYPES.
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
 ];
 
 /** Top-bar search: how long a query may be, and how many hits per kind. */

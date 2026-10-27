@@ -58,6 +58,7 @@ export class AsanaImportService {
   ) {}
 
   async status(workspaceId: string, userId: string): Promise<AsanaImportStatus> {
+    await this.closeDeadRuns(workspaceId);
     const runs = await this.prisma.importRun.findMany({
       where: { workspaceId, source: ImportSource.ASANA },
       include: { startedBy: { select: { id: true, name: true } } },
@@ -213,39 +214,56 @@ export class AsanaImportService {
     ];
   }
 
-  /**
-   * One run per workspace at a time. A run whose worker died stops writing
-   * progress; past the stale mark it is closed as failed so another can start.
-   */
+  /** One run per workspace at a time. */
   private async assertNoneRunning(workspaceId: string): Promise<void> {
+    await this.closeDeadRuns(workspaceId);
     const active = await this.prisma.importRun.findFirst({
       where: {
         workspaceId,
         status: { in: [ImportRunStatus.QUEUED, ImportRunStatus.RUNNING] },
       },
     });
-    if (!active) return;
-
-    if (Date.now() - active.updatedAt.getTime() < STALE_RUN_MS) {
+    if (active) {
       throw AppException.conflict('RESOURCE_CONFLICT', 'An Asana import is already running here.');
     }
-    await this.prisma.importRun.update({
-      where: { id: active.id },
-      data: {
-        status: ImportRunStatus.FAILED,
-        finishedAt: new Date(),
-        errorCount: active.errorCount + 1,
-        errors: [
-          ...(Array.isArray(active.errors) ? active.errors : []),
-          {
-            kind: 'run',
-            externalId: null,
-            name: null,
-            message: 'The worker stopped before finishing.',
-          },
-        ],
+  }
+
+  /**
+   * A run whose worker died stops writing progress; past the stale mark it is
+   * closed as failed.
+   *
+   * Done whenever the page reads the status, not only when a run is started:
+   * the page disables "Sync again" while a run is active, so a dead run that
+   * only a new start could close kept the button disabled for good.
+   */
+  private async closeDeadRuns(workspaceId: string): Promise<void> {
+    const dead = await this.prisma.importRun.findMany({
+      where: {
+        workspaceId,
+        status: { in: [ImportRunStatus.QUEUED, ImportRunStatus.RUNNING] },
+        updatedAt: { lt: new Date(Date.now() - STALE_RUN_MS) },
       },
     });
+    for (const run of dead) {
+      await this.prisma.importRun.update({
+        where: { id: run.id },
+        data: {
+          status: ImportRunStatus.FAILED,
+          finishedAt: new Date(),
+          errorCount: run.errorCount + 1,
+          errors: [
+            ...(Array.isArray(run.errors) ? run.errors : []),
+            {
+              kind: 'run',
+              externalId: null,
+              name: null,
+              message: 'The worker stopped before finishing.',
+            },
+          ],
+        },
+      });
+      this.logger.warn({ runId: run.id, workspaceId }, 'Closed an Asana import whose worker died');
+    }
   }
 
   private async loadDirectory(): Promise<AsanaDirectory> {

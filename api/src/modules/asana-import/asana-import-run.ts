@@ -1634,6 +1634,12 @@ export class AsanaImportRun {
         continue;
       }
       if (this.ref('attachment', attachment.gid)) continue;
+      // An empty file has nothing to copy, and a link to it opens nothing:
+      // counted, not reported as a file left behind.
+      if (attachment.size === 0) {
+        this.counter('emptyFiles').done += 1;
+        continue;
+      }
 
       try {
         await this.copyAttachment(attachment, item.taskId);
