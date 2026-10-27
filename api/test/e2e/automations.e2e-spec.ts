@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { AI_CHECK_FIELD, API_PREFIX, MAX_AUTOMATION_DEPTH, WorkspaceRole } from '@coretask/contracts';
+import {
+  AI_CHECK_FIELD,
+  API_PREFIX,
+  MAX_AUTOMATION_DEPTH,
+  WorkspaceRole,
+} from '@coretask/contracts';
 import request from 'supertest';
 
 import type { AutomationEvent } from '../../src/modules/automations/automation-event.publisher';

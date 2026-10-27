@@ -379,7 +379,11 @@ export class AutomationMetadataService {
         label: 'Task or all subtasks completion status',
         valueKind: CONDITION_FIELD_KINDS.completed,
       },
-      { field: 'IS_SUBTASK', label: 'Task is a subtask', valueKind: CONDITION_FIELD_KINDS.IS_SUBTASK },
+      {
+        field: 'IS_SUBTASK',
+        label: 'Task is a subtask',
+        valueKind: CONDITION_FIELD_KINDS.IS_SUBTASK,
+      },
       {
         field: 'TASK_TYPE',
         label: 'Task type',
