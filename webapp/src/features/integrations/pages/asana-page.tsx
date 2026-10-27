@@ -226,8 +226,8 @@ export function AsanaPage() {
                 </p>
                 <p>
                   People are matched by e-mail. Anyone without a CoreTask account gets one with no
-                  password, which they claim with “Forgot password” at that address. Nobody is
-                  notified, and no rules run on imported tasks.
+                  password, which they claim by signing in with Google or Microsoft at that address,
+                  or with “Forgot password”. Nobody is notified, and no rules run on imported tasks.
                 </p>
               </div>
             </AlertDialogDescription>
