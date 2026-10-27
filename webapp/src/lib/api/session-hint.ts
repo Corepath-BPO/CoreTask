@@ -10,8 +10,8 @@
  * Three states, and the distinction matters:
  *
  * - `'1'`  signed in here → try to restore.
- * - `'0'`  known signed out (explicit logout, or a refresh that really failed)
- *          → skip the call.
+ * - `'0'`  known signed out (explicit logout, or a refresh the API refused —
+ *          see `isRefreshRefusal`) → skip the call.
  * - absent unknown → **try anyway**.
  *
  * "Unknown" must not mean "signed out". A browser that already held a valid
@@ -51,6 +51,19 @@ export function markSessionStarted(): void {
 /** Only for outcomes that prove no usable cookie remains. */
 export function markSignedOut(): void {
   write(SIGNED_OUT);
+}
+
+/**
+ * Whether a failed `/auth/refresh` proves the cookie is unusable.
+ *
+ * Only the API saying no does: 401 for a missing, expired or replayed token,
+ * 403 for a disabled account. A network error or a 5xx — the API still
+ * starting after a restart, a proxy timing out — says nothing about the
+ * cookie. Recording one of those as signed out skipped every later restore and
+ * stranded a live session on /login.
+ */
+export function isRefreshRefusal(status: number | undefined): boolean {
+  return status === 401 || status === 403;
 }
 
 /**

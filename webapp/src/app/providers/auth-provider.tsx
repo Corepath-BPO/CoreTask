@@ -1,10 +1,17 @@
 import { useEffect, useRef } from 'react';
 
 import { authApi } from '@/features/auth/api/auth.api';
+import { ApiError } from '@/lib/api/api-error';
 import { setUnauthenticatedHandler } from '@/lib/api/client';
 import { queryClient } from '@/lib/api/query-client';
-import { markSignedOut, shouldAttemptRestore } from '@/lib/api/session-hint';
+import { isRefreshRefusal, markSignedOut, shouldAttemptRestore } from '@/lib/api/session-hint';
 import { useAuthStore } from '@/stores/auth.store';
+
+/** How long a restore that failed for a reason other than a refusal waits to retry. */
+export const RESTORE_RETRY_DELAY_MS = 1_500;
+
+const isRefusal = (error: unknown): boolean =>
+  error instanceof ApiError && isRefreshRefusal(error.status);
 
 /**
  * Restores the session on boot.
@@ -47,10 +54,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     void authApi
       .refresh()
+      .catch(async (error: unknown) => {
+        // A blip — the API still coming up after a restart, say — gets one
+        // more try before this load gives up. A refusal will not change.
+        if (isRefusal(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, RESTORE_RETRY_DELAY_MS));
+        return authApi.refresh();
+      })
       .then(setSession)
-      .catch(() => {
-        // The cookie really is unusable, so record it and stop asking.
-        markSignedOut();
+      .catch((error: unknown) => {
+        // Only a refusal proves the cookie is unusable, so only a refusal is
+        // recorded. Anything else leaves the hint as it was, and the next load
+        // tries again instead of skipping the restore for good.
+        if (isRefusal(error)) markSignedOut();
         markAnonymous();
       });
   }, [setSession, markAnonymous]);

@@ -9,6 +9,7 @@ import axios, {
 import { env } from '@/app/config/env';
 
 import { ApiError } from './api-error';
+import { isRefreshRefusal } from './session-hint';
 
 /** A request that has already been retried once after a refresh. */
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
@@ -72,8 +73,14 @@ async function refreshAccessToken(): Promise<string | null> {
       const token = response.data.data.accessToken;
       setAccessToken(token);
       return token;
-    } catch {
-      setAccessToken(null);
+    } catch (error) {
+      // Only a refusal ends the session. On a network error or a 5xx the
+      // expired token stays, so the next request repeats this refresh; dropping
+      // it sent that request out bare, and its UNAUTHORIZED signed the user out
+      // over a blip.
+      if (axios.isAxiosError(error) && isRefreshRefusal(error.response?.status)) {
+        setAccessToken(null);
+      }
       return null;
     } finally {
       // Cleared on the next tick so concurrent callers all observe this result.
