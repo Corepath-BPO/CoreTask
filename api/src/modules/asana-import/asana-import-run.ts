@@ -16,7 +16,11 @@ import type { Logger } from '@nestjs/common';
 import { ImportRunStatus, ImportSource, Prisma } from '@prisma/client';
 
 import type { PrismaService } from '../../database/prisma.service';
-import type { AsanaApiClient, AsanaParams } from '../../integrations/asana/asana-api.client';
+import {
+  AsanaApiError,
+  type AsanaApiClient,
+  type AsanaParams,
+} from '../../integrations/asana/asana-api.client';
 import type {
   AsanaAttachment,
   AsanaCustomField,
@@ -1512,6 +1516,15 @@ export class AsanaImportRun {
         for (const gid of await this.searchSubtasks(filter)) found.add(gid);
       }
     } catch (error) {
+      /*
+       * Only Asana saying no means this organisation has no search. Anything
+       * else — a connection that stayed down through every retry, a 5xx — is
+       * not a reason to spend the rest of the day reading every subtask: the
+       * run ends, saying why, and syncing again finishes it.
+       */
+      if (!searchRefused(error)) {
+        throw new Error(`Asana search did not answer: ${readableError(error)}`);
+      }
       this.deps.logger.warn(
         { runId: this.runId, err: readableError(error) },
         'Asana search unavailable; reading every subtask’s history',
@@ -1796,6 +1809,19 @@ export async function pool<T>(
     }
   });
   await Promise.all(runners);
+}
+
+/**
+ * Asana answered the search and refused it: 402 on a plan without search, or
+ * another 4xx. A 429 that outlasted its retries is load, not a refusal.
+ */
+function searchRefused(error: unknown): boolean {
+  return (
+    error instanceof AsanaApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 429
+  );
 }
 
 /**
