@@ -199,6 +199,7 @@ describe('the automation catalogue', () => {
       createdAt: new Date('2025-12-31T10:00:00.000Z'),
       kind: 'APPROVAL',
       approvalStatus: 'PENDING',
+      parentTaskId: null,
     } as unknown as Task;
 
     const probed = [...READABLE_TASK_FIELDS, customFieldKey('field-risk')];
@@ -219,6 +220,13 @@ describe('the automation catalogue', () => {
 
       expect(value).not.toBe(FROM_THE_EVENT);
       expect(value).toBeDefined();
+    });
+
+    it('reads whether the task is a subtask from its parent, not from the event', () => {
+      const subtask = { ...task, parentTaskId: 'task-0' } as unknown as Task;
+
+      expect(readField('IS_SUBTASK', task, event)).toBe(false);
+      expect(readField('IS_SUBTASK', subtask, event)).toBe(true);
     });
 
     /*

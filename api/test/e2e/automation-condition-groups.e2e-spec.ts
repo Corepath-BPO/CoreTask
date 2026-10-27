@@ -157,6 +157,22 @@ describe('Automation condition groups (e2e)', () => {
 
   // -------------------------------------------------------------------------
   describe('running', () => {
+    it('tells a subtask from a top-level task', async () => {
+      // A subtask is a task in its parent's project, so "a task is added to
+      // this project" hears it too; this is how a rule keeps to the parents.
+      const scope = await setupScope();
+      const ruleId = await ruleChecking(scope, { field: 'IS_SUBTASK', operator: 'IS_NOT_CHECKED' });
+      await publish(scope, ruleId).expect(200);
+
+      const parentId = await task(scope, {});
+      await runner.handle(created(scope, parentId));
+      const subtaskId = await task(scope, { parentTaskId: parentId });
+      await runner.handle(created(scope, subtaskId));
+
+      expect(await context.prisma.comment.count({ where: { taskId: parentId } })).toBe(1);
+      expect(await context.prisma.comment.count({ where: { taskId: subtaskId } })).toBe(0);
+    });
+
     it('holds an "any of" group when one of its conditions does', async () => {
       const scope = await setupScope();
       const ruleId = await ruleChecking(scope, {

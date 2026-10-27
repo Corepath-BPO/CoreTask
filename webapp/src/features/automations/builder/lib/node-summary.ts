@@ -362,6 +362,10 @@ function conditionSummary(
   // value it is being compared against.
   if (operator === 'IS_EMPTY') return [{ text: `${label} is empty` }];
   if (operator === 'IS_NOT_EMPTY') return [{ text: `${label} is set` }];
+  // So does a yes-or-no one: "Task is a subtask is not checked" has no value
+  // to wait for, and an "Unspecified" chip after it would say it had.
+  if (operator === 'IS_CHECKED') return [{ text: `${label} is checked` }];
+  if (operator === 'IS_NOT_CHECKED') return [{ text: `${label} is not checked` }];
 
   const raw = config['value'];
 
@@ -516,6 +520,7 @@ const SYSTEM_FIELD_LABEL: Record<string, string> = {
   dueDate: 'Due date',
   startDate: 'Start date',
   title: 'Title',
+  IS_SUBTASK: 'Task is a subtask',
 };
 
 /**

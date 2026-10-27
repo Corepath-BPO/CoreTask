@@ -185,6 +185,18 @@ describe('what a node says', () => {
     expect(summary).toBe('Due date is empty');
   });
 
+  it('reads a yes-or-no check as finished, with no value to wait for', () => {
+    const summary = summarise(
+      node({
+        type: 'CONDITION',
+        configuration: { field: 'IS_SUBTASK', operator: 'IS_NOT_CHECKED' },
+      }),
+      metadata,
+    );
+
+    expect(summary).toBe('Task is a subtask is not checked');
+  });
+
   it('still reads without metadata, rather than rendering nothing', () => {
     // The canvas paints before the metadata query lands; a node blank for that
     // moment looks like a node that failed.
