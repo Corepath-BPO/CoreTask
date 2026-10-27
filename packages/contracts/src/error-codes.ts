@@ -88,6 +88,7 @@ export const ErrorCode = {
 
   // Slack
   SLACK_NOT_CONFIGURED: 'SLACK_NOT_CONFIGURED',
+  ASANA_NOT_CONFIGURED: 'ASANA_NOT_CONFIGURED',
   SLACK_NOT_CONNECTED: 'SLACK_NOT_CONNECTED',
   SLACK_ALREADY_CONNECTED: 'SLACK_ALREADY_CONNECTED',
   SLACK_INSTALL_INVALID: 'SLACK_INSTALL_INVALID',
@@ -204,6 +205,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
     'This workspace already has the maximum number of webhook endpoints.',
 
   SLACK_NOT_CONFIGURED: 'This CoreTask server has no Slack app set up.',
+  ASANA_NOT_CONFIGURED: 'This CoreTask server has no Asana access token set up.',
   SLACK_NOT_CONNECTED: 'Slack is not connected to this workspace.',
   SLACK_ALREADY_CONNECTED: 'That Slack workspace is already connected to CoreTask.',
   SLACK_INSTALL_INVALID:

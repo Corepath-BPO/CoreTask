@@ -10,7 +10,9 @@ import { EmailProcessor } from './jobs/email/email.processor';
 import { AutomationProcessor } from './jobs/automation/automation.processor';
 import { MaintenanceProcessor } from './jobs/maintenance/maintenance.processor';
 import { JobsModule } from './jobs/jobs.module';
+import { ImportProcessor } from './jobs/import/import.processor';
 import { WebhookProcessor } from './jobs/webhook/webhook.processor';
+import { AsanaImporterModule } from './modules/asana-import/asana-importer.module';
 import { AttachmentSweeperModule } from './modules/attachments/attachment-sweeper.module';
 import { AutomationClockModule } from './modules/automations/automation-clock.module';
 import { AutomationEventsModule } from './modules/automations/automation-events.module';
@@ -44,7 +46,15 @@ import { RedisModule } from './redis/redis.module';
     // The clock behind "scheduled time", "due date is approaching" and the rest.
     AutomationClockModule,
     WebhookDeliveryModule,
+    // Imports from other tools; Asana only, so far.
+    AsanaImporterModule,
   ],
-  providers: [EmailProcessor, MaintenanceProcessor, AutomationProcessor, WebhookProcessor],
+  providers: [
+    EmailProcessor,
+    MaintenanceProcessor,
+    AutomationProcessor,
+    WebhookProcessor,
+    ImportProcessor,
+  ],
 })
 export class WorkerModule {}

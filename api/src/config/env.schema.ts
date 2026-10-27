@@ -198,6 +198,23 @@ export const envSchema = z
     SLACK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
 
     /*
+     * Importing from Asana (docs/integrations/asana-import.md). A personal
+     * access token and the Asana workspace it reads; without the token
+     * Integrations › Asana says what is missing. The token is the server's,
+     * not a workspace's, so only people Asana lists in that workspace may
+     * start an import. Read-only: the importer only ever sends GETs.
+     * Secrets: .env only.
+     */
+    ASANA_ACCESS_TOKEN: optionalString,
+    ASANA_WORKSPACE_ID: optionalString,
+    ASANA_API_BASE_URL: z.string().url().default('https://app.asana.com/api/1.0'),
+    ASANA_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    /** Asana allows 1,500 a minute on paid plans and 150 on free ones. */
+    ASANA_MAX_REQUESTS_PER_MINUTE: z.coerce.number().int().min(10).max(1_500).default(1_200),
+    /** Requests in flight at once; Asana refuses more than 50 concurrent reads. */
+    ASANA_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
+
+    /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
      * from the base delay: 30 s, 1 m, 2 m, 4 m, 8 m by default.
      */

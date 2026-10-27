@@ -13,6 +13,8 @@ import {
   CUSTOM_FIELD_TYPES,
   GOAL_PROGRESS_SOURCES,
   GOAL_STATUSES,
+  IMPORT_RUN_STATUSES,
+  IMPORT_SOURCES,
   IDENTITY_PROVIDERS,
   MY_TASKS_BUCKETS,
   NOTIFICATION_TYPES,
@@ -80,6 +82,8 @@ describe('shared enums match the Prisma schema', () => {
     ['OAuthAppPolicy', OAUTH_APP_POLICIES],
     ['IdentityProvider', IDENTITY_PROVIDERS],
     ['SignInMethod', SIGN_IN_METHODS],
+    ['ImportSource', IMPORT_SOURCES],
+    ['ImportRunStatus', IMPORT_RUN_STATUSES],
   ];
 
   it.each(cases)('%s has identical members on both sides', (name, shared) => {

@@ -25,6 +25,7 @@ import {
 import { OAuthAppsPage } from '@/features/integrations/pages/oauth-apps-page';
 import { OAuthConsentPage } from '@/features/integrations/pages/oauth-consent-page';
 import { PlaygroundPage } from '@/features/integrations/pages/playground-page';
+import { AsanaPage } from '@/features/integrations/pages/asana-page';
 import { SlackPage } from '@/features/integrations/pages/slack-page';
 import { SlackCallbackPage, SlackLinkPage } from '@/features/integrations/pages/slack-return-pages';
 import { WebhooksPage } from '@/features/integrations/pages/webhooks-page';
@@ -420,6 +421,12 @@ const integrationsSlackRoute = createRoute({
   getParentRoute: () => integrationsRoute,
   path: '/slack',
   component: SlackPage,
+});
+
+const integrationsAsanaRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/asana',
+  component: AsanaPage,
 });
 
 /**
@@ -886,6 +893,7 @@ const routeTree = rootRoute.addChildren([
       integrationsOAuthAppsRoute,
       integrationsConnectedAppsRoute,
       integrationsSlackRoute,
+      integrationsAsanaRoute,
     ]),
     goalsRoute,
     calendarRoute,
