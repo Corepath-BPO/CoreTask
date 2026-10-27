@@ -369,6 +369,17 @@ export class AutomationMetadataService {
       },
       { field: 'createdAt', label: 'Created', valueKind: CONDITION_FIELD_KINDS.createdAt },
       { field: 'completedAt', label: 'Completed on', valueKind: CONDITION_FIELD_KINDS.completedAt },
+      /*
+       * Offered by the catalogue and read by the runner, but missing here, so
+       * the panel had no definition for either: its heading printed the key and
+       * "Choose an option" stayed empty and disabled, on a rule that ran fine.
+       */
+      {
+        field: 'completed',
+        label: 'Task or all subtasks completion status',
+        valueKind: CONDITION_FIELD_KINDS.completed,
+      },
+      { field: 'IS_SUBTASK', label: 'Task is a subtask', valueKind: CONDITION_FIELD_KINDS.IS_SUBTASK },
       {
         field: 'TASK_TYPE',
         label: 'Task type',

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { API_PREFIX, MAX_AUTOMATION_DEPTH, WorkspaceRole } from '@coretask/contracts';
+import { AI_CHECK_FIELD, API_PREFIX, MAX_AUTOMATION_DEPTH, WorkspaceRole } from '@coretask/contracts';
 import request from 'supertest';
 
 import type { AutomationEvent } from '../../src/modules/automations/automation-event.publisher';
@@ -3395,6 +3395,23 @@ describe('Automations (e2e)', () => {
       const status = metadata.conditionFields.find((field) => field.field === 'status');
       expect(status?.valueKind).toBe('ENUM');
       expect(status?.options?.length).toBeGreaterThan(0);
+    });
+
+    it('defines every condition it offers, so the panel can edit it', async () => {
+      const scope = await setupScope();
+      await addCustomField(scope, 'Stage');
+      const metadata = await readMetadata(scope);
+
+      // The panel finds a condition's name and comparisons here by its field;
+      // without one it prints the key and offers no comparison at all. The AI
+      // check asks a question rather than reading a field.
+      const fields = new Set(metadata.conditionFields.map((field) => field.field));
+      const undefinedFields = metadata.conditions
+        .filter((entry) => entry.available && entry.subtype !== AI_CHECK_FIELD)
+        .map((entry) => entry.subtype)
+        .filter((subtype) => !fields.has(subtype));
+
+      expect(undefinedFields).toEqual([]);
     });
 
     it('says which of the four move forms the engine can honour', async () => {
