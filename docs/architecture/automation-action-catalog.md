@@ -70,7 +70,15 @@ another project's section would be a tenancy hole rather than a mistake.
 `MOVE_TO_PROJECT` takes a `projectId` and an optional `targetSectionId`, under
 its own key so nothing that reads `sectionId` as "a section of this project"
 ever sees it. `mode: 'ADD'` adds the task to the other project and keeps it here
-too (multi-homing); the default moves it. A moved task:
+too (multi-homing); the default moves it.
+
+A task already in that project, as its home or linked in, is moved to the chosen
+section there, as Asana's "add to project in section" does. The move is raised
+in that project, so its "moved to a section" rules run. With no section chosen,
+or already in it, nothing changes. This is how "added to New PM Lease Starting:
+move it to IN LEASE in New Lease Starting" is built.
+
+A moved task:
 
 - **Section** — the chosen one, or the project's first; a project with no
   sections takes the task sectionless.

@@ -416,6 +416,18 @@ describe('moving a task to another project', () => {
     expect(onChange).toHaveBeenLastCalledWith({ projectId: 'p-2' });
   });
 
+  it('says an add moves a task already in that project to the section chosen', () => {
+    renderMove({ projectId: 'p-2', mode: 'ADD' });
+    expect(
+      screen.getByText(/A task already in that project moves to the section chosen here/),
+    ).toBeInTheDocument();
+  });
+
+  it('says nothing of that for a move, which takes the task out of here', () => {
+    renderMove({ projectId: 'p-2' });
+    expect(screen.queryByText(/A task already in that project/)).toBeNull();
+  });
+
   it('clears the project from the field itself', async () => {
     const user = setupUser();
     const onChange = renderMove({ projectId: 'p-2', targetSectionId: 's-22' });
