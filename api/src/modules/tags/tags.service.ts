@@ -110,9 +110,16 @@ export class TagsService {
       select: { taskId: true },
     });
     await this.prisma.tag.delete({ where: { id: tagId } });
-    for (const { taskId } of tagged.slice(0, 200)) {
-      void this.tasks.announceUpdated(workspaceId, taskId);
-    }
+    /*
+     * Awaited, not fired and forgotten. Left running past the response, these
+     * reads had nothing to catch them: a rejection nobody observes is one Node
+     * treats as fatal, and in the e2e suite they outlived the database and
+     * failed the run. Settled, so a broadcast that fails is not the delete's
+     * failure — the tag is gone either way.
+     */
+    await Promise.allSettled(
+      tagged.slice(0, 200).map(({ taskId }) => this.tasks.announceUpdated(workspaceId, taskId)),
+    );
   }
 
   /** Adds a tag by id, or by name — making it when no tag has that name yet. */
