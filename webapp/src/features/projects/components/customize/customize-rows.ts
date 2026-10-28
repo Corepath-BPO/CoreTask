@@ -46,7 +46,8 @@ export const CUSTOMIZE_GROUPS: CustomizeGroupDescriptor[] = [
   {
     id: 'ai-studio',
     label: 'AI Studio',
-    rows: [{ id: 'rules', label: 'Rules', icon: Zap, built: true }],
+    // Asana's name for them; the builder still calls each one a rule.
+    rows: [{ id: 'rules', label: 'Automations', icon: Zap, built: true }],
   },
   {
     id: 'workflow',

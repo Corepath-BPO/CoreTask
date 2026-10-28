@@ -31,6 +31,12 @@ vi.mock('@/features/automations/hooks/use-automations', async (importOriginal) =
   useAutomations: (...args: unknown[]) => automations(...args),
 }));
 
+// The rule list's save-to-library names; nothing in these tests saves one.
+vi.mock('@/features/automations/builder/hooks/use-automation-graph', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAutomationMetadata: () => ({ data: undefined, isLoading: false }),
+}));
+
 vi.mock('@/features/projects/hooks/use-forms', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useProjectForms: (...args: unknown[]) => forms(...args),
@@ -148,7 +154,7 @@ describe('CustomizePanel', () => {
     expect(screen.getByText('Workflow features')).toBeInTheDocument();
 
     for (const label of [
-      'Rules',
+      'Automations',
       'Fields',
       'Forms',
       'Emails',
@@ -164,7 +170,7 @@ describe('CustomizePanel', () => {
   it('counts the rules, and only the fields that are not archived', async () => {
     await renderPanel().result;
 
-    expect(screen.getByRole('button', { name: /Rules/ })).toHaveTextContent('11');
+    expect(screen.getByRole('button', { name: /^Automations/ })).toHaveTextContent('11');
     expect(screen.getByRole('button', { name: /^Fields/ })).toHaveTextContent('7');
     expect(screen.getByRole('button', { name: /^Forms/ })).toHaveTextContent('2');
     expect(screen.getByRole('button', { name: /Task types and templates/ })).toHaveTextContent('1');
@@ -182,7 +188,7 @@ describe('CustomizePanel', () => {
 
     await renderPanel().result;
 
-    expect(screen.getByRole('button', { name: /Rules/ })).not.toHaveTextContent(/\d/);
+    expect(screen.getByRole('button', { name: /^Automations/ })).not.toHaveTextContent(/\d/);
     expect(screen.getByRole('button', { name: /^Fields/ })).not.toHaveTextContent(/\d/);
   });
 
@@ -243,13 +249,14 @@ describe('CustomizePanel', () => {
     expect(screen.getByRole('heading', { name: 'Fields' })).toBeInTheDocument();
   });
 
-  it('opens the Rules section listing every rule', async () => {
+  it('opens the Automations section listing every rule', async () => {
     const user = setupUser();
     await renderPanel().result;
 
-    await user.click(screen.getByRole('button', { name: /Rules/ }));
+    await user.click(screen.getByRole('button', { name: /^Automations/ }));
 
-    expect(screen.getByRole('heading', { name: 'Rules' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Automations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In this project' })).toBeInTheDocument();
     expect(screen.getByText('Rule 0')).toBeInTheDocument();
     expect(screen.getByText('Rule 10')).toBeInTheDocument();
   });
