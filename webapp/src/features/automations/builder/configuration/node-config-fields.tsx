@@ -701,6 +701,7 @@ const ADD_OPTION = 'ADD';
  * because that is the shape somebody arriving from there expects to find.
  * "Move" takes the task out of this project; "Add" (stored as `mode: 'ADD'`)
  * leaves it here and puts it in the other project too, in the section chosen.
+ * A task already in that project moves to the section chosen, as in Asana.
  *
  * The section list follows the chosen project, and changing the project clears
  * the section: a section id means nothing in another project, and keeping it
@@ -848,7 +849,11 @@ function MoveToProjectFields({
       <Field
         label="Choose a column/section"
         htmlFor="step-targetSectionId"
-        hint="Left blank, the task lands in the project’s first section."
+        hint={
+          read('mode') === ADD_OPTION
+            ? 'Left blank, the task lands in the project’s first section. A task already in that project moves to the section chosen here.'
+            : 'Left blank, the task lands in the project’s first section.'
+        }
       >
         <Select
           value={read('targetSectionId')}

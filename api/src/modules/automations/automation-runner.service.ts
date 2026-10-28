@@ -2854,8 +2854,14 @@ export class AutomationRunnerService {
   /**
    * "Add task to another project" — multi-homing from a rule. The task keeps
    * its home and its place here, and gains a place in the other project: the
-   * section chosen, or that project's first. Already there is nothing to do,
-   * and says so rather than failing, so a rule that runs twice stays quiet.
+   * section chosen, or that project's first.
+   *
+   * Already there, it moves to the chosen section, as Asana's "add to project
+   * in section" does. That is how a rule in one project moves a task on in
+   * another it also lives in: "added to New PM Lease Starting" puts its card
+   * in New Lease Starting at IN LEASE. With no section chosen, or already in
+   * it, there is nothing to do, and it says so rather than failing, so a rule
+   * that runs twice stays quiet.
    */
   private async addToProject(
     task: EvaluableTask,
@@ -2871,13 +2877,6 @@ export class AutomationRunnerService {
     if (!target) {
       return { succeeded: false, message: 'That project is no longer in this workspace.' };
     }
-    const linked = await this.prisma.taskProject.findUnique({
-      where: { taskId_projectId: { taskId: task.id, projectId } },
-      select: { taskId: true },
-    });
-    if (task.projectId === projectId || linked) {
-      return { succeeded: true, message: 'The task is already in that project.' };
-    }
 
     const sectionId =
       (requestedSectionId
@@ -2885,6 +2884,18 @@ export class AutomationRunnerService {
         : target.sections[0]?.id) ?? null;
     if (requestedSectionId && !sectionId) {
       return { succeeded: false, message: 'That section is no longer in the chosen project.' };
+    }
+
+    const linked = await this.prisma.taskProject.findUnique({
+      where: { taskId_projectId: { taskId: task.id, projectId } },
+      select: { sectionId: true },
+    });
+    if (task.projectId === projectId || linked) {
+      const from = task.projectId === projectId ? task.sectionId : (linked?.sectionId ?? null);
+      if (!requestedSectionId || from === sectionId) {
+        return { succeeded: true, message: 'The task is already in that project.' };
+      }
+      return this.moveWithin(task, rule, event, projectId, from, sectionId);
     }
 
     await this.prisma.taskProject.create({
@@ -2897,6 +2908,53 @@ export class AutomationRunnerService {
       },
     });
     return { succeeded: true, before: null, after: { projectId, sectionId } };
+  }
+
+  /**
+   * A task already in another project, moved to one of that project's
+   * sections: its own section when that project is its home, its place there
+   * when it is linked in. Either way the move is raised in that project, so
+   * its "moved to a section" rules see it, as they see a person's drag.
+   */
+  private async moveWithin(
+    task: EvaluableTask,
+    rule: RunnableRule,
+    event: AutomationEvent,
+    projectId: string,
+    from: string | null,
+    sectionId: string | null,
+  ): Promise<ActionOutcome> {
+    const before = { projectId, sectionId: from };
+    const after = { projectId, sectionId };
+
+    if (task.projectId === projectId) {
+      const events = await this.updateTask(task, { sectionId }, rule, event);
+      return { succeeded: true, before, after, events };
+    }
+
+    await this.prisma.taskProject.update({
+      where: { taskId_projectId: { taskId: task.id, projectId } },
+      data: {
+        sectionId,
+        position: await endOfSection(this.prisma, rule.workspaceId, projectId, sectionId),
+      },
+    });
+    return {
+      succeeded: true,
+      before,
+      after,
+      events: [
+        this.follow(
+          rule,
+          event,
+          AutomationTrigger.TASK_MOVED_TO_SECTION,
+          task.id,
+          { sectionId: from },
+          { sectionId },
+          projectId,
+        ),
+      ],
+    };
   }
 
   /**

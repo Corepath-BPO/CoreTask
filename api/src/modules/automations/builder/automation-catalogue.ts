@@ -1133,10 +1133,11 @@ const ACTION_SPECS: readonly ActionSpec[] = [
      * What becomes of what the task carries is decided in the runner, and the
      * description says the half somebody building the rule needs: the task
      * lands in a section of the chosen project and keeps its field values.
-     * "Add" (`mode: 'ADD'`) keeps it here as well — multi-homing.
+     * "Add" (`mode: 'ADD'`) keeps it here as well — multi-homing — and moves
+     * a task already there to the chosen section, as Asana's does.
      */
     description:
-      'Move the task, or add it there too; it lands in the chosen section, or the project’s first one.',
+      'Move the task, or add it there too; it lands in the chosen section, or the project’s first one. Added to a project it is already in, it moves to the chosen section.',
   },
   {
     subtype: AutomationAction.REMOVE_FROM_PROJECT,

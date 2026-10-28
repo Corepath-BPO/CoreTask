@@ -300,6 +300,61 @@ describe('Automations (e2e)', () => {
       expect(await context.prisma.taskProject.count({ where: { taskId: scope.taskId } })).toBe(1);
     });
 
+    it('moves a task already in the other project to the section chosen there', async () => {
+      const scope = await setupScope();
+      const sibling = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'New Lease Starting' })
+        .expect(201);
+      const targetProjectId = sibling.body.data.id as string;
+      const inLease = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects/${targetProjectId}/sections`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'IN LEASE' })
+        .expect(201);
+      const inLeaseId = inLease.body.data.id as string;
+      const firstSectionId = (sibling.body.data.sections as { id: string }[])[0]?.id ?? null;
+
+      // Already linked in there, in its first section, as a person put it.
+      await context.prisma.taskProject.create({
+        data: { taskId: scope.taskId, projectId: targetProjectId, sectionId: firstSectionId },
+      });
+
+      await publishGraph(scope, [
+        { id: 't', nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION', parentId: null },
+        {
+          id: 'a',
+          nodeType: 'ACTION',
+          subtype: 'MOVE_TO_PROJECT',
+          parentId: 't',
+          configuration: { projectId: targetProjectId, targetSectionId: inLeaseId, mode: 'ADD' },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+      expect(result.executed).toBe(1);
+
+      const link = await context.prisma.taskProject.findUniqueOrThrow({
+        where: { taskId_projectId: { taskId: scope.taskId, projectId: targetProjectId } },
+      });
+      expect(link.sectionId).toBe(inLeaseId);
+
+      // Raised there, so that project's own section rules hear the card arrive.
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          trigger: 'TASK_MOVED_TO_SECTION',
+          projectId: targetProjectId,
+          before: { sectionId: firstSectionId },
+          after: { sectionId: inLeaseId },
+        }),
+      ]);
+
+      // Already at IN LEASE, a second run leaves it and says nothing.
+      const again = await runner.handle(moveEvent(scope));
+      expect(again.events).toEqual([]);
+    });
+
     it('fills variables into the titles of the subtasks it creates', async () => {
       const scope = await setupScope();
 
