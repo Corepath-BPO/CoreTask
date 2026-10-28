@@ -95,15 +95,28 @@ export interface CatalogueCustomField {
 }
 
 /**
- * The fields a rule can watch, compare or write.
+ * The fields a rule can watch or write.
  *
- * A computed field is none of those: its value is never on the row the
- * engine loads, and writing it would be overwritten by the next read. It is
- * left out of every generated row rather than shown greyed, because there is
- * no configuration under which it becomes available.
+ * A computed field is neither: nothing changes it, so no event says it did,
+ * and writing it would be overwritten by the next read. It is left out of
+ * those generated rows rather than shown greyed, because there is no
+ * configuration under which it becomes available.
  */
 function settable(fields: readonly CatalogueCustomField[]): CatalogueCustomField[] {
   return fields.filter((field) => !isComputedFieldType(field.type as CustomFieldType));
+}
+
+/**
+ * The fields a condition can compare: the settable ones, and formulas.
+ *
+ * A formula's number is worked out with the task when a rule runs — see
+ * `AutomationRunnerService.formulasFor` — so "Days to complete is under 1"
+ * reads what the board shows.
+ */
+function comparable(fields: readonly CatalogueCustomField[]): CatalogueCustomField[] {
+  return fields.filter(
+    (field) => !isComputedFieldType(field.type as CustomFieldType) || field.type === 'FORMULA',
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -235,15 +248,14 @@ export function kindForCustomFieldType(type: string | undefined): ConditionValue
     case 'URL':
     case 'EMAIL':
       return ConditionValueKind.TEXT;
+    // A formula is a number too, worked out with the task when a rule runs.
+    // Rules compare it; they never set it, and `settable` keeps it out of actions.
     case 'NUMBER':
     case 'RATING':
+    case 'FORMULA':
       return ConditionValueKind.NUMBER;
     case 'DATE':
       return ConditionValueKind.DATE;
-    // A formula is worked out on read; a rule can neither compare a value it
-    // cannot load off the row nor set one. It has no kind, so no row.
-    case 'FORMULA':
-      return undefined;
     case 'CHECKBOX':
       return ConditionValueKind.BOOLEAN;
     case 'SINGLE_SELECT':
@@ -953,6 +965,8 @@ const VALUE_TYPE_BY_FIELD_TYPE: Record<string, ConditionValueType> = {
   NUMBER: CONDITION_VALUE_TYPE.NUMBER,
   // A rating is a bounded whole number; the comparisons are the number ones.
   RATING: CONDITION_VALUE_TYPE.NUMBER,
+  // So is a formula, as the runner works it out.
+  FORMULA: CONDITION_VALUE_TYPE.NUMBER,
   DATE: CONDITION_VALUE_TYPE.DATE,
   CHECKBOX: CONDITION_VALUE_TYPE.CHECKBOX,
   SINGLE_SELECT: CONDITION_VALUE_TYPE.SINGLE_SELECT,
@@ -976,7 +990,7 @@ export function conditionCatalogue(
   /** Whether a model is configured, which the AI check needs. */
   ai = false,
 ): AutomationConditionEntry[] {
-  const generated: AutomationConditionEntry[] = settable(fields).map((field) => ({
+  const generated: AutomationConditionEntry[] = comparable(fields).map((field) => ({
     ...toConditionEntry({
       subtype: customFieldKey(field.id),
       label: `${field.name} is…`,

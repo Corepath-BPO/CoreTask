@@ -76,6 +76,7 @@ import { AiUnavailableError } from '../../integrations/ai/ai-client';
 import { RealtimeRelayPublisher } from '../../websocket/realtime-relay.publisher';
 import { diffItemStories, snapshotFromTask } from '../activity-logs/item-stories';
 import { toValueDto } from '../custom-fields/custom-field-value.mapper';
+import { FormulaValuesService } from '../custom-fields/formula-values.service';
 import { labelValue } from '../custom-fields/lib/value-labels';
 
 import { completionData, priorityData, readActionId, statusData } from './action-config';
@@ -177,7 +178,15 @@ export interface AutomationRunResult {
  * The task as conditions read it: its own columns plus its custom-field values,
  * loaded together so evaluation never reaches for the database mid-walk.
  */
-type EvaluableTask = Task & { customFieldValues?: TaskCustomFieldValue[]; facts?: TaskFacts };
+type EvaluableTask = Task & {
+  customFieldValues?: TaskCustomFieldValue[];
+  facts?: TaskFacts;
+  /**
+   * The project's formula fields, worked out from the values above when the
+   * task was loaded. A formula is never stored, so there is no row to read.
+   */
+  formulaValues?: ReadonlyMap<string, number | null>;
+};
 
 /**
  * What a rule's words can name: the task — or ticket — it acted on. A ticket
@@ -271,12 +280,18 @@ interface AiCheckRecord {
 export class AutomationRunnerService {
   private readonly logger = new Logger(AutomationRunnerService.name);
 
+  private readonly formulaValues: FormulaValuesService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly relay: RealtimeRelayPublisher,
     /** The AI steps. Absent, as in a test that builds the runner by hand, they fail with a reason. */
     private readonly ai?: AutomationAiService,
-  ) {}
+    /** Formula fields for conditions. Built on Prisma when a test builds the runner by hand. */
+    formulaValues?: FormulaValuesService,
+  ) {
+    this.formulaValues = formulaValues ?? new FormulaValuesService(prisma);
+  }
 
   /**
    * Finds the rules matching an event and runs each one.
@@ -719,7 +734,8 @@ export class AutomationRunnerService {
       }),
     ]);
     const facts: TaskFacts = { attachments, comments, openBlockers };
-    const live: EvaluableTask = { ...row, facts };
+    const formulaValues = await this.formulasFor(event.projectId, row.id, row.customFieldValues);
+    const live: EvaluableTask = { ...row, facts, formulaValues };
 
     return {
       live,
@@ -727,8 +743,43 @@ export class AutomationRunnerService {
         ...row,
         customFieldValues: row.customFieldValues.map((value) => ({ ...value })),
         facts: { ...facts },
+        formulaValues,
       },
     };
+  }
+
+  /**
+   * The formula fields on the event's project, worked out for this task.
+   *
+   * Formulas are calculated when read and never stored, so a condition on one
+   * had nothing to compare. "Days to complete is under 1" read empty and never
+   * held. They are worked out here once per event, from the values loaded with
+   * the task and the same evaluator the task list uses, so a rule sees the
+   * number the board shows. A project with no formula fields costs one indexed
+   * query and nothing more.
+   */
+  private async formulasFor(
+    projectId: string | undefined,
+    taskId: string,
+    rows: readonly TaskCustomFieldValue[],
+  ): Promise<ReadonlyMap<string, number | null> | undefined> {
+    if (!projectId) return undefined;
+    const plan = await this.formulaValues.plan(projectId);
+    if (!plan) return undefined;
+
+    const computed = this.formulaValues.compute(plan, [
+      {
+        taskId,
+        values: rows.map((row) => ({
+          customFieldId: row.customFieldId,
+          number: row.numberValue === null ? null : Number(row.numberValue),
+          date: row.dateValue?.toISOString() ?? null,
+        })),
+      },
+    ]);
+    return new Map(
+      (computed.get(taskId) ?? []).map((value) => [value.customFieldId, value.number]),
+    );
   }
 
   private async runRule(
@@ -1595,6 +1646,9 @@ export class AutomationRunnerService {
      */
     if (field.startsWith('customField:')) {
       const fieldId = field.slice('customField:'.length);
+
+      // A formula has no row: its number was worked out with the task.
+      if (task.formulaValues?.has(fieldId)) return task.formulaValues.get(fieldId) ?? null;
 
       return customFieldActual(
         task.customFieldValues?.find((row) => row.customFieldId === fieldId),

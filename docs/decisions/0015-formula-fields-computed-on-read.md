@@ -58,3 +58,6 @@ bulk bar, the rule builder and the import leave it out by one rule.
   blank without a word, which is worse than being told.
 - Dates in `days_between` and `today()` are compared at UTC midnight, so a
   formula's value does not depend on which side of midnight the reader is.
+- Later (October 2026): rule conditions read formulas too. The runner works
+  them out once per event from the task it loads, so they are still never
+  stored. A formula is still never a trigger or an action.

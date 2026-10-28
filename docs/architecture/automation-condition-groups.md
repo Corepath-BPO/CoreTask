@@ -137,6 +137,13 @@ prefixed form for anything indirected — `customField:<id>`. The prefix is what
 stops a custom field named "status" from colliding with the task's own status
 column.
 
+A formula field is compared as a number. Its value is never stored, so the
+runner works out the project's formulas once per event, when it loads the task
+(`formulasFor`), with the same evaluator the task list uses. "Days to complete
+is less than 1" therefore reads what the board shows. A formula is a condition
+only: nothing changes it, so it is never a trigger, and nothing may set it, so
+it is never an action.
+
 The value's shape follows the operator, not the field: a scalar for `IS`, an
 array for `IS_ONE_OF`, nothing at all for `IS_EMPTY`. `operatorTakesValue` in
 `@coretask/contracts` is the single answer to which is which, shared with the

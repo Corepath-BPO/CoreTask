@@ -1,4 +1,5 @@
 import {
+  CONDITION_VALUE_TYPE,
   CUSTOM_FIELD_TYPES,
   CustomFieldType,
   defaultOperatorForConditionField,
@@ -81,7 +82,7 @@ describe('every field type a project can hold', () => {
     }
   });
 
-  it('leaves a formula out of all three, since nothing can watch, compare or set it', () => {
+  it('offers a formula as a condition only: a rule compares it, never watches or sets it', () => {
     const formula: CatalogueCustomField = {
       id: 'field-total',
       name: 'Total',
@@ -91,9 +92,18 @@ describe('every field type a project can hold', () => {
     expect(triggerCatalogue([formula]).some((entry) => entry.fieldId === 'field-total')).toBe(
       false,
     );
-    expect(conditionCatalogue([formula]).some((entry) => entry.fieldId === 'field-total')).toBe(
-      false,
-    );
     expect(actionCatalogue([formula]).some((entry) => entry.fieldId === 'field-total')).toBe(false);
+
+    // Compared as the number the runner works out with the task.
+    const condition = conditionCatalogue([formula]).find(
+      (entry) => entry.fieldId === 'field-total',
+    );
+    expect(condition).toMatchObject({ available: true, valueType: CONDITION_VALUE_TYPE.NUMBER });
+    for (const operator of operatorsForConditionField(condition!.subtype, condition!.valueType)) {
+      expect({ operator, evaluable: isEvaluableOperator(operator) }).toEqual({
+        operator,
+        evaluable: true,
+      });
+    }
   });
 });

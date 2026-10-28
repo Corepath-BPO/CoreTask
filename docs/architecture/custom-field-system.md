@@ -58,7 +58,9 @@ Two of the eleven deserve a word:
   editor shows `{Effort}` and converts at the edges. A formula may not name
   itself, loop through another formula, nest more than five deep, or reference
   more than twenty fields. Its cell is read-only for everybody, `PUT` on it is a
-  `422`, and it is hidden from the bulk bar, the rule builder and the import.
+  `422`, and it is hidden from the bulk bar and the import. The rule builder
+  offers it as a condition only, compared as a number the runner works out
+  when the rule runs; never as a trigger or an action.
   Because nothing is stored there is nothing to filter or sort on; a filter
   naming a formula is refused by name.
 

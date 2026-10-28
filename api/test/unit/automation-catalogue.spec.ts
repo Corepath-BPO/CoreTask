@@ -482,7 +482,7 @@ describe('the automation catalogue', () => {
       expect(generated.every((entry) => entry.available && entry.reason === null)).toBe(true);
     });
 
-    it('treats a rating as a number, and leaves a formula out entirely', () => {
+    it('treats a rating as a number, and a formula as a number to compare, never set', () => {
       const mixed: CatalogueCustomField[] = [
         { id: 'field-stars', name: 'Stars', type: 'RATING' },
         { id: 'field-total', name: 'Total', type: 'FORMULA' },
@@ -491,8 +491,14 @@ describe('the automation catalogue', () => {
       const generatedConditions = conditionCatalogue(mixed).filter(
         (entry) => entry.category === CONDITION_CATEGORY.CUSTOM_FIELD,
       );
-      expect(generatedConditions.map((entry) => entry.fieldId)).toEqual(['field-stars']);
-      expect(generatedConditions[0]?.valueType).toBe(CONDITION_VALUE_TYPE.NUMBER);
+      expect(generatedConditions.map((entry) => entry.fieldId)).toEqual([
+        'field-stars',
+        'field-total',
+      ]);
+      expect(generatedConditions.map((entry) => entry.valueType)).toEqual([
+        CONDITION_VALUE_TYPE.NUMBER,
+        CONDITION_VALUE_TYPE.NUMBER,
+      ]);
 
       const generatedActions = actionCatalogue(mixed).filter(
         (entry) => entry.category === ACTION_CATEGORY.CHANGE_CUSTOM_FIELD,
