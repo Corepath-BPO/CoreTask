@@ -1,4 +1,5 @@
 import {
+  AI_DRAFT_PROMPT_MAX,
   AUTOMATION_EXECUTIONS_PAGE_SIZE,
   AUTOMATION_NODE_TYPES,
   AUTOMATION_TRIGGERS,
@@ -206,6 +207,18 @@ export class ExecutionsQueryDto extends PaginationQueryDto {
   @Min(1)
   @Max(PAGINATION_MAX_LIMIT)
   override limit: number = AUTOMATION_EXECUTIONS_PAGE_SIZE;
+}
+
+export class DraftRuleDto {
+  @ApiProperty({
+    example: 'When a task moves to Week 1, assign it to Sam and set the due date to Friday',
+    maxLength: AI_DRAFT_PROMPT_MAX,
+  })
+  @Transform(trim)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(AI_DRAFT_PROMPT_MAX)
+  prompt!: string;
 }
 
 export class RevertRuleDto {

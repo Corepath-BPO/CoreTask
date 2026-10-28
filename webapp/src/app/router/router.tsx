@@ -1,4 +1,11 @@
-import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
+import type { AutomationDraft } from '@coretask/types';
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  redirect,
+  useLocation,
+} from '@tanstack/react-router';
 
 import { AppLayout } from '@/app/layouts/app-layout';
 import { AuthLayout } from '@/app/layouts/auth-layout';
@@ -34,6 +41,7 @@ import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
 import { AutomationBuilderDialog } from '@/features/automations/builder/components/automation-builder-dialog';
 import { AddAutomationDialog } from '@/features/automations/components/add-automation-dialog';
+import { readDraft } from '@/features/automations/lib/drafted-rule';
 import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectActivityPage } from '@/features/projects/pages/project-activity-page';
 import { ProjectFilesPage } from '@/features/projects/pages/project-files-page';
@@ -696,6 +704,11 @@ const projectAutomationNewRoute = createRoute({
   component: function AutomationNewRoute() {
     const { projectId } = projectAutomationNewRoute.useParams();
     const { sectionId, starter } = projectAutomationNewRoute.useSearch();
+    // A rule drafted from a sentence on the Add automation page, which rides
+    // in the history entry rather than the address — see `drafted-rule.ts`.
+    const drafted = useLocation({
+      select: (location) => readDraft(location.state.automationDraft),
+    });
 
     /*
      * Keyed on what shapes the canvas. A starter chosen from inside the
@@ -704,11 +717,12 @@ const projectAutomationNewRoute = createRoute({
      */
     return (
       <AutomationBuilderDialog
-        key={`${starter ?? ''}:${sectionId ?? ''}`}
+        key={`${starter ?? ''}:${sectionId ?? ''}:${drafted ? 'drafted' : ''}`}
         projectId={projectId}
         ruleId={null}
         {...(sectionId ? { sectionId } : {})}
         {...(starter ? { starter } : {})}
+        {...(drafted ? { drafted } : {})}
       />
     );
   },
@@ -928,5 +942,10 @@ export const router = createRouter({
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
+  }
+
+  interface HistoryState {
+    /** A rule drafted on the Add automation page, for the new-rule builder to open. */
+    automationDraft?: AutomationDraft;
   }
 }

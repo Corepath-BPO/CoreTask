@@ -17,17 +17,20 @@ import { makeNodeUnder, makeTrigger, type CanvasNode } from '../builder/lib/grap
  * validator refuses to publish until somebody says — so a starter is a rule
  * half-written in the shape that works, never one that runs before it is read.
  */
+/** A step a rule opens with, hung under the one before it. */
+export interface ChainStep {
+  type: Extract<AutomationNodeType, 'ACTION' | 'CONDITION'>;
+  subtype: string;
+  configuration?: Record<string, unknown>;
+}
+
 export interface StarterTemplate {
   /** Stable, url-safe. Travels in `?starter=` to the builder. */
   key: string;
   name: string;
   description: string;
   trigger: AutomationTrigger;
-  steps: readonly {
-    type: Extract<AutomationNodeType, 'ACTION' | 'CONDITION'>;
-    subtype: string;
-    configuration?: Record<string, unknown>;
-  }[];
+  steps: readonly ChainStep[];
 }
 
 export const STARTER_TEMPLATES: readonly StarterTemplate[] = [
@@ -95,12 +98,19 @@ export function findStarter(key: string | undefined): StarterTemplate | undefine
  */
 export function makeStarterNodes(starter: StarterTemplate, sectionId?: string): CanvasNode[] {
   const scoped = sectionId && starter.trigger === AutomationTrigger.TASK_MOVED_TO_SECTION;
-  const trigger = makeTrigger(starter.trigger, scoped ? { sectionId } : {});
 
+  return makeChainNodes(makeTrigger(starter.trigger, scoped ? { sectionId } : {}), starter.steps);
+}
+
+/**
+ * A trigger with steps under it, each hanging off the one before: the shape
+ * of a starter, and of a rule drafted from a sentence.
+ */
+export function makeChainNodes(trigger: CanvasNode, steps: readonly ChainStep[]): CanvasNode[] {
   const nodes: CanvasNode[] = [trigger];
   let parent = trigger;
 
-  for (const step of starter.steps) {
+  for (const step of steps) {
     const node: CanvasNode = {
       ...makeNodeUnder(step.type, step.subtype, parent.id, null, nodes),
       configuration: { ...(step.configuration ?? {}) },
