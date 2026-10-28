@@ -1,32 +1,51 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AutomationBuilderHeader, type SaveState } from './automation-builder-header';
+import { setupUser } from '@/test/test-utils';
 
-function renderHeader(
+import {
+  AutomationBuilderHeader,
+  type BuilderView,
+  type SaveState,
+} from './automation-builder-header';
+
+function renderHeader({
+  status = 'DRAFT',
+  publishedVersion = null,
+  hasUnpublishedChanges = false,
+  view = 'build',
+  activityAvailable = true,
+  canTurnOn = true,
   canSave = true,
+  save = 'idle',
   canSaveToLibrary = true,
   canBrowseLibrary = true,
-  {
-    autosaves = false,
-    status = 'DRAFT',
-    save = 'idle',
-    publishedVersion = null,
-    hasUnpublishedChanges = false,
-    canPublish = false,
-  }: {
-    autosaves?: boolean;
-    status?: string;
-    save?: SaveState;
-    publishedVersion?: number | null;
-    hasUnpublishedChanges?: boolean;
-    canPublish?: boolean;
-  } = {},
-) {
-  const onSave = vi.fn();
-  const onShowHistory = vi.fn();
-  const onSaveToLibrary = vi.fn();
-  const onBrowseLibrary = vi.fn();
+  withHistory = false,
+  withDelete = false,
+}: {
+  status?: string;
+  publishedVersion?: number | null;
+  hasUnpublishedChanges?: boolean;
+  view?: BuilderView;
+  activityAvailable?: boolean;
+  canTurnOn?: boolean;
+  canSave?: boolean;
+  save?: SaveState;
+  canSaveToLibrary?: boolean;
+  canBrowseLibrary?: boolean;
+  withHistory?: boolean;
+  withDelete?: boolean;
+} = {}) {
+  const handlers = {
+    onViewChange: vi.fn(),
+    onToggleLive: vi.fn(),
+    onSave: vi.fn(),
+    onClose: vi.fn(),
+    onShowHistory: vi.fn(),
+    onDelete: vi.fn(),
+    onSaveToLibrary: vi.fn(),
+    onBrowseLibrary: vi.fn(),
+  };
 
   render(
     <AutomationBuilderHeader
@@ -34,112 +53,161 @@ function renderHeader(
       status={status}
       publishedVersion={publishedVersion}
       hasUnpublishedChanges={hasUnpublishedChanges}
-      {...(publishedVersion !== null ? { onShowHistory } : {})}
       name="Assign incoming work"
       onNameChange={vi.fn()}
+      view={view}
+      onViewChange={handlers.onViewChange}
+      activityAvailable={activityAvailable}
+      canTurnOn={canTurnOn}
+      toggling={false}
+      onToggleLive={handlers.onToggleLive}
       settingsOpen={false}
       onToggleSettings={vi.fn()}
       save={save}
       saving={false}
       canSave={canSave}
-      autosaves={autosaves}
-      onSave={onSave}
+      onSave={handlers.onSave}
       issues={[]}
       onFocusIssue={vi.fn()}
-      publishing={false}
-      canPublish={canPublish}
-      onPublish={vi.fn()}
-      onSaveToLibrary={onSaveToLibrary}
+      {...(withHistory ? { onShowHistory: handlers.onShowHistory } : {})}
+      {...(withDelete ? { onDelete: handlers.onDelete } : {})}
+      onSaveToLibrary={handlers.onSaveToLibrary}
       canSaveToLibrary={canSaveToLibrary}
-      onBrowseLibrary={onBrowseLibrary}
+      onBrowseLibrary={handlers.onBrowseLibrary}
       canBrowseLibrary={canBrowseLibrary}
-      onClose={vi.fn()}
+      onClose={handlers.onClose}
     />,
   );
 
-  return { onSave, onSaveToLibrary, onBrowseLibrary, onShowHistory };
+  return handlers;
 }
 
 describe('AutomationBuilderHeader', () => {
-  it('provides a visible draft save action', () => {
-    const { onSave } = renderHeader();
+  it('turns a draft on with the switch beside its name', async () => {
+    const user = setupUser();
+    const { onToggleLive } = renderHeader();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    const toggle = screen.getByRole('switch', { name: 'Turn this rule on' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('Draft')).toBeInTheDocument();
 
-    expect(onSave).toHaveBeenCalledOnce();
+    await user.click(toggle);
+    expect(onToggleLive).toHaveBeenCalledWith(true);
   });
 
-  it('offers the library from the rule itself, off until there is a rule to save', () => {
-    const { onSaveToLibrary } = renderHeader();
+  it('will not turn on a rule that cannot be published yet', () => {
+    renderHeader({ canTurnOn: false });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save to library' }));
-    expect(onSaveToLibrary).toHaveBeenCalledOnce();
-
-    renderHeader(true, false);
-    expect(screen.getAllByRole('button', { name: 'Save to library' }).at(-1)).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Turn this rule on' })).toBeDisabled();
   });
 
-  it('opens the library from the canvas, but not over unsaved work', () => {
-    const { onBrowseLibrary } = renderHeader();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Browse the rule library' }));
-    expect(onBrowseLibrary).toHaveBeenCalledOnce();
-
-    renderHeader(true, true, false);
-    expect(
-      screen.getAllByRole('button', { name: 'Browse the rule library' }).at(-1),
-    ).toBeDisabled();
-  });
-
-  it('disables saving until the draft has a valid change', () => {
-    renderHeader(false);
-
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
-  });
-
-  it('drops the button for a rule that saves itself, until a save fails', () => {
-    renderHeader(true, true, true, { autosaves: true, save: 'saved' });
-    expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Saved');
-
-    renderHeader(true, true, true, { autosaves: true, save: 'error' });
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
-  });
-
-  it('names the running version and says when the draft differs from it', () => {
-    renderHeader(true, true, true, {
+  it('turns a live rule off, and names the version running', async () => {
+    const user = setupUser();
+    const { onToggleLive } = renderHeader({
       status: 'ACTIVE',
-      autosaves: true,
-      save: 'saved',
       publishedVersion: 3,
-      hasUnpublishedChanges: true,
-      canPublish: true,
+      canTurnOn: false,
     });
 
-    expect(screen.getByText('· v3')).toBeInTheDocument();
+    const toggle = screen.getByRole('switch', { name: 'Turn this rule off' });
+    expect(toggle).toBeChecked();
+    // Turning a running rule off never waits on it being publishable.
+    expect(toggle).toBeEnabled();
+    expect(screen.getByText(/Active/)).toHaveTextContent('Active · v3');
+
+    await user.click(toggle);
+    expect(onToggleLive).toHaveBeenCalledWith(false);
+  });
+
+  it('says a paused rule is paused', () => {
+    renderHeader({ status: 'PAUSED', publishedVersion: 2 });
+
+    expect(screen.getByText(/Paused/)).toHaveTextContent('Paused · v2');
+    expect(screen.getByRole('switch')).not.toBeChecked();
+  });
+
+  it('says when a live rule holds edits that are not running yet', () => {
+    renderHeader({ status: 'ACTIVE', publishedVersion: 3, hasUnpublishedChanges: true });
+
     expect(screen.getByText('Unpublished changes')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish changes' })).toBeEnabled();
   });
 
-  it('has nothing to publish while a live rule runs what is on screen', () => {
-    renderHeader(true, true, true, { status: 'ACTIVE', autosaves: true, publishedVersion: 2 });
+  it('switches between Build and Activity, but not to the runs of an unsaved rule', async () => {
+    const user = setupUser();
+    const { onViewChange } = renderHeader();
 
-    expect(screen.queryByText('Unpublished changes')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish changes' })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: 'Build' })).toHaveAttribute('aria-selected', 'true');
+    await user.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(onViewChange).toHaveBeenCalledWith('activity');
   });
 
-  it('opens the version history once there is a version', () => {
-    const { onShowHistory } = renderHeader(true, true, true, { publishedVersion: 1 });
-    fireEvent.click(screen.getByRole('button', { name: 'Version history' }));
-    expect(onShowHistory).toHaveBeenCalledOnce();
+  it('keeps Activity off until the rule has been saved', () => {
+    renderHeader({ activityAvailable: false });
 
-    renderHeader();
-    expect(screen.getAllByRole('button', { name: 'Version history' })).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
   });
 
-  it('says a paused rule is turned back on by publishing', () => {
-    renderHeader(true, true, true, { status: 'PAUSED', publishedVersion: 1, canPublish: true });
+  it('saves with Save and leaves with Cancel', async () => {
+    const user = setupUser();
+    const { onSave, onClose } = renderHeader();
 
-    expect(screen.getByRole('button', { name: 'Publish and resume' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSave).toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('keeps Save off while there is nothing to save', () => {
+    renderHeader({ canSave: false, save: 'saved' });
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Saved');
+  });
+
+  it('gathers history, the library and delete under ⋯', async () => {
+    const user = setupUser();
+    const { onShowHistory, onDelete } = renderHeader({
+      withHistory: true,
+      withDelete: true,
+      canBrowseLibrary: false,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    const menu = await screen.findByRole('menu');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual([
+      'Version history',
+      'Save to library',
+      'Browse the library (save first)',
+      'Delete this rule',
+    ]);
+    // Starting from a template leaves this canvas, so not over unsaved work.
+    expect(within(menu).getByRole('menuitem', { name: /Browse the library/ })).toHaveAttribute(
+      'data-disabled',
+    );
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Version history' }));
+    expect(onShowHistory).toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete this rule' }));
+    expect(onDelete).toHaveBeenCalled();
+  });
+
+  it('offers no history or delete on a rule that has neither yet', async () => {
+    const user = setupUser();
+    renderHeader({ canSaveToLibrary: false });
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).queryByRole('menuitem', { name: 'Version history' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Delete this rule' })).toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: 'Save to library' })).toHaveAttribute(
+      'data-disabled',
+    );
   });
 });

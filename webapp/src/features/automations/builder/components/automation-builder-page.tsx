@@ -39,6 +39,7 @@ import { findStarter, makeStarterNodes } from '../../lib/starter-templates';
 import { collectRuleReferences } from '../../lib/template-references';
 import {
   useCreateRule,
+  usePauseRule,
   usePublishRule,
   useRemoveRule,
   useRevertRule,
@@ -76,7 +77,13 @@ import {
   type GraphEdits,
 } from '../lib/graph-edits';
 
-import { AutomationBuilderHeader, type SaveState } from './automation-builder-header';
+import { RuleRunHistory } from '../../components/automation-run-history-dialog';
+
+import {
+  AutomationBuilderHeader,
+  type BuilderView,
+  type SaveState,
+} from './automation-builder-header';
 import { AutomationCanvas } from './automation-canvas';
 import { VersionHistoryDialog } from './version-history-dialog';
 
@@ -183,10 +190,13 @@ export function AutomationBuilderPage({
   const saveGraph = useSaveGraph(workspaceId, projectId);
   const createRule = useCreateRule(workspaceId, projectId);
   const publishRule = usePublishRule(workspaceId, projectId);
+  const pauseRule = usePauseRule(workspaceId, projectId);
   const removeRule = useRemoveRule(workspaceId, projectId);
   const revertRule = useRevertRule(workspaceId, projectId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** Build | Activity: the rule to edit, or what it has done. */
+  const [view, setView] = useState<BuilderView>('build');
   const [libraryTarget, setLibraryTarget] = useState<LibraryTarget | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
@@ -744,6 +754,11 @@ export function AutomationBuilderPage({
    * Publish says why rather than a save being allowed to fail.
    */
   const unnamed = currentName.trim() === '';
+  /** Running now: the switch is on, and Save puts edits live. */
+  const live = rule?.status === AutomationRuleStatus.ACTIVE;
+  /** Whether publishing would be accepted: named, a trigger, nothing blocking. */
+  const canPublishNow =
+    blocking.length === 0 && !unnamed && Boolean(triggerNode?.subtype) && !saving;
 
   /*
    * Autosave, for every rule that exists.
@@ -1067,6 +1082,15 @@ export function AutomationBuilderPage({
         {...(rule.publishedVersion ? { onShowHistory: () => setHistoryOpen(true) } : {})}
         name={currentName}
         onNameChange={(name) => setSettingsEdits((previous) => ({ ...previous, name }))}
+        view={view}
+        onViewChange={setView}
+        activityAvailable={!isNew}
+        canTurnOn={canPublishNow}
+        toggling={publishRule.isPending || pauseRule.isPending}
+        onToggleLive={(next) => {
+          if (next) void publish();
+          else if (ruleId !== null) void pauseRule.mutateAsync(ruleId).catch(() => undefined);
+        }}
         settingsOpen={rail.kind === 'settings'}
         onToggleSettings={() =>
           setRail((previous) =>
@@ -1074,23 +1098,23 @@ export function AutomationBuilderPage({
           )
         }
         save={saveState}
-        saving={saving}
-        canSave={dirty && !unnamed && Boolean(triggerNode?.subtype)}
-        autosaves={autosaves}
-        onSave={() => void saveDraft()}
-        issues={issues}
-        onFocusIssue={(nodeId) => setSelectedId(nodeId)}
-        publishing={publishRule.isPending}
-        canPublish={
-          blocking.length === 0 &&
-          !saving &&
-          // A live rule already running what is on screen has nothing to publish.
-          (rule.status !== AutomationRuleStatus.ACTIVE ||
-            rule.publishedVersion === null ||
-            rule.hasUnpublishedChanges ||
-            dirty)
+        /*
+         * Save on a running rule puts the edits live, as Asana's does; on a rule
+         * that is off it keeps the draft and the rule stays off. Turning a rule
+         * on is the switch's job.
+         */
+        saving={live ? saving || publishRule.isPending : saving}
+        canSave={
+          live
+            ? canPublishNow && (rule.hasUnpublishedChanges || dirty)
+            : dirty && !unnamed && Boolean(triggerNode?.subtype)
         }
-        onPublish={() => void publish()}
+        onSave={() => void (live ? publish() : saveDraft())}
+        issues={issues}
+        onFocusIssue={(nodeId) => {
+          setView('build');
+          setSelectedId(nodeId);
+        }}
         /*
          * Only a saved rule can be taken away; a brand-new canvas has nothing
          * behind it, and closing the builder already discards it.
@@ -1181,75 +1205,84 @@ export function AutomationBuilderPage({
         window size rather than at the one the guess was tuned for.
       */}
       {/* A row: the canvas takes what the rail does not. */}
-      <div className="flex min-h-0 w-full flex-1">
-        <AutomationCanvas
-          graph={graph}
-          metadata={metadata}
-          {...(project?.name ? { projectName: project.name } : {})}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onOpenNode={(nodeId) => {
-            setSelectedId(nodeId);
+      {view === 'activity' && ruleId !== null ? (
+        /* What the rule has done, in place of the drawing: Asana's Activity tab. */
+        <div className="min-h-0 w-full flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-6 py-6">
+            <h2 className="mb-4 text-sm font-semibold">Runs, newest first</h2>
+            <RuleRunHistory workspaceId={workspaceId} projectId={projectId} ruleId={ruleId} />
+          </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 w-full flex-1">
+          <AutomationCanvas
+            graph={graph}
+            metadata={metadata}
+            {...(project?.name ? { projectName: project.name } : {})}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onOpenNode={(nodeId) => {
+              setSelectedId(nodeId);
 
-            /*
-             * A placeholder is not a step to configure — it is the invitation
-             * to choose one. Its id carries where it sits, so the action lands
-             * on the right arm without tracking a separate selection.
-             */
-            const target = readPlaceholderId(nodeId);
+              /*
+               * A placeholder is not a step to configure — it is the invitation
+               * to choose one. Its id carries where it sits, so the action lands
+               * on the right arm without tracking a separate selection.
+               */
+              const target = readPlaceholderId(nodeId);
 
-            if (target) {
-              openActionPicker(target);
-              return;
-            }
+              if (target) {
+                openActionPicker(target);
+                return;
+              }
 
-            /*
-             * An unchosen trigger has no settings to show — opening its form
-             * would present an empty sheet. The question it is actually asking
-             * is which trigger, so that is the list that opens.
-             */
-            if (nodeId === triggerNode?.id && triggerNode.subtype === '') {
-              openTriggerPicker();
-              return;
-            }
+              /*
+               * An unchosen trigger has no settings to show — opening its form
+               * would present an empty sheet. The question it is actually asking
+               * is which trigger, so that is the list that opens.
+               */
+              if (nodeId === triggerNode?.id && triggerNode.subtype === '') {
+                openTriggerPicker();
+                return;
+              }
 
-            /*
-             * The fallback opens nothing, because there is nothing to set.
-             *
-             * Its form would be the condition form, which offers to give
-             * "otherwise" a comparison — and a fallback with one is a row that
-             * is neither the fallback nor a question.
-             */
-            if (fallbackRow(realNodes)?.id === nodeId) return;
+              /*
+               * The fallback opens nothing, because there is nothing to set.
+               *
+               * Its form would be the condition form, which offers to give
+               * "otherwise" a comparison — and a fallback with one is a row that
+               * is neither the fallback nor a question.
+               */
+              if (fallbackRow(realNodes)?.id === nodeId) return;
 
-            /*
-             * A branch nobody has answered opens the catalogue, not the form.
-             *
-             * The card reads "+ Otherwise if…" or "Check if — choose what to
-             * check", and both are asking the same thing: which check. The
-             * comparison form cannot answer that — it asks how to compare a
-             * field, and there is no field yet — so this is the one route to
-             * the seven groups of checks the endpoint has always sent.
-             */
-            const row = realNodes.find((node) => node.id === nodeId);
+              /*
+               * A branch nobody has answered opens the catalogue, not the form.
+               *
+               * The card reads "+ Otherwise if…" or "Check if — choose what to
+               * check", and both are asking the same thing: which check. The
+               * comparison form cannot answer that — it asks how to compare a
+               * field, and there is no field yet — so this is the one route to
+               * the seven groups of checks the endpoint has always sent.
+               */
+              const row = realNodes.find((node) => node.id === nodeId);
 
-            if (row && isUnansweredRow(row)) {
-              openConditionPicker(nodeId);
-              return;
-            }
+              if (row && isUnansweredRow(row)) {
+                openConditionPicker(nodeId);
+                return;
+              }
 
-            setRail({ kind: 'configure', nodeId });
-          }}
-          onAddElseIf={addElseIf}
-          onAddOtherwise={addOtherwise}
-          onChangeTrigger={openTriggerPicker}
-          onDuplicateNode={duplicateNode}
-          onDeleteNode={deleteNode}
-          onInsertStep={insertStepAfter}
-          onMoveRow={moveRow}
-        />
+              setRail({ kind: 'configure', nodeId });
+            }}
+            onAddElseIf={addElseIf}
+            onAddOtherwise={addOtherwise}
+            onChangeTrigger={openTriggerPicker}
+            onDuplicateNode={duplicateNode}
+            onDeleteNode={deleteNode}
+            onInsertStep={insertStepAfter}
+            onMoveRow={moveRow}
+          />
 
-        {/*
+          {/*
           Beside the canvas rather than over it.
           
           A step only makes sense in the shape it sits in, so covering the rule
@@ -1257,48 +1290,49 @@ export function AutomationBuilderPage({
           edited. The canvas is a flex sibling, so opening the panel narrows the
           drawing rather than hiding part of it.
         */}
-        <NodeConfigRail
-          mode={rail}
-          nodes={graph.nodes}
-          metadata={metadata}
-          onClose={() => {
-            setRail({ kind: 'closed' });
-            setAddingAt(null);
-            /* Closing the catalogue leaves the row unanswered rather than
+          <NodeConfigRail
+            mode={rail}
+            nodes={graph.nodes}
+            metadata={metadata}
+            onClose={() => {
+              setRail({ kind: 'closed' });
+              setAddingAt(null);
+              /* Closing the catalogue leaves the row unanswered rather than
                half-answered — the card goes on offering, and the × on it is
                still the way to take a mis-clicked branch back off. */
-            setAnswering(null);
-          }}
-          onChange={(nodeId, configuration) =>
-            setEdits((previous) => ({
-              ...previous,
-              configured: { ...previous.configured, [nodeId]: configuration },
-            }))
-          }
-          onDelete={deleteNode}
-          onChoose={chooseFromRail}
-          /*
-           * The breadcrumb's way back to the list a step was chosen from.
-           *
-           * A rule started from a section's lightning menu arrives with its
-           * trigger already set, and the card's hover menu was the only route
-           * back to the trigger list — which reads as no route at all. The
-           * pickers this opens replace in place: a trigger chosen again
-           * retypes the same node, a branch row chosen again asks a different
-           * question of the same row.
-           */
-          onReopenCatalogue={(nodeId) => {
-            const node = realNodes.find((entry) => entry.id === nodeId);
-            if (!node) return;
+              setAnswering(null);
+            }}
+            onChange={(nodeId, configuration) =>
+              setEdits((previous) => ({
+                ...previous,
+                configured: { ...previous.configured, [nodeId]: configuration },
+              }))
+            }
+            onDelete={deleteNode}
+            onChoose={chooseFromRail}
+            /*
+             * The breadcrumb's way back to the list a step was chosen from.
+             *
+             * A rule started from a section's lightning menu arrives with its
+             * trigger already set, and the card's hover menu was the only route
+             * back to the trigger list — which reads as no route at all. The
+             * pickers this opens replace in place: a trigger chosen again
+             * retypes the same node, a branch row chosen again asks a different
+             * question of the same row.
+             */
+            onReopenCatalogue={(nodeId) => {
+              const node = realNodes.find((entry) => entry.id === nodeId);
+              if (!node) return;
 
-            if (node.type === 'TRIGGER') openTriggerPicker();
-            else openConditionPicker(nodeId);
-          }}
-          rule={rule}
-          settings={settings}
-          onSettingsChange={(next) => setSettingsEdits((previous) => ({ ...previous, ...next }))}
-        />
-      </div>
+              if (node.type === 'TRIGGER') openTriggerPicker();
+              else openConditionPicker(nodeId);
+            }}
+            rule={rule}
+            settings={settings}
+            onSettingsChange={(next) => setSettingsEdits((previous) => ({ ...previous, ...next }))}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -51,7 +51,7 @@ describe('AutomationRunHistoryDialog', () => {
       />,
     );
 
-    expect(await screen.findByText(/the newest 2 of 3 runs/)).toBeInTheDocument();
+    expect(await screen.findByText(/the newest 2 of 3 runs/i)).toBeInTheDocument();
     expect(screen.getAllByText('completed')).toHaveLength(2);
 
     await user.click(screen.getByRole('button', { name: 'Show older runs' }));

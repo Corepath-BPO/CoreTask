@@ -28,7 +28,44 @@ export function AutomationRunHistoryDialog({
   rule: AutomationRule | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const executions = useRuleExecutions(workspaceId, projectId, rule?.id ?? null);
+  return (
+    <Dialog open={rule !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b px-6 py-5">
+          <DialogTitle className="flex items-center gap-2">
+            <History className="size-4 text-primary-strong" aria-hidden="true" />
+            Run history
+          </DialogTitle>
+          <DialogDescription>{rule?.name ?? 'Automation'} · newest runs first</DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[65vh] overflow-y-auto px-6 py-4">
+          <RuleRunHistory
+            workspaceId={workspaceId}
+            projectId={projectId}
+            ruleId={rule?.id ?? null}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * A rule's runs, newest first: what each did, step by step, and why one failed
+ * or was skipped. Shared by the run history dialog and the builder's Activity
+ * tab.
+ */
+export function RuleRunHistory({
+  workspaceId,
+  projectId,
+  ruleId,
+}: {
+  workspaceId: string | undefined;
+  projectId: string;
+  ruleId: string | null;
+}) {
+  const executions = useRuleExecutions(workspaceId, projectId, ruleId);
   /*
    * Pages are numbered, so a run that lands while older pages load shifts
    * the rest down by one and the next page repeats a row. Keeping the first
@@ -47,119 +84,101 @@ export function AutomationRunHistoryDialog({
   const total = executions.data?.pages[0]?.meta.total ?? 0;
 
   return (
-    <Dialog open={rule !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b px-6 py-5">
-          <DialogTitle className="flex items-center gap-2">
-            <History className="size-4 text-primary-strong" aria-hidden="true" />
-            Run history
-          </DialogTitle>
-          <DialogDescription>
-            {rule?.name ?? 'Automation'} ·{' '}
-            {total > runs.length
-              ? `the newest ${runs.length} of ${total} runs`
-              : 'newest executions first'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="max-h-[65vh] overflow-y-auto px-6 py-4">
-          {executions.isLoading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 3 }, (_, index) => (
-                <Skeleton key={index} className="h-24 rounded-xl" />
-              ))}
-            </div>
-          ) : executions.isError ? (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-              Run history could not be loaded. Close this panel and try again.
-            </div>
-          ) : runs.length === 0 ? (
-            <div className="flex min-h-40 flex-col items-center justify-center text-center">
-              <Clock3 className="mb-3 size-6 text-muted-foreground" aria-hidden="true" />
-              <p className="text-sm font-semibold">This rule has not run yet</p>
-              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-                Publish it, then perform the event named by its trigger. The result and every action
-                will appear here.
-              </p>
-            </div>
-          ) : (
-            <ol className="space-y-3">
-              {runs.map((execution) => {
-                const tone = executionTone(execution.status);
-                const StatusIcon = tone.icon;
-
-                return (
-                  <li key={execution.id} className="rounded-xl border bg-card p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <span className={`mt-0.5 rounded-full p-1.5 ${tone.iconClass}`}>
-                          <StatusIcon className="size-3.5" aria-hidden="true" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold capitalize">
-                            {execution.status.toLowerCase()}
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {formatRelativeTime(execution.startedAt)}
-                            {execution.durationMs !== null ? ` · ${execution.durationMs} ms` : ''}
-                            {/* Which version ran: an old run reads against what
-                                the rule said then, not what it says now. */}
-                            {execution.ruleVersion
-                              ? ` · version ${execution.ruleVersion.version}`
-                              : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <Badge variant={tone.badge}>
-                        {execution.triggerType.replaceAll('_', ' ')}
-                      </Badge>
-                    </div>
-
-                    {(execution.error || execution.skippedReason) && (
-                      <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-                        {execution.error ?? execution.skippedReason}
-                      </p>
-                    )}
-
-                    {execution.logs.length > 0 && (
-                      <ul className="mt-3 space-y-1.5 border-t pt-3">
-                        {execution.logs.map((log) => (
-                          <li key={log.id} className="flex items-start gap-2 text-xs">
-                            {log.succeeded ? (
-                              <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
-                            ) : (
-                              <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                            )}
-                            <span>
-                              <span className="font-medium">
-                                {log.subtype.replaceAll('_', ' ')}
-                              </span>
-                              {log.message ? ` · ${log.message}` : ''}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-          {executions.hasNextPage && (
-            <div className="flex justify-center pt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                loading={executions.isFetchingNextPage}
-                onClick={() => void executions.fetchNextPage()}
-              >
-                Show older runs
-              </Button>
-            </div>
-          )}
+    <div>
+      {total > runs.length && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          The newest {runs.length} of {total} runs
+        </p>
+      )}
+      {executions.isLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }, (_, index) => (
+            <Skeleton key={index} className="h-24 rounded-xl" />
+          ))}
         </div>
-      </DialogContent>
-    </Dialog>
+      ) : executions.isError ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          Run history could not be loaded. Close this panel and try again.
+        </div>
+      ) : runs.length === 0 ? (
+        <div className="flex min-h-40 flex-col items-center justify-center text-center">
+          <Clock3 className="mb-3 size-6 text-muted-foreground" aria-hidden="true" />
+          <p className="text-sm font-semibold">This rule has not run yet</p>
+          <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+            Publish it, then perform the event named by its trigger. The result and every action
+            will appear here.
+          </p>
+        </div>
+      ) : (
+        <ol className="space-y-3">
+          {runs.map((execution) => {
+            const tone = executionTone(execution.status);
+            const StatusIcon = tone.icon;
+
+            return (
+              <li key={execution.id} className="rounded-xl border bg-card p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className={`mt-0.5 rounded-full p-1.5 ${tone.iconClass}`}>
+                      <StatusIcon className="size-3.5" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold capitalize">
+                        {execution.status.toLowerCase()}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {formatRelativeTime(execution.startedAt)}
+                        {execution.durationMs !== null ? ` · ${execution.durationMs} ms` : ''}
+                        {/* Which version ran: an old run reads against what
+                            the rule said then, not what it says now. */}
+                        {execution.ruleVersion ? ` · version ${execution.ruleVersion.version}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant={tone.badge}>{execution.triggerType.replaceAll('_', ' ')}</Badge>
+                </div>
+
+                {(execution.error || execution.skippedReason) && (
+                  <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    {execution.error ?? execution.skippedReason}
+                  </p>
+                )}
+
+                {execution.logs.length > 0 && (
+                  <ul className="mt-3 space-y-1.5 border-t pt-3">
+                    {execution.logs.map((log) => (
+                      <li key={log.id} className="flex items-start gap-2 text-xs">
+                        {log.succeeded ? (
+                          <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+                        ) : (
+                          <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                        )}
+                        <span>
+                          <span className="font-medium">{log.subtype.replaceAll('_', ' ')}</span>
+                          {log.message ? ` · ${log.message}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {executions.hasNextPage && (
+        <div className="flex justify-center pt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            loading={executions.isFetchingNextPage}
+            onClick={() => void executions.fetchNextPage()}
+          >
+            Show older runs
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
