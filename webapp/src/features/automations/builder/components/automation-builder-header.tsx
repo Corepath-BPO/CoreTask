@@ -1,25 +1,27 @@
 import type { AutomationGraphIssue } from '@coretask/types';
-import {
-  ArrowLeft,
-  BookmarkPlus,
-  History,
-  LibraryBig,
-  Save,
-  Settings,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { BookmarkPlus, History, LibraryBig, MoreHorizontal, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 
 import { AutomationValidationIssues } from './automation-validation-issues';
 
 /** What the header says about the last write. */
 export type SaveState = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
+
+/** What the builder shows: the rule to edit, or what it has done. */
+export type BuilderView = 'build' | 'activity';
 
 const SAVE_LABEL: Record<Exclude<SaveState, 'idle'>, string> = {
   unsaved: 'Unsaved changes',
@@ -28,23 +30,16 @@ const SAVE_LABEL: Record<Exclude<SaveState, 'idle'>, string> = {
   error: 'Unable to save',
 };
 
-const STATUS_TONE: Record<string, 'muted' | 'success' | 'warning' | 'destructive'> = {
-  DRAFT: 'muted',
-  ACTIVE: 'success',
-  PAUSED: 'warning',
-  DISABLED: 'muted',
-  ARCHIVED: 'muted',
-};
-
 /**
- * The whole of the builder's chrome, in one bar.
+ * The builder's bar, laid out as Asana's rule editor is: the name and an Active
+ * switch on the left, Build | Activity in the middle, and Cancel / Save with
+ * the settings and a ⋯ menu on the right. See
+ * `docs/architecture/automation-builder-layout.md`.
  *
- * It used to be two: this, and a row of Change trigger / Add action / Add branch
- * underneath. Every one of those already exists on the canvas — the trigger card
- * opens the trigger, the "+ Do this…" placeholder opens the action list, the "…"
- * on a connector splits the rule — so the row was a second way to do things
- * somebody was already looking at, and it charged the drawing a strip of height
- * for the privilege. A canvas needs room more than it needs a menu bar.
+ * Underneath, a rule is still a draft that is published. The switch is whether
+ * the rule runs: on publishes it, off pauses it. Save keeps the draft — and on a
+ * rule that is running it also puts the edits live, which is what Save means to
+ * somebody used to Asana.
  *
  * Presentational. The only thing it owns is whether the name is being typed;
  * everything else it reports back to the page, which owns the rule.
@@ -54,21 +49,23 @@ export function AutomationBuilderHeader({
   status,
   publishedVersion,
   hasUnpublishedChanges,
-  onShowHistory,
   name,
   onNameChange,
+  view,
+  onViewChange,
+  activityAvailable,
+  canTurnOn,
+  toggling,
+  onToggleLive,
   settingsOpen,
   onToggleSettings,
   save,
   saving,
   canSave,
-  autosaves,
   onSave,
   issues,
   onFocusIssue,
-  publishing,
-  canPublish,
-  onPublish,
+  onShowHistory,
   onDelete,
   onSaveToLibrary,
   canSaveToLibrary,
@@ -83,30 +80,31 @@ export function AutomationBuilderHeader({
   publishedVersion: number | null;
   /** Whether the draft says something the running version does not. */
   hasUnpublishedChanges: boolean;
-  /** Open the rule's versions. Absent until there is one. */
-  onShowHistory?: () => void;
   name: string;
   onNameChange: (name: string) => void;
+  view: BuilderView;
+  onViewChange: (view: BuilderView) => void;
+  /** Off for a rule never saved: it has no runs to show. */
+  activityAvailable: boolean;
+  /** Whether the rule can be published now: named, a trigger, no blocking problem. */
+  canTurnOn: boolean;
+  /** A publish or pause on its way. */
+  toggling: boolean;
+  /** On publishes the rule; off pauses it. */
+  onToggleLive: (live: boolean) => void;
   /** Whether the rail is showing the rule's own settings rather than a step's. */
   settingsOpen: boolean;
   onToggleSettings: () => void;
   save: SaveState;
   saving: boolean;
   canSave: boolean;
-  /**
-   * True for a rule that has been saved once, which the page then saves on its
-   * own a moment after each edit — into the draft, which a live rule does not
-   * run until it is published. Its Save button only shows when a save failed.
-   */
-  autosaves: boolean;
+  /** Keep the draft, and on a running rule put it live. The page decides which. */
   onSave: () => void;
   issues: AutomationGraphIssue[];
   onFocusIssue: (nodeId: string) => void;
-  publishing: boolean;
-  canPublish: boolean;
-  onPublish: () => void;
-  /** Take the whole rule away. Absent on a rule that has never been saved —
-      there is nothing to delete yet, and closing the builder is the same act. */
+  /** Open the rule's versions. Absent until there is one. */
+  onShowHistory?: () => void;
+  /** Take the whole rule away. Absent on a rule never saved. */
   onDelete?: () => void;
   /** Put this rule in the workspace's library for other projects to start from. */
   onSaveToLibrary: () => void;
@@ -116,92 +114,87 @@ export function AutomationBuilderHeader({
   onBrowseLibrary: () => void;
   /** Off while there are unsaved changes: choosing a template leaves this canvas. */
   canBrowseLibrary: boolean;
+  /** Cancel: leave the builder. The dialog asks about unsaved work on the way out. */
   onClose: () => void;
 }) {
+  const live = status === 'ACTIVE';
+  const state = live ? 'Active' : status === 'PAUSED' ? 'Paused' : 'Draft';
+
   return (
-    // `shrink-0`, because the canvas below it is the flex child that grows: a
-    // header allowed to give up height would be squeezed by its own contents.
-    <header className="flex shrink-0 items-center gap-4 border-b border-border px-4 py-2.5">
-      {/* The same exit as the X, offered where a back control is looked for.
-          One route out, two doors to it — the dialog's unsaved-work guard
-          covers both. */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-8 shrink-0 cursor-pointer"
-        aria-label="Back to automations"
-        onClick={onClose}
-      >
-        <ArrowLeft className="size-4" aria-hidden="true" />
-      </Button>
-
-      <div className="min-w-0 flex-1">
-        {/*
-          A fixed line, filled or not.
-
-          The project is a second request, so leaving the row out until it lands
-          made the whole header — and the canvas under it — jump down a line a
-          moment after the rule appeared.
-        */}
-        <p className="h-4 truncate px-2 text-xs text-muted-foreground">{projectName}</p>
-
-        <div className="flex min-w-0 items-center gap-2">
+    <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-border px-4 py-2.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="min-w-0">
+          {/* A fixed line, filled or not, so the bar does not jump when the
+              project arrives a moment after the rule. */}
+          <p className="h-4 truncate px-2 text-xs text-muted-foreground">{projectName}</p>
           <RuleName name={name} onChange={onNameChange} />
-
-          <Badge variant={STATUS_TONE[status] ?? 'muted'} className="gap-1.5">
-            {/* `bg-current` so the dot is whatever the badge already is, rather
-                than a second colour to keep in step with the tone map. */}
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
-            {status.charAt(0) + status.slice(1).toLowerCase()}
-            {/* Which version is running, beside the word saying that it is. */}
-            {publishedVersion !== null && <span className="opacity-80">· v{publishedVersion}</span>}
-          </Badge>
-
-          {/* A saved draft a live rule is not running yet. The edits are safe —
-              they reach nothing until Publish — and this says so before
-              somebody wonders why the board did not change. */}
-          {hasUnpublishedChanges && (
-            <Badge variant="warning" title="Saved, and not running until you publish">
-              Unpublished changes
-            </Badge>
-          )}
         </div>
+
+        <label className="flex shrink-0 items-center gap-2 text-sm">
+          <Switch
+            checked={live}
+            disabled={toggling || (!live && !canTurnOn)}
+            onCheckedChange={(next) => onToggleLive(next)}
+            aria-label={live ? 'Turn this rule off' : 'Turn this rule on'}
+            title={
+              !live && !canTurnOn
+                ? 'Name the rule, choose its trigger and fix its problems to turn it on'
+                : undefined
+            }
+          />
+          <span className={cn(live ? 'text-foreground' : 'text-muted-foreground')}>
+            {state}
+            {publishedVersion !== null && (
+              <span className="opacity-70"> · v{publishedVersion}</span>
+            )}
+          </span>
+        </label>
+
+        {/* A live rule runs its last published version; this says the draft
+            holds more than that, until Save puts it live. */}
+        {live && hasUnpublishedChanges && (
+          <Badge variant="warning" title="Saved, and not running until you press Save">
+            Unpublished changes
+          </Badge>
+        )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <div
+        role="tablist"
+        aria-label="Rule"
+        className="flex rounded-lg border border-border bg-muted/40 p-0.5"
+      >
+        <ViewTab label="Build" selected={view === 'build'} onSelect={() => onViewChange('build')} />
+        <ViewTab
+          label="Activity"
+          selected={view === 'activity'}
+          disabled={!activityAvailable}
+          title={activityAvailable ? undefined : 'Save the rule to see its runs'}
+          onSelect={() => onViewChange('activity')}
+        />
+      </div>
+
+      <div className="flex min-w-0 items-center justify-end gap-2">
         <SaveIndicator state={save} />
 
-        {/* A saved rule saves itself; the button is how a failed save is
-            retried, and how a brand-new rule is first written. */}
-        {(!autosaves || save === 'error') && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            loading={saving}
-            disabled={!canSave || saving}
-            onClick={onSave}
-          >
-            <Save className="size-4" aria-hidden="true" />
-            Save draft
-          </Button>
-        )}
+        {/* Beside Save, not above the canvas: this is why Save, or the switch, is off. */}
+        <AutomationValidationIssues issues={issues} onFocusNode={onFocusIssue} />
 
-        {/* What it ran before, and the way back to it. */}
-        {onShowHistory && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 cursor-pointer"
-            aria-label="Version history"
-            title="Version history"
-            onClick={onShowHistory}
-          >
-            <History className="size-4" aria-hidden="true" />
-          </Button>
-        )}
+        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          className="cursor-pointer"
+          loading={saving}
+          disabled={!canSave || saving}
+          onClick={onSave}
+          title={live ? 'Save, and put your changes live' : 'Save the draft; the rule stays off'}
+        >
+          Save
+        </Button>
 
-        {/* The rule's own settings — what it is called, what it is for, and
+        {/* The rule's own settings: what it is called, what it is for, and
             whether other rules may set it off. */}
         <Button
           variant="ghost"
@@ -211,103 +204,88 @@ export function AutomationBuilderHeader({
           aria-pressed={settingsOpen}
           onClick={onToggleSettings}
         >
-          {/* A cog rather than sliders: this opens the rule's own settings, and
-              sliders read as "adjust what is on screen". */}
           <Settings className="size-4" aria-hidden="true" />
         </Button>
 
-        {/* Reuse lives beside the rule's own controls: "I want this on the
-            other project too" is thought while looking at the rule, not at a
-            list of them. Saves the canvas first, so the library gets what is
-            on screen rather than what was last written. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 cursor-pointer"
-          aria-label="Save to library"
-          title="Save to library"
-          disabled={!canSaveToLibrary}
-          onClick={onSaveToLibrary}
-        >
-          <BookmarkPlus className="size-4" aria-hidden="true" />
-        </Button>
-
-        {/* The other direction: what is already in the library, from here.
-            Starting from a template opens its own draft, so this is only
-            offered while nothing on this canvas would be lost by leaving. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 cursor-pointer"
-          aria-label="Browse the rule library"
-          title={
-            canBrowseLibrary ? 'Browse the rule library' : 'Save or discard your changes first'
-          }
-          disabled={!canBrowseLibrary}
-          onClick={onBrowseLibrary}
-        >
-          <LibraryBig className="size-4" aria-hidden="true" />
-        </Button>
-
-        {/* Beside the settings it belongs with, not buried in them: taking a
-            rule away is a thing owners come here to do, and a control nobody
-            can find is a privilege nobody has. */}
-        {onDelete && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 cursor-pointer text-muted-foreground hover:text-destructive"
-            aria-label="Delete this rule"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-4" aria-hidden="true" />
-          </Button>
-        )}
-
-        {/* Beside Publish, not above the canvas: this is the explanation for the
-            button next to it being off. */}
-        <AutomationValidationIssues issues={issues} onFocusNode={onFocusIssue} />
-
-        <Button
-          size="sm"
-          className="cursor-pointer"
-          loading={publishing}
-          disabled={!canPublish || publishing}
-          onClick={onPublish}
-          title={
-            publishedVersion !== null && status === 'ACTIVE' && !canPublish
-              ? 'Nothing to publish: the rule is running what you see.'
-              : undefined
-          }
-        >
-          {publishLabel(status, publishedVersion)}
-        </Button>
-
-        {/* Leaving is leaving, wherever it is pressed from: the dialog asks
-            about unsaved work on its way out, so this does not have to. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 cursor-pointer"
-          aria-label="Close rule builder"
-          onClick={onClose}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 cursor-pointer"
+              aria-label="More actions"
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            {onShowHistory && (
+              <DropdownMenuItem onSelect={onShowHistory}>
+                <History className="size-4" aria-hidden="true" />
+                Version history
+              </DropdownMenuItem>
+            )}
+            {/* Saves the canvas first, so the library gets what is on screen. */}
+            <DropdownMenuItem disabled={!canSaveToLibrary} onSelect={onSaveToLibrary}>
+              <BookmarkPlus className="size-4" aria-hidden="true" />
+              Save to library
+            </DropdownMenuItem>
+            {/* Starting from a template leaves this canvas, so only with nothing to lose. */}
+            <DropdownMenuItem disabled={!canBrowseLibrary} onSelect={onBrowseLibrary}>
+              <LibraryBig className="size-4" aria-hidden="true" />
+              {canBrowseLibrary ? 'Browse the rule library' : 'Browse the library (save first)'}
+            </DropdownMenuItem>
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={onDelete}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                  Delete this rule
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
 }
 
-/**
- * What Publish does, in its own words. A live rule's button publishes the
- * draft over the running version; a paused one's also turns it back on.
- */
-function publishLabel(status: string, publishedVersion: number | null): string {
-  if (publishedVersion === null) return 'Publish rule';
-  if (status === 'ACTIVE') return 'Publish changes';
-  if (status === 'PAUSED') return 'Publish and resume';
-  return 'Publish rule';
+/** One of Build | Activity. */
+function ViewTab({
+  label,
+  selected,
+  onSelect,
+  disabled,
+  title,
+}: {
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      disabled={disabled}
+      title={title}
+      onClick={onSelect}
+      className={cn(
+        'h-7 rounded-md px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        selected
+          ? 'bg-card text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {label}
+    </button>
+  );
 }
 
 /**

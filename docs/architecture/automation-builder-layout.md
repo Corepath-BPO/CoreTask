@@ -91,10 +91,22 @@ trigger and move row.
 - **Toolbar:** fit, zoom in, zoom out, minimap on or off, expanded or collapsed
   cards.
 
+## Header
+
+- **Left:** the project, the rule's name, and an **Active** switch. A rule is
+  still a draft that is published: on publishes it, off pauses it. The switch
+  stays off until the rule has a name, a trigger and no blocking problem;
+  turning a running rule off never waits on that. A running rule whose draft
+  holds more than its live version says "Unpublished changes".
+- **Middle:** **Build | Activity.** Activity swaps the canvas for the rule's
+  runs, newest first; it is off on a rule never saved.
+- **Right:** the problems count, **Cancel** (leave the builder), **Save**, the
+  settings gear, and a ⋯ menu with version history, the library and delete.
+  Save keeps the draft; on a running rule it also puts the edits live, which is
+  what Save means in Asana.
+
 ## Not in this change
 
-- **Header:** Build | Activity tabs, the Active switch, and Cancel / Save in place
-  of Publish.
 - **Rule list:** the drawer's styling.
 - **Adding a rule:** the full-screen "Add automation" page with a prompt and the
   template gallery.
