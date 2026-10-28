@@ -76,6 +76,8 @@ export const AI_INSTRUCTIONS_MAX = 2000;
 export const AI_QUESTION_MAX = 500;
 /** Most changes one "Use AI…" step makes, whatever the model asks for. */
 export const AI_MAX_CHANGES = 10;
+/** Longest description a rule is drafted from, on the Add automation page. */
+export const AI_DRAFT_PROMPT_MAX = 1000;
 
 /** Why the AI steps are greyed out on a server with no model configured. */
 export const AI_UNAVAILABLE_REASON =
