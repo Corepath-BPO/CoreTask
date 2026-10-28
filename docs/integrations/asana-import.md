@@ -71,7 +71,20 @@ record up there first: found, the row is updated, and missing, the row is
 created and the mapping recorded. A second run therefore never duplicates, and
 a run that stopped half way is finished by starting another. Asana's values
 win for the fields the import owns. Comments and tasks added in CoreTask are
-left alone. Something deleted in Asana is not deleted here.
+left alone.
+
+A task deleted in Asana is archived here, with its subtasks, never deleted.
+After the subtasks, a run asks Asana by gid about every imported task it did
+not reach, and archives one only when Asana answers 404. Anything else leaves
+the task as it is: a task moved to a project that did not come across is still
+there (200), and one moved where the token cannot see is 403. A subtask is
+settled by its parent, since Asana answers 403 for a deleted task's subtasks.
+The tasks of a project whose list Asana refused that run are not asked about.
+Each archived task gets an activity entry, and its mapping row records when
+(`external_refs.sourceDeletedAt`). A task restored from Asana's trash is
+restored here by the next run. One a person restores in CoreTask while Asana
+still has it deleted stays restored. Other records deleted in Asana (projects,
+sections, comments, files) are still left in place.
 
 Each mapping row also keeps the record exactly as Asana last sent it
 (`external_refs.snapshot`), every requested field included. Data CoreTask has

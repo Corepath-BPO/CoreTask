@@ -198,6 +198,10 @@ export class AsanaImportRun {
   private readonly pendingTags = new Map<string, Promise<string>>();
   /** Tasks written this run, so one reached twice is written once. */
   private readonly writtenTasks = new Map<string, Promise<string>>();
+  /** Projects whose task list Asana refused this run: their tasks were not looked for. */
+  private readonly unlistedProjects = new Set<string>();
+  /** Refs (`type:gid`) of records an earlier run found deleted in Asana. */
+  private readonly sourceDeleted = new Set<string>();
   private readonly tags = new Map<string, string>();
   private readonly projectGids = new Set<string>();
   private readonly privateProjects = new Set<string>();
@@ -242,6 +246,7 @@ export class AsanaImportRun {
     const listed = await this.step('tasks', () => this.listTasks(projects ?? []));
     const topLevel = await this.step('tasks', () => this.importTopLevel(listed ?? new Map()));
     const items = await this.step('subtasks', () => this.importSubtasks(topLevel ?? []));
+    await this.step('deleted', () => this.archiveDeleted());
     await this.step('history', () => this.importHistory(items ?? []));
     await this.step('dependencies', () => this.importDependencies());
     await this.step('access', () => this.grantAssigneesAccess());
@@ -328,9 +333,13 @@ export class AsanaImportRun {
   private async loadRefs(): Promise<void> {
     const rows = await this.prisma.externalRef.findMany({
       where: { workspaceId: this.workspaceId, source: ImportSource.ASANA },
-      select: { entityType: true, externalId: true, entityId: true },
+      select: { entityType: true, externalId: true, entityId: true, sourceDeletedAt: true },
     });
-    for (const row of rows) this.refs.set(`${row.entityType}:${row.externalId}`, row.entityId);
+    for (const row of rows) {
+      const key = `${row.entityType}:${row.externalId}`;
+      this.refs.set(key, row.entityId);
+      if (row.sourceDeletedAt) this.sourceDeleted.add(key);
+    }
   }
 
   private ref(type: string, gid: string): string | undefined {
@@ -347,8 +356,14 @@ export class AsanaImportRun {
     entityId: string,
     snapshot?: unknown,
   ): Promise<void> {
-    if (snapshot === undefined && this.refs.get(`${type}:${gid}`) === entityId) return;
-    const data = snapshot === undefined ? {} : { snapshot: snapshot as Prisma.InputJsonValue };
+    const key = `${type}:${gid}`;
+    // Asana has it again, so it is no longer deleted there.
+    const returned = this.sourceDeleted.delete(key);
+    if (snapshot === undefined && !returned && this.refs.get(key) === entityId) return;
+    const data = {
+      ...(snapshot === undefined ? {} : { snapshot: snapshot as Prisma.InputJsonValue }),
+      ...(returned ? { sourceDeletedAt: null } : {}),
+    };
     await this.prisma.externalRef.upsert({
       where: {
         workspaceId_source_entityType_externalId: {
@@ -368,7 +383,7 @@ export class AsanaImportRun {
       },
       update: { entityId, ...data },
     });
-    this.refs.set(`${type}:${gid}`, entityId);
+    this.refs.set(key, entityId);
   }
 
   /**
@@ -1037,6 +1052,7 @@ export class AsanaImportRun {
           subtasks.total = (subtasks.total ?? 0) + (task.num_subtasks ?? 0);
         }
       } catch (error) {
+        this.unlistedProjects.add(project.gid);
         this.fail('project_tasks', project, error);
       }
       counter.total = listed.size;
@@ -1138,10 +1154,18 @@ export class AsanaImportRun {
       approvalStatus: approvalStatus(kind, task.approval_status),
     };
 
+    // Back out of Asana's trash: an earlier run archived it when it was deleted.
+    const restored = this.sourceDeleted.has(`task:${task.gid}`);
     const taskId = await this.upsert(
       'task',
       task.gid,
-      (id) => this.prisma.task.update({ where: { id }, data }),
+      async (id) => {
+        await this.prisma.task.update({
+          where: { id },
+          data: restored ? { ...data, archivedAt: null } : data,
+        });
+        if (restored) this.counter('restored').done += 1;
+      },
       () =>
         this.prisma.task.create({
           data: {
@@ -1442,6 +1466,109 @@ export class AsanaImportRun {
       }
       await this.progress();
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Deleted in Asana
+  // -------------------------------------------------------------------------
+
+  /**
+   * Tasks deleted in Asana since an earlier run, archived here.
+   *
+   * A task this run did not reach is not necessarily gone: it may have moved
+   * to a project that did not come across, or to one the token cannot open. So
+   * each is asked for by its gid, and archived only when Asana answers that
+   * there is no such task (404). A subtask is settled by its parent, as it is
+   * in Asana, which answers 403 rather than 404 for a deleted task's subtasks.
+   * Tasks in a project whose list Asana refused this run were not looked for,
+   * so they are not asked about.
+   *
+   * Archived, not deleted: comments and history stay, and a person can restore
+   * one. A task that comes back out of Asana's trash is restored by the next
+   * run (`writeTask`). One a person restores while Asana still has it deleted
+   * stays restored: its ref already says Asana deleted it, so it is not asked
+   * about again.
+   */
+  private async archiveDeleted(): Promise<void> {
+    const unseen = new Map<string, string>();
+    for (const [key, entityId] of this.refs) {
+      if (!key.startsWith('task:') || this.sourceDeleted.has(key)) continue;
+      const gid = key.slice('task:'.length);
+      if (!this.writtenTasks.has(gid)) unseen.set(entityId, gid);
+    }
+    if (unseen.size === 0) return;
+
+    const unlisted = new Set([...this.unlistedProjects].map((gid) => this.ref('project', gid)));
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: [...unseen.keys()] }, workspaceId: this.workspaceId, archivedAt: null },
+      select: { id: true, title: true, projectId: true, parentTaskId: true },
+    });
+    const inQuestion = new Set(tasks.map((task) => task.id));
+    const asked = tasks.filter(
+      (task) =>
+        !(task.parentTaskId && inQuestion.has(task.parentTaskId)) &&
+        !(task.projectId && unlisted.has(task.projectId)),
+    );
+
+    const counter = this.counter('archived');
+    await pool(asked, this.deps.concurrency, async (task) => {
+      const gid = unseen.get(task.id) as string;
+      try {
+        // Still in Asana, somewhere this run did not look: left as it is.
+        await this.asana.get(`/tasks/${gid}`, { opt_fields: 'gid' });
+      } catch (error) {
+        const status = error instanceof AsanaApiError ? error.status : null;
+        try {
+          if (status === 404) counter.done += await this.archiveGone(task);
+          // 403: there, but not to this token. Anything else is not an answer.
+          else if (status !== 403) this.fail('deleted_check', { gid, name: task.title }, error);
+        } catch (writeError) {
+          this.fail('deleted_check', { gid, name: task.title }, writeError);
+        }
+      }
+      await this.progress();
+    });
+  }
+
+  /** A task Asana deleted, and its subtasks, archived; their refs say why. */
+  private async archiveGone(task: {
+    id: string;
+    title: string;
+    projectId: string | null;
+  }): Promise<number> {
+    const archivedAt = new Date();
+    const subtasks = await this.prisma.task.findMany({
+      where: { parentTaskId: task.id, archivedAt: null },
+      select: { id: true },
+    });
+    const ids = [task.id, ...subtasks.map((subtask) => subtask.id)];
+
+    const { count } = await this.prisma.task.updateMany({
+      where: { id: { in: ids }, archivedAt: null },
+      data: { archivedAt },
+    });
+    await this.prisma.externalRef.updateMany({
+      where: {
+        workspaceId: this.workspaceId,
+        source: ImportSource.ASANA,
+        entityType: 'task',
+        entityId: { in: ids },
+      },
+      data: { sourceDeletedAt: archivedAt },
+    });
+    await this.prisma.activityLog.create({
+      data: {
+        workspaceId: this.workspaceId,
+        actorId: this.starterId,
+        action: ActivityAction.ARCHIVED,
+        entity: ActivityEntity.TASK,
+        entityId: task.id,
+        projectId: task.projectId,
+        summary: `Archived task "${clip(task.title, 400)}": deleted in Asana`,
+        metadata: { source: 'asana', runId: this.runId },
+      },
+    });
+    return count;
   }
 
   // -------------------------------------------------------------------------
@@ -1780,6 +1907,8 @@ export class AsanaImportRun {
   private async recordActivity(): Promise<void> {
     const projects = this.counter('projects').done;
     const tasks = this.counter('tasks').done + this.counter('subtasks').done;
+    const archived = this.counter('archived').done;
+    const deleted = archived > 0 ? `, and archived ${archived} deleted there` : '';
     await this.prisma.activityLog.create({
       data: {
         workspaceId: this.workspaceId,
@@ -1787,7 +1916,7 @@ export class AsanaImportRun {
         action: ActivityAction.UPDATED,
         entity: ActivityEntity.WORKSPACE,
         entityId: this.workspaceId,
-        summary: `Imported ${projects} projects and ${tasks} tasks from Asana`,
+        summary: `Imported ${projects} projects and ${tasks} tasks from Asana${deleted}`,
         metadata: { source: 'asana', runId: this.runId, errors: this.errorCount },
       },
     });

@@ -60,6 +60,8 @@ function flatten(where: Row = {}): Row {
 function matches(row: Row, where: Row = {}): boolean {
   return Object.entries(flatten(where)).every(([key, condition]) => {
     const value = row[key];
+    // A column never written reads as null, as it does in the database.
+    if (condition === null) return value === null || value === undefined;
     if (condition !== null && typeof condition === 'object' && !(condition instanceof Date)) {
       const operator = condition as { in?: unknown[]; not?: unknown };
       if ('in' in operator) return (operator.in ?? []).includes(value);
@@ -134,6 +136,11 @@ class FakeTable {
     if (!row) throw notFound();
     Object.assign(row, data);
     return row;
+  };
+  updateMany = async ({ where, data }: { where: Row; data: Row }) => {
+    const found = this.rows.filter((row) => matches(row, where));
+    for (const row of found) Object.assign(row, data);
+    return { count: found.length };
   };
   upsert = async ({ where, create, update }: { where: Row; create: Row; update: Row }) => {
     const row = this.rows.find((candidate) => matches(candidate, where));
@@ -344,6 +351,8 @@ function fakeAsana(routes: (path: string, params: AsanaParams) => unknown[], sea
         // Without `search`, this organisation has no search: a free Asana plan, refused.
         throw new AsanaApiError(path, 402, 'Search is only available to premium users.');
       }
+      // One task, asked for by gid: the organisation answers, or refuses.
+      if (/^\/tasks\/[^/]+$/.test(path)) return routes(path, params);
       // The contractor is not in the workspace, and Asana will not say who they are.
       throw new Error(`Not found: ${path}`);
     }),
@@ -595,6 +604,133 @@ describe('AsanaImportRun', () => {
       (row) => row['title'] === 'Fix the boiler today',
     ) as Row;
     expect(String(task['description']).match(/Linked files/g)).toHaveLength(1);
+  });
+
+  /** The organisation after T1 was deleted: gone from every list, and 404 by gid. */
+  function withoutT1(answer: () => unknown = () => notInAsana('T1')) {
+    const org = organisation();
+    const routes = org.routes;
+    return {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        if (path === '/tasks/T1') return answer() as unknown[];
+        const result = routes(path, params);
+        return path === '/tasks' ? result.filter((task) => (task as Row)['gid'] !== 'T1') : result;
+      },
+    };
+  }
+
+  function notInAsana(gid: string): never {
+    throw new AsanaApiError(`/tasks/${gid}`, 404, 'Unknown object: ' + gid);
+  }
+
+  const taskTitled = (context: Awaited<ReturnType<typeof setUp>>, title: string) =>
+    rows(context, 'task').find((row) => row['title'] === title) as Row;
+
+  const taskRef = (context: Awaited<ReturnType<typeof setUp>>, gid: string) =>
+    rows(context, 'externalRef').find(
+      (ref) => ref['entityType'] === 'task' && ref['externalId'] === gid,
+    ) as Row;
+
+  it('archives a task deleted in Asana, with its subtasks, when run again', async () => {
+    const context = await setUp();
+    await runImport(context);
+
+    const { status, job, asana } = await runImport(context, withoutT1());
+
+    expect(status).toBe('SUCCEEDED');
+    for (const title of ['Fix the boiler', 'Check pressure', 'Write down the reading']) {
+      expect(taskTitled(context, title)['archivedAt']).toBeInstanceOf(Date);
+    }
+    expect(taskTitled(context, 'Order parts')['archivedAt']).toBeUndefined();
+    for (const gid of ['T1', 'ST1', 'SST1']) {
+      expect(taskRef(context, gid)['sourceDeletedAt']).toBeInstanceOf(Date);
+    }
+    // Asked about the parent only: Asana answers 403 for a deleted task's subtasks.
+    const asked = asana.get.mock.calls
+      .map(([path]) => path)
+      .filter((path) => path.startsWith('/tasks/T') || path.startsWith('/tasks/S'));
+    expect(asked).toEqual(['/tasks/T1']);
+    expect(job.snapshot().counts['archived']).toEqual({ done: 3 });
+    expect(rows(context, 'activityLog')).toContainEqual(
+      expect.objectContaining({
+        action: 'ARCHIVED',
+        entity: 'TASK',
+        entityId: taskTitled(context, 'Fix the boiler')['id'],
+        summary: 'Archived task "Fix the boiler": deleted in Asana',
+      }),
+    );
+  });
+
+  it('leaves a task restored in CoreTask alone while Asana still has it deleted', async () => {
+    const context = await setUp();
+    await runImport(context);
+    await runImport(context, withoutT1());
+    taskTitled(context, 'Fix the boiler')['archivedAt'] = null;
+
+    const { status, asana } = await runImport(context, withoutT1());
+
+    expect(status).toBe('SUCCEEDED');
+    expect(taskTitled(context, 'Fix the boiler')['archivedAt']).toBeNull();
+    expect(asana.get).not.toHaveBeenCalledWith('/tasks/T1', expect.anything());
+  });
+
+  it('restores a task that comes back out of Asana’s trash', async () => {
+    const context = await setUp();
+    await runImport(context);
+    await runImport(context, withoutT1());
+
+    const { job } = await runImport(context);
+
+    for (const title of ['Fix the boiler', 'Check pressure', 'Write down the reading']) {
+      expect(taskTitled(context, title)['archivedAt']).toBeNull();
+    }
+    for (const gid of ['T1', 'ST1', 'SST1']) {
+      expect(taskRef(context, gid)['sourceDeletedAt']).toBeNull();
+    }
+    expect(job.snapshot().counts['restored']).toEqual({ done: 3 });
+  });
+
+  it('keeps a task Asana still has, or will not show, that this run did not reach', async () => {
+    const context = await setUp();
+    await runImport(context);
+
+    // Moved to a project that does not come across.
+    const moved = await runImport(
+      context,
+      withoutT1(() => ({ gid: 'T1' })),
+    );
+    // Moved to one the token cannot open.
+    const hidden = await runImport(
+      context,
+      withoutT1(() => {
+        throw new AsanaApiError('/tasks/T1', 403, 'Not authorized');
+      }),
+    );
+
+    expect([moved.status, hidden.status]).toEqual(['SUCCEEDED', 'SUCCEEDED']);
+    expect(taskTitled(context, 'Fix the boiler')['archivedAt']).toBeUndefined();
+    expect(taskRef(context, 'T1')['sourceDeletedAt']).toBeUndefined();
+  });
+
+  it('does not ask about the tasks of a project Asana would not list', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const routes = org.routes;
+
+    const { status, asana } = await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        if (path === '/tasks' && params['project'] === 'P1') throw new Error('Asana timed out');
+        return routes(path, params);
+      },
+    });
+
+    expect(status).toBe('PARTIAL');
+    // T2 is only in P1, which was not listed; T1 was reached through P2.
+    expect(asana.get).not.toHaveBeenCalledWith('/tasks/T2', expect.anything());
+    expect(taskTitled(context, 'Order parts')['archivedAt']).toBeUndefined();
   });
 
   it('imports a subtask Asana also lists in a project once, under its parent', async () => {

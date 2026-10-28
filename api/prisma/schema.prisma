@@ -3193,22 +3193,27 @@ model ImportRun {
 /// than a column on every imported model, so the models stay what they are
 /// and an import's footprint can be listed or removed in one place.
 model ExternalRef {
-  id          String       @id @default(uuid(7)) @db.Uuid
-  workspaceId String       @db.Uuid
-  source      ImportSource
+  id              String       @id @default(uuid(7)) @db.Uuid
+  workspaceId     String       @db.Uuid
+  source          ImportSource
   /// What kind of record: `project`, `section`, `task`, `story`, `attachment`…
-  entityType  String       @db.VarChar(40)
-  externalId  String       @db.VarChar(64)
+  entityType      String       @db.VarChar(40)
+  externalId      String       @db.VarChar(64)
   /// The CoreTask row. No foreign key: by `entityType` it is a row of a
   /// different table, and a row deleted in CoreTask just makes this a miss.
-  entityId    String       @db.Uuid
+  entityId        String       @db.Uuid
   /// The record as the other tool last sent it, every field it asked for.
   /// CoreTask's tables hold what they have columns for; this keeps the rest
   /// (a reference field's target, a custom task type, formatting the editor
   /// drops), so it can still be mapped later without reading the tool again.
-  snapshot    Json?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  snapshot        Json?
+  /// When the other tool said the record no longer exists: a sync asked Asana
+  /// for a task it did not reach and was told there is no such task. The
+  /// CoreTask row was archived then, and is restored if the record comes back
+  /// out of Asana's trash. Null while the record is there.
+  sourceDeletedAt DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
