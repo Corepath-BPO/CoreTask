@@ -44,6 +44,7 @@ const run: ImportRun = {
     subtasks: { done: 1200, total: 117660 },
     comments: { done: 12 },
     placeholders: { done: 22 },
+    archived: { done: 3 },
     requests: 4321,
   },
   errors: [
@@ -113,7 +114,11 @@ describe('AsanaPage', () => {
     expect(screen.getByRole('progressbar', { name: 'Subtasks: 1%' })).toBeInTheDocument();
     expect(screen.getByText(/1,200 of 117,660/)).toBeInTheDocument();
     expect(screen.getByText(/4,321 Asana requests/)).toBeInTheDocument();
-    expect(screen.getByText(/22 new placeholder accounts · 12 comments/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /22 new placeholder accounts · 12 comments · 3 tasks deleted in Asana, archived/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText('1 record not imported')).toBeInTheDocument();
     expect(screen.getByText(/scan.heic: Not an accepted type/)).toBeInTheDocument();
   });

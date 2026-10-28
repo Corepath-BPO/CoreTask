@@ -60,6 +60,7 @@ const PHASE_LABEL: Record<string, string> = {
   portfolios: 'Portfolios',
   tasks: 'Tasks',
   subtasks: 'Subtasks',
+  deleted: 'Tasks deleted in Asana',
   history: 'Comments and files',
   dependencies: 'Dependencies',
   access: 'Project access',
@@ -92,6 +93,12 @@ const TALLIES: { key: string; one: string; many: string }[] = [
   { key: 'links', one: 'linked file', many: 'linked files' },
   { key: 'emptyFiles', one: 'empty file skipped', many: 'empty files skipped' },
   { key: 'flattened', one: 'nested subtask moved up', many: 'nested subtasks moved up' },
+  {
+    key: 'archived',
+    one: 'task deleted in Asana, archived',
+    many: 'tasks deleted in Asana, archived',
+  },
+  { key: 'restored', one: 'task back in Asana, restored', many: 'tasks back in Asana, restored' },
 ];
 
 function counter(run: ImportRun, key: string): ImportCounter | null {
