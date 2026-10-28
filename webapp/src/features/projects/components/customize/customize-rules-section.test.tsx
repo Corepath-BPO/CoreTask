@@ -5,6 +5,12 @@ import { renderWithRouter, screen, setupUser, within } from '@/test/test-utils';
 
 import { CustomizeRulesSection } from './customize-rules-section';
 
+const navigate = vi.fn();
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useNavigate: () => navigate,
+}));
+
 // Only Save to library reads the project's names, and no test here saves one.
 vi.mock('@/features/automations/builder/hooks/use-automation-graph', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -89,17 +95,23 @@ describe('CustomizeRulesSection', () => {
     );
   });
 
-  it('adds a rule from scratch or from the library', async () => {
+  it('opens the Add automation page from + Add, and a rule from its row', async () => {
     const user = setupUser();
     await renderSection();
 
     await user.click(screen.getByRole('button', { name: 'Add' }));
-    const menu = await screen.findByRole('menu');
-    expect(
-      within(menu)
-        .getAllByRole('menuitem')
-        .map((item) => item.textContent),
-    ).toEqual(['Start from scratch', 'Start from the rule library']);
+    expect(navigate).toHaveBeenLastCalledWith({
+      to: '/projects/$projectId/automations/add',
+      params: { projectId: 'p-1' },
+      search: {},
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Move to Prepare New Lease/ }));
+    expect(navigate).toHaveBeenLastCalledWith({
+      to: '/projects/$projectId/automations/$ruleId',
+      params: { projectId: 'p-1', ruleId: 'r-1' },
+      search: {},
+    });
   });
 
   it('gives each rule its own ⋯ menu, named for what removing it does', async () => {

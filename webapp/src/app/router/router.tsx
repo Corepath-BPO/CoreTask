@@ -33,6 +33,7 @@ import { AcceptInvitationPage } from '@/features/members/pages/accept-invitation
 import { MembersPage } from '@/features/members/pages/members-page';
 import { AutomationsPage } from '@/features/automations/pages/automations-page';
 import { AutomationBuilderDialog } from '@/features/automations/builder/components/automation-builder-dialog';
+import { AddAutomationDialog } from '@/features/automations/components/add-automation-dialog';
 import { ProjectBoardPage } from '@/features/projects/pages/project-board-page';
 import { ProjectActivityPage } from '@/features/projects/pages/project-activity-page';
 import { ProjectFilesPage } from '@/features/projects/pages/project-files-page';
@@ -714,6 +715,19 @@ const projectAutomationNewRoute = createRoute({
 });
 
 /**
+ * Adding a rule: the prompt, Start from scratch and the gallery, as Asana's
+ * "Add automation" page. A static segment, so it wins over `$ruleId`.
+ */
+const projectAutomationAddRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: '/automations/add',
+  component: function AutomationAddRoute() {
+    const { projectId } = projectAutomationAddRoute.useParams();
+    return <AddAutomationDialog projectId={projectId} />;
+  },
+});
+
+/**
  * The visual builder, on its own address.
  *
  * A rule now has a URL that can be pasted to a colleague, and Back is the rule
@@ -862,6 +876,7 @@ const routeTree = rootRoute.addChildren([
       projectMessagesRoute,
       projectFilesRoute,
       projectAutomationsRoute,
+      projectAutomationAddRoute,
       projectAutomationNewRoute,
       projectAutomationBuilderRoute,
       projectNoteRoute,
