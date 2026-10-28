@@ -385,6 +385,23 @@ describe('values that match no option', () => {
 
     expect(summary).toContain('urgent fix');
   });
+
+  it('shows a number stored as a number, as one typed into the panel', () => {
+    // The API and a drafted rule may store 3 where the panel stores "3".
+    const stored = (value: unknown) =>
+      summarise(
+        node({
+          type: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: 'estimatedMinutes', operator: 'LESS_THAN', value },
+        }),
+        metadata,
+      );
+
+    expect(stored(3)).toBe(stored('3'));
+    expect(stored(3)).toMatch(/3$/);
+    expect(stored(3)).not.toContain('…');
+  });
 });
 
 describe('the send-a-webhook step', () => {

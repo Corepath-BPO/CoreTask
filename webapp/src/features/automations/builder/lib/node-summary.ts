@@ -533,6 +533,9 @@ const SYSTEM_FIELD_LABEL: Record<string, string> = {
  * nothing and looks broken doing it — the ellipsis at least reads as loading.
  */
 function readableValue(raw: unknown): string {
+  // A number stored as one, as the API and a drafted rule may write it, is
+  // shown as written. The panel stores the text the box holds; both are rules.
+  if (typeof raw === 'number') return Number.isFinite(raw) ? String(raw) : '…';
   if (typeof raw !== 'string' || raw === '') return '…';
 
   return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) ? '…' : humaniseEnum(raw);
