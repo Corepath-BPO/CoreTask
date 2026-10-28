@@ -941,6 +941,75 @@ describe('Automations (e2e)', () => {
       expect(stored?.textValue).toBe('Large');
     });
 
+    it('compares a formula field, worked out with the task when the rule runs', async () => {
+      /*
+       * IT Development's Effort: the days from Started to Completed, sized.
+       * A formula is never stored, so a condition on one used to read empty
+       * and never hold.
+       */
+      const scope = await setupScope();
+      const field = (
+        name: string,
+        type: 'DATE' | 'FORMULA' | 'TEXT',
+        settings: Record<string, string> = {},
+      ) =>
+        context.prisma.customField.create({
+          data: {
+            workspaceId: scope.workspaceId,
+            name,
+            type,
+            settings,
+            projects: { create: { projectId: scope.projectId } },
+          },
+        });
+      const started = await field('Started', 'DATE');
+      const completed = await field('Completed', 'DATE');
+      const days = await field('Days to complete', 'FORMULA', {
+        expression: `days_between({field:${started.id}}, {field:${completed.id}})`,
+      });
+      const effort = await field('Effort', 'TEXT');
+
+      const dated = (customFieldId: string, day: string) =>
+        context.prisma.taskCustomFieldValue.upsert({
+          where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId } },
+          create: { taskId: scope.taskId, customFieldId, dateValue: new Date(day) },
+          update: { dateValue: new Date(day) },
+        });
+      const effortNow = () =>
+        context.prisma.taskCustomFieldValue.findUnique({
+          where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId: effort.id } },
+        });
+
+      await dated(started.id, '2026-10-01T00:00:00Z');
+      await dated(completed.id, '2026-10-03T00:00:00Z');
+
+      await publishGraph(scope, [
+        { nodeType: 'TRIGGER', subtype: 'TASK_MOVED_TO_SECTION' },
+        {
+          nodeType: 'CONDITION',
+          subtype: 'FIELD_COMPARISON',
+          configuration: { field: `customField:${days.id}`, operator: 'LESS_THAN', value: 3 },
+        },
+        {
+          nodeType: 'ACTION',
+          subtype: 'SET_CUSTOM_FIELD',
+          configuration: { fieldId: effort.id, value: 'Medium' },
+        },
+      ]);
+
+      // Two days apart: under 3, so the rule sizes it.
+      await runner.handle(moveEvent(scope));
+      expect((await effortNow())?.textValue).toBe('Medium');
+
+      // Five days apart, the same rule holds back.
+      await context.prisma.taskCustomFieldValue.delete({
+        where: { taskId_customFieldId: { taskId: scope.taskId, customFieldId: effort.id } },
+      });
+      await dated(completed.id, '2026-10-06T00:00:00Z');
+      await runner.handle(moveEvent(scope));
+      expect(await effortNow()).toBeNull();
+    });
+
     it('sets a start date as a day counted from now, and clears it', async () => {
       const scope = await setupScope();
 

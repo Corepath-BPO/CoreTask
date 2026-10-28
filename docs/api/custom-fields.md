@@ -92,7 +92,8 @@ levels of nesting, more than twenty references, and `isRequired: true`.
 A formula's value is never stored. It is worked out when rows are read and
 appended to each row's `customFieldValues` with `number` set (or `null` while
 any operand is empty). `PUT` on a formula field is `422`; a filter or sort that
-names one is `400`.
+names one is `400`. A rule's condition can compare one as a number, worked out
+when the rule runs.
 
 ### `POST /:fieldId/attach`
 
