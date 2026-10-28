@@ -105,10 +105,24 @@ trigger and move row.
   Save keeps the draft; on a running rule it also puts the edits live, which is
   what Save means in Asana.
 
+## Rule list
+
+- **Where:** Customize › **Automations**, Asana's name for the row. The builder
+  still calls each one a rule.
+- **Heading:** **In this project**, "Triggered by activity in this project", and
+  **+ Add**: Start from scratch, or Start from the rule library.
+- **Rows:** borderless, one per rule:
+  - an icon for what sets the rule off;
+  - its name;
+  - "Active · Last run 3 hours ago". A failed last run says so, in red.
+- **Click a row** to open the rule in the builder.
+- **⋯ on hover:** the same menu the Automations tab has. It holds edit, run
+  history, publish / pause / resume, duplicate, save to library, and delete or
+  archive. It shows only to managers, and always on a screen without a pointer.
+- **Not taken from Asana:** the drag handle that replaces the icon on hover.
+  CoreTask's rules run in no particular order, so there is nothing to reorder.
+
 ## Not in this change
 
-- **Rule list:** the drawer's styling.
 - **Adding a rule:** the full-screen "Add automation" page with a prompt and the
-  template gallery.
-
-Each comes after this change, in that order.
+  template gallery. **+ Add** opens it once it exists.

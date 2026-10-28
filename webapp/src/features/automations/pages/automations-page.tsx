@@ -1,41 +1,10 @@
-import { AUTOMATION_STATE_COLOR, AutomationRuleStatus, TRIGGER_LABEL } from '@coretask/contracts';
+import { AUTOMATION_STATE_COLOR, TRIGGER_LABEL } from '@coretask/contracts';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import {
-  AlertCircle,
-  BookmarkPlus,
-  Copy,
-  History,
-  LibraryBig,
-  MoreHorizontal,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
-  Trash2,
-  Upload,
-  Zap,
-} from 'lucide-react';
+import { AlertCircle, LibraryBig, Plus, Zap } from 'lucide-react';
 import { useState } from 'react';
 
 import { EmptyState } from '@/components/feedback/empty-state';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SemanticBadge } from '@/features/colors/components/semantic-badge';
 import { useProject } from '@/features/projects/hooks/use-projects';
@@ -43,20 +12,10 @@ import { useProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 import { formatRelativeTime } from '@/lib/utils';
 
-import type { AutomationRule } from '../api/automations.api';
-import { useAutomationMetadata } from '../builder/hooks/use-automation-graph';
-import { AutomationRunHistoryDialog } from '../components/automation-run-history-dialog';
+import { RuleActionsMenu } from '../components/rule-actions-menu';
 import { RuleLibraryDialog } from '../components/rule-library-dialog';
-import { SaveToLibraryDialog, type LibraryTarget } from '../components/save-to-library-dialog';
-import { collectRuleReferences } from '../lib/template-references';
-import {
-  useAutomations,
-  useDuplicateRule,
-  useEnableRule,
-  usePauseRule,
-  usePublishRule,
-  useRemoveRule,
-} from '../hooks/use-automations';
+import { useAutomations } from '../hooks/use-automations';
+import { useRuleActions } from '../hooks/use-rule-actions';
 
 /**
  * Every rule on a project, with what it does and how it has been behaving.
@@ -75,19 +34,8 @@ export function AutomationsPage() {
   const canManage = useProjectAccess(project).canManage;
 
   const { data: rules, isLoading, isError, refetch } = useAutomations(workspaceId, projectId);
-  const publish = usePublishRule(workspaceId, projectId);
-  const pause = usePauseRule(workspaceId, projectId);
-  const enable = useEnableRule(workspaceId, projectId);
-  const duplicate = useDuplicateRule(workspaceId, projectId);
-  const remove = useRemoveRule(workspaceId, projectId);
-  /* The project's names for what a rule points at, so the save dialog can say
-     "this rule names Incoming Request and To do" rather than listing ids. */
-  const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
-
-  const [pendingRemove, setPendingRemove] = useState<AutomationRule | null>(null);
-  const [historyRule, setHistoryRule] = useState<AutomationRule | null>(null);
+  const actions = useRuleActions(workspaceId, projectId);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [libraryTarget, setLibraryTarget] = useState<LibraryTarget | null>(null);
 
   const navigate = useNavigate();
 
@@ -96,20 +44,13 @@ export function AutomationsPage() {
    * yet is exactly where starting from the library is most wanted.
    */
   const library = (
-    <>
-      <RuleLibraryDialog
-        open={libraryOpen}
-        onOpenChange={setLibraryOpen}
-        workspaceId={workspaceId}
-        projectId={projectId}
-        canManage={canManage}
-      />
-      <SaveToLibraryDialog
-        workspaceId={workspaceId}
-        target={libraryTarget}
-        onOpenChange={(open) => !open && setLibraryTarget(null)}
-      />
-    </>
+    <RuleLibraryDialog
+      open={libraryOpen}
+      onOpenChange={setLibraryOpen}
+      workspaceId={workspaceId}
+      projectId={projectId}
+      canManage={canManage}
+    />
   );
 
   if (isLoading) {
@@ -260,7 +201,7 @@ export function AutomationsPage() {
                   <button
                     type="button"
                     className="rounded font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setHistoryRule(rule)}
+                    onClick={() => actions.showHistory(rule)}
                   >
                     {rule.runCount}
                   </button>
@@ -272,92 +213,7 @@ export function AutomationsPage() {
                 </td>
 
                 <td className="px-3 py-2 text-right">
-                  {canManage && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label={`Actions for ${rule.name}`}
-                        >
-                          <MoreHorizontal className="size-4" aria-hidden="true" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            void navigate({
-                              to: '/projects/$projectId/automations/$ruleId',
-                              params: { projectId, ruleId: rule.id },
-                            })
-                          }
-                        >
-                          <Pencil className="size-4" aria-hidden="true" />
-                          Edit rule
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => setHistoryRule(rule)}>
-                          <History className="size-4" aria-hidden="true" />
-                          Run history
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {rule.status === AutomationRuleStatus.DRAFT && (
-                          <DropdownMenuItem onSelect={() => publish.mutate(rule.id)}>
-                            <Upload className="size-4" aria-hidden="true" />
-                            Publish
-                          </DropdownMenuItem>
-                        )}
-                        {rule.status === AutomationRuleStatus.ACTIVE && (
-                          <DropdownMenuItem onSelect={() => pause.mutate(rule.id)}>
-                            <Pause className="size-4" aria-hidden="true" />
-                            Pause
-                          </DropdownMenuItem>
-                        )}
-                        {rule.status === AutomationRuleStatus.PAUSED && (
-                          <DropdownMenuItem onSelect={() => enable.mutate(rule.id)}>
-                            <Play className="size-4" aria-hidden="true" />
-                            Resume
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem onSelect={() => duplicate.mutate(rule.id)}>
-                          <Copy className="size-4" aria-hidden="true" />
-                          Duplicate
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            setLibraryTarget({
-                              kind: 'rule',
-                              projectId,
-                              ruleId: rule.id,
-                              name: rule.name,
-                              description: rule.description,
-                              references: collectRuleReferences(
-                                rule.nodes.map((node) => ({
-                                  type: node.nodeType,
-                                  configuration: node.configuration,
-                                })),
-                                rule.triggerConfig,
-                                metadata,
-                              ),
-                            })
-                          }
-                        >
-                          <BookmarkPlus className="size-4" aria-hidden="true" />
-                          Save to library
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setPendingRemove(rule)}
-                        >
-                          <Trash2 className="size-4" aria-hidden="true" />
-                          {/* Named for what actually happens, which depends on
-                              whether the rule has ever run. */}
-                          {rule.runCount > 0 ? 'Archive' : 'Delete'}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
+                  {canManage && <RuleActionsMenu rule={rule} actions={actions} />}
                 </td>
               </tr>
             ))}
@@ -365,42 +221,7 @@ export function AutomationsPage() {
         </table>
       </div>
 
-      <AlertDialog
-        open={pendingRemove !== null}
-        onOpenChange={(open) => !open && setPendingRemove(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingRemove && pendingRemove.runCount > 0 ? 'Archive' : 'Delete'} “
-              {pendingRemove?.name}”?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingRemove && pendingRemove.runCount > 0
-                ? 'It stops running, and its history stays so you can still see what it changed.'
-                : 'This draft has never run, so nothing is lost.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (pendingRemove) remove.mutate(pendingRemove.id);
-                setPendingRemove(null);
-              }}
-            >
-              {pendingRemove && pendingRemove.runCount > 0 ? 'Archive' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AutomationRunHistoryDialog
-        workspaceId={workspaceId}
-        projectId={projectId}
-        rule={historyRule}
-        onOpenChange={(open) => !open && setHistoryRule(null)}
-      />
+      {actions.dialogs}
 
       {library}
     </div>
