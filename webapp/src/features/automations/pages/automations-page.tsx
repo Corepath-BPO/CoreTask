@@ -87,7 +87,7 @@ export function AutomationsPage() {
                 <Button
                   onClick={() =>
                     void navigate({
-                      to: '/projects/$projectId/automations/new',
+                      to: '/projects/$projectId/automations/add',
                       params: { projectId },
                       search: {},
                     })
@@ -121,7 +121,7 @@ export function AutomationsPage() {
             size="sm"
             onClick={() =>
               void navigate({
-                to: '/projects/$projectId/automations/new',
+                to: '/projects/$projectId/automations/add',
                 params: { projectId },
                 search: {},
               })

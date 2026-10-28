@@ -1,19 +1,12 @@
 import { AutomationExecutionStatus, AutomationRuleStatus } from '@coretask/contracts';
 import { useNavigate } from '@tanstack/react-router';
-import { LibraryBig, Plus } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Plus } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { AutomationRule } from '@/features/automations/api/automations.api';
 import { RuleActionsMenu } from '@/features/automations/components/rule-actions-menu';
-import { RuleLibraryDialog } from '@/features/automations/components/rule-library-dialog';
 import { TriggerIcon } from '@/features/automations/components/trigger-icon';
 import { useRuleActions } from '@/features/automations/hooks/use-rule-actions';
 import { cn, formatRelativeTime } from '@/lib/utils';
@@ -31,9 +24,9 @@ const STATE_LABEL: Partial<Record<string, string>> = {
  * what sets it off, its name, and whether it is on and when it last ran.
  *
  * A directory rather than a second rule editor: each row hands off to the
- * builder, which already owns editing, and creating starts the same "new rule"
- * canvas the Automations tab starts. Both destinations navigate with a fresh
- * search, which drops `?customize=` — the panel gives way to the canvas.
+ * builder, which already owns editing, and + Add opens the Add automation page
+ * the Automations tab opens. Both navigate with a fresh search, which drops
+ * `?customize=` — the panel gives way, and closing the page brings it back.
  */
 export function CustomizeRulesSection({
   workspaceId,
@@ -50,11 +43,10 @@ export function CustomizeRulesSection({
 }) {
   const navigate = useNavigate();
   const actions = useRuleActions(workspaceId, projectId);
-  const [libraryOpen, setLibraryOpen] = useState(false);
 
-  const newRule = () =>
+  const addRule = () =>
     void navigate({
-      to: '/projects/$projectId/automations/new',
+      to: '/projects/$projectId/automations/add',
       params: { projectId },
       search: {},
     });
@@ -67,26 +59,10 @@ export function CustomizeRulesSection({
           <p className="text-xs text-muted-foreground">Triggered by activity in this project</p>
         </div>
         {canManage && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="shrink-0">
-                <Plus />
-                Add
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onSelect={newRule}>
-                <Plus />
-                Start from scratch
-              </DropdownMenuItem>
-              {/* The workspace's saved rules, applied here. The dialog navigates to
-                  the new draft, which drops `?customize=` the same way. */}
-              <DropdownMenuItem onSelect={() => setLibraryOpen(true)}>
-                <LibraryBig />
-                Start from the rule library
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={addRule}>
+            <Plus />
+            Add
+          </Button>
         )}
       </div>
 
@@ -120,14 +96,6 @@ export function CustomizeRulesSection({
       </div>
 
       {actions.dialogs}
-
-      <RuleLibraryDialog
-        open={libraryOpen}
-        onOpenChange={setLibraryOpen}
-        workspaceId={workspaceId}
-        projectId={projectId}
-        canManage={canManage}
-      />
     </div>
   );
 }

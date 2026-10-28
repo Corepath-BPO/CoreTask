@@ -110,7 +110,7 @@ trigger and move row.
 - **Where:** Customize › **Automations**, Asana's name for the row. The builder
   still calls each one a rule.
 - **Heading:** **In this project**, "Triggered by activity in this project", and
-  **+ Add**: Start from scratch, or Start from the rule library.
+  **+ Add**, which opens the Add automation page.
 - **Rows:** borderless, one per rule:
   - an icon for what sets the rule off;
   - its name;
@@ -122,7 +122,22 @@ trigger and move row.
 - **Not taken from Asana:** the drag handle that replaces the icon on hover.
   CoreTask's rules run in no particular order, so there is nothing to reorder.
 
-## Not in this change
+## Adding a rule
 
-- **Adding a rule:** the full-screen "Add automation" page with a prompt and the
-  template gallery. **+ Add** opens it once it exists.
+- **Where:** `/projects/:id/automations/add`, over the whole screen like the
+  builder. **+ Add** in the rule list and **New rule** on the Automations tab
+  open it. **×** goes back to wherever it was opened from.
+- **The question:** a bolt, "What do you want to automate?", and a box to answer
+  in. Asana's box writes the rule with AI. CoreTask's finds it instead: the
+  words typed rank the gallery below, best match first, so "assign tasks when
+  they move to a section" brings "Assign whoever owns a section" to the top.
+  Cards sharing no word step aside.
+- **OR, Start from scratch:** a blank rule in the builder.
+- **Featured:** the starters, as cards in a grid of four. Each card shows what
+  sets it off ⚡ what it does, its name, and a line. A starter opens in the
+  builder unsaved, with its blanks left to fill.
+- **Saved in this workspace:** the rule library's templates, as the same cards
+  with "From [project]". Choosing one makes a draft in this project and opens
+  it, as the library does.
+- **Nothing is created** until a saved rule is chosen or the builder saves.
+- Only a project's managers see the page. Anyone else is told so.

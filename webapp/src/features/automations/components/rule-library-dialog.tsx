@@ -11,7 +11,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
-import { toast } from 'sonner';
 
 import {
   AlertDialog,
@@ -41,13 +40,10 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
-import {
-  useApplyTemplate,
-  useAutomationTemplates,
-  useRemoveTemplate,
-} from '../hooks/use-automation-templates';
+import { useAutomationTemplates, useRemoveTemplate } from '../hooks/use-automation-templates';
+import { useStartFromTemplate } from '../hooks/use-start-from-template';
 import { STARTER_TEMPLATES, type StarterTemplate } from '../lib/starter-templates';
-import { describeUnresolved, summariseTemplate } from '../lib/template-summary';
+import { summariseTemplate } from '../lib/template-summary';
 
 import { SaveToLibraryDialog, type LibraryTarget } from './save-to-library-dialog';
 
@@ -86,13 +82,12 @@ export function RuleLibraryDialog({
 }) {
   const navigate = useNavigate();
   const templates = useAutomationTemplates(workspaceId, open);
-  const apply = useApplyTemplate(workspaceId, projectId);
+  const startFrom = useStartFromTemplate(workspaceId, projectId, sectionId);
   const remove = useRemoveTemplate(workspaceId);
 
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<LibraryTarget | null>(null);
   const [pendingRemove, setPendingRemove] = useState<AutomationTemplate | null>(null);
-  const [applyingId, setApplyingId] = useState<string | null>(null);
 
   const cards = useMemo(
     () =>
@@ -144,42 +139,8 @@ export function RuleLibraryDialog({
     });
   };
 
-  const use = (template: AutomationTemplate) => {
-    setApplyingId(template.id);
-
-    apply.mutate(
-      { templateId: template.id, ...(sectionId ? { sectionId } : {}) },
-      {
-        onSuccess: (applied) => {
-          onOpenChange(false);
-
-          /*
-           * Said here rather than in the hook, because what to say depends on
-           * the answer. A clean match is a draft to look over; an unmatched
-           * section is a draft with a blank in it, and the blank is the news.
-           */
-          const gaps = describeUnresolved(applied.unresolved);
-          if (gaps) {
-            toast.warning(`Started “${template.name}” as a draft.`, {
-              description: gaps,
-              duration: 12_000,
-            });
-          } else {
-            toast.success(`Started “${template.name}” as a draft.`, {
-              description: 'Check it over, then publish it when it reads right.',
-            });
-          }
-
-          void navigate({
-            to: '/projects/$projectId/automations/$ruleId',
-            params: { projectId, ruleId: applied.rule.id },
-            search: {},
-          });
-        },
-        onSettled: () => setApplyingId(null),
-      },
-    );
-  };
+  const use = (template: AutomationTemplate) =>
+    startFrom.start(template, () => onOpenChange(false));
 
   return (
     <>
@@ -314,8 +275,8 @@ export function RuleLibraryDialog({
                                 <Button
                                   size="sm"
                                   className="cursor-pointer"
-                                  loading={applyingId === template.id}
-                                  disabled={apply.isPending}
+                                  loading={startFrom.startingId === template.id}
+                                  disabled={startFrom.isPending}
                                   onClick={() => use(template)}
                                 >
                                   <Plus className="size-4" aria-hidden="true" />
