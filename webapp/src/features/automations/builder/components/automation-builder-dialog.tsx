@@ -1,3 +1,4 @@
+import type { AutomationDraft } from '@coretask/types';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
@@ -36,12 +37,15 @@ export function AutomationBuilderDialog({
   ruleId,
   sectionId,
   starter,
+  drafted,
 }: {
   projectId: string;
   ruleId: string | null;
   sectionId?: string;
   /** A starter's key from the library, for a canvas that opens already shaped. */
   starter?: string;
+  /** A rule drafted from a sentence on the Add automation page. */
+  drafted?: AutomationDraft;
 }) {
   const navigate = useNavigate();
 
@@ -102,6 +106,7 @@ export function AutomationBuilderDialog({
           ruleId={ruleId}
           {...(sectionId ? { sectionId } : {})}
           {...(starter ? { starter } : {})}
+          {...(drafted ? { drafted } : {})}
           onDirtyChange={setDirty}
           onClose={leave}
         />

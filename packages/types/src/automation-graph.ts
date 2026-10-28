@@ -142,6 +142,54 @@ export interface AutomationGraphValidation {
   issues: AutomationGraphIssue[];
 }
 
+/** What somebody asks for when they describe a rule instead of building one. */
+export interface DraftAutomationPayload {
+  /** "When a task moves to Week 1, assign it to Sam." */
+  prompt: string;
+}
+
+/**
+ * A rule drafted from a sentence, for the builder to open unsaved.
+ *
+ * Nothing is created: the builder holds it as it holds a starter, and the
+ * first save is what makes the rule. The nodes are in the shape that save
+ * sends, a trigger and a straight line of steps under it, with ids that have
+ * never been to the database.
+ */
+export interface AutomationDraft {
+  name: string;
+  description: string | null;
+  nodes: SaveAutomationGraphNode[];
+  /** The validator's answer about the draft, the same one Publish would give. */
+  validation: AutomationGraphValidation;
+  /**
+   * What was asked for and is not in the draft: the model's own note about
+   * what the steps could not express, and any step it named wrongly.
+   */
+  notes: string[];
+}
+
+/**
+ * What the engine can do at all, independent of any one project.
+ *
+ * Separate from `permissions`: this says what is possible, that says what this
+ * caller may do. A client that conflates them tells a manager a feature is
+ * forbidden when it simply does not exist yet.
+ */
+export interface AutomationCapabilities {
+  /** The runner walks a branch's arms and takes one. */
+  branching: boolean;
+  /** A Wait step pauses a run until the clock resumes it. */
+  delays: boolean;
+  externalActions: boolean;
+  /** A model is set up: the AI steps run, and a rule can be drafted from a sentence. */
+  ai: boolean;
+  conditionsOnCustomFields: boolean;
+  actionsOnCustomFields: boolean;
+  maxActionsPerExecution: number;
+  maxRuleDepth: number;
+}
+
 /**
  * What the forms need to offer real choices.
  *
@@ -207,6 +255,13 @@ export interface AutomationMetadata {
     type: string;
     options?: { id: string; label: string; colorToken: string }[];
   }[];
+  /**
+   * What this server's engine can do. The endpoint has always sent it; it is
+   * declared since the Add automation page reads `ai`, to offer drafting a
+   * rule only where a model is set up. Optional, as `teams` is, so a fixture
+   * written before it keeps compiling.
+   */
+  capabilities?: AutomationCapabilities;
 }
 
 /** One offer in the trigger or action selector. */

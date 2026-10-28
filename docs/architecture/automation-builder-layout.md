@@ -128,10 +128,42 @@ trigger and move row.
   builder. **+ Add** in the rule list and **New rule** on the Automations tab
   open it. **×** goes back to wherever it was opened from.
 - **The question:** a bolt, "What do you want to automate?", and a box to answer
-  in. Asana's box writes the rule with AI. CoreTask's finds it instead: the
-  words typed rank the gallery below, best match first, so "assign tasks when
-  they move to a section" brings "Assign whoever owns a section" to the top.
-  Cards sharing no word step aside.
+  in. The box does two things:
+  - **While you type,** the words rank the gallery below, best match first. So
+    "assign tasks when they move to a section" brings "Assign whoever owns a
+    section" to the top. Cards that share no word step aside.
+  - **Send (↑ or Enter)** writes the rule with AI, as Asana's box does. The
+    builder opens on the drafted rule, unsaved, at `/automations/new`. "When a
+    task moves to Week 1, assign it to Sam and set the due date to Friday"
+    opens as "When a task is moved to a section: Week 1", then "Assign Sam",
+    then "Set the due date: Friday next week".
+- **Drafting, in the API:** `POST …/automations/draft` with `{ prompt }`
+  (`AutomationDraftService`). The model is offered the builder's vocabulary as
+  tools: one for the trigger, one for a check, and one per action. The
+  project's sections, people, statuses, priorities, fields, teams and other
+  projects (from `AutomationMetadataService.forProject`) come with it as ids,
+  so it can name the real Week 1 and nothing that is not there. Each call is
+  read back before it becomes a step. An id that was not offered, or a value
+  the step cannot hold, is left out and named in `notes`.
+  - **What comes back:** the nodes in the shape the builder saves. That is the
+    trigger, one **Check if** (a group of ALL when the sentence names several
+    conditions), then the actions in order. With them come the graph
+    validator's answer and the notes. Nothing is written.
+  - **Not drafted:** ticket rules, AI steps, branches and Wait steps. A sentence
+    that is not a rule at all gets a 422 with the model's reason, shown under
+    the box.
+  - **Dates:** a weekday such as "Friday" is that day of the following week,
+    because that is the relative date a rule can store.
+  - **Limits:** managers only, and 10 drafts a minute.
+- **The hand-off:** the draft travels in the history entry's state
+  (`automationDraft`), not the address, so a reload reopens the same draft.
+  `makeDraftNodes` shapes the canvas as `makeStarterNodes` shapes a starter's.
+  The builder counts a drafted rule as unsaved from the start: **Save** is
+  offered straight away, and closing asks first. Anything left out shows as a
+  toast while the builder opens.
+- **Only with a model:** the send button shows only where
+  `capabilities.ai` on the metadata is true (`ANTHROPIC_API_KEY` set). Without
+  one the box only ranks the gallery, and Enter does nothing.
 - **OR, Start from scratch:** a blank rule in the builder.
 - **Featured:** the starters, as cards in a grid of four. Each card shows what
   sets it off ⚡ what it does, its name, and a line. A starter opens in the
@@ -139,5 +171,6 @@ trigger and move row.
 - **Saved in this workspace:** the rule library's templates, as the same cards
   with "From [project]". Choosing one makes a draft in this project and opens
   it, as the library does.
-- **Nothing is created** until a saved rule is chosen or the builder saves.
+- **Nothing is created** until a saved rule is chosen or the builder saves, and
+  sending a sentence is no exception.
 - Only a project's managers see the page. Anyone else is told so.

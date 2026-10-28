@@ -15,6 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { ApiErrorResponseDoc } from '../../common/decorators/api-envelope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -27,10 +28,12 @@ import { toGraph } from './builder/automation-graph.mapper';
 import { ProjectAccessGuard } from '../project-access/project-access.guard';
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
+import { AutomationDraftService } from './automation-draft.service';
 import { AutomationsService } from './automations.service';
 import {
   AutomationNodeDto,
   CreateRuleDto,
+  DraftRuleDto,
   ExecutionsQueryDto,
   RevertRuleDto,
   RunRuleDto,
@@ -60,6 +63,7 @@ export class AutomationsController {
     private readonly validator: AutomationGraphValidatorService,
     private readonly metadata: AutomationMetadataService,
     private readonly definitions: AutomationDefinitionService,
+    private readonly drafts: AutomationDraftService,
   ) {}
 
   @Get()
@@ -107,6 +111,31 @@ export class AutomationsController {
     @CurrentWorkspace('role') role: WorkspaceRole,
   ) {
     return this.metadata.forProject(workspaceId, projectId, role);
+  }
+
+  @Post('draft')
+  @HttpCode(HttpStatus.OK)
+  // A model call per request: a few a minute is plenty for somebody typing.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Draft a rule from a sentence, without saving it',
+    description:
+      'Asana’s “What do you want to automate?”. A model turns the sentence into a trigger, ' +
+      'checks and actions, naming only this project’s own sections, people, statuses and ' +
+      'fields. Returns the nodes in the shape the builder saves, what the validator says about ' +
+      'them, and notes on anything asked for that is not in the draft. Creates nothing. ' +
+      '`capabilities.ai` on the metadata says whether a model is set up.',
+  })
+  @ApiBody({ type: DraftRuleDto })
+  @ApiErrorResponseDoc(422, 'No rule could be drafted from the sentence; the message says why')
+  @ApiErrorResponseDoc(503, 'No model is set up, or it did not answer')
+  draft(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() dto: DraftRuleDto,
+  ) {
+    return this.drafts.draft(workspaceId, projectId, role, dto.prompt);
   }
 
   @Get(':ruleId/graph')

@@ -32,7 +32,7 @@ import {
   AI_CHECK_FIELD,
   AI_UNAVAILABLE_REASON,
 } from '@coretask/contracts';
-import type { AutomationCatalogEntry } from '@coretask/types';
+import type { AutomationCapabilities, AutomationCatalogEntry } from '@coretask/types';
 
 /**
  * What the builder's pickers may offer, and which of it the engine really runs.
@@ -75,26 +75,6 @@ export interface AutomationTriggerEntry extends AutomationCatalogEntry {
 export interface AutomationConditionEntry extends AutomationCatalogEntry {
   /** Feeds `OPERATORS_BY_VALUE_TYPE` on the client. */
   valueType: ConditionValueType;
-}
-
-/**
- * What the engine can do at all, independent of any one project.
- *
- * Separate from `permissions`: this says what is possible, that says what this
- * caller may do. A client that conflates them tells a manager a feature is
- * forbidden when it simply does not exist yet.
- */
-export interface AutomationCapabilities {
-  /** The runner walks a branch's arms and takes one. */
-  branching: boolean;
-  /** A Wait step pauses a run until the clock resumes it. */
-  delays: boolean;
-  externalActions: boolean;
-  ai: boolean;
-  conditionsOnCustomFields: boolean;
-  actionsOnCustomFields: boolean;
-  maxActionsPerExecution: number;
-  maxRuleDepth: number;
 }
 
 /** What this caller may do with the project's rules. */

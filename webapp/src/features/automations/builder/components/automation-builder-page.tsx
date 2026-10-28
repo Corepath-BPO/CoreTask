@@ -7,6 +7,7 @@ import {
 } from '@coretask/contracts';
 import type {
   AutomationCatalogEntry,
+  AutomationDraft,
   AutomationGraphNode,
   AutomationRuleGraph,
   AutomationRuleVersionSummary,
@@ -35,6 +36,7 @@ import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
 import { RuleLibraryDialog } from '../../components/rule-library-dialog';
 import { SaveToLibraryDialog, type LibraryTarget } from '../../components/save-to-library-dialog';
+import { makeDraftNodes } from '../../lib/drafted-rule';
 import { findStarter, makeStarterNodes } from '../../lib/starter-templates';
 import { collectRuleReferences } from '../../lib/template-references';
 import {
@@ -102,21 +104,29 @@ function blankRule(
   projectId: string,
   sectionId: string | undefined,
   starterKey: string | undefined,
+  drafted: AutomationDraft | undefined,
 ): AutomationRuleGraph {
   /*
    * A starter arrives already shaped — its trigger and steps drawn, its blanks
    * unanswered — and named, so the rule list can tell it from an untitled
    * draft. An unknown key is a blank canvas rather than an error: a stale link
    * to a starter that was renamed should still open something.
+   *
+   * A rule drafted from a sentence arrives the same way, with its blanks
+   * answered as far as the sentence said.
    */
-  const starter = findStarter(starterKey);
-  const nodes = starter ? makeStarterNodes(starter, sectionId) : makeDefaultNodes(sectionId);
+  const starter = drafted ? undefined : findStarter(starterKey);
+  const nodes = drafted
+    ? makeDraftNodes(drafted)
+    : starter
+      ? makeStarterNodes(starter, sectionId)
+      : makeDefaultNodes(sectionId);
 
   return {
     id: '',
     projectId,
-    name: starter?.name ?? '',
-    description: starter?.description ?? null,
+    name: drafted?.name ?? starter?.name ?? '',
+    description: drafted?.description ?? starter?.description ?? null,
     status: AutomationRuleStatus.DRAFT,
     version: 0,
     // Chaining allowed by default, matching the column: a new rule behaves the
@@ -152,6 +162,7 @@ export function AutomationBuilderPage({
   ruleId,
   sectionId,
   starter,
+  drafted,
   onDirtyChange,
   onClose,
 }: {
@@ -162,6 +173,8 @@ export function AutomationBuilderPage({
   sectionId?: string;
   /** A starter's key, when begun from the library's list of them. */
   starter?: string;
+  /** A rule drafted from a sentence on the Add automation page. */
+  drafted?: AutomationDraft;
   /** Reported outward so the wrapper can ask before discarding unsaved work. */
   onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
@@ -213,7 +226,7 @@ export function AutomationBuilderPage({
    * had been drawn on it the moment anything else on the page changed.
    */
   const [blank] = useState<AutomationRuleGraph | null>(() =>
-    ruleId === null ? blankRule(projectId, sectionId, starter) : null,
+    ruleId === null ? blankRule(projectId, sectionId, starter, drafted) : null,
   );
 
   const rule = fetched ?? blank;
@@ -742,7 +755,13 @@ export function AutomationBuilderPage({
   );
 
   const blocking = issues.filter((issue) => issue.level === 'ERROR');
-  const dirty = Object.keys(settingsEdits).length > 0 || hasEdits(edits);
+  /*
+   * A drafted rule is unsaved work from the first moment, unlike a starter:
+   * its blanks are answered, so Save is offered before anything is touched,
+   * and closing asks before throwing away what the sentence produced.
+   */
+  const dirty =
+    Object.keys(settingsEdits).length > 0 || hasEdits(edits) || (isNew && drafted !== undefined);
   const saving = saveGraph.isPending || createRule.isPending;
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);

@@ -1,8 +1,14 @@
-import { ACTION_LABEL, TRIGGER_LABEL, type AutomationAction } from '@coretask/contracts';
+import {
+  ACTION_LABEL,
+  AI_DRAFT_PROMPT_MAX,
+  TRIGGER_LABEL,
+  type AutomationAction,
+} from '@coretask/contracts';
 import type { AutomationTemplate } from '@coretask/types';
 import { useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router';
-import { Loader2, LockKeyhole, Search, X, Zap } from 'lucide-react';
+import { ArrowUp, Loader2, LockKeyhole, Search, Sparkles, X, Zap } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -10,8 +16,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useProject } from '@/features/projects/hooks/use-projects';
 import { useProjectAccess } from '@/features/projects/lib/project-access';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
+import { ApiError } from '@/lib/api/api-error';
 
+import { useAutomationMetadata } from '../builder/hooks/use-automation-graph';
 import { useAutomationTemplates } from '../hooks/use-automation-templates';
+import { useDraftAutomation } from '../hooks/use-draft-automation';
 import { useStartFromTemplate } from '../hooks/use-start-from-template';
 import { rankByWords } from '../lib/gallery-search';
 import { STARTER_TEMPLATES, type StarterTemplate } from '../lib/starter-templates';
@@ -38,11 +47,14 @@ const firstAction = (template: AutomationTemplate) =>
  * Adding a rule, laid out as Asana's "Add automation" page: what do you want
  * to automate, Start from scratch, and a gallery of rules to begin from.
  *
- * Asana's box writes the rule with AI. CoreTask's finds it: what is typed
- * ranks the starters and the workspace's saved rules by the words they share,
- * so "assign tasks when they move to a section" brings "Assign whoever owns a
- * section" to the top. Nothing is created here. A starter opens in the builder
- * unsaved; a saved rule becomes a draft in this project, as from the library.
+ * The box does two things with what is typed. As it is typed, it ranks the
+ * starters and the workspace's saved rules by the words they share, so
+ * "assign tasks when they move to a section" brings "Assign whoever owns a
+ * section" to the top. Sent, it asks AI to write the rule, as Asana's box
+ * does — offered only where the server has a model set up — and opens the
+ * builder on what came back. Nothing is created here: a starter or a drafted
+ * rule opens in the builder unsaved; a saved rule becomes a draft in this
+ * project, as from the library.
  *
  * Over the whole screen and on its own address, like the builder. Closing
  * goes back to wherever it was opened from.
@@ -58,6 +70,11 @@ export function AddAutomationDialog({ projectId }: { projectId: string }) {
 
   const templates = useAutomationTemplates(workspaceId, canManage);
   const startFrom = useStartFromTemplate(workspaceId, projectId);
+  // The builder's own metadata, which it reads next anyway; `ai` says whether
+  // this server can draft a rule at all.
+  const { data: metadata } = useAutomationMetadata(workspaceId, projectId);
+  const canDraft = metadata?.capabilities?.ai === true;
+  const drafting = useDraftAutomation(workspaceId, projectId);
   const [query, setQuery] = useState('');
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,6 +90,43 @@ export function AddAutomationDialog({ projectId }: { projectId: string }) {
       params: { projectId },
       search: starter ? { starter } : {},
     });
+
+  /*
+   * The sentence, drafted into a rule and opened in the builder unsaved. The
+   * draft rides in the history entry rather than the address — it is the whole
+   * rule — and anything the sentence asked for that did not make it in is said
+   * as the builder opens, since the canvas cannot show what is missing.
+   */
+  const draftRule = () => {
+    const prompt = query.trim();
+    if (!canDraft || prompt === '' || drafting.isPending) return;
+
+    drafting.mutate(
+      { prompt },
+      {
+        onSuccess: (draft) => {
+          if (draft.notes.length > 0) {
+            toast.warning('Some of that is not in the rule.', {
+              description: draft.notes.join(' '),
+              duration: 12_000,
+            });
+          }
+          void navigate({
+            to: '/projects/$projectId/automations/new',
+            params: { projectId },
+            search: {},
+            state: { automationDraft: draft },
+          });
+        },
+      },
+    );
+  };
+
+  const draftError = drafting.isError
+    ? drafting.error instanceof ApiError
+      ? drafting.error.message
+      : 'The rule could not be drafted. Try again.'
+    : null;
 
   const saved = useMemo(
     () =>
@@ -150,28 +204,71 @@ export function AddAutomationDialog({ projectId }: { projectId: string }) {
                       ref={promptRef}
                       value={query}
                       rows={2}
+                      maxLength={AI_DRAFT_PROMPT_MAX}
                       aria-label={PROMPT}
-                      placeholder="Assign tasks when they move to a section"
-                      onChange={(event) => setQuery(event.target.value)}
-                      // A question, not a document: Enter has nothing to add.
-                      onKeyDown={(event) => event.key === 'Enter' && event.preventDefault()}
+                      placeholder={
+                        canDraft
+                          ? 'When a task moves to Week 1, assign it to Sam'
+                          : 'Assign tasks when they move to a section'
+                      }
+                      onChange={(event) => {
+                        setQuery(event.target.value);
+                        // What was wrong was about the last sentence, not this one.
+                        if (drafting.isError) drafting.reset();
+                      }}
+                      // A question, not a document: Enter sends it, or has nothing to add.
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        draftRule();
+                      }}
                       className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                     />
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Search className="size-3.5 shrink-0" aria-hidden="true" />
-                      <span className="flex-1">Finds the starters and saved rules that do it.</span>
+                      {drafting.isPending ? (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                      ) : canDraft ? (
+                        <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <Search className="size-3.5 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="flex-1" aria-live="polite">
+                        {drafting.isPending
+                          ? 'Drafting your rule…'
+                          : canDraft
+                            ? 'Send to draft it with AI, or pick a match below.'
+                            : 'Finds the starters and saved rules that do it.'}
+                      </span>
                       {searching && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 cursor-pointer px-2 text-xs"
+                          disabled={drafting.isPending}
                           onClick={() => setQuery('')}
                         >
                           Clear
                         </Button>
                       )}
+                      {canDraft && (
+                        <Button
+                          size="icon"
+                          className="size-7 shrink-0 cursor-pointer rounded-full"
+                          aria-label="Draft with AI"
+                          aria-busy={drafting.isPending}
+                          disabled={!searching || drafting.isPending}
+                          onClick={draftRule}
+                        >
+                          <ArrowUp className="size-4" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </div>
+                  {draftError && (
+                    <p role="alert" className="mt-2 w-full text-left text-xs text-destructive">
+                      {draftError}
+                    </p>
+                  )}
 
                   <div
                     className="my-5 flex w-full max-w-xs items-center gap-3 text-xs text-muted-foreground"

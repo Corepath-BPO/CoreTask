@@ -15,6 +15,7 @@ import {
   TicketConditionField,
 } from '@coretask/contracts';
 import type {
+  AutomationCapabilities,
   AutomationCatalogEntry,
   AutomationMetadata,
   ConditionFieldDefinition,
@@ -34,7 +35,6 @@ import {
   kindForCustomFieldType,
   permissionsFor,
   triggerCatalogue,
-  type AutomationCapabilities,
   type AutomationConditionEntry,
   type AutomationPermissions,
   type AutomationTriggerEntry,
