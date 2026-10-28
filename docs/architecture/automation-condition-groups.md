@@ -137,6 +137,10 @@ prefixed form for anything indirected — `customField:<id>`. The prefix is what
 stops a custom field named "status" from colliding with the task's own status
 column.
 
+An empty field never matches a number comparison (greater than, less than, the
+inclusive bounds, between), just as it never matches a view filter. Nothing is
+not zero. Asking about an empty field is what "is empty" is for.
+
 A formula field is compared as a number. Its value is never stored, so the
 runner works out the project's formulas once per event, when it loads the task
 (`formulasFor`), with the same evaluator the task list uses. "Days to complete

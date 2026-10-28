@@ -192,6 +192,57 @@ describe('the comparisons a condition can make', () => {
       expect(holds({ field, operator: 'LESS_THAN_OR_EQUAL', value: '7' }, eight)).toBe(false);
     });
 
+    it('compares the strict bounds', () => {
+      expect(holds({ field, operator: 'GREATER_THAN', value: '7' }, eight)).toBe(true);
+      expect(holds({ field, operator: 'GREATER_THAN', value: '8' }, eight)).toBe(false);
+      expect(holds({ field, operator: 'LESS_THAN', value: '9' }, eight)).toBe(true);
+      expect(holds({ field, operator: 'LESS_THAN', value: '8' }, eight)).toBe(false);
+      // A value stored as a number reads the same as one typed into the panel.
+      expect(holds({ field, operator: 'LESS_THAN', value: 9 }, eight)).toBe(true);
+    });
+
+    it('never counts an empty field as 0', () => {
+      // "Estimate is less than 3" used to hold for a task with no estimate.
+      for (const operator of [
+        'GREATER_THAN',
+        'LESS_THAN',
+        'GREATER_THAN_OR_EQUAL',
+        'LESS_THAN_OR_EQUAL',
+      ]) {
+        expect({ operator, holds: holds({ field, operator, value: '3' }, base) }).toEqual({
+          operator,
+          holds: false,
+        });
+        expect({
+          operator,
+          holds: holds(
+            { field, operator, value: '-3' },
+            holding({ customFieldId: 'field-effort' }),
+          ),
+        }).toEqual({ operator, holds: false });
+      }
+    });
+
+    it('never compares against a value nobody gave', () => {
+      expect(holds({ field, operator: 'GREATER_THAN', value: '' }, eight)).toBe(false);
+      expect(holds({ field, operator: 'LESS_THAN', value: '  ' }, eight)).toBe(false);
+      expect(holds({ field, operator: 'GREATER_THAN_OR_EQUAL' }, eight)).toBe(false);
+      expect(holds({ field, operator: 'LESS_THAN', value: 'lots' }, eight)).toBe(false);
+    });
+
+    it('reads a formula with no answer as empty, not as 0', () => {
+      const days = 'field-days';
+      const unanswered = {
+        ...base,
+        formulaValues: new Map([[days, null]]),
+      } as unknown as Task;
+      const twoDays = { ...base, formulaValues: new Map([[days, 2]]) } as unknown as Task;
+      const condition = { field: customFieldKey(days), operator: 'LESS_THAN', value: '1' };
+
+      expect(holds(condition, unanswered)).toBe(false);
+      expect(holds({ ...condition, value: '3' }, twoDays)).toBe(true);
+    });
+
     it('reads "between" inclusively and either way round', () => {
       expect(holds({ field, operator: 'BETWEEN', value: ['5', '10'] }, eight)).toBe(true);
       expect(holds({ field, operator: 'BETWEEN', value: ['10', '5'] }, eight)).toBe(true);

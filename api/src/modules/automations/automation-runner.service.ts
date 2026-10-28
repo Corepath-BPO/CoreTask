@@ -89,7 +89,7 @@ import {
   runKey,
   type AutomationEvent,
 } from './automation-event.publisher';
-import { directComparison } from './condition-comparison';
+import { directComparison, numberComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { ticketLifecycle } from '../tickets/ticket-lifecycle';
@@ -1588,19 +1588,17 @@ export class AutomationRunnerService {
         return Array.isArray(expected) && expected.map(String).includes(String(actual ?? ''));
       case FilterOperator.NOT_IN:
         return !(Array.isArray(expected) && expected.map(String).includes(String(actual ?? '')));
-      case FilterOperator.GREATER_THAN:
-        return Number(actual) > Number(expected);
-      case FilterOperator.LESS_THAN:
-        return Number(actual) < Number(expected);
       /*
-       * The inclusive bounds, which the builder offered on every number field
-       * and the translation table knew, and this switch did not — so "at least
-       * 30" fell to the default and was false on every event.
+       * Never true for an empty field — see `numberComparison`. The inclusive
+       * bounds are here because the builder offered them on every number field
+       * and the translation table knew them, and this switch once did not — so
+       * "at least 30" fell to the default and was false on every event.
        */
+      case FilterOperator.GREATER_THAN:
+      case FilterOperator.LESS_THAN:
       case FilterOperator.GREATER_THAN_OR_EQUAL:
-        return Number(actual) >= Number(expected);
       case FilterOperator.LESS_THAN_OR_EQUAL:
-        return Number(actual) <= Number(expected);
+        return numberComparison(comparison, actual, expected);
 
       /*
        * Dates, compared as dates.

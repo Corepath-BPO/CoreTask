@@ -36,12 +36,11 @@ export function directComparison(
     // same range as "between 5 and 10", not an empty one.
     case CONDITION_OPERATOR.BETWEEN: {
       if (!Array.isArray(expected) || expected.length < 2) return false;
-      if (actual === null || actual === undefined || actual === '') return false;
 
-      const value = Number(actual);
-      const low = Number(expected[0]);
-      const high = Number(expected[1]);
-      if ([value, low, high].some((entry) => Number.isNaN(entry))) return false;
+      const value = asNumber(actual);
+      const low = asNumber(expected[0]);
+      const high = asNumber(expected[1]);
+      if (value === null || low === null || high === null) return false;
 
       return value >= Math.min(low, high) && value <= Math.max(low, high);
     }
@@ -90,6 +89,53 @@ export function directComparison(
     default:
       return false;
   }
+}
+
+/** The four comparisons a number makes against one value. */
+export type NumberComparison =
+  'GREATER_THAN' | 'LESS_THAN' | 'GREATER_THAN_OR_EQUAL' | 'LESS_THAN_OR_EQUAL';
+
+/**
+ * A number against a number, and false when either side is empty.
+ *
+ * `Number(null)` is 0, so "Estimate is less than 3" used to hold for a task
+ * with no estimate, and an empty formula counted as no days at all. A view
+ * filter never matched an empty field (SQL compares nothing with NULL), and
+ * `BETWEEN` here already refused one, so a rule now reads the same way. "Is
+ * empty" is the question for an empty field.
+ */
+export function numberComparison(
+  operator: NumberComparison,
+  actual: unknown,
+  expected: unknown,
+): boolean {
+  const left = asNumber(actual);
+  const right = asNumber(expected);
+  if (left === null || right === null) return false;
+
+  switch (operator) {
+    case 'GREATER_THAN':
+      return left > right;
+    case 'LESS_THAN':
+      return left < right;
+    case 'GREATER_THAN_OR_EQUAL':
+      return left >= right;
+    case 'LESS_THAN_OR_EQUAL':
+      return left <= right;
+  }
+}
+
+/**
+ * A value as a number, or null when there is none: empty, blank, a flag, a
+ * list, or text that is not a number. Never 0 for nothing.
+ */
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean' || Array.isArray(value)) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
