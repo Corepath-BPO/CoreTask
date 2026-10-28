@@ -30,7 +30,7 @@ export type CanvasNode = Omit<AutomationGraphNode, 'type'> & {
  *
  * There is no `moved` here any more. Where a step sits is worked out from the
  * rule's shape rather than remembered, so a position is a consequence of an
- * edit rather than one of its own — see `layoutGraph`.
+ * edit rather than one of its own — see `flowLayout`.
  */
 export interface GraphEdits {
   added: CanvasNode[];

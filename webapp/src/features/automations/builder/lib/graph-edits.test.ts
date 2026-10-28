@@ -49,7 +49,7 @@ describe('unsaved edits over the server’s copy', () => {
 
   it('lays a configuration over the stored node', () => {
     // Position used to be laid over here too. It is worked out from the rule's
-    // shape now, so there is nothing to overlay — see `layoutGraph`.
+    // shape now, so there is nothing to overlay — see `flowLayout`.
     const result = applyEdits(chain(), {
       ...NO_EDITS,
       configured: { a: { userId: 'u-1' } },
