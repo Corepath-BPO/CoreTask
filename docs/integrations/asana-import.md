@@ -54,11 +54,14 @@ time the page looks, so **Sync again** is never left disabled by it.
 | Custom task type ("Ticket")                                           | A tag of that name                                                                                                                                                                                   |
 | Tags, followers, likes, dependencies, actual time                     | Tag, Follower, TaskLike, TaskDependency, one TimeEntry                                                                                                                                               |
 | Comment                                                               | Comment, with its author, date, @mentions, pin and likes                                                                                                                                             |
-| System history ("assigned", "marked complete")                        | Not kept                                                                                                                                                                                             |
+| System history ("assigned", "changed the due date")                   | Lines in the task's activity, beside CoreTask's own, credited to whoever made the change (a rule's as an automation), at the time it happened. Top-level tasks, and subtasks whose history is read.  |
 | File stored by Asana                                                  | Copied into CoreTask's storage when it is an accepted type within `STORAGE_MAX_FILE_SIZE_MB`; otherwise linked back to Asana under Linked files, and reported. An empty file is skipped and counted. |
 | File elsewhere (Drive, Dropbox, a link)                               | Listed under "Linked files" at the end of the description                                                                                                                                            |
 | Status update, portfolio                                              | ProjectStatusUpdate, Portfolio (only portfolios the token's owner owns)                                                                                                                              |
 | Rules                                                                 | Not readable through Asana's API. Rebuild them in Customize › Rules.                                                                                                                                 |
+| Task template                                                         | TaskTemplate in its project's Add menu: name, task name, description, kind, due date (days after it is made), subtask names. One deleted in Asana goes.                                              |
+| Project template                                                      | Not copied: Asana's API gives a template's name and team, not its sections or tasks, and seeing those would mean making a project from it in Asana.                                                  |
+| Goals, messages, forms, others' My Tasks and portfolios               | Not readable: Asana's API has no route for messages or forms, and answers 403 for another person's My Tasks or portfolio.                                                                            |
 
 Writes go straight to the database. Imported tasks therefore fire no rules,
 webhooks, notifications or e-mails. Anyone who is assigned a task in a private
@@ -163,7 +166,10 @@ Every `ASANA_LIVE_SYNC_INTERVAL_MS` (30 seconds), the worker:
    new subtask goes under its top task. A task Asana answers 404 for is
    archived, as Sync again archives it. A new task in a project that has not
    come across yet waits for the next full run, which brings the project.
-   What Asana took off a task comes off as a full run takes it off. A deleted
+   Its stories are read too, one more request, for Asana's record of what
+   changed; its comments and files are written again only when the events
+   were about those. What Asana took off a task comes off as a full run takes
+   it off. A deleted
    comment's event that names its task has the task's stories read again; one
    that does not, or a comment Asana answers 404 for, is found by its mapping
    row and deleted.

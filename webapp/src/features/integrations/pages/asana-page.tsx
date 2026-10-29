@@ -90,6 +90,12 @@ const TALLIES: { key: string; one: string; many: string }[] = [
   { key: 'customFields', one: 'custom field', many: 'custom fields' },
   { key: 'sections', one: 'section', many: 'sections' },
   { key: 'comments', one: 'comment', many: 'comments' },
+  {
+    key: 'changeHistory',
+    one: 'change from Asana’s history',
+    many: 'changes from Asana’s history',
+  },
+  { key: 'taskTemplates', one: 'task template', many: 'task templates' },
   { key: 'attachments', one: 'file', many: 'files' },
   { key: 'links', one: 'linked file', many: 'linked files' },
   { key: 'emptyFiles', one: 'empty file skipped', many: 'empty files skipped' },

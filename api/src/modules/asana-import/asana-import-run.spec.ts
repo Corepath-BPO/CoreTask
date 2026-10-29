@@ -10,7 +10,7 @@ import {
 } from '../../integrations/asana/asana-api.client';
 import type { StorageService } from '../../integrations/storage/storage.service';
 
-import { AsanaImportRun, pool, readableError } from './asana-import-run';
+import { AsanaImportRun, pool, readableError, changeLine, historyId } from './asana-import-run';
 import { AsanaLiveSyncService } from './asana-live-sync.service';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,7 @@ const UNIQUE: Record<string, string[][]> = {
   portfolioProject: [['portfolioId', 'projectId']],
   taskDependency: [['blockedTaskId', 'blockingTaskId']],
   externalRef: [['workspaceId', 'source', 'entityType', 'externalId']],
+  activityLog: [['id']],
 };
 
 function notFound(): Error {
@@ -309,6 +310,23 @@ function organisation() {
         case '/status_updates':
         case '/portfolios':
           return [];
+        case '/task_templates':
+          return params['project'] === 'P1'
+            ? [
+                {
+                  gid: 'TT1',
+                  name: 'New hire',
+                  created_by: { gid: 'U2' },
+                  template: {
+                    name: 'Onboard a new hire',
+                    html_description: '<body>Welcome aboard</body>',
+                    relative_due_on: 5,
+                    task_resource_subtype: 'default_task',
+                    subtasks: [{ name: 'Laptop' }, { name: 'Badge' }],
+                  },
+                },
+              ]
+            : [];
         case '/tasks':
           return params['project'] === 'P1' ? [task1, task2] : [task1];
         case '/tasks/T1/subtasks':
@@ -894,6 +912,98 @@ describe('AsanaImportRun', () => {
     await runImport(context, withSubtaskComment([]), fakeStorage(), commentedOn(false));
 
     expect(reading['deletedAt']).toBeInstanceOf(Date);
+  });
+
+  /** The organisation with Asana's record of two changes to T1. */
+  function withChanges() {
+    const org = organisation();
+    const routes = org.routes;
+    return {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        const result = routes(path, params);
+        if (path !== '/tasks/T1/stories') return result;
+        return [
+          ...result,
+          {
+            gid: 'H1',
+            resource_subtype: 'assigned',
+            text: 'Ada Lovelace assigned to Bob Builder',
+            created_at: '2026-10-02T09:00:00.000Z',
+            created_by: { gid: 'U1', name: 'Ada Lovelace' },
+          },
+          {
+            gid: 'H2',
+            resource_subtype: 'enum_custom_field_changed',
+            text: 'Asana changed Priority to High',
+            created_at: '2026-10-02T10:00:00.000Z',
+            created_by: { gid: 'U1', name: 'Ada Lovelace' },
+          },
+        ];
+      },
+    };
+  }
+
+  /** Activity lines made from Asana's stories, not the run's own. */
+  const fromAsana = (context: Awaited<ReturnType<typeof setUp>>) =>
+    rows(context, 'activityLog').filter((row) => (row['metadata'] as Row | null)?.['story']);
+
+  it('keeps Asana’s record of what changed on a task, once, in time order', async () => {
+    const context = await setUp();
+    const { job } = await runImport(context, withChanges());
+    const again = await runImport(context, withChanges());
+
+    const task = taskTitled(context, 'Fix the boiler');
+    const lines = fromAsana(context).sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
+    expect(lines).toEqual([
+      expect.objectContaining({
+        entity: 'TASK',
+        entityId: task['id'],
+        projectId: task['projectId'],
+        action: 'ASSIGNED',
+        actorId: context.starterId,
+        summary: 'assigned to Bob Builder',
+        createdAt: new Date('2026-10-02T09:00:00.000Z'),
+      }),
+      // A rule's change: no person, as CoreTask shows a rule's.
+      expect.objectContaining({
+        action: 'UPDATED',
+        actorId: null,
+        summary: 'changed Priority to High',
+      }),
+    ]);
+    expect(job.snapshot().counts['changeHistory']).toEqual({ done: 2 });
+    expect(again.job.snapshot().counts['changeHistory']).toEqual({ done: 0 });
+  });
+
+  it('brings a project’s task templates, and lets one deleted in Asana go', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const p1 = rows(context, 'project').find((row) => row['name'] === 'Maintenance') as Row;
+    expect(rows(context, 'taskTemplate')).toEqual([
+      expect.objectContaining({
+        projectId: p1['id'],
+        name: 'New hire',
+        title: 'Onboard a new hire',
+        kind: 'TASK',
+        dueInDays: 5,
+        subtasks: [{ title: 'Laptop' }, { title: 'Badge' }],
+      }),
+    ]);
+    expect(String(rows(context, 'taskTemplate')[0]?.['description'])).toContain('Welcome aboard');
+    const ours = await context.db.table('taskTemplate').create({
+      data: { workspaceId: context.workspaceId, projectId: p1['id'], name: 'Ours', title: 'Ours' },
+    });
+
+    const org = organisation();
+    const routes = org.routes;
+    await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        path === '/task_templates' ? [] : routes(path, params),
+    });
+
+    expect(rows(context, 'taskTemplate')).toEqual([ours]);
   });
 
   it('keeps a task Asana still has, or will not show, that this run did not reach', async () => {
@@ -1558,6 +1668,38 @@ describe('AsanaImportRun live sync', () => {
     expect(run.liveProjectGids()).toContain('P3');
   });
 
+  it('writes what changed on a task it reads, and leaves its comments be', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const dueDateMoved = {
+      gid: 'H3',
+      resource_subtype: 'due_date_changed',
+      text: 'Bob Builder changed the due date to Nov 2',
+      created_at: '2026-10-04T09:00:00.000Z',
+      created_by: { gid: 'U2', name: 'Bob Builder' },
+    };
+    const { run, asana } = await liveRun(
+      context,
+      liveOrg({ T1: () => org.tasks['T1'] }, (path) =>
+        path === '/tasks/T1/stories' ? [...org.routes(path, {}), dueDateMoved] : null,
+      ),
+    );
+    const commentWrites = jest.spyOn(context.db.table('comment'), 'update');
+
+    await run.syncTasks(['T1'], new Set());
+
+    const bob = rows(context, 'user').find((row) => row['email'] === 'bob@example.com') as Row;
+    expect(
+      rows(context, 'activityLog').find(
+        (row) => (row['metadata'] as Row | null)?.['story'] === 'H3',
+      ),
+    ).toMatchObject({ actorId: bob['id'], summary: 'changed the due date to Nov 2' });
+    expect(commentWrites).not.toHaveBeenCalled();
+    // Files only when the events were about one.
+    expect(asana.list).not.toHaveBeenCalledWith('/attachments', expect.anything());
+  });
+
   it('reads a tag a task names that it has not seen', async () => {
     const context = await setUp();
     await runImport(context);
@@ -1863,6 +2005,49 @@ describe('AsanaLiveSyncService', () => {
 
     expect(await live.tick()).toEqual({ workspaces: 1, changes: 0 });
     expect(asana.events).not.toHaveBeenCalled();
+  });
+});
+
+describe('changeLine', () => {
+  const story = (text: string, by: string | null) => ({
+    gid: 'S',
+    text,
+    created_by: by ? { gid: 'U', name: by } : null,
+  });
+
+  it('leaves out whoever made the change, which CoreTask writes itself', () => {
+    expect(changeLine(story('IT assigned to Earl', 'IT'))).toEqual({
+      text: 'assigned to Earl',
+      byRule: false,
+    });
+  });
+
+  it('takes "Asana …" for a rule, whoever set it off', () => {
+    expect(changeLine(story('Asana changed Status to New', 'IT'))).toEqual({
+      text: 'changed Status to New',
+      byRule: true,
+    });
+    expect(changeLine(story('created Review the request', null))).toEqual({
+      text: 'created Review the request',
+      byRule: true,
+    });
+  });
+
+  it('has nothing to say for a story with no text', () => {
+    expect(changeLine(story('', 'IT'))).toBeNull();
+  });
+});
+
+describe('historyId', () => {
+  it('is a UUID v7 at the story’s time, the same each time for the same story', () => {
+    const at = new Date('2026-10-02T09:00:00.000Z');
+    const id = historyId('ws', 'H1', at);
+
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(parseInt(id.replace(/-/g, '').slice(0, 12), 16)).toBe(at.getTime());
+    expect(historyId('ws', 'H1', at)).toBe(id);
+    expect(historyId('ws', 'H2', at)).not.toBe(id);
+    expect(historyId('other', 'H1', at)).not.toBe(id);
   });
 });
 
