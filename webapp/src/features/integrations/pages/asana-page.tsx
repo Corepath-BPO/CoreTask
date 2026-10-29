@@ -22,6 +22,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActiveWorkspace } from '@/features/workspaces/hooks/use-workspaces';
 
+import { AsanaLiveSyncCard } from '../components/asana-live-sync-card';
 import { useAsanaImportStatus, useStartAsanaImport } from '../hooks/use-asana-import';
 import { isRunActive } from '../lib/import-runs';
 
@@ -198,6 +199,14 @@ export function AsanaPage() {
             </Button>
           </CardContent>
         </Card>
+      )}
+
+      {status.isTarget && status.liveSync && workspace && (
+        <AsanaLiveSyncCard
+          workspaceId={workspace.id}
+          liveSync={status.liveSync}
+          asanaName={asanaName}
+        />
       )}
 
       {status.runs.length > 0 && (

@@ -90,6 +90,52 @@ Each mapping row also keeps the record exactly as Asana last sent it
 (`external_refs.snapshot`), every requested field included. Data CoreTask has
 no column for can still be mapped later without reading Asana again.
 
+## Live sync
+
+Integrations › Asana › **Live sync**, in the workspace that holds the import,
+keeps it in step with Asana as Asana changes, rather than at each Sync again.
+Changes come across within a minute or two. It is a switch, and only someone
+who may import may flip it.
+
+It reads Asana's **event stream** for each imported project (`GET /events`),
+which only reads Asana: no webhook is registered there, and nothing in Asana
+changes. Webhooks would also need Asana to reach a public address, and Asana
+deletes one that cannot be reached for a day, which a stack that is sometimes
+switched off would hit.
+
+Every `ASANA_LIVE_SYNC_INTERVAL_MS` (30 seconds), the worker:
+
+1. Reads each project's events since its last token (`asana_event_streams`).
+2. Picks out the tasks they name: a changed, added, moved or deleted task;
+   the task of a new comment or file; a project whose sections changed.
+   Asana's own stories about a change ("changed the due date") come with an
+   event on the task and are skipped.
+3. Reads each of those tasks again and writes it with the full run's own code
+   (`AsanaImportRun.syncTasks`), so a task looks the same whichever brought it.
+   A task keeps its place unless it moved, and goes last where it moved to. A
+   new subtask goes under its top task. A task Asana answers 404 for is
+   archived, as Sync again archives it. A new task in a project that has not
+   come across yet waits for the next full run, which brings the project.
+4. Tells open boards and task panels, through the worker's realtime relay.
+   As with an import, no CoreTask rule fires (Asana's already ran) and nobody
+   is notified.
+
+A full Sync again backs it up. Asana's events are at-most-once, and a stream's
+token lapses after 24 hours, so one runs:
+
+- when live sync is switched on, after every stream has its token, so nothing
+  that changes during the run is missed;
+- whenever a token has lapsed: the worker was off for a day, say;
+- every night, at `ASANA_FULL_SYNC_CRON` in `ASANA_FULL_SYNC_TZ`
+  (3 AM, America/Chicago).
+
+Ticks and runs share the import queue, which does one job at a time, so live
+sync never writes while a full run does; it picks up after.
+
+What live sync leaves to the full run: new projects, project details, tags and
+custom field definitions, and tasks moved into or out of a project that did not
+come across.
+
 ## Size and time
 
 Asana has no count of a task's comments or files, so finding them means reading

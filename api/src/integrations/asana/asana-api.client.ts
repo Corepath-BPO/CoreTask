@@ -3,6 +3,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { fetchWithTimeout } from '../../common/utils/http.util';
 import { AppConfigService } from '../../config/app-config.service';
 
+import type { AsanaEvent, AsanaEventsPage } from './asana.types';
+
 /**
  * Asana said no. `status` is the HTTP status; the message is Asana's own,
  * which never echoes the token.
@@ -125,6 +127,22 @@ export class AsanaApiClient {
     return this.config.asana.enabled;
   }
 
+  /**
+   * One read of a resource's event stream. A first read, or one whose token
+   * has lapsed, gets 412 from Asana with a fresh token and no events; that
+   * comes back as `lapsed` rather than as an error.
+   */
+  async events(resource: string, sync: string | null): Promise<AsanaEventsPage> {
+    const body = await this.request<{
+      data?: AsanaEvent[];
+      sync?: string;
+      has_more?: boolean;
+    }>('/events', { resource, sync: sync ?? undefined }, [412]);
+    if (!body.sync) throw new AsanaApiError('/events', 412, 'Asana sent no sync token.');
+    const lapsed = body.data === undefined;
+    return { events: body.data ?? [], sync: body.sync, hasMore: Boolean(body.has_more), lapsed };
+  }
+
   /** One object: `data` of the response. */
   async get<T>(path: string, params: AsanaParams = {}): Promise<T> {
     const body = await this.request<{ data: T }>(path, params);
@@ -204,7 +222,12 @@ export class AsanaApiClient {
     await this.wait(Math.min(SERVER_RETRY_BASE_MS * 2 ** dropped, DROPPED_RETRY_MAX_MS));
   }
 
-  private async request<T>(path: string, params: AsanaParams): Promise<T> {
+  /** `accept` lists error statuses whose body is the answer, not a failure. */
+  private async request<T>(
+    path: string,
+    params: AsanaParams,
+    accept: readonly number[] = [],
+  ): Promise<T> {
     const { accessToken, apiBaseUrl, timeoutMs } = this.config.asana;
     if (!accessToken) throw new AsanaApiError(path, 0, 'ASANA_ACCESS_TOKEN is not set.');
 
@@ -256,7 +279,7 @@ export class AsanaApiClient {
         continue;
       }
 
-      if (!response.ok) {
+      if (!response.ok && !accept.includes(response.status)) {
         throw new AsanaApiError(path, response.status, await errorMessage(response));
       }
 

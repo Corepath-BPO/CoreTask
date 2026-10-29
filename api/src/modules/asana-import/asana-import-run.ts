@@ -111,6 +111,8 @@ const ATTACHMENT_FIELDS = 'name,host,size,download_url,view_url,permanent_url,cr
 const SEARCH_PAGE_SIZE = 100;
 /** A bound on one search's pages: 100,000 tasks. */
 const MAX_SEARCH_PAGES = 1_000;
+/** How far live sync walks up to a subtask's parent that is not here yet. */
+const MAX_LIVE_DEPTH = 5;
 /** People per "commented on by" search, to keep the query string short. */
 const SEARCH_PEOPLE_PER_QUERY = 10;
 
@@ -161,6 +163,22 @@ interface ListedTask {
   order: Map<string, number>;
   /** The project it was first listed in, the home when its memberships say nothing. */
   firstProject: string;
+}
+
+/** Where a task goes. */
+interface Placement {
+  projectId: string | null;
+  sectionId: string | null;
+  parentTaskId: string | null;
+  /** Its place; null keeps a task that is already here where it is, and puts a new one last. */
+  position: number | null;
+}
+
+/** A task live sync changed, for the caller to announce. */
+export interface LiveChange {
+  taskId: string;
+  /** Every project the task shows in: home and linked. */
+  projectIds: string[];
 }
 
 /** A task already in CoreTask, waiting for its comments and files. */
@@ -215,7 +233,8 @@ export class AsanaImportRun {
 
   constructor(
     private readonly deps: AsanaImportDeps,
-    private readonly runId: string,
+    /** The run row progress is written to; null for live sync, which has none. */
+    private readonly runId: string | null,
     private readonly workspaceId: string,
     private readonly asanaWorkspaceGid: string,
     /** Who started it: the owner of what nobody else can be credited with. */
@@ -285,6 +304,7 @@ export class AsanaImportRun {
   }
 
   private async progress(force = false): Promise<void> {
+    if (!this.runId) return;
     const now = Date.now();
     if (!force && now - this.lastProgressAt < PROGRESS_INTERVAL_MS) return;
     this.lastProgressAt = now;
@@ -1123,10 +1143,27 @@ export class AsanaImportRun {
     parent: { taskId: string; projectId: string | null; position: number } | null,
     listed: ListedTask | null,
   ): Promise<string> {
-    const placement = parent
+    const home = parent
       ? { projectId: parent.projectId, sectionId: null as string | null, position: parent.position }
       : this.homeOf(task, listed!);
+    return this.saveTask(
+      task,
+      { ...home, parentTaskId: parent?.taskId ?? null },
+      (projectGid) => listed?.order.get(projectGid) ?? 0,
+    );
+  }
 
+  /**
+   * One task as Asana has it, with everything it carries inline: tags,
+   * followers, likes, custom field values, other projects and time spent.
+   * `orderIn` gives its index in another project's list, or null to keep the
+   * place it has there.
+   */
+  private async saveTask(
+    task: AsanaTask,
+    placement: Placement,
+    orderIn: (projectGid: string) => number | null,
+  ): Promise<string> {
     const [assignee, creator] = await Promise.all([
       this.personOf(task.assignee),
       this.personOf(task.created_by),
@@ -1139,12 +1176,11 @@ export class AsanaImportRun {
     const data = {
       projectId: placement.projectId,
       sectionId: placement.sectionId,
-      parentTaskId: parent?.taskId ?? null,
+      parentTaskId: placement.parentTaskId,
       title: clip(task.name, LIMITS.taskTitle, 'Untitled task'),
       description: description(task.html_notes, this.person),
       status: done ? TaskStatus.DONE : TaskStatus.TODO,
       completedAt: done ? (instant(task.completed_at) ?? new Date()) : null,
-      position: placement.position,
       assigneeId: assignee?.id ?? null,
       startDate: start.date,
       startAt: start.at,
@@ -1162,14 +1198,19 @@ export class AsanaImportRun {
       async (id) => {
         await this.prisma.task.update({
           where: { id },
-          data: restored ? { ...data, archivedAt: null } : data,
+          data: {
+            ...data,
+            ...(placement.position === null ? {} : { position: placement.position }),
+            ...(restored ? { archivedAt: null } : {}),
+          },
         });
         if (restored) this.counter('restored').done += 1;
       },
-      () =>
+      async () =>
         this.prisma.task.create({
           data: {
             ...data,
+            position: placement.position ?? (await this.lastPosition(placement)),
             workspaceId: this.workspaceId,
             createdById: creator?.id ?? this.starterId,
             createdAt: instant(task.created_at) ?? undefined,
@@ -1179,12 +1220,7 @@ export class AsanaImportRun {
       task,
     );
 
-    await this.importOtherProjects(
-      task,
-      (projectGid) => listed?.order.get(projectGid) ?? 0,
-      taskId,
-      placement.projectId,
-    );
+    await this.importOtherProjects(task, orderIn, taskId, placement.projectId);
     await this.importTaskTags(task, taskId);
     await this.importFollowersAndLikes(task, taskId);
     await this.importFieldValues(task, taskId);
@@ -1223,7 +1259,7 @@ export class AsanaImportRun {
   /** Asana's multi-homing: each further project keeps its own section and place. */
   private async importOtherProjects(
     task: AsanaTask,
-    orderIn: (projectGid: string) => number,
+    orderIn: (projectGid: string) => number | null,
     taskId: string,
     homeProjectId: string | null,
   ): Promise<void> {
@@ -1236,11 +1272,19 @@ export class AsanaImportRun {
       const sectionId = membership.section
         ? (this.ref('section', membership.section.gid) ?? null)
         : null;
-      const position = (orderIn(projectGid) + 1) * POSITION_STEP;
+      const order = orderIn(projectGid);
+      const position = order === null ? null : (order + 1) * POSITION_STEP;
       await this.prisma.taskProject.upsert({
         where: { taskId_projectId: { taskId, projectId } },
-        create: { taskId, projectId, sectionId, position, addedById: this.starterId },
-        update: { sectionId, position },
+        create: {
+          taskId,
+          projectId,
+          sectionId,
+          position:
+            position ?? (await this.lastPosition({ projectId, sectionId, parentTaskId: null })),
+          addedById: this.starterId,
+        },
+        update: position === null ? { sectionId } : { sectionId, position },
       });
       this.counter('multiHomed').done += 1;
     }
@@ -1556,6 +1600,16 @@ export class AsanaImportRun {
       },
       data: { sourceDeletedAt: archivedAt },
     });
+    const gone = await this.prisma.externalRef.findMany({
+      where: {
+        workspaceId: this.workspaceId,
+        source: ImportSource.ASANA,
+        entityType: 'task',
+        entityId: { in: ids },
+      },
+      select: { externalId: true },
+    });
+    for (const ref of gone) this.sourceDeleted.add(`task:${ref.externalId}`);
     await this.prisma.activityLog.create({
       data: {
         workspaceId: this.workspaceId,
@@ -1591,26 +1645,31 @@ export class AsanaImportRun {
 
     await pool(todo, this.deps.concurrency, async (item) => {
       try {
-        const stories = await this.asana.list<AsanaStory>(`/tasks/${item.gid}/stories`, {
-          opt_fields: STORY_FIELDS,
-        });
-        for (const story of stories) {
-          if (story.resource_subtype !== 'comment_added') continue;
-          try {
-            await this.importComment(story, item.taskId);
-          } catch (error) {
-            this.fail('comment', { gid: story.gid, name: item.name }, error);
-          }
-        }
-        if (stories.some((story) => story.resource_subtype === 'attachment_added')) {
-          await this.importAttachments(item);
-        }
+        await this.readHistory(item);
         counter.done += 1;
       } catch (error) {
         this.fail('history', { gid: item.gid, name: item.name }, error);
       }
       await this.progress();
     });
+  }
+
+  /** One task's comments, and its files when its stories say it has some. */
+  private async readHistory(item: DetailItem): Promise<void> {
+    const stories = await this.asana.list<AsanaStory>(`/tasks/${item.gid}/stories`, {
+      opt_fields: STORY_FIELDS,
+    });
+    for (const story of stories) {
+      if (story.resource_subtype !== 'comment_added') continue;
+      try {
+        await this.importComment(story, item.taskId);
+      } catch (error) {
+        this.fail('comment', { gid: story.gid, name: item.name }, error);
+      }
+    }
+    if (stories.some((story) => story.resource_subtype === 'attachment_added')) {
+      await this.importAttachments(item);
+    }
   }
 
   /**
@@ -1843,6 +1902,261 @@ export class AsanaImportRun {
     });
     const { download_url: _signed, ...kept } = attachment;
     await this.remember('attachment', attachment.gid, created.id, kept);
+  }
+
+  // -------------------------------------------------------------------------
+  // Live sync
+  // -------------------------------------------------------------------------
+
+  /**
+   * Readies the run to apply single tasks between full runs: the refs, and the
+   * people, fields and tags they point at. Done once, and again after a full
+   * run has changed what the refs hold.
+   */
+  async prepareLive(): Promise<void> {
+    await this.loadRefs();
+
+    const userRefs = [...this.refs].filter(([key]) => key.startsWith('user:'));
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userRefs.map(([, id]) => id) } },
+      select: { id: true, name: true },
+    });
+    const byId = new Map(users.map((user) => [user.id, user]));
+    for (const [key, id] of userRefs) {
+      const user = byId.get(id);
+      if (user) this.people.set(key.slice('user:'.length), user);
+    }
+    for (const key of this.refs.keys()) {
+      if (key.startsWith('project:')) this.projectGids.add(key.slice('project:'.length));
+    }
+    await this.importFields();
+    await this.importTags();
+  }
+
+  /** The imported projects, whose Asana event streams live sync reads. */
+  liveProjectGids(): string[] {
+    return [...this.projectGids];
+  }
+
+  /** The CoreTask project an Asana project became. */
+  projectIdOf(projectGid: string): string | null {
+    return this.ref('project', projectGid) ?? null;
+  }
+
+  /**
+   * The tasks Asana's events named, each read again and written the way a
+   * full run writes it. `withHistory` names those whose comments or files
+   * changed as well. Returns what changed, for the caller to announce.
+   */
+  async syncTasks(
+    gids: readonly string[],
+    withHistory: ReadonlySet<string>,
+  ): Promise<LiveChange[]> {
+    const changes: LiveChange[] = [];
+    await pool([...new Set(gids)], this.deps.concurrency, async (gid) => {
+      try {
+        const change = await this.syncTask(gid, withHistory.has(gid), 0);
+        if (change) changes.push(change);
+      } catch (error) {
+        this.fail('live_task', { gid }, error);
+      }
+    });
+    if (this.dependencies.size > 0) {
+      await this.importDependencies();
+      this.dependencies.clear();
+    }
+    return changes;
+  }
+
+  /** A project's sections as Asana has them now: one was added, renamed or moved. */
+  async syncSections(projectGid: string): Promise<void> {
+    const projectId = this.ref('project', projectGid);
+    if (projectId) await this.importSections({ gid: projectGid } as AsanaProject, projectId);
+  }
+
+  /** The failures since the last call, for live sync's status. */
+  takeFailures(): ImportError[] {
+    const failures = this.errors.splice(0);
+    this.errorCount = 0;
+    return failures;
+  }
+
+  private async syncTask(gid: string, history: boolean, depth: number): Promise<LiveChange | null> {
+    let task: AsanaTask;
+    try {
+      task = await this.asana.get<AsanaTask>(`/tasks/${gid}`, { opt_fields: TASK_FIELDS });
+    } catch (error) {
+      if (!(error instanceof AsanaApiError)) throw error;
+      // Deleted in Asana: archived here, as Sync again does.
+      if (error.status === 404) return this.archiveIfHere(gid);
+      // Moved where the token cannot see: left as it is.
+      if (error.status === 403) return null;
+      throw error;
+    }
+
+    const placement = await this.livePlacement(task, depth);
+    if (!placement) return null;
+
+    const taskId = await this.saveTask(task, placement, () => null);
+    if (history) {
+      await this.readHistory({
+        gid,
+        taskId,
+        name: task.name ?? '',
+        subtasks: 0,
+        isSubtask: Boolean(task.parent),
+      });
+    }
+    await this.grantAssigneeAccess(taskId);
+
+    const projectIds = new Set<string>();
+    if (placement.projectId) projectIds.add(placement.projectId);
+    for (const membership of task.memberships ?? []) {
+      const projectId = membership.project ? this.ref('project', membership.project.gid) : null;
+      if (projectId) projectIds.add(projectId);
+    }
+    return { taskId, projectIds: [...projectIds] };
+  }
+
+  /**
+   * Where a task Asana changed belongs here. A subtask goes under its top
+   * task, as a full run nests it. A top-level task stays in the project it is
+   * already in while Asana still has it there. Either keeps its place unless
+   * it moved, and goes last where it moved to.
+   */
+  private async livePlacement(task: AsanaTask, depth: number): Promise<Placement | null> {
+    const existingId = this.ref('task', task.gid);
+    const existing = existingId
+      ? await this.prisma.task.findUnique({
+          where: { id: existingId },
+          select: { projectId: true, sectionId: true, parentTaskId: true },
+        })
+      : null;
+
+    if (task.parent) {
+      let parentId = this.ref('task', task.parent.gid);
+      if (!parentId && depth < MAX_LIVE_DEPTH) {
+        await this.syncTask(task.parent.gid, false, depth + 1);
+        parentId = this.ref('task', task.parent.gid);
+      }
+      if (!parentId) return null;
+      const parent = await this.prisma.task.findUnique({
+        where: { id: parentId },
+        select: { id: true, projectId: true, parentTaskId: true },
+      });
+      if (!parent) return null;
+      const top = parent.parentTaskId
+        ? await this.prisma.task.findUnique({
+            where: { id: parent.parentTaskId },
+            select: { id: true, projectId: true },
+          })
+        : parent;
+      if (!top) return null;
+
+      const placement = { projectId: top.projectId, sectionId: null, parentTaskId: top.id };
+      const stays = existing?.parentTaskId === top.id;
+      return { ...placement, position: stays ? null : await this.lastPosition(placement) };
+    }
+
+    const memberships = (task.memberships ?? []).filter(
+      (membership) => membership.project && this.projectGids.has(membership.project.gid),
+    );
+    const membership =
+      memberships.find(
+        (candidate) =>
+          existing !== null &&
+          this.ref('project', candidate.project?.gid ?? '') === existing.projectId,
+      ) ?? memberships[0];
+    if (!membership?.project) {
+      // In no project that came across. One already here keeps its place; a
+      // new one waits for the next full run, which brings its project too.
+      if (!existing || existing.parentTaskId) return null;
+      return {
+        projectId: existing.projectId,
+        sectionId: existing.sectionId,
+        parentTaskId: null,
+        position: null,
+      };
+    }
+
+    const projectId = this.ref('project', membership.project.gid) ?? null;
+    let sectionId: string | null = null;
+    if (membership.section) {
+      sectionId = this.ref('section', membership.section.gid) ?? null;
+      if (!sectionId) {
+        await this.syncSections(membership.project.gid);
+        sectionId = this.ref('section', membership.section.gid) ?? null;
+      }
+    }
+    const placement = { projectId, sectionId, parentTaskId: null };
+    const stays =
+      existing !== null &&
+      existing.parentTaskId === null &&
+      existing.projectId === projectId &&
+      existing.sectionId === sectionId;
+    return { ...placement, position: stays ? null : await this.lastPosition(placement) };
+  }
+
+  /** A task deleted in Asana, archived here when it came across and is not already. */
+  private async archiveIfHere(gid: string): Promise<LiveChange | null> {
+    const taskId = this.ref('task', gid);
+    if (!taskId) return null;
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, workspaceId: this.workspaceId, archivedAt: null },
+      select: { id: true, title: true, projectId: true },
+    });
+    if (!task) return null;
+    await this.archiveGone(task);
+    return { taskId: task.id, projectIds: task.projectId ? [task.projectId] : [] };
+  }
+
+  /** Whoever is assigned a task in a private project joins it, as a full run makes them. */
+  private async grantAssigneeAccess(taskId: string): Promise<void> {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { assigneeId: true, project: { select: { id: true, visibility: true } } },
+    });
+    if (!task?.assigneeId || !task.project) return;
+    if (task.project.visibility !== ProjectVisibility.PRIVATE) return;
+    await this.prisma.projectMember.createMany({
+      data: [
+        {
+          projectId: task.project.id,
+          userId: task.assigneeId,
+          workspaceId: this.workspaceId,
+          role: ProjectMemberRole.EDITOR,
+          addedById: this.starterId,
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
+  /** After everything already in this place, where a person's new task goes. */
+  private async lastPosition(place: {
+    projectId: string | null;
+    sectionId: string | null;
+    parentTaskId: string | null;
+  }): Promise<number> {
+    const tasks = await this.prisma.task.aggregate({
+      where: {
+        workspaceId: this.workspaceId,
+        projectId: place.projectId,
+        sectionId: place.sectionId,
+        parentTaskId: place.parentTaskId,
+        archivedAt: null,
+      },
+      _max: { position: true },
+    });
+    let last = tasks._max.position ?? 0;
+    if (place.projectId && !place.parentTaskId) {
+      const linked = await this.prisma.taskProject.aggregate({
+        where: { projectId: place.projectId, sectionId: place.sectionId },
+        _max: { position: true },
+      });
+      last = Math.max(last, linked._max.position ?? 0);
+    }
+    return last + POSITION_STEP;
   }
 
   // -------------------------------------------------------------------------

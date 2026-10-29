@@ -213,6 +213,15 @@ export const envSchema = z
     ASANA_MAX_REQUESTS_PER_MINUTE: z.coerce.number().int().min(10).max(1_500).default(1_200),
     /** Requests in flight at once; Asana refuses more than 50 concurrent reads. */
     ASANA_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
+    /** Live sync: how often the worker reads each project's Asana event stream. */
+    ASANA_LIVE_SYNC_INTERVAL_MS: z.coerce.number().int().min(10_000).max(600_000).default(30_000),
+    /*
+     * Live sync's nightly full Sync again, a cron pattern read in
+     * ASANA_FULL_SYNC_TZ. A full run takes the better part of an hour and
+     * live sync waits for it, so it belongs in Asana's users' quiet hours.
+     */
+    ASANA_FULL_SYNC_CRON: z.string().min(9).default('0 3 * * *'),
+    ASANA_FULL_SYNC_TZ: z.string().min(1).default('America/Chicago'),
 
     /*
      * Outbound webhooks. Delivery retries follow BullMQ's exponential backoff
