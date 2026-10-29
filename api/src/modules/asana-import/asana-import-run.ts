@@ -91,7 +91,8 @@ export const TASK_FIELDS = [
   'parent',
   'memberships.project',
   'memberships.section',
-  'tags',
+  // Named, so a task's snapshot can still find a tag Asana has since deleted.
+  'tags.name',
   'followers',
   'likes.user',
   'dependencies',
@@ -1328,6 +1329,8 @@ export class AsanaImportRun {
 
     // Back out of Asana's trash: an earlier run archived it when it was deleted.
     const restored = this.sourceDeleted.has(`task:${task.gid}`);
+    // Read before the write below replaces it.
+    const before = await this.previousTask(task.gid);
     const taskId = await this.upsert(
       'task',
       task.gid,
@@ -1356,9 +1359,9 @@ export class AsanaImportRun {
       task,
     );
 
-    await this.importOtherProjects(task, orderIn, taskId, placement.projectId);
-    await this.importTaskTags(task, taskId);
-    await this.importFollowersAndLikes(task, taskId);
+    await this.importOtherProjects(task, orderIn, taskId, placement.projectId, before);
+    await this.importTaskTags(task, taskId, before);
+    await this.importFollowersAndLikes(task, taskId, before);
     await this.importFieldValues(task, taskId);
     await this.importTime(task, taskId, assignee, due.date ?? instant(task.created_at));
 
@@ -1369,6 +1372,33 @@ export class AsanaImportRun {
       );
     }
     return taskId;
+  }
+
+  /**
+   * The task as the last write had it, from its ref's snapshot.
+   *
+   * Comparing it with Asana's task now says what Asana took off since — a
+   * tag, a follower, a project — and that comes off here too. Only what Asana
+   * had is ever in question: a tag or a follower added in CoreTask was never
+   * in the snapshot, so a sync leaves it alone.
+   */
+  private async previousTask(gid: string): Promise<Partial<AsanaTask> | null> {
+    if (!this.ref('task', gid)) return null;
+    const ref = await this.prisma.externalRef.findUnique({
+      where: {
+        workspaceId_source_entityType_externalId: {
+          workspaceId: this.workspaceId,
+          source: ImportSource.ASANA,
+          entityType: 'task',
+          externalId: gid,
+        },
+      },
+      select: { snapshot: true },
+    });
+    const snapshot = ref?.snapshot;
+    return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? (snapshot as Partial<AsanaTask>)
+      : null;
   }
 
   /**
@@ -1392,12 +1422,16 @@ export class AsanaImportRun {
     };
   }
 
-  /** Asana's multi-homing: each further project keeps its own section and place. */
+  /**
+   * Asana's multi-homing: each further project keeps its own section and
+   * place. A project Asana took the task out of lets it go here too.
+   */
   private async importOtherProjects(
     task: AsanaTask,
     orderIn: (projectGid: string) => number | null,
     taskId: string,
     homeProjectId: string | null,
+    before: Partial<AsanaTask> | null,
   ): Promise<void> {
     for (const membership of task.memberships ?? []) {
       const projectGid = membership.project?.gid;
@@ -1424,9 +1458,34 @@ export class AsanaImportRun {
       });
       this.counter('multiHomed').done += 1;
     }
+
+    // A project this run could not list (made private, deleted) drops out of
+    // a task's memberships without the task leaving it: that link stays.
+    const taken = droppedGids(
+      before?.memberships?.map((membership) => membership.project),
+      task.memberships?.map((membership) => membership.project),
+    )
+      .filter((gid) => this.projectGids.has(gid))
+      .map((gid) => this.ref('project', gid))
+      .filter((id): id is string => Boolean(id) && id !== homeProjectId);
+    if (taken.length) {
+      const { count } = await this.prisma.taskProject.deleteMany({
+        where: { taskId, projectId: { in: taken } },
+      });
+      this.counter('unlinked').done += count;
+    }
+    // Out of its home in Asana, a task moves home to a project it was linked
+    // to; that link is now its home and goes.
+    if (homeProjectId && (before?.memberships?.length ?? 0) > 1) {
+      await this.prisma.taskProject.deleteMany({ where: { taskId, projectId: homeProjectId } });
+    }
   }
 
-  private async importTaskTags(task: AsanaTask, taskId: string): Promise<void> {
+  private async importTaskTags(
+    task: AsanaTask,
+    taskId: string,
+    before: Partial<AsanaTask> | null,
+  ): Promise<void> {
     const tagIds = (task.tags ?? [])
       .map((tag) => this.tags.get(tag.gid))
       .filter((id): id is string => Boolean(id));
@@ -1441,9 +1500,45 @@ export class AsanaImportRun {
         skipDuplicates: true,
       });
     }
+
+    // Taken off in Asana, or the tag of a type the task no longer is.
+    const taken: string[] = [];
+    const now = new Set((task.tags ?? []).map((tag) => tag.gid));
+    for (const tag of before?.tags ?? []) {
+      if (!tag?.gid || now.has(tag.gid)) continue;
+      const id = this.tags.get(tag.gid) ?? (tag.name ? await this.tagNamed(tag.name) : undefined);
+      if (id) taken.push(id);
+    }
+    const type = before?.custom_type?.name;
+    if (type && type !== task.custom_type?.name) {
+      const id = await this.tagNamed(type);
+      if (id) taken.push(id);
+    }
+    const kept = new Set(tagIds);
+    const off = taken.filter((id) => !kept.has(id));
+    if (off.length) {
+      const { count } = await this.prisma.taskTag.deleteMany({
+        where: { taskId, tagId: { in: off } },
+      });
+      this.counter('untagged').done += count;
+    }
   }
 
-  private async importFollowersAndLikes(task: AsanaTask, taskId: string): Promise<void> {
+  /** A tag's id by name, without making it. */
+  private async tagNamed(rawName: string): Promise<string | undefined> {
+    const nameKey = tagNameKey(clip(rawName, LIMITS.tagName, 'Tag'));
+    const tag = await this.prisma.tag.findUnique({
+      where: { workspaceId_nameKey: { workspaceId: this.workspaceId, nameKey } },
+      select: { id: true },
+    });
+    return tag?.id;
+  }
+
+  private async importFollowersAndLikes(
+    task: AsanaTask,
+    taskId: string,
+    before: Partial<AsanaTask> | null,
+  ): Promise<void> {
     const followers: string[] = [];
     for (const follower of task.followers ?? []) {
       const person = await this.personOf(follower);
@@ -1467,6 +1562,37 @@ export class AsanaImportRun {
         skipDuplicates: true,
       });
     }
+
+    // Stopped following, or took a like back, in Asana since the last write.
+    const unfollowed = (
+      await this.userIdsOf(droppedGids(before?.followers, task.followers))
+    ).filter((userId) => !followers.includes(userId));
+    if (unfollowed.length) {
+      const { count } = await this.prisma.follower.deleteMany({
+        where: { taskId, userId: { in: unfollowed } },
+      });
+      this.counter('unfollowed').done += count;
+    }
+    const unliked = (
+      await this.userIdsOf(
+        droppedGids(
+          before?.likes?.map((like) => like.user),
+          task.likes?.map((like) => like.user),
+        ),
+      )
+    ).filter((userId) => !likers.includes(userId));
+    if (unliked.length) {
+      await this.prisma.taskLike.deleteMany({ where: { taskId, userId: { in: unliked } } });
+    }
+  }
+
+  private async userIdsOf(gids: readonly string[]): Promise<string[]> {
+    const ids: string[] = [];
+    for (const gid of gids) {
+      const person = await this.personOf({ gid });
+      if (person) ids.push(person.id);
+    }
+    return ids;
   }
 
   /**
@@ -1800,8 +1926,11 @@ export class AsanaImportRun {
    */
   private async importHistory(items: DetailItem[]): Promise<void> {
     const withHistory = await this.subtasksWithHistory();
+    const commented = withHistory ? await this.commentedTasks() : new Set<string>();
     const todo = withHistory
-      ? items.filter((item) => !item.isSubtask || withHistory.has(item.gid))
+      ? items.filter(
+          (item) => !item.isSubtask || withHistory.has(item.gid) || commented.has(item.taskId),
+        )
       : items;
     const counter = this.counter('history');
     counter.total = todo.length;
@@ -1818,7 +1947,24 @@ export class AsanaImportRun {
     });
   }
 
-  /** One task's comments, and its files when its stories say it has some. */
+  /**
+   * The tasks with a comment here. Search finds a subtask by its comments in
+   * Asana, so one whose every comment was deleted there drops out of it; its
+   * history is read all the same, which is how the deletions come across.
+   */
+  private async commentedTasks(): Promise<Set<string>> {
+    const rows = await this.prisma.comment.findMany({
+      where: { workspaceId: this.workspaceId, deletedAt: null, taskId: { not: null } },
+      select: { taskId: true },
+      distinct: ['taskId'],
+    });
+    return new Set(rows.map((row) => row.taskId).filter((id): id is string => Boolean(id)));
+  }
+
+  /**
+   * One task's comments, and its files when its stories say it has some. A
+   * comment Asana no longer lists was deleted there, and is here too.
+   */
   private async readHistory(item: DetailItem): Promise<void> {
     const stories = await this.asana.list<AsanaStory>(`/tasks/${item.gid}/stories`, {
       opt_fields: STORY_FIELDS,
@@ -1831,6 +1977,7 @@ export class AsanaImportRun {
         this.fail('comment', { gid: story.gid, name: item.name }, error);
       }
     }
+    await this.dropDeletedComments(item.taskId, stories);
     // An image pasted into the text is a file Asana tells of in no story.
     if (
       this.waitingImages.has(item.gid) ||
@@ -1939,10 +2086,17 @@ export class AsanaImportRun {
       pinnedAt: story.is_pinned ? createdAt : null,
       pinnedById: story.is_pinned ? (author?.id ?? this.starterId) : null,
     };
+    // Asana lists it again after a run took it for deleted. One deleted in
+    // CoreTask stays deleted: only Asana's deletion is undone.
+    const restored = this.sourceDeleted.has(`story:${story.gid}`);
     const commentId = await this.upsert(
       'story',
       story.gid,
-      (id) => this.prisma.comment.update({ where: { id }, data }),
+      (id) =>
+        this.prisma.comment.update({
+          where: { id },
+          data: { ...data, ...(restored ? { deletedAt: null } : {}) },
+        }),
       () =>
         this.prisma.comment.create({
           data: {
@@ -1979,6 +2133,52 @@ export class AsanaImportRun {
       });
     }
     this.counter('comments').done += 1;
+  }
+
+  /** The task's comments from Asana that Asana's stories no longer list. */
+  private async dropDeletedComments(taskId: string, stories: readonly AsanaStory[]): Promise<void> {
+    const comments = await this.prisma.comment.findMany({
+      where: { taskId, deletedAt: null },
+      select: { id: true },
+    });
+    if (comments.length === 0) return;
+    const listed = new Set(stories.map((story) => story.gid));
+    const refs = await this.prisma.externalRef.findMany({
+      where: {
+        workspaceId: this.workspaceId,
+        source: ImportSource.ASANA,
+        entityType: 'story',
+        entityId: { in: comments.map((comment) => comment.id) },
+      },
+      select: { externalId: true, entityId: true },
+    });
+    await this.deleteComments(
+      refs.filter((ref) => !listed.has(ref.externalId)).map((ref) => ref.entityId),
+    );
+  }
+
+  /**
+   * Comments Asana deleted, marked deleted the way CoreTask deletes one, with
+   * their refs saying it was Asana. Returns how many were still showing.
+   */
+  private async deleteComments(ids: readonly string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const deletedAt = new Date();
+    const { count } = await this.prisma.comment.updateMany({
+      where: { id: { in: [...ids] }, deletedAt: null },
+      data: { deletedAt },
+    });
+    await this.prisma.externalRef.updateMany({
+      where: {
+        workspaceId: this.workspaceId,
+        source: ImportSource.ASANA,
+        entityType: 'story',
+        entityId: { in: [...ids] },
+      },
+      data: { sourceDeletedAt: deletedAt },
+    });
+    this.counter('commentsDeleted').done += count;
+    return count;
   }
 
   /**
@@ -2150,6 +2350,35 @@ export class AsanaImportRun {
   async syncSections(projectGid: string): Promise<void> {
     const projectId = this.ref('project', projectGid);
     if (projectId) await this.importSections({ gid: projectGid } as AsanaProject, projectId);
+  }
+
+  /**
+   * Comments Asana's events said were deleted, found by their refs: Asana
+   * cannot say whose they were once they are gone. Returns their tasks.
+   */
+  async removeComments(storyGids: readonly string[]): Promise<LiveChange[]> {
+    const ids = storyGids
+      .map((gid) => this.ref('story', gid))
+      .filter((id): id is string => Boolean(id));
+    if (ids.length === 0) return [];
+    const comments = await this.prisma.comment.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, taskId: true },
+    });
+    if (comments.length === 0) return [];
+    await this.deleteComments(comments.map((comment) => comment.id));
+
+    const taskIds = [
+      ...new Set(comments.map((comment) => comment.taskId).filter((id): id is string => !!id)),
+    ];
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: taskIds } },
+      select: { id: true, projectId: true },
+    });
+    return tasks.map((task) => ({
+      taskId: task.id,
+      projectIds: task.projectId ? [task.projectId] : [],
+    }));
   }
 
   /** The failures since the last call, for live sync's status. */
@@ -2461,6 +2690,18 @@ export function readableError(error: unknown): string {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines.at(-1) ?? 'The database refused the write.';
+}
+
+/** The gids `before` lists that `now` does not. */
+function droppedGids(
+  before: readonly (AsanaRef | null | undefined)[] | undefined,
+  now: readonly (AsanaRef | null | undefined)[] | undefined,
+): string[] {
+  const kept = new Set((now ?? []).map((ref) => ref?.gid));
+  const gids = (before ?? [])
+    .map((ref) => ref?.gid)
+    .filter((gid): gid is string => Boolean(gid) && !kept.has(gid));
+  return [...new Set(gids)];
 }
 
 function isNotFound(error: unknown): boolean {

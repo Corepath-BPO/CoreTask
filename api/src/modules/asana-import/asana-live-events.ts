@@ -10,10 +10,18 @@ export interface LiveWork {
   sections: Set<string>;
   /** Comments the events named without their task, to be looked up. */
   stories: Set<string>;
+  /** Comments deleted in Asana, found here by their refs. */
+  deletedStories: Set<string>;
 }
 
 export function emptyWork(): LiveWork {
-  return { tasks: new Set(), history: new Set(), sections: new Set(), stories: new Set() };
+  return {
+    tasks: new Set(),
+    history: new Set(),
+    sections: new Set(),
+    stories: new Set(),
+    deletedStories: new Set(),
+  };
 }
 
 /** Stories that are content, not Asana's own record of a change. */
@@ -28,8 +36,9 @@ const CONTENT_STORIES = new Set(['comment_added', 'attachment_added']);
  *
  * A story Asana writes about a change ("changed the due date") comes with an
  * event on the task itself, so it is skipped; a comment or a file is read
- * with the task's history. A story event without its task (an edited
- * comment) is looked up. Sections are re-read per project.
+ * with the task's history, which also finds a comment deleted there. A story
+ * event without its task (an edited comment) is looked up, or, deleted, found
+ * by its ref. Sections are re-read per project.
  */
 export function addWork(work: LiveWork, projectGid: string, events: readonly AsanaEvent[]): void {
   for (const event of events) {
@@ -41,12 +50,13 @@ export function addWork(work: LiveWork, projectGid: string, events: readonly Asa
         break;
 
       case 'story': {
-        if (event.action === 'removed' || event.action === 'deleted') break;
         const subtype = resource.resource_subtype;
         if (subtype && !CONTENT_STORIES.has(subtype)) break;
         if (parent?.resource_type === 'task') {
           work.tasks.add(parent.gid);
           work.history.add(parent.gid);
+        } else if (event.action === 'removed' || event.action === 'deleted') {
+          work.deletedStories.add(resource.gid);
         } else {
           work.stories.add(resource.gid);
         }

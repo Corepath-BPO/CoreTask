@@ -109,7 +109,29 @@ Each archived task gets an activity entry, and its mapping row records when
 (`external_refs.sourceDeletedAt`). A task restored from Asana's trash is
 restored here by the next run. One a person restores in CoreTask while Asana
 still has it deleted stays restored. Other records deleted in Asana (projects,
-sections, comments, files) are still left in place.
+sections, files) are still left in place.
+
+What Asana takes off a task comes off here too. Each write compares the task
+with the snapshot the last write kept (below), and removes here what Asana had
+then and has no more:
+
+- a tag, including the tag of a custom task type the task no longer is
+  (`untagged`);
+- a follower (`unfollowed`) or a like;
+- a further project the task was taken out of (`unlinked`). Taken out of its
+  home project, a task moves home to a project it is still in, and that link
+  goes.
+
+Only what was in the snapshot is ever in question, so a tag or a follower added
+in CoreTask stays. Snapshots name tags (`tags.name`), so a tag Asana deleted
+outright is still found by its name.
+
+A comment Asana no longer lists among a task's stories was deleted there. It is
+deleted here the way CoreTask deletes one: kept, marked deleted, with its
+mapping row's `sourceDeletedAt` set (`commentsDeleted`). Should Asana list it
+again, it is restored; one deleted in CoreTask stays deleted. A subtask that
+has comments here has its stories read even when search no longer finds it, so
+deleting its last comment in Asana comes across too.
 
 Each mapping row also keeps the record exactly as Asana last sent it
 (`external_refs.snapshot`), every requested field included. Data CoreTask has
@@ -141,6 +163,10 @@ Every `ASANA_LIVE_SYNC_INTERVAL_MS` (30 seconds), the worker:
    new subtask goes under its top task. A task Asana answers 404 for is
    archived, as Sync again archives it. A new task in a project that has not
    come across yet waits for the next full run, which brings the project.
+   What Asana took off a task comes off as a full run takes it off. A deleted
+   comment's event that names its task has the task's stories read again; one
+   that does not, or a comment Asana answers 404 for, is found by its mapping
+   row and deleted.
 4. Tells open boards and task panels, through the worker's realtime relay.
    As with an import, no CoreTask rule fires (Asana's already ran) and nobody
    is notified.
