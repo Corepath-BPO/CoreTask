@@ -178,9 +178,17 @@ function set(...parts: Buffer[]): Buffer {
   return tlv(0x31, Buffer.concat(parts));
 }
 
-/** A positive INTEGER: a leading zero keeps the top bit from reading as a sign. */
+/**
+ * A positive INTEGER in DER's shortest form. A leading zero keeps the top bit
+ * from reading as a sign, and is the only one allowed: a random serial that
+ * happened to start 0x00 0x12 was "illegal padding" to OpenSSL, and failed
+ * the whole suite about once in 512 runs.
+ */
 function integer(value: Buffer): Buffer {
-  return tlv(0x02, value[0]! & 0x80 ? Buffer.concat([Buffer.from([0]), value]) : value);
+  let start = 0;
+  while (start < value.length - 1 && value[start] === 0) start += 1;
+  const digits = value.subarray(start);
+  return tlv(0x02, digits[0]! & 0x80 ? Buffer.concat([Buffer.from([0]), digits]) : digits);
 }
 
 function oid(dotted: string): Buffer {
