@@ -100,6 +100,14 @@ const TALLIES: { key: string; one: string; many: string }[] = [
     many: 'tasks deleted in Asana, archived',
   },
   { key: 'restored', one: 'task back in Asana, restored', many: 'tasks back in Asana, restored' },
+  { key: 'untagged', one: 'tag taken off in Asana', many: 'tags taken off in Asana' },
+  { key: 'unfollowed', one: 'follower gone in Asana', many: 'followers gone in Asana' },
+  {
+    key: 'unlinked',
+    one: 'task taken out of a project in Asana',
+    many: 'tasks taken out of a project in Asana',
+  },
+  { key: 'commentsDeleted', one: 'comment deleted in Asana', many: 'comments deleted in Asana' },
 ];
 
 function counter(run: ImportRun, key: string): ImportCounter | null {

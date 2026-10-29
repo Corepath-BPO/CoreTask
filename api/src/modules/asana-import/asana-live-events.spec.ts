@@ -57,10 +57,20 @@ describe('addWork', () => {
     expect(work.tasks.size).toBe(0);
   });
 
-  it('leaves deleted comments, as a full run does', () => {
+  it('reads the history of a task that lost a comment, which finds the deletion', () => {
     const work = emptyWork();
-    addWork(work, 'P1', [story('S1', 'comment_added', 'T1', 'deleted')]);
+    addWork(work, 'P1', [story('S1', 'comment_added', 'T1', 'removed')]);
 
+    expect([...work.tasks]).toEqual(['T1']);
+    expect([...work.history]).toEqual(['T1']);
+  });
+
+  it('keeps a deleted comment whose event names no task, to be found by its ref', () => {
+    const work = emptyWork();
+    addWork(work, 'P1', [story('S1', 'comment_added', null, 'deleted')]);
+
+    expect([...work.deletedStories]).toEqual(['S1']);
+    expect(work.stories.size).toBe(0);
     expect(work.tasks.size).toBe(0);
   });
 

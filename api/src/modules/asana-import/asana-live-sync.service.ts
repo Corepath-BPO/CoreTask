@@ -119,10 +119,13 @@ export class AsanaLiveSyncService {
 
     const work = emptyWork();
     for (const [projectGid, events] of streams.events) addWork(work, projectGid, events);
-    await this.findStoryTasks(work.stories, work.tasks, work.history);
+    await this.findStoryTasks(work.stories, work.tasks, work.history, work.deletedStories);
 
     for (const projectGid of work.sections) await run.syncSections(projectGid);
     const changes = work.tasks.size > 0 ? await run.syncTasks([...work.tasks], work.history) : [];
+    if (work.deletedStories.size > 0) {
+      changes.push(...(await run.removeComments([...work.deletedStories])));
+    }
     await this.announce(workspaceId, changes, work.sections, run);
 
     const failures = run.takeFailures();
@@ -234,11 +237,12 @@ export class AsanaLiveSyncService {
     return { events, lapsed };
   }
 
-  /** The tasks of comments whose events did not say. */
+  /** The tasks of comments whose events did not say; one Asana no longer has was deleted. */
   private async findStoryTasks(
     stories: Set<string>,
     tasks: Set<string>,
     history: Set<string>,
+    deleted: Set<string>,
   ): Promise<void> {
     await pool([...stories], 5, async (gid) => {
       try {
@@ -249,8 +253,9 @@ export class AsanaLiveSyncService {
           tasks.add(story.target.gid);
           history.add(story.target.gid);
         }
-      } catch {
-        // A comment deleted since: nothing to bring across.
+      } catch (error) {
+        // Deleted since it was written: deleted here too.
+        if (error instanceof AsanaApiError && error.status === 404) deleted.add(gid);
       }
     });
   }

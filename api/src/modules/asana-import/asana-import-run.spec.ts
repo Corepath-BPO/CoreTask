@@ -710,6 +710,192 @@ describe('AsanaImportRun', () => {
     expect(job.snapshot().counts['restored']).toEqual({ done: 3 });
   });
 
+  /** `T1`'s rows in a linking table. */
+  const ofT1 = (context: Awaited<ReturnType<typeof setUp>>, table: string) =>
+    rows(context, table).filter(
+      (row) => row['taskId'] === taskTitled(context, 'Fix the boiler')['id'],
+    );
+
+  /** The organisation with `T1` changed, and P1 or P2 no longer listing it if it left. */
+  function withT1(change: Row) {
+    const org = organisation();
+    Object.assign(org.tasks['T1'] as Row, change);
+    const projects = ((org.tasks['T1'] as Row)['memberships'] as Row[]).map(
+      (membership) => (membership['project'] as Row)['gid'],
+    );
+    const routes = org.routes;
+    return {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        const result = routes(path, params);
+        if (path !== '/tasks' || projects.includes(params['project'])) return result;
+        return result.filter((task) => (task as Row)['gid'] !== 'T1');
+      },
+    };
+  }
+
+  it('takes off what Asana took off since the last run', async () => {
+    const context = await setUp();
+    await runImport(context);
+    expect(ofT1(context, 'taskProject')).toHaveLength(1);
+    expect(ofT1(context, 'taskTag')).toHaveLength(1);
+    expect(ofT1(context, 'follower')).toHaveLength(2);
+    expect(ofT1(context, 'taskLike')).toHaveLength(1);
+
+    const { status, job } = await runImport(
+      context,
+      withT1({
+        memberships: [{ project: { gid: 'P1' }, section: { gid: 'S1' } }],
+        custom_type: null,
+        followers: [{ gid: 'U1' }],
+        likes: [],
+      }),
+    );
+
+    expect(status).toBe('SUCCEEDED');
+    expect(ofT1(context, 'taskProject')).toEqual([]);
+    expect(ofT1(context, 'taskTag')).toEqual([]);
+    expect(ofT1(context, 'follower').map((row) => row['userId'])).toEqual([context.starterId]);
+    expect(ofT1(context, 'taskLike')).toEqual([]);
+    expect(job.snapshot().counts).toMatchObject({
+      unlinked: { done: 1 },
+      untagged: { done: 1 },
+      unfollowed: { done: 1 },
+    });
+  });
+
+  it('leaves a tag or a follower added in CoreTask alone', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const taskId = taskTitled(context, 'Fix the boiler')['id'];
+    const urgent = await context.db.table('tag').create({
+      data: { workspaceId: context.workspaceId, name: 'Urgent', nameKey: 'urgent' },
+    });
+    await context.db.table('taskTag').create({ data: { taskId, tagId: urgent['id'] } });
+    const cy = await context.db
+      .table('user')
+      .create({ data: { email: 'cy@example.com', name: 'Cy' } });
+    await context.db
+      .table('follower')
+      .create({ data: { workspaceId: context.workspaceId, userId: cy['id'], taskId } });
+
+    await runImport(context, withT1({ custom_type: null, followers: [{ gid: 'U1' }] }));
+
+    expect(ofT1(context, 'taskTag').map((row) => row['tagId'])).toEqual([urgent['id']]);
+    expect(
+      ofT1(context, 'follower')
+        .map((row) => row['userId'])
+        .sort(),
+    ).toEqual([context.starterId, cy['id']].sort());
+  });
+
+  it('moves a task taken out of its home project to the one it was linked to', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const p2 = rows(context, 'project').find((row) => row['name'] === 'Old leases') as Row;
+
+    await runImport(context, withT1({ memberships: [{ project: { gid: 'P2' }, section: null }] }));
+
+    expect(taskTitled(context, 'Fix the boiler')['projectId']).toBe(p2['id']);
+    // Its home now, so no longer a link as well.
+    expect(ofT1(context, 'taskProject')).toEqual([]);
+  });
+
+  it('keeps the link to a project Asana no longer lists, which the task did not leave', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = withT1({ memberships: [{ project: { gid: 'P1' }, section: { gid: 'S1' } }] });
+    const routes = org.routes;
+
+    // P2 made private: gone from the project list and from T1's memberships.
+    const { job } = await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        path === '/projects' && params['archived'] === true ? [] : routes(path, params),
+    });
+
+    expect(ofT1(context, 'taskProject')).toHaveLength(1);
+    expect(job.snapshot().counts['unlinked']).toBeUndefined();
+  });
+
+  it('deletes a comment deleted in Asana, and brings it back if Asana lists it again', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const taskId = taskTitled(context, 'Fix the boiler')['id'];
+    const local = await context.db.table('comment').create({
+      data: { workspaceId: context.workspaceId, authorId: context.starterId, taskId, body: 'Here' },
+    });
+    const org = organisation();
+    const routes = org.routes;
+    const withoutC1 = {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        const result = routes(path, params);
+        return path === '/tasks/T1/stories'
+          ? result.filter((story) => (story as Row)['gid'] !== 'C1')
+          : result;
+      },
+    };
+
+    const { job } = await runImport(context, withoutC1);
+
+    const thanks = rows(context, 'comment').find((row) =>
+      String(row['body']).includes('Thanks'),
+    ) as Row;
+    expect(thanks['deletedAt']).toBeInstanceOf(Date);
+    const others = rows(context, 'comment').filter((row) => row !== thanks);
+    expect(others.map((row) => row['deletedAt'] ?? null)).toEqual([null, null]);
+    expect(others).toContain(local);
+    const ref = rows(context, 'externalRef').find(
+      (row) => row['entityType'] === 'story' && row['externalId'] === 'C1',
+    ) as Row;
+    expect(ref['sourceDeletedAt']).toBeInstanceOf(Date);
+    expect(job.snapshot().counts['commentsDeleted']).toEqual({ done: 1 });
+
+    await runImport(context);
+
+    expect(thanks['deletedAt']).toBeNull();
+    expect(ref['sourceDeletedAt']).toBeNull();
+  });
+
+  it('reads a commented subtask that search no longer finds, so a deletion comes across', async () => {
+    const context = await setUp();
+    const org = organisation();
+    const routes = org.routes;
+    const withSubtaskComment = (comments: Row[]) => ({
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        path === '/tasks/SST1/stories' ? comments : routes(path, params),
+    });
+    const commentedOn =
+      (found: boolean): Search =>
+      (params) =>
+        found && params['commented_on_by.any']
+          ? [{ gid: 'SST1', created_at: '2026-10-05T00:00:00.000Z' }]
+          : [];
+    await runImport(
+      context,
+      withSubtaskComment([
+        {
+          gid: 'C9',
+          resource_subtype: 'comment_added',
+          text: 'Reading is 2 bar',
+          created_by: { gid: 'U2', name: 'Bob Builder' },
+        },
+      ]),
+      fakeStorage(),
+      commentedOn(true),
+    );
+    const reading = rows(context, 'comment').find((row) =>
+      String(row['body']).includes('2 bar'),
+    ) as Row;
+    expect(reading['deletedAt'] ?? null).toBeNull();
+
+    await runImport(context, withSubtaskComment([]), fakeStorage(), commentedOn(false));
+
+    expect(reading['deletedAt']).toBeInstanceOf(Date);
+  });
+
   it('keeps a task Asana still has, or will not show, that this run did not reach', async () => {
     const context = await setUp();
     await runImport(context);
@@ -1231,6 +1417,23 @@ describe('AsanaImportRun live sync', () => {
       (row) => row['entityType'] === 'task' && row['externalId'] === 'T2',
     ) as Row;
     expect(ref['sourceDeletedAt']).toBeInstanceOf(Date);
+  });
+
+  it('deletes comments whose deletion an event told of without their task', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const task = titled(context, 'Fix the boiler');
+    const { run } = await liveRun(context, liveOrg({}));
+
+    const changes = await run.removeComments(['C1', 'C-unknown']);
+
+    const thanks = rows(context, 'comment').find((row) =>
+      String(row['body']).includes('Thanks'),
+    ) as Row;
+    expect(thanks['deletedAt']).toBeInstanceOf(Date);
+    expect(changes).toEqual([{ taskId: task['id'], projectIds: [task['projectId']] }]);
+    // Already gone: nothing to announce the second time.
+    expect(await run.removeComments(['C1'])).toEqual([]);
   });
 
   it('reads a project’s sections again for a task moved into a new one', async () => {
