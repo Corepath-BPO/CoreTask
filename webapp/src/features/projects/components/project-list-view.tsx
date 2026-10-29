@@ -1,7 +1,10 @@
 import {
+  MAX_FILTERS_PER_VIEW,
+  OPERATORS_BY_KIND,
   SystemField,
   TaskStatus,
   type CreatableWorkItemType,
+  type FilterOperator,
   type WorkItemType,
 } from '@coretask/contracts';
 import type {
@@ -123,6 +126,8 @@ import {
 
 import { EditCustomFieldDialog } from './field-picker/edit-custom-field-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
+import { findQueryableField } from '../lib/view-fields';
+
 import { ColumnHeaderTable } from './column-header';
 import { ViewToolbarControls } from './toolbar/view-toolbar-controls';
 
@@ -195,6 +200,8 @@ export function ProjectListView({
   const [debounced, setDebounced] = useState('');
   // Asana keeps the search as a bare icon until it is needed.
   const [searchOpen, setSearchOpen] = useState(false);
+  // A column's "Filter" opens the toolbar's popover with that field's row added.
+  const [filterOpen, setFilterOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   /*
@@ -257,6 +264,24 @@ export function ProjectListView({
   const manualOrder = isManualOrder(settings);
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
+
+  /** A column's "Filter": a row for that field in the Filter popover, which opens. */
+  const filterByColumn = (field: string) => {
+    const queryable = findQueryableField(field, metadata);
+    const conditions = settings.filters.conditions;
+    if (queryable && conditions.length < MAX_FILTERS_PER_VIEW) {
+      onSettingsChange?.({
+        filters: {
+          ...settings.filters,
+          conditions: [
+            ...conditions,
+            { field, operator: OPERATORS_BY_KIND[queryable.kind][0] as FilterOperator },
+          ],
+        },
+      });
+    }
+    setFilterOpen(true);
+  };
   const renameSection = useRenameSection(workspaceId, projectId);
   const moveTask = useMoveTaskToSection(workspaceId);
   const createWorkItem = useCreateProjectWorkItem(workspaceId, projectId);
@@ -739,6 +764,8 @@ export function ProjectListView({
               dirty={dirty}
               onChange={(patch) => onSettingsChange?.(patch)}
               onSaveAs={() => onSaveAs?.()}
+              filterOpen={filterOpen}
+              onFilterOpenChange={setFilterOpen}
             />
 
             {searchOpen || search !== '' ? (
@@ -866,6 +893,20 @@ export function ProjectListView({
                   onChange={onColumnsChange}
                   titleMinWidth={titleMinWidth}
                   onEditField={canEdit ? setEditingFieldId : undefined}
+                  onSort={
+                    onSettingsChange
+                      ? (field, direction) => onSettingsChange({ sorts: [{ field, direction }] })
+                      : undefined
+                  }
+                  onGroup={
+                    onSettingsChange
+                      ? (field) =>
+                          onSettingsChange({
+                            groupBy: field === SystemField.SECTION ? null : field,
+                          })
+                      : undefined
+                  }
+                  onFilter={onSettingsChange ? filterByColumn : undefined}
                   onResizePreview={(preview) => setResizing(preview ? [preview] : null)}
                   widths={<ColumnWidths columns={shown} />}
                   addControl={

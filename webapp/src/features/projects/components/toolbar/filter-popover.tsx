@@ -29,11 +29,16 @@ export function FilterPopover({
   metadata,
   meId,
   onChange,
+  open,
+  onOpenChange,
 }: {
   settings: ViewSettings;
   metadata: ProjectFieldMetadata | undefined;
   meId: string | undefined;
   onChange: (patch: Partial<ViewSettings>) => void;
+  /** Open from elsewhere — a column's "Filter" — when given; its own otherwise. */
+  open?: boolean | undefined;
+  onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const conditions = settings.filters.conditions;
   const active = conditions.length + (settings.showCompleted === false ? 1 : 0);
@@ -52,7 +57,7 @@ export function FilterPopover({
   };
 
   return (
-    <Popover>
+    <Popover {...(open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}>
       <PopoverTrigger asChild>
         <Button
           variant={active > 0 ? 'secondary' : 'ghost'}

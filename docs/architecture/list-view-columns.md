@@ -32,7 +32,15 @@ rows would buy ordering and constraints that a JSON array already gives, at the
 cost of a join on every read.
 
 The column list is edited from **Options → Fields**, where Asana keeps it; the
-standalone Fields button is gone. The same menu holds the row density
+standalone Fields button is gone. Each column also has Asana's header menu, the
+chevron that shows on hover (`column-menu.tsx`): **Edit field** for a custom
+field, then **Sort** (ascending or descending, replacing the view's sort),
+**Filter** (adds a row for the field and opens the Filter popover), **Group**,
+then **Add column** (a field not shown yet, placed just after this one),
+**Move column** (left or right, never in front of the Task column), **Pin** and
+**Hide column**. The Task column, like Asana's Name, only sorts. Someone who
+cannot edit the view sees only Sort, Filter and Group, which change their own
+unsaved copy of it. The same menu holds the row density
 (`COMFORTABLE` or `COMPACT`, applied as `data-density` on the scrolling pane)
 and "Show completed tasks". Toggling and reordering are pure functions in
 `column-layout.ts` (`toggleColumn`, `moveColumnBy`), and the title can never

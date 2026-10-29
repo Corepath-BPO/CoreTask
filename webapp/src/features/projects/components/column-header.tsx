@@ -1,3 +1,4 @@
+import { SYSTEM_FIELD_CATALOG, type SortDirection } from '@coretask/contracts';
 import type { ProjectFieldMetadata, ViewColumn } from '@coretask/types';
 import {
   DndContext,
@@ -8,7 +9,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
-import { Pencil, Pin, PinOff } from 'lucide-react';
+import { Pin } from 'lucide-react';
 import { useRef } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -16,12 +17,17 @@ import { cn } from '@/lib/utils';
 import {
   clampWidth,
   columnWidth,
+  insertColumnAfter,
   isPinnedColumn,
   isFixedColumn,
   moveColumn,
   setPinned,
+  toggleColumn,
 } from '../lib/column-layout';
 import { columnLabel, columnMinWidth } from '../lib/column-labels';
+import { findQueryableField } from '../lib/view-fields';
+
+import { ColumnMenu, type ColumnMenuActions } from './column-menu';
 
 /** Where a pinned column sits, and whether it is the one casting the shadow. */
 export interface PinnedProps {
@@ -31,11 +37,12 @@ export interface PinnedProps {
 }
 
 /**
- * The header row: drag to reorder, drag the edge to resize, click to pin.
+ * The header row: drag to reorder, drag the edge to resize, and each column's
+ * menu (Asana's chevron) for the rest — edit its field, sort, filter or group
+ * by it, add a column beside it, move, pin or hide it.
  *
- * All three change the same saved setting, so they live together rather than in
- * a menu somewhere else — the column you want to move is the one under your
- * cursor.
+ * They change the view the header belongs to, so they live on it rather than
+ * in a menu somewhere else: the column you mean is the one under your cursor.
  */
 export function ColumnHeaderTable({
   columns,
@@ -48,6 +55,9 @@ export function ColumnHeaderTable({
   widths,
   titleMinWidth,
   onEditField,
+  onSort,
+  onFilter,
+  onGroup,
 }: {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
@@ -63,6 +73,10 @@ export function ColumnHeaderTable({
   titleMinWidth?: number | undefined;
   /** Opens the edit dialog for a custom field's column. */
   onEditField?: ((fieldId: string) => void) | undefined;
+  /** The view's own settings, read by a column: absent where the view cannot change. */
+  onSort?: ((field: string, direction: SortDirection) => void) | undefined;
+  onFilter?: ((field: string) => void) | undefined;
+  onGroup?: ((field: string) => void) | undefined;
 }) {
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so clicking the pin button
@@ -80,7 +94,48 @@ export function ColumnHeaderTable({
     onChange(moveColumn(columns, String(active.id), toIndex));
   };
 
-  const body = columns.map((column) => (
+  // What "Add column" can offer: what Options › Fields offers, less what shows.
+  const shown = new Set(columns.map((column) => column.field));
+  const addable = [
+    ...SYSTEM_FIELD_CATALOG.filter((field) => field.isColumn).map((field) => field.key as string),
+    ...(metadata?.customFields ?? [])
+      .filter((field) => !field.isArchived)
+      .map((field) => `custom:${field.id}`),
+  ]
+    .filter((field) => !shown.has(field))
+    .map((field) => ({ field, label: columnLabel(field, metadata) }));
+
+  const actionsFor = (column: ViewColumn, index: number): ColumnMenuActions => {
+    const field = column.field;
+    const queryable = findQueryableField(field, metadata);
+    // The Task column, as Asana's Name column, only sorts.
+    const isTitle = isFixedColumn(field);
+    const arrange = canEdit && !isTitle;
+
+    return {
+      // Only a custom field has a definition to edit; the system columns are
+      // furniture with nothing to configure.
+      onEditField:
+        canEdit && onEditField && field.startsWith('custom:')
+          ? () => onEditField(field.slice('custom:'.length))
+          : undefined,
+      onSort: queryable?.isSortable && onSort ? (direction) => onSort(field, direction) : undefined,
+      onFilter: !isTitle && queryable?.isFilterable && onFilter ? () => onFilter(field) : undefined,
+      onGroup: !isTitle && queryable?.isGroupable && onGroup ? () => onGroup(field) : undefined,
+      addable,
+      onAdd: arrange ? (added) => onChange(insertColumnAfter(columns, field, added)) : undefined,
+      onMove: arrange
+        ? (direction) => onChange(moveColumn(columns, field, index + direction))
+        : undefined,
+      canMoveLeft: index > 0 && !isFixedColumn(columns[index - 1]?.field ?? ''),
+      canMoveRight: index < columns.length - 1,
+      isPinned: isPinnedColumn(column),
+      onPin: arrange ? (isPinned) => onChange(setPinned(columns, field, isPinned)) : undefined,
+      onHide: arrange ? () => onChange(toggleColumn(columns, field)) : undefined,
+    };
+  };
+
+  const body = columns.map((column, index) => (
     <HeaderCell
       key={column.field}
       column={column}
@@ -90,19 +145,12 @@ export function ColumnHeaderTable({
       minWidth={
         isFixedColumn(column.field) ? titleMinWidth : columnMinWidth(column.field, metadata)
       }
-      onPin={(isPinned) => onChange(setPinned(columns, column.field, isPinned))}
+      actions={actionsFor(column, index)}
       onResizePreview={onResizePreview}
       onResizeEnd={(width) =>
         onChange(
           columns.map((entry) => (entry.field === column.field ? { ...entry, width } : entry)),
         )
-      }
-      // Only a custom field is editable from its header — the system columns
-      // are furniture with nothing to configure.
-      onEdit={
-        canEdit && onEditField && column.field.startsWith('custom:')
-          ? () => onEditField(column.field.slice('custom:'.length))
-          : undefined
       }
     />
   ));
@@ -167,20 +215,18 @@ function HeaderCell({
   canEdit,
   pinned,
   minWidth,
-  onPin,
+  actions,
   onResizePreview,
   onResizeEnd,
-  onEdit,
 }: {
   column: ViewColumn;
   label: string;
   canEdit: boolean;
   pinned: PinnedProps;
   minWidth?: number | undefined;
-  onPin: (isPinned: boolean) => void;
+  actions: ColumnMenuActions;
   onResizePreview: (preview: { field: string; width: number } | null) => void;
   onResizeEnd: (width: number) => void;
-  onEdit?: (() => void) | undefined;
 }) {
   /*
    * The Task column is not a sortable at all, rather than a sortable that
@@ -237,38 +283,20 @@ function HeaderCell({
           {label}
         </span>
 
-        {onEdit && (
+        {/* A pinned column keeps its pin in sight: it is state, not a hover action. */}
+        {canArrange && isPinnedColumn(column) && (
           <button
             type="button"
-            onClick={onEdit}
-            aria-label={`Edit ${label}`}
-            className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover/header:opacity-100"
+            onClick={() => actions.onPin?.(false)}
+            aria-label={`Unpin ${label}`}
+            aria-pressed
+            className="shrink-0 cursor-pointer rounded p-0.5 text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
           >
-            <Pencil className="size-3" aria-hidden="true" />
+            <Pin className="size-3" aria-hidden="true" />
           </button>
         )}
 
-        {canArrange && (
-          <button
-            type="button"
-            onClick={() => onPin(!isPinnedColumn(column))}
-            aria-label={`${isPinnedColumn(column) ? 'Unpin' : 'Pin'} ${label}`}
-            aria-pressed={isPinnedColumn(column)}
-            className={cn(
-              'shrink-0 cursor-pointer rounded p-0.5 hover:bg-muted focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
-              // A pinned column keeps its icon: it is state, not a hover action.
-              isPinnedColumn(column)
-                ? 'text-foreground'
-                : 'opacity-0 transition-opacity group-hover/header:opacity-100',
-            )}
-          >
-            {isPinnedColumn(column) ? (
-              <Pin className="size-3" aria-hidden="true" />
-            ) : (
-              <PinOff className="size-3" aria-hidden="true" />
-            )}
-          </button>
-        )}
+        <ColumnMenu label={label} actions={actions} />
 
         {canEdit && (
           <ResizeHandle

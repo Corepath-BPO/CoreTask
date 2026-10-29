@@ -73,6 +73,18 @@ export function columnWidth(column: ViewColumn): number {
  * hiding it would leave a table of attributes belonging to nothing, so it is
  * never toggled off.
  */
+/** `field` as a column just after `after`, as Asana's "Add column" puts it; once only. */
+export function insertColumnAfter(
+  columns: ViewColumn[],
+  after: string,
+  field: string,
+): ViewColumn[] {
+  if (columns.some((column) => column.field === field)) return columns;
+  const index = columns.findIndex((column) => column.field === after);
+  const at = index === -1 ? columns.length : index + 1;
+  return [...columns.slice(0, at), { field }, ...columns.slice(at)];
+}
+
 export function toggleColumn(columns: ViewColumn[], field: string): ViewColumn[] {
   if (field === SystemField.TITLE) return columns;
   return columns.some((column) => column.field === field)
