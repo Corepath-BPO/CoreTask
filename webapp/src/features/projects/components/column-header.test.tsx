@@ -35,7 +35,7 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof ColumnHeade
     columns,
     metadata,
     canEdit: true,
-    pinned: { offsets: new Map<string, number>(), lastPinned: null, scrolled: false },
+    pinned: { offsets: new Map<string, number>(), lastPinned: null },
     onChange: vi.fn(),
     onResizePreview: vi.fn(),
     addControl: null,

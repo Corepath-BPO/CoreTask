@@ -27,7 +27,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/feedback/empty-state';
@@ -44,6 +44,7 @@ import { useManualRules, useRunRule } from '@/features/automations/hooks/use-aut
 import { useMoveTaskToSection } from '@/features/tasks/hooks/use-tasks';
 import { resolveTaskDrop, type TaskGroups } from '@/features/tasks/lib/resolve-task-drop';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
+import { useStableCallback } from '@/lib/hooks/use-stable-callback';
 import { SHORTCUT_PRIORITY, useShortcutActions } from '@/lib/shortcuts/shortcut-registry';
 import { calendarDateFromNow, cn, formatDate } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
@@ -136,7 +137,7 @@ import { RemoveFieldDialog } from './field-picker/remove-field-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { findQueryableField } from '../lib/view-fields';
 
-import { ColumnHeaderTable } from './column-header';
+import { ColumnHeaderTable, FROZEN_EDGE_SHADOW } from './column-header';
 import { ViewToolbarControls } from './toolbar/view-toolbar-controls';
 
 /** The selected rows and the last plain click, which a shift range extends from. */
@@ -177,6 +178,26 @@ interface ProjectListViewProps {
   /** The section named in the URL, if any; clicking a header selects it. */
   selectedSectionId?: string | null;
   onSelectSection?: ((sectionId: string) => void) | undefined;
+}
+
+/*
+ * One row object per item for as long as the item is unchanged. A refetch
+ * keeps an unchanged item's object (React Query shares structure), so keeping
+ * its row too lets the memoized rows skip everything a refetch did not touch.
+ */
+const rowCache = new WeakMap<Parameters<typeof toWorkItemRow>[0], WorkItemRow>();
+function rowOf(item: Parameters<typeof toWorkItemRow>[0]): WorkItemRow {
+  let row = rowCache.get(item);
+  if (!row) {
+    row = toWorkItemRow(item);
+    rowCache.set(item, row);
+  }
+  return row;
+}
+
+/** What clips the overlays at the frozen boundary — see `linesRef`. */
+function overlayClip(scrollLeft: number, pinnedWidth: number): string {
+  return scrollLeft > 0 ? `inset(0 0 0 ${scrollLeft + pinnedWidth}px)` : 'none';
 }
 
 /**
@@ -342,15 +363,17 @@ export function ProjectListView({
    * Horizontal scroll is tracked so the frozen column can grow a shadow only
    * once something is actually hidden behind it. A permanent shadow reads as a
    * visual seam; one that appears on scroll says "there is more this way".
+   * This is where it was last scrolled to sideways: the overlays' clip is only
+   * rewritten when that moves, never on a vertical scroll.
    */
-  const [scrolled, setScrolled] = useState(false);
+  const lastScrollLeft = useRef(0);
 
   /*
    * Converted at the boundary — see `toWorkItemRow`. The cells were written
    * against `Task`, and rewriting a dozen of them in the same change that puts
    * tickets in the grid would make one large diff out of two separate risks.
    */
-  const tasks = useMemo(() => (data?.items ?? []).map(toWorkItemRow), [data]);
+  const tasks = useMemo(() => (data?.items ?? []).map(rowOf), [data]);
 
   const groups = useMemo(
     () => groupRows(tasks, settings.groupBy, metadata, undefined, settings.groupOrder ?? 'ASC'),
@@ -483,6 +506,14 @@ export function ProjectListView({
     const column = shown.find((entry) => entry.field === pinned.lastPinned);
     return (pinned.offsets.get(pinned.lastPinned) ?? 0) + (column ? columnWidth(column) : 0);
   }, [pinned, shown]);
+
+  // A column pinned or resized while the grid is scrolled moves the frozen
+  // boundary; the clip follows at once rather than at the next sideways scroll.
+  useLayoutEffect(() => {
+    const clip = overlayClip(lastScrollLeft.current, pinnedWidth);
+    if (linesRef.current) linesRef.current.style.clipPath = clip;
+    if (stripsRef.current) stripsRef.current.style.clipPath = clip;
+  }, [pinnedWidth]);
 
   /*
    * A gridline drag resizes the column on its left, exactly as Asana's does:
@@ -650,23 +681,48 @@ export function ProjectListView({
 
   const clearSelection = useCallback(() => setSelection(NO_SELECTION), []);
 
-  const selectRow = (id: string, modifiers: { shift: boolean; toggle: boolean }) => {
-    setSelection((previous) => {
-      // A range keeps its anchor, so the next shift-click extends from the
-      // same place rather than from the end of the last range.
-      if (modifiers.shift) {
-        const range = rangeBetween(order, previous.anchor, id);
+  /*
+   * The rows are memoized, so what they are handed keeps its identity: an
+   * arrow made afresh here would be a new prop on every render, and every row
+   * would render again for a change that touched one of them.
+   */
+  const openTask = useStableCallback(onOpenTask);
+  /*
+   * Through the shared mutation, whatever the row is. Sending every edit to
+   * the task endpoint meant a ticket's inline changes hit `PATCH /tasks/:id`
+   * with a ticket id and 404'd — the cell reverted and the grid looked as
+   * though nothing had been typed.
+   */
+  const saveTask = useStableCallback((workItemId: string, payload: Record<string, unknown>) =>
+    updateWorkItem.mutate({ workItemId, payload: toWorkItemUpdate(payload) }),
+  );
+  const saveField = useStableCallback(
+    (taskId: string, fieldId: string, value: Record<string, unknown>) =>
+      setFieldValue.mutate({ taskId, fieldId, value }),
+  );
+  const addSubtask = useStableCallback((parentId: string, title: string, sectionId: string) =>
+    create({ type: 'TASK', title, parentId, sectionId }),
+  );
+
+  const selectRow = useStableCallback(
+    (id: string, modifiers: { shift: boolean; toggle: boolean }) => {
+      setSelection((previous) => {
+        // A range keeps its anchor, so the next shift-click extends from the
+        // same place rather than from the end of the last range.
+        if (modifiers.shift) {
+          const range = rangeBetween(order, previous.anchor, id);
+          return {
+            ids: new Set([...(modifiers.toggle ? previous.ids : []), ...range]),
+            anchor: previous.anchor ?? id,
+          };
+        }
         return {
-          ids: new Set([...(modifiers.toggle ? previous.ids : []), ...range]),
-          anchor: previous.anchor ?? id,
+          ids: modifiers.toggle ? toggleSelected(previous.ids, id) : new Set([id]),
+          anchor: id,
         };
-      }
-      return {
-        ids: modifiers.toggle ? toggleSelected(previous.ids, id) : new Set([id]),
-        anchor: id,
-      };
-    });
-  };
+      });
+    },
+  );
 
   /*
    * Escape clears the selection — in the capture phase, so it runs ahead of
@@ -866,15 +922,25 @@ export function ProjectListView({
          * Cards that scrolled independently would drift out of step the moment
          * anyone moved sideways, so the columns would only line up until they
          * were used. A single container also keeps one scrollbar and one
-         * `scrolled` flag driving the frozen column's shadow.
+         * `data-scrolled` flag driving the frozen column's shadow.
          */
         <div
           ref={paneRef}
           onScroll={(event) => {
-            const left = event.currentTarget.scrollLeft;
-            setScrolled(left > 0);
+            const pane = event.currentTarget;
+            const left = pane.scrollLeft;
+            if (left === lastScrollLeft.current) return;
+            lastScrollLeft.current = left;
+            /*
+             * Straight on the element, not through React: the frozen edge's
+             * shadow and the frozen columns' resize strips read it in CSS. As
+             * state it re-rendered every row the moment the grid left its left
+             * edge, which on a long project was a frame of half a second.
+             */
+            const scrolledNow = left > 0 ? 'true' : 'false';
+            if (pane.dataset['scrolled'] !== scrolledNow) pane.dataset['scrolled'] = scrolledNow;
             // Keep the frozen zone clean — see linesRef above.
-            const clip = left > 0 ? `inset(0 0 0 ${left + pinnedWidth}px)` : 'none';
+            const clip = overlayClip(left, pinnedWidth);
             if (linesRef.current) linesRef.current.style.clipPath = clip;
             if (stripsRef.current) stripsRef.current.style.clipPath = clip;
           }}
@@ -909,7 +975,7 @@ export function ProjectListView({
                   columns={shown}
                   metadata={metadata}
                   canEdit={canEdit}
-                  pinned={{ ...pinned, scrolled }}
+                  pinned={pinned}
                   onChange={onColumnsChange}
                   titleMinWidth={titleMinWidth}
                   onEditField={canEdit ? setEditingFieldId : undefined}
@@ -1040,29 +1106,13 @@ export function ProjectListView({
                                 columns={shown}
                                 metadata={metadata}
                                 canEdit={canEdit}
-                                pinned={{ ...pinned, scrolled }}
+                                pinned={pinned}
                                 manualOrder={manualOrder}
-                                onOpenTask={onOpenTask}
-                                /*
-                                 * Through the shared mutation, whatever the row
-                                 * is. Sending every edit to the task endpoint
-                                 * meant a ticket's inline changes hit
-                                 * `PATCH /tasks/:id` with a ticket id and 404'd
-                                 * — the cell reverted and the grid looked as
-                                 * though nothing had been typed.
-                                 */
-                                onSaveTask={(workItemId, payload) =>
-                                  updateWorkItem.mutate({
-                                    workItemId,
-                                    payload: toWorkItemUpdate(payload),
-                                  })
-                                }
-                                onSaveField={(taskId, fieldId, value) =>
-                                  setFieldValue.mutate({ taskId, fieldId, value })
-                                }
-                                onAddSubtask={(parentId, title) =>
-                                  create({ type: 'TASK', title, parentId, sectionId: group.id })
-                                }
+                                onOpenTask={openTask}
+                                onSaveTask={saveTask}
+                                onSaveField={saveField}
+                                sectionId={group.id}
+                                onAddSubtask={addSubtask}
                               />
                             ))}
 
@@ -1159,15 +1209,19 @@ export function ProjectListView({
               {/* The rules are also handles: grab one anywhere along its
                   height to resize the column, as in Asana. A pinned column's
                   visible edge parts company with its natural position once
-                  the grid is scrolled, so its strip retires and the header
-                  handle takes over. */}
+                  the grid is scrolled, so its strip retires (CSS, off the
+                  pane's `data-scrolled`) and the header handle takes over. */}
               {canEdit && (
                 <div ref={stripsRef} className="pointer-events-none absolute inset-0 z-20 !mt-0">
-                  {shown.map((column, index) => {
-                    if (pinned.offsets.has(column.field) && scrolled) return null;
-                    return (
+                  {shown.map((column, index) => (
+                    <span
+                      key={column.field}
+                      className={cn(
+                        'contents',
+                        pinned.offsets.has(column.field) && '[[data-scrolled=true]_&]:hidden',
+                      )}
+                    >
                       <EdgeResizer
-                        key={column.field}
                         x={columnEdges[index] ?? 0}
                         label={`Resize ${columnLabel(column.field, metadata)}`}
                         onDrag={(dx) => setResizing(resizeAdjustments(index, dx))}
@@ -1178,8 +1232,8 @@ export function ProjectListView({
                         }}
                         onCancel={() => setResizing(null)}
                       />
-                    );
-                  })}
+                    </span>
+                  ))}
 
                   {/* Asana's blue guide, tracking whichever edge is being
                       dragged — the header handles share it too. */}
@@ -1301,14 +1355,17 @@ interface RowProps {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
   canEdit: boolean;
-  pinned: PinnedLayout & { scrolled: boolean };
+  pinned: PinnedLayout;
   /** False while a sort or a value grouping owns the order: no drag handle. */
   manualOrder?: boolean;
   onOpenTask: (taskId: string) => void;
   onSaveTask: (taskId: string, payload: Record<string, unknown>) => void;
   onSaveField: (taskId: string, fieldId: string, value: Record<string, unknown>) => void;
   /** Absent when the caller cannot create — the row then offers nothing. */
-  onAddSubtask?: ((parentId: string, title: string) => Promise<unknown>) | undefined;
+  onAddSubtask?:
+    ((parentId: string, title: string, sectionId: string) => Promise<unknown>) | undefined;
+  /** The section the row's subtasks are created in. */
+  sectionId?: string | undefined;
   /** Absent when rows cannot be selected — a read-only view. Top-level rows only. */
   onSelect?: ((id: string, modifiers: { shift: boolean; toggle: boolean }) => void) | undefined;
 }
@@ -1324,9 +1381,10 @@ interface RowProps {
 // `onAddSubtask` is pulled out rather than left in `shared`: the row below is a
 // plain `<tr>` and has no use for it, and spreading it there would hand a child
 // row a handler for creating children of its own.
-function TaskRows({
+const TaskRows = memo(function TaskRows({
   task,
   onAddSubtask,
+  sectionId,
   selected,
   ...shared
 }: RowProps & { task: TaskRow; selected: boolean }) {
@@ -1392,7 +1450,7 @@ function TaskRows({
                 defaultType="TASK"
                 sectionName={task.title}
                 plain
-                onCreate={({ title }) => onAddSubtask(task.id, title)}
+                onCreate={({ title }) => onAddSubtask(task.id, title, sectionId ?? '')}
               />
             </div>
           </td>
@@ -1400,10 +1458,14 @@ function TaskRows({
       )}
     </>
   );
-}
+});
 
-/** One `<tr>`. Shared by parents and subtasks so a row means the same thing. */
-function Row({
+/**
+ * One `<tr>`. Shared by parents and subtasks so a row means the same thing.
+ * Memoized, as `TaskRows` is: a selection, a page loading below or an edit in
+ * another row leaves this one as it was.
+ */
+const Row = memo(function Row({
   task,
   depth = 0,
   expanded,
@@ -1477,9 +1539,7 @@ function Row({
               // pinned cell is opaque and covers them, so it carries its own.
               left !== undefined && 'sticky z-10 border-r border-border/60 bg-background',
               left !== undefined && isSelected && SELECTED_BG,
-              column.field === pinned.lastPinned &&
-                pinned.scrolled &&
-                'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+              column.field === pinned.lastPinned && FROZEN_EDGE_SHADOW,
             )}
           >
             <Cell
@@ -1512,7 +1572,7 @@ function Row({
       <td aria-hidden="true" />
     </tr>
   );
-}
+});
 
 /**
  * A section's name, collapse control and task count.

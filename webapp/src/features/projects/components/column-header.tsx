@@ -33,8 +33,22 @@ import { ColumnMenu, type ColumnMenuActions } from './column-menu';
 export interface PinnedProps {
   offsets: Map<string, number>;
   lastPinned: string | null;
-  scrolled: boolean;
 }
+
+/**
+ * The shadow on the last frozen column, shown while the grid is scrolled
+ * sideways. Driven by `data-scrolled` on the scroll pane, set straight on the
+ * element by its scroll handler: a React state for it re-rendered every row
+ * the moment the grid left its left edge.
+ *
+ * Read through a plain descendant selector, `[data-scrolled=true] &`, which
+ * restyles only the cells that carry it. Tailwind's `group-data-*` compiles to
+ * `:is(… *)`, for which Chrome restyled the whole grid: a quarter of a second
+ * on a project of two hundred rows, against eight milliseconds. The shadow is
+ * always there and only its opacity changes, so nothing is laid out again.
+ */
+export const FROZEN_EDGE_SHADOW =
+  'after:pointer-events-none after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent after:opacity-0 [[data-scrolled=true]_&]:after:opacity-100';
 
 /**
  * The header row: drag to reorder, drag the edge to resize, and each column's
@@ -276,9 +290,7 @@ function HeaderCell({
         isPinned && 'sticky z-20 bg-background',
         // The shadow belongs to the last frozen column: it marks where the
         // frozen block ends and the scrolling part begins.
-        column.field === pinned.lastPinned &&
-          pinned.scrolled &&
-          'after:absolute after:inset-y-0 after:-right-3 after:w-3 after:bg-gradient-to-r after:from-black/10 after:to-transparent',
+        column.field === pinned.lastPinned && FROZEN_EDGE_SHADOW,
         isDragging && 'opacity-40',
         isOver && !isDragging && 'bg-muted',
       )}
