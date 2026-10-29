@@ -216,6 +216,17 @@ export const envSchema = z
     /** Live sync: how often the worker reads each project's Asana event stream. */
     ASANA_LIVE_SYNC_INTERVAL_MS: z.coerce.number().int().min(10_000).max(600_000).default(30_000),
     /*
+     * Live sync: how often it looks at the workspace's projects, tags and
+     * field definitions, which Asana sends no events for. A handful of
+     * requests each time.
+     */
+    ASANA_LIVE_DEFINITIONS_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(3_600_000)
+      .default(300_000),
+    /*
      * Live sync's nightly full Sync again, a cron pattern read in
      * ASANA_FULL_SYNC_TZ. A full run takes the better part of an hour and
      * live sync waits for it, so it belongs in Asana's users' quiet hours.

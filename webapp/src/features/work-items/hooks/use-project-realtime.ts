@@ -123,6 +123,10 @@ export function useProjectRealtime(workspaceId: string | undefined, projectId: s
       void queryClient.invalidateQueries({
         queryKey: queryKeys.projects.members(workspaceId, projectId),
       });
+      // Its fields and their options, which the List's columns and cells read.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.projectViews.metadata(workspaceId, projectId),
+      });
     };
 
     const workItemEvents = [

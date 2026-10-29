@@ -161,6 +161,7 @@ export class AppConfigService {
       maxRequestsPerMinute: this.env.ASANA_MAX_REQUESTS_PER_MINUTE,
       concurrency: this.env.ASANA_CONCURRENCY,
       liveSyncIntervalMs: this.env.ASANA_LIVE_SYNC_INTERVAL_MS,
+      liveDefinitionsIntervalMs: this.env.ASANA_LIVE_DEFINITIONS_INTERVAL_MS,
       fullSyncCron: this.env.ASANA_FULL_SYNC_CRON,
       fullSyncTz: this.env.ASANA_FULL_SYNC_TZ,
       enabled: Boolean(this.env.ASANA_ACCESS_TOKEN && this.env.ASANA_WORKSPACE_ID),

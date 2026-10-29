@@ -371,7 +371,7 @@ function fakeAsana(routes: (path: string, params: AsanaParams) => unknown[], sea
         throw new AsanaApiError(path, 402, 'Search is only available to premium users.');
       }
       // One task or field, asked for by gid: the organisation answers, or refuses.
-      if (/^\/(tasks|custom_fields)\/[^/]+$/.test(path)) return routes(path, params);
+      if (/^\/(tasks|custom_fields|tags|projects)\/[^/]+$/.test(path)) return routes(path, params);
       // The contractor is not in the workspace, and Asana will not say who they are.
       throw new Error(`Not found: ${path}`);
     }),
@@ -1419,6 +1419,195 @@ describe('AsanaImportRun live sync', () => {
     expect(ref['sourceDeletedAt']).toBeInstanceOf(Date);
   });
 
+  /** The organisation with some answers replaced; `null` from `change` keeps the original. */
+  function changedOrg(change: (path: string, params: AsanaParams) => unknown) {
+    const org = organisation();
+    const routes = org.routes;
+    return {
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        (change(path, params) ?? routes(path, params)) as unknown[],
+    };
+  }
+
+  const urgent = { gid: 'TG1', name: 'Urgent', color: 'dark-red' };
+  const withTag = (path: string) => (path === `/workspaces/${WS}/tags` ? [urgent] : null);
+
+  it('looks at fields, tags and projects, and writes nothing when none changed', async () => {
+    const context = await setUp();
+    await runImport(context, changedOrg(withTag));
+    const { run, asana } = await liveRun(context, changedOrg(withTag));
+    const writes = ['customField', 'tag', 'project'].map((name) =>
+      jest.spyOn(context.db.table(name), 'update'),
+    );
+    const openStream = jest.fn(async () => undefined);
+    // Preparing read the fields and tags once already.
+    asana.list.mockClear();
+
+    const changes = await run.syncDefinitions(openStream);
+
+    expect(changes).toEqual({ fieldIds: [], createdProjectIds: [], updatedProjectIds: [] });
+    for (const write of writes) expect(write).not.toHaveBeenCalled();
+    expect(openStream).not.toHaveBeenCalled();
+    expect(asana.list.mock.calls.map(([path]) => path).sort()).toEqual([
+      '/projects',
+      '/projects',
+      `/workspaces/${WS}/custom_fields`,
+      `/workspaces/${WS}/tags`,
+    ]);
+  });
+
+  it('writes a field, a tag and a project Asana changed', async () => {
+    const context = await setUp();
+    await runImport(context, changedOrg(withTag));
+    const tagId = (rows(context, 'tag').find((row) => row['name'] === 'Urgent') as Row)['id'];
+    const org = organisation();
+    // Changed in Asana after live sync got ready, as it would be.
+    let changed = false;
+    const { run } = await liveRun(
+      context,
+      changedOrg((path, params) => {
+        if (!changed) return withTag(path);
+        if (path === `/workspaces/${WS}/custom_fields`) {
+          return org
+            .routes(path, params)
+            .map((field) =>
+              (field as Row)['gid'] === 'F2' ? { ...(field as Row), name: 'Unit number' } : field,
+            );
+        }
+        if (path === `/workspaces/${WS}/tags`) return [{ ...urgent, name: 'Very urgent' }];
+        if (path === '/projects' && params['archived'] === false) {
+          return org
+            .routes(path, params)
+            .map((project) => ({ ...(project as Row), name: 'Maintenance and repairs' }));
+        }
+        return null;
+      }),
+    );
+    changed = true;
+
+    const changes = await run.syncDefinitions(async () => undefined);
+
+    const unit = rows(context, 'customField').find((row) => row['name'] === 'Unit number') as Row;
+    expect(changes.fieldIds).toEqual([unit['id']]);
+    // Renamed, not made again under its new name.
+    expect(rows(context, 'tag').filter((row) => String(row['name']).includes('rgent'))).toEqual([
+      expect.objectContaining({ id: tagId, name: 'Very urgent', nameKey: 'very urgent' }),
+    ]);
+    const project = rows(context, 'project').find(
+      (row) => row['name'] === 'Maintenance and repairs',
+    ) as Row;
+    expect(changes.updatedProjectIds).toEqual([project['id']]);
+    expect(changes.createdProjectIds).toEqual([]);
+  });
+
+  it('brings a new project across with its tasks, its stream opened first', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const log: string[] = [];
+    const renewals = { gid: 'P3', name: 'Renewals', privacy_setting: 'public_to_workspace' };
+    const newTask = {
+      gid: 'T9',
+      name: 'Renew the lease',
+      num_subtasks: 0,
+      memberships: [{ project: { gid: 'P3' }, section: { gid: 'S9' } }],
+    };
+    const alsoHere = {
+      ...org.tasks['T2'],
+      memberships: [
+        { project: { gid: 'P1' }, section: { gid: 'S2' } },
+        { project: { gid: 'P3' }, section: { gid: 'S9' } },
+      ],
+    };
+    const { run } = await liveRun(
+      context,
+      changedOrg((path, params) => {
+        if (path === '/projects' && params['archived'] === false) {
+          return [...org.routes(path, params), renewals];
+        }
+        if (path === '/projects/P3/sections') return [{ gid: 'S9', name: 'Up next' }];
+        if (path === '/projects/P3/custom_field_settings') return [];
+        if (path === '/tasks' && params['project'] === 'P3') {
+          log.push('listed');
+          return [newTask, alsoHere];
+        }
+        return null;
+      }),
+    );
+
+    const changes = await run.syncDefinitions(async (projectGid) => {
+      log.push(`opened ${projectGid}`);
+    });
+
+    expect(log).toEqual(['opened P3', 'listed']);
+    const p3 = rows(context, 'project').find((row) => row['name'] === 'Renewals') as Row;
+    expect(changes.createdProjectIds).toEqual([p3['id']]);
+    const s9 = rows(context, 'section').find((row) => row['name'] === 'Up next') as Row;
+    expect(titled(context, 'Renew the lease')).toMatchObject({
+      projectId: p3['id'],
+      sectionId: s9['id'],
+    });
+    // Already here from P1: it stays there, and P3 is one more of its projects.
+    const orderParts = titled(context, 'Order parts');
+    const p1 = rows(context, 'project').find((row) => row['name'] === 'Maintenance') as Row;
+    expect(orderParts['projectId']).toBe(p1['id']);
+    expect(
+      rows(context, 'taskProject').filter((row) => row['taskId'] === orderParts['id']),
+    ).toEqual([expect.objectContaining({ projectId: p3['id'], sectionId: s9['id'] })]);
+    expect(run.liveProjectGids()).toContain('P3');
+  });
+
+  it('reads a tag a task names that it has not seen', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const tagged = { ...org.tasks['T1'], tags: [{ gid: 'TG7' }] };
+    const { run } = await liveRun(
+      context,
+      liveOrg({ T1: () => tagged }, (path) =>
+        path === '/tags/TG7'
+          ? ({ gid: 'TG7', name: 'Waiting', color: 'light-yellow' } as unknown as unknown[])
+          : null,
+      ),
+    );
+
+    await run.syncTasks(['T1'], new Set());
+
+    const waiting = rows(context, 'tag').find((row) => row['name'] === 'Waiting') as Row;
+    expect(
+      rows(context, 'taskTag').filter(
+        (row) => row['taskId'] === titled(context, 'Fix the boiler')['id'],
+      ),
+    ).toContainEqual(expect.objectContaining({ tagId: waiting['id'] }));
+    expect(
+      rows(context, 'externalRef').find(
+        (row) => row['entityType'] === 'tag' && row['externalId'] === 'TG7',
+      ),
+    ).toMatchObject({ entityId: waiting['id'] });
+  });
+
+  it('reads a project again when its events say it changed, writing it only if it did', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const [listed] = org.routes('/projects', { archived: false }) as Row[];
+    let answer: Row = { ...listed };
+    const { run } = await liveRun(
+      context,
+      liveOrg({}, (path) => (path === '/projects/P1' ? (answer as unknown as unknown[]) : null)),
+    );
+    const update = jest.spyOn(context.db.table('project'), 'update');
+    const p1 = rows(context, 'project').find((row) => row['name'] === 'Maintenance') as Row;
+
+    expect(await run.syncProject('P1', new Set(['details']))).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+
+    answer = { ...listed, name: 'Maintenance and repairs' };
+    expect(await run.syncProject('P1', new Set(['details']))).toBe(p1['id']);
+    expect(p1['name']).toBe('Maintenance and repairs');
+  });
+
   it('deletes comments whose deletion an event told of without their task', async () => {
     const context = await setUp();
     await runImport(context);
@@ -1510,6 +1699,10 @@ describe('AsanaLiveSyncService', () => {
     context: Awaited<ReturnType<typeof setUp>>,
     events: (resource: string, sync: string | null) => unknown,
     tasks: Record<string, () => unknown> = {},
+    options: {
+      routes?: (path: string, params: AsanaParams) => unknown;
+      definitionsEvery?: number;
+    } = {},
   ) {
     const org = organisation();
     const routes = org.routes;
@@ -1517,7 +1710,7 @@ describe('AsanaLiveSyncService', () => {
       fakeAsana((path, params) => {
         const one = /^\/tasks\/([^/]+)$/.exec(path)?.[1];
         if (one && tasks[one]) return tasks[one]() as unknown[];
-        return routes(path, params);
+        return (options.routes?.(path, params) ?? routes(path, params)) as unknown[];
       }),
       { events: jest.fn(async (resource: string, sync: string | null) => events(resource, sync)) },
     );
@@ -1525,7 +1718,13 @@ describe('AsanaLiveSyncService', () => {
     const relay = { toProjectAudience: jest.fn(async () => undefined) };
     const live = new AsanaLiveSyncService(
       context.db.prisma,
-      { asana: { enabled: true, concurrency: 3 } } as never,
+      {
+        asana: {
+          enabled: true,
+          concurrency: 3,
+          liveDefinitionsIntervalMs: options.definitionsEvery,
+        },
+      } as never,
       asana as never,
       fakeStorage() as never,
       relay as never,
@@ -1595,6 +1794,48 @@ describe('AsanaLiveSyncService', () => {
     expect(liveSync(context)['lastChangeAt']).toBeInstanceOf(Date);
     const p1 = rows(context, 'asanaEventStream').find((row) => row['projectGid'] === 'P1') as Row;
     expect(p1['syncToken']).toBe('P1-token+1');
+  });
+
+  it('brings a new project across and tells whoever may see it', async () => {
+    const context = await setUpLive({ needsFullSync: false, tokens: true });
+    const org = organisation();
+    const { live, relay } = service(
+      context,
+      (resource, sync) =>
+        sync === null
+          ? { events: [], sync: `${resource}-fresh`, hasMore: false, lapsed: true }
+          : { events: [], sync: `${sync}+1`, hasMore: false, lapsed: false },
+      {},
+      {
+        definitionsEvery: 300_000,
+        routes: (path, params) => {
+          if (path === '/projects' && params['archived'] === false) {
+            return [...org.routes(path, params), { gid: 'P3', name: 'Renewals' }];
+          }
+          if (path === '/projects/P3/sections' || path === '/projects/P3/custom_field_settings') {
+            return [];
+          }
+          if (path === '/tasks' && params['project'] === 'P3') return [];
+          return null;
+        },
+      },
+    );
+
+    const result = await live.tick();
+    // Looked at once per interval, not every tick.
+    const second = await live.tick();
+
+    const p3 = rows(context, 'project').find((row) => row['name'] === 'Renewals') as Row;
+    expect(relay.toProjectAudience).toHaveBeenCalledWith(
+      context.workspaceId,
+      p3['id'],
+      'project:created',
+      expect.objectContaining({ projectId: p3['id'], source: 'asana' }),
+    );
+    expect(result.changes).toBe(1);
+    expect(second.changes).toBe(0);
+    const stream = rows(context, 'asanaEventStream').find((row) => row['projectGid'] === 'P3');
+    expect(stream?.['syncToken']).toBe('P3-fresh+1');
   });
 
   it('asks for a full run when a stream’s token has lapsed', async () => {

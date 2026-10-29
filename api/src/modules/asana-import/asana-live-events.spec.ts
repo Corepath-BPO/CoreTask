@@ -74,6 +74,23 @@ describe('addWork', () => {
     expect(work.tasks.size).toBe(0);
   });
 
+  it('reads a project again when its details, fields or members changed', () => {
+    const work = emptyWork();
+    addWork(work, 'P1', [
+      { action: 'changed', resource: { gid: 'P1', resource_type: 'project' } },
+      {
+        action: 'added',
+        resource: { gid: 'CFS1', resource_type: 'custom_field_setting' },
+        parent: { gid: 'P1', resource_type: 'project' },
+      },
+      { action: 'added', resource: { gid: 'M1', resource_type: 'membership' } },
+    ]);
+    addWork(work, 'P2', [{ action: 'deleted', resource: { gid: 'P2', resource_type: 'project' } }]);
+
+    expect([...work.projects.keys()]).toEqual(['P1']);
+    expect([...(work.projects.get('P1') ?? [])]).toEqual(['details', 'fields', 'members']);
+  });
+
   it('re-reads a project’s sections when one changed', () => {
     const work = emptyWork();
     addWork(work, 'P1', [
