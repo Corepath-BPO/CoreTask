@@ -12,7 +12,13 @@ import { StorageService } from '../../integrations/storage/storage.service';
 import { ImportJob, QueueName, type ImportJobData } from '../../jobs/queue-names';
 import { RealtimeRelayPublisher } from '../../websocket/realtime-relay.publisher';
 
-import { AsanaImportRun, pool, readableError, type LiveChange } from './asana-import-run';
+import {
+  AsanaImportRun,
+  pool,
+  readableError,
+  type DefinitionChanges,
+  type LiveChange,
+} from './asana-import-run';
 import { addWork, emptyWork } from './asana-live-events';
 
 /** A run that has written nothing for this long has lost its worker. */
@@ -49,6 +55,8 @@ interface Prepared {
 export class AsanaLiveSyncService {
   private readonly logger = new Logger(AsanaLiveSyncService.name);
   private readonly prepared = new Map<string, Prepared>();
+  /** When each workspace's fields, tags and projects were last looked at. */
+  private readonly definitionsAt = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -128,6 +136,16 @@ export class AsanaLiveSyncService {
     }
     await this.announce(workspaceId, changes, work.sections, run);
 
+    const updated: string[] = [];
+    for (const [projectGid, parts] of work.projects) {
+      const projectId = await run.syncProject(projectGid, parts);
+      if (projectId) updated.push(projectId);
+    }
+    const definitions = this.definitionsDue(workspaceId)
+      ? await run.syncDefinitions((projectGid) => this.openStream(workspaceId, projectGid))
+      : null;
+    const count = changes.length + (await this.announceProjects(workspaceId, updated, definitions));
+
     const failures = run.takeFailures();
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
@@ -136,10 +154,10 @@ export class AsanaLiveSyncService {
       where: { workspaceId },
       data: {
         lastPolledAt: now,
-        ...(changes.length > 0
+        ...(count > 0
           ? {
               lastChangeAt: now,
-              changesToday: (sameDay ? sync.changesToday : 0) + changes.length,
+              changesToday: (sameDay ? sync.changesToday : 0) + count,
               countedOn: new Date(today),
             }
           : {}),
@@ -148,13 +166,13 @@ export class AsanaLiveSyncService {
           : null,
       },
     });
-    if (changes.length > 0 || failures.length > 0) {
+    if (count > 0 || failures.length > 0) {
       this.logger.log(
-        { workspaceId, changes: changes.length, failures: failures.length },
+        { workspaceId, changes: count, failures: failures.length },
         'Asana live sync applied changes',
       );
     }
-    return changes.length;
+    return count;
   }
 
   /** The workspace's prepared run, made again when a full run has changed the refs since. */
@@ -237,6 +255,26 @@ export class AsanaLiveSyncService {
     return { events, lapsed };
   }
 
+  /** Whether a workspace's fields, tags and projects are due a look; marks them looked at. */
+  private definitionsDue(workspaceId: string): boolean {
+    const every = this.config.asana.liveDefinitionsIntervalMs;
+    if (!every) return false;
+    const last = this.definitionsAt.get(workspaceId);
+    if (last !== undefined && Date.now() - last < every) return false;
+    this.definitionsAt.set(workspaceId, Date.now());
+    return true;
+  }
+
+  /** A new project's event stream, opened before its tasks are read. */
+  private async openStream(workspaceId: string, projectGid: string): Promise<void> {
+    const answer = await this.asana.events(projectGid, null);
+    await this.prisma.asanaEventStream.upsert({
+      where: { workspaceId_projectGid: { workspaceId, projectGid } },
+      create: { workspaceId, projectGid, syncToken: answer.sync },
+      update: { syncToken: answer.sync },
+    });
+  }
+
   /** The tasks of comments whose events did not say; one Asana no longer has was deleted. */
   private async findStoryTasks(
     stories: Set<string>,
@@ -289,6 +327,45 @@ export class AsanaLiveSyncService {
       { workspaceId: sync.workspaceId, runId: run.id },
       'Asana live sync queued a full run',
     );
+  }
+
+  /**
+   * Projects that changed, told to whoever may see them, as a person's own
+   * change is: a new one appears in lists and pickers, a changed one's page,
+   * roster and fields refresh. A field's new definition reaches every project
+   * using it. Returns how many, for the day's count.
+   */
+  private async announceProjects(
+    workspaceId: string,
+    updated: string[],
+    definitions: DefinitionChanges | null,
+  ): Promise<number> {
+    const created = new Set(definitions?.createdProjectIds ?? []);
+    const changed = new Set([...updated, ...(definitions?.updatedProjectIds ?? [])]);
+    if (definitions && definitions.fieldIds.length > 0) {
+      const using = await this.prisma.projectCustomField.findMany({
+        where: { customFieldId: { in: definitions.fieldIds } },
+        select: { projectId: true },
+        distinct: ['projectId'],
+      });
+      for (const row of using) changed.add(row.projectId);
+    }
+
+    const occurredAt = new Date().toISOString();
+    const projects = new Set([...created, ...changed]);
+    for (const projectId of projects) {
+      const event = created.has(projectId)
+        ? ServerEvent.PROJECT_CREATED
+        : ServerEvent.PROJECT_UPDATED;
+      await this.relay.toProjectAudience(workspaceId, projectId, event, {
+        workspaceId,
+        projectId,
+        id: projectId,
+        occurredAt,
+        source: 'asana',
+      });
+    }
+    return projects.size;
   }
 
   /** Tells open boards, task panels and lists what changed. */

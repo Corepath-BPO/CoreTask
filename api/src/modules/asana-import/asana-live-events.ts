@@ -1,5 +1,7 @@
 import type { AsanaEvent } from '../../integrations/asana/asana.types';
 
+import type { ProjectPart } from './asana-import-run';
+
 /** What a project's events ask live sync to do. */
 export interface LiveWork {
   /** Tasks to read again from Asana and write. */
@@ -12,6 +14,8 @@ export interface LiveWork {
   stories: Set<string>;
   /** Comments deleted in Asana, found here by their refs. */
   deletedStories: Set<string>;
+  /** Projects whose details, fields or members changed, and which of those. */
+  projects: Map<string, Set<ProjectPart>>;
 }
 
 export function emptyWork(): LiveWork {
@@ -21,7 +25,14 @@ export function emptyWork(): LiveWork {
     sections: new Set(),
     stories: new Set(),
     deletedStories: new Set(),
+    projects: new Map(),
   };
+}
+
+function touch(work: LiveWork, projectGid: string, part: ProjectPart): void {
+  const parts = work.projects.get(projectGid) ?? new Set<ProjectPart>();
+  parts.add(part);
+  work.projects.set(projectGid, parts);
 }
 
 /** Stories that are content, not Asana's own record of a change. */
@@ -38,7 +49,8 @@ const CONTENT_STORIES = new Set(['comment_added', 'attachment_added']);
  * event on the task itself, so it is skipped; a comment or a file is read
  * with the task's history, which also finds a comment deleted there. A story
  * event without its task (an edited comment) is looked up, or, deleted, found
- * by its ref. Sections are re-read per project.
+ * by its ref. Sections are re-read per project, and so is the project itself
+ * when its details, fields or members changed.
  */
 export function addWork(work: LiveWork, projectGid: string, events: readonly AsanaEvent[]): void {
   for (const event of events) {
@@ -74,8 +86,25 @@ export function addWork(work: LiveWork, projectGid: string, events: readonly Asa
         work.sections.add(projectGid);
         break;
 
+      case 'project':
+        // Deleted in Asana: left in place, as a full run leaves it.
+        if (event.action !== 'deleted' && resource.gid === projectGid) {
+          touch(work, projectGid, 'details');
+        }
+        break;
+
+      case 'custom_field_setting':
+        touch(work, projectGid, 'fields');
+        break;
+
+      case 'membership':
+      case 'project_membership':
+        touch(work, projectGid, 'members');
+        break;
+
       default:
-        // Projects, tags and fields are a full run's: nightly, or Sync again.
+        // A tag or a field's definition: live sync looks at those every few
+        // minutes (`syncDefinitions`), since Asana sends no event for them.
         break;
     }
   }

@@ -39,6 +39,7 @@ import type {
   AsanaSection,
   AsanaStatusUpdate,
   AsanaStory,
+  AsanaTag,
   AsanaTask,
   AsanaTeam,
   AsanaUser,
@@ -112,6 +113,7 @@ const FIELD_FIELDS =
   'name,resource_subtype,description,precision,format,currency_code,custom_label,custom_label_position,enum_options.name,enum_options.color,enum_options.enabled';
 const PROJECT_FIELDS =
   'name,archived,color,html_notes,owner,team,privacy_setting,start_on,due_on,completed,completed_at,created_at';
+const TAG_FIELDS = 'name,color';
 const STORY_FIELDS =
   'resource_subtype,text,html_text,created_at,created_by.name,created_by.email,is_pinned,likes.user';
 const ATTACHMENT_FIELDS = 'name,host,size,download_url,view_url,permanent_url,created_at';
@@ -200,6 +202,17 @@ interface Placement {
 }
 
 /** A task live sync changed, for the caller to announce. */
+/** What live sync's look at the workspace's fields, tags and projects changed. */
+export interface DefinitionChanges {
+  /** Fields whose definition changed: every project using one is told. */
+  fieldIds: string[];
+  createdProjectIds: string[];
+  updatedProjectIds: string[];
+}
+
+/** What a project's events were about. */
+export type ProjectPart = 'details' | 'fields' | 'members';
+
 export interface LiveChange {
   taskId: string;
   /** Every project the task shows in: home and linked. */
@@ -246,6 +259,8 @@ export class AsanaImportRun {
   /** Refs (`type:gid`) of records an earlier run found deleted in Asana. */
   private readonly sourceDeleted = new Set<string>();
   private readonly tags = new Map<string, string>();
+  /** Tags asked for by gid, once each. */
+  private readonly pendingTagGids = new Map<string, Promise<string | undefined>>();
   private readonly projectGids = new Set<string>();
   private readonly privateProjects = new Set<string>();
   private readonly dependencies = new Map<string, string[]>();
@@ -750,18 +765,76 @@ export class AsanaImportRun {
   }
 
   private async importTags(): Promise<void> {
-    const tags = await this.asana.list<AsanaRef & { color?: string | null }>(
-      `/workspaces/${this.asanaWorkspaceGid}/tags`,
-      { opt_fields: 'name,color' },
-    );
+    const tags = await this.asana.list<AsanaTag>(`/workspaces/${this.asanaWorkspaceGid}/tags`, {
+      opt_fields: TAG_FIELDS,
+    });
     for (const tag of tags) {
       try {
-        this.tags.set(tag.gid, await this.ensureTag(tag.name ?? 'Tag', tag.color ?? null));
+        await this.saveAsanaTag(tag);
       } catch (error) {
         this.fail('tag', tag, error);
       }
     }
     this.counter('tags').done = tags.length;
+  }
+
+  /**
+   * One of Asana's tags, kept by its ref, so a tag renamed or recoloured
+   * there is renamed or recoloured here rather than made again under its new
+   * name. One from before refs were kept is found by its name. A new name
+   * another tag here already has is left alone: the two are not merged.
+   */
+  private async saveAsanaTag(tag: AsanaTag): Promise<string> {
+    const name = clip(tag.name, LIMITS.tagName, 'Tag');
+    const nameKey = tagNameKey(name);
+    const color = colorToken(tag.color ?? null);
+
+    const known = this.ref('tag', tag.gid);
+    const current = known
+      ? await this.prisma.tag.findUnique({
+          where: { id: known },
+          select: { id: true, name: true, nameKey: true, color: true },
+        })
+      : null;
+    let id: string;
+    if (current) {
+      id = current.id;
+      const taken =
+        current.nameKey !== nameKey &&
+        (await this.prisma.tag.findUnique({
+          where: { workspaceId_nameKey: { workspaceId: this.workspaceId, nameKey } },
+          select: { id: true },
+        })) !== null;
+      const rename = !taken && current.name !== name;
+      if (rename || current.color !== color) {
+        await this.prisma.tag.update({
+          where: { id },
+          data: { ...(rename ? { name, nameKey } : {}), color },
+        });
+      }
+    } else {
+      id = await this.ensureTag(name, tag.color ?? null);
+    }
+
+    await this.remember('tag', tag.gid, id, tag);
+    this.tags.set(tag.gid, id);
+    return id;
+  }
+
+  /** A tag a task names that this run has not seen: made since it started. */
+  private tagOf(gid: string): Promise<string | undefined> {
+    let pending = this.pendingTagGids.get(gid);
+    if (!pending) {
+      pending = this.asana
+        .get<AsanaTag>(`/tags/${gid}`, { opt_fields: TAG_FIELDS })
+        .then((tag) => this.saveAsanaTag(tag))
+        .catch((error: unknown) => {
+          this.fail('tag', { gid }, error);
+          return undefined;
+        });
+      this.pendingTagGids.set(gid, pending);
+    }
+    return pending;
   }
 
   /**
@@ -804,29 +877,10 @@ export class AsanaImportRun {
   // -------------------------------------------------------------------------
 
   private async importProjects(): Promise<AsanaProject[]> {
-    const projects = [
-      ...(await this.asana.list<AsanaProject>('/projects', {
-        workspace: this.asanaWorkspaceGid,
-        archived: false,
-        opt_fields: PROJECT_FIELDS,
-      })),
-      ...(await this.asana.list<AsanaProject>('/projects', {
-        workspace: this.asanaWorkspaceGid,
-        archived: true,
-        opt_fields: PROJECT_FIELDS,
-      })),
-    ];
+    const projects = await this.listProjects();
     const counter = this.counter('projects');
     counter.total = projects.length;
-
-    const keys = new Set(
-      (
-        await this.prisma.project.findMany({
-          where: { workspaceId: this.workspaceId },
-          select: { key: true },
-        })
-      ).map((project) => project.key),
-    );
+    const keys = await this.projectKeys();
 
     const imported: AsanaProject[] = [];
     for (const project of projects) {
@@ -840,6 +894,31 @@ export class AsanaImportRun {
       await this.progress();
     }
     return imported;
+  }
+
+  /** Every project the token can see, archived ones after the rest. */
+  private async listProjects(): Promise<AsanaProject[]> {
+    return [
+      ...(await this.asana.list<AsanaProject>('/projects', {
+        workspace: this.asanaWorkspaceGid,
+        archived: false,
+        opt_fields: PROJECT_FIELDS,
+      })),
+      ...(await this.asana.list<AsanaProject>('/projects', {
+        workspace: this.asanaWorkspaceGid,
+        archived: true,
+        opt_fields: PROJECT_FIELDS,
+      })),
+    ];
+  }
+
+  /** The keys projects here already have, which a new one must not repeat. */
+  private async projectKeys(): Promise<Set<string>> {
+    const projects = await this.prisma.project.findMany({
+      where: { workspaceId: this.workspaceId },
+      select: { key: true },
+    });
+    return new Set(projects.map((project) => project.key));
   }
 
   private async importProject(project: AsanaProject, keys: Set<string>): Promise<void> {
@@ -1486,9 +1565,11 @@ export class AsanaImportRun {
     taskId: string,
     before: Partial<AsanaTask> | null,
   ): Promise<void> {
-    const tagIds = (task.tags ?? [])
-      .map((tag) => this.tags.get(tag.gid))
-      .filter((id): id is string => Boolean(id));
+    const tagIds: string[] = [];
+    for (const tag of task.tags ?? []) {
+      const id = this.tags.get(tag.gid) ?? (await this.tagOf(tag.gid));
+      if (id) tagIds.push(id);
+    }
 
     // A custom task type ("Ticket") becomes a tag of that name, so the tasks
     // stay findable as one kind without losing their custom fields.
@@ -2353,6 +2434,174 @@ export class AsanaImportRun {
   }
 
   /**
+   * The workspace's fields, tags and projects, each compared with the record
+   * its ref kept. Asana has no event stream for these, so live sync asks
+   * every few minutes, and writes again only what changed. A new project
+   * comes across with its tasks; `openStream` opens its event stream first,
+   * so whatever is done to it meanwhile is read on the next tick.
+   *
+   * A project-local field the workspace's list leaves out, and a new team,
+   * wait for the next full run.
+   */
+  async syncDefinitions(
+    openStream: (projectGid: string) => Promise<void>,
+  ): Promise<DefinitionChanges> {
+    const kept = await this.keptRecords(['custom_field', 'tag', 'project']);
+    const changes: DefinitionChanges = {
+      fieldIds: [],
+      createdProjectIds: [],
+      updatedProjectIds: [],
+    };
+
+    const fields = await this.asana.list<AsanaCustomField>(
+      `/workspaces/${this.asanaWorkspaceGid}/custom_fields`,
+      { opt_fields: FIELD_FIELDS },
+    );
+    for (const field of fields) {
+      if (sameRecord(kept.get(`custom_field:${field.gid}`), field)) continue;
+      try {
+        const saved = await this.saveField(field);
+        if (saved) changes.fieldIds.push(saved.id);
+      } catch (error) {
+        this.fail('custom_field', field, error);
+      }
+    }
+
+    const tags = await this.asana.list<AsanaTag>(`/workspaces/${this.asanaWorkspaceGid}/tags`, {
+      opt_fields: TAG_FIELDS,
+    });
+    for (const tag of tags) {
+      if (sameRecord(kept.get(`tag:${tag.gid}`), tag)) continue;
+      try {
+        await this.saveAsanaTag(tag);
+      } catch (error) {
+        this.fail('tag', tag, error);
+      }
+    }
+
+    let keys: Set<string> | null = null;
+    for (const project of await this.listProjects()) {
+      const projectId = this.ref('project', project.gid);
+      if (projectId && sameRecord(kept.get(`project:${project.gid}`), project)) continue;
+      try {
+        keys ??= await this.projectKeys();
+        if (projectId) {
+          await this.importProject(project, keys);
+          changes.updatedProjectIds.push(projectId);
+        } else {
+          await openStream(project.gid);
+          changes.createdProjectIds.push(await this.importNewProject(project, keys));
+        }
+      } catch (error) {
+        this.fail('project', project, error);
+      }
+    }
+    return changes;
+  }
+
+  /**
+   * A project Asana's events say changed. Its record is read again and
+   * written when it differs from the one kept; its fields or its members are
+   * read again when the events were about those. Returns the project when
+   * anything was written. One deleted in Asana, or out of the token's sight,
+   * is left as it is.
+   */
+  async syncProject(projectGid: string, parts: ReadonlySet<ProjectPart>): Promise<string | null> {
+    const projectId = this.ref('project', projectGid);
+    if (!projectId) return null;
+    try {
+      const project = await this.asana.get<AsanaProject>(`/projects/${projectGid}`, {
+        opt_fields: PROJECT_FIELDS,
+      });
+      if (parts.has('details')) {
+        const kept = await this.keptRecords(['project'], [projectGid]);
+        if (!sameRecord(kept.get(`project:${projectGid}`), project)) {
+          // The whole project: its members, fields and status come with it.
+          await this.importProject(project, await this.projectKeys());
+          return projectId;
+        }
+      }
+      if (parts.has('fields')) {
+        await this.importProjectFields(project, projectId);
+        await this.layoutListView(project, projectId);
+      }
+      if (parts.has('members')) {
+        await this.importProjectMembers(project, projectId, await this.personOf(project.owner));
+      }
+      return parts.has('fields') || parts.has('members') ? projectId : null;
+    } catch (error) {
+      if (error instanceof AsanaApiError && (error.status === 403 || error.status === 404)) {
+        return null;
+      }
+      this.fail('project', { gid: projectGid }, error);
+      return null;
+    }
+  }
+
+  /**
+   * A project new in Asana since the last full run, brought across as a full
+   * run would: the project, then its tasks, their subtasks, comments and
+   * files. A task already here from another project keeps its home there and
+   * gains this one as a further project, at its place in this one's list.
+   */
+  private async importNewProject(project: AsanaProject, keys: Set<string>): Promise<string> {
+    await this.importProject(project, keys);
+    const projectId = this.ref('project', project.gid) as string;
+
+    // Tasks written by an earlier pass are written again: this list is new.
+    this.writtenTasks.clear();
+    const listed = await this.listTasks([project]);
+    const fresh = new Map<string, ListedTask>();
+    for (const [gid, entry] of listed) {
+      if (!this.ref('task', gid)) {
+        fresh.set(gid, entry);
+        continue;
+      }
+      try {
+        const placement = await this.livePlacement(entry.task, 0);
+        if (placement) {
+          await this.saveTask(entry.task, placement, (other) => entry.order.get(other) ?? null);
+        }
+      } catch (error) {
+        this.fail('task', entry.task, error);
+      }
+    }
+
+    const items = await this.importSubtasks(await this.importTopLevel(fresh));
+    await pool(items, this.deps.concurrency, async (item) => {
+      try {
+        await this.readHistory(item);
+      } catch (error) {
+        this.fail('history', { gid: item.gid, name: item.name }, error);
+      }
+    });
+    if (this.dependencies.size > 0) {
+      await this.importDependencies();
+      this.dependencies.clear();
+    }
+    await this.grantAssigneesAccess();
+    this.counter('newProjects').done += 1;
+    return projectId;
+  }
+
+  /** The records refs of these kinds keep, by `type:gid`; only these gids when given. */
+  private async keptRecords(
+    types: readonly string[],
+    gids?: readonly string[],
+  ): Promise<Map<string, unknown>> {
+    const rows = await this.prisma.externalRef.findMany({
+      where: {
+        workspaceId: this.workspaceId,
+        source: ImportSource.ASANA,
+        entityType: { in: [...types] },
+        ...(gids ? { externalId: { in: [...gids] } } : {}),
+      },
+      select: { entityType: true, externalId: true, snapshot: true },
+    });
+    return new Map(rows.map((row) => [`${row.entityType}:${row.externalId}`, row.snapshot]));
+  }
+
+  /**
    * Comments Asana's events said were deleted, found by their refs: Asana
    * cannot say whose they were once they are gone. Returns their tasks.
    */
@@ -2690,6 +2939,26 @@ export function readableError(error: unknown): string {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines.at(-1) ?? 'The database refused the write.';
+}
+
+/**
+ * Whether the record a ref kept and Asana's record now are the same. The
+ * database keeps JSON with its keys in an order of its own, so they are
+ * compared key by key, not as text.
+ */
+function sameRecord(kept: unknown, record: unknown): boolean {
+  return kept !== undefined && kept !== null && stableJson(kept) === stableJson(record);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 }
 
 /** The gids `before` lists that `now` does not. */

@@ -167,7 +167,22 @@ Every `ASANA_LIVE_SYNC_INTERVAL_MS` (30 seconds), the worker:
    comment's event that names its task has the task's stories read again; one
    that does not, or a comment Asana answers 404 for, is found by its mapping
    row and deleted.
-4. Tells open boards and task panels, through the worker's realtime relay.
+4. Reads again a project whose own events say its details, fields or members
+   changed (`AsanaImportRun.syncProject`). Its record is written only when it
+   differs from the one its mapping row kept.
+5. Every `ASANA_LIVE_DEFINITIONS_INTERVAL_MS` (5 minutes), looks at the
+   workspace's custom fields, tags and projects, which Asana sends no events
+   for (`AsanaImportRun.syncDefinitions`). Each is compared with the record its
+   mapping row kept, key by key, and only what differs is written: a field's
+   new name or options, a tag renamed or recoloured (tags now have mapping
+   rows, so a rename renames rather than making a second tag), a project's
+   details. A new project comes across with its tasks, subtasks, comments and
+   files, its event stream opened first so nothing done to it meanwhile is
+   missed. A task already here from another project keeps its home and gains
+   the new one. About ten requests when nothing changed.
+6. Tells open boards, task panels and project pages, through the worker's
+   realtime relay: a new project appears in lists, and a changed one's page,
+   roster and fields refresh, as does every project using a changed field.
    As with an import, no CoreTask rule fires (Asana's already ran) and nobody
    is notified.
 
@@ -183,9 +198,10 @@ token lapses after 24 hours, so one runs:
 Ticks and runs share the import queue, which does one job at a time, so live
 sync never writes while a full run does; it picks up after.
 
-What live sync leaves to the full run: new projects, project details, tags and
-custom field definitions, and tasks moved into or out of a project that did not
-come across.
+What live sync leaves to the full run: a new team, a project-local field the
+workspace's list leaves out, a field taken off a project, and tasks moved into
+or out of a project that did not come across. A tag a task names that live
+sync has not seen yet is read from Asana on the spot.
 
 ## Size and time
 

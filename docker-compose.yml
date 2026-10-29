@@ -258,6 +258,7 @@ services:
       ASANA_WORKSPACE_ID: ${ASANA_WORKSPACE_ID:-}
       # Live sync's pace and its nightly full Sync again (cron, in that zone).
       ASANA_LIVE_SYNC_INTERVAL_MS: ${ASANA_LIVE_SYNC_INTERVAL_MS:-30000}
+      ASANA_LIVE_DEFINITIONS_INTERVAL_MS: ${ASANA_LIVE_DEFINITIONS_INTERVAL_MS:-300000}
       ASANA_FULL_SYNC_CRON: ${ASANA_FULL_SYNC_CRON:-0 3 * * *}
       ASANA_FULL_SYNC_TZ: ${ASANA_FULL_SYNC_TZ:-America/Chicago}
       # Migrations are the API container's job; two processes racing

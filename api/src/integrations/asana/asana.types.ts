@@ -107,6 +107,10 @@ export interface AsanaProject extends AsanaRef {
   created_at?: string;
 }
 
+export interface AsanaTag extends AsanaRef {
+  color?: string | null;
+}
+
 export interface AsanaMembership {
   gid: string;
   member?: AsanaUser;
