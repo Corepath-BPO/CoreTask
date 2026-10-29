@@ -17,6 +17,9 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
+    // Staging reaches this dev server through a Cloudflare Tunnel as
+    // staging.coretask.org; Vite refuses a Host it does not know.
+    allowedHosts: ['.coretask.org'],
     watch: {
       // Bind mounts from a Windows host do not deliver inotify events to the
       // Linux container, so HMR needs polling there. Enabled by
