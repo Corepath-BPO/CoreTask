@@ -66,6 +66,7 @@ const metadata: ProjectFieldMetadata = {
   priorities: [],
   tags: [],
   sections: [{ id: 's-1', name: 'Backlog' }],
+  assignees: [],
   members: [{ id: 'u-me', name: 'Me', email: 'me@x.dev', avatarUrl: null }],
 };
 

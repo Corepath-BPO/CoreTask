@@ -370,8 +370,8 @@ function fakeAsana(routes: (path: string, params: AsanaParams) => unknown[], sea
         // Without `search`, this organisation has no search: a free Asana plan, refused.
         throw new AsanaApiError(path, 402, 'Search is only available to premium users.');
       }
-      // One task, asked for by gid: the organisation answers, or refuses.
-      if (/^\/tasks\/[^/]+$/.test(path)) return routes(path, params);
+      // One task or field, asked for by gid: the organisation answers, or refuses.
+      if (/^\/(tasks|custom_fields)\/[^/]+$/.test(path)) return routes(path, params);
       // The contractor is not in the workspace, and Asana will not say who they are.
       throw new Error(`Not found: ${path}`);
     }),
@@ -974,6 +974,158 @@ describe('AsanaImportRun', () => {
       expect.objectContaining({ kind: 'history', externalId: 'T1', message: 'Asana timed out' }),
     ]);
     expect(rows(context, 'task')).toHaveLength(4);
+  });
+});
+
+describe('AsanaImportRun list layout, images and options', () => {
+  const columnsOf = (context: Awaited<ReturnType<typeof setUp>>, projectName: string) => {
+    const project = rows(context, 'project').find((row) => row['name'] === projectName) as Row;
+    const view = rows(context, 'projectView').find(
+      (row) => row['projectId'] === project['id'] && row['type'] === 'LIST',
+    ) as Row | undefined;
+    const settings = (view?.['settings'] ?? {}) as {
+      columns?: { field: string; width?: number }[];
+    };
+    return settings.columns ?? [];
+  };
+  const fieldColumn = (context: Awaited<ReturnType<typeof setUp>>, gid: string) => {
+    const ref = rows(context, 'externalRef').find(
+      (row) => row['entityType'] === 'custom_field' && row['externalId'] === gid,
+    ) as Row;
+    return `custom:${ref['entityId'] as string}`;
+  };
+
+  it('lays a project’s List view out as Asana does, with its fields and none of CoreTask’s own', async () => {
+    const context = await setUp();
+    await runImport(context);
+
+    const fields = columnsOf(context, 'Maintenance').map((column) => column.field);
+    expect(fields).toEqual([
+      'title',
+      'assigneeId',
+      'dueDate',
+      fieldColumn(context, 'F1'),
+      fieldColumn(context, 'F2'),
+      fieldColumn(context, 'F3'),
+      'tags',
+    ]);
+    expect(columnsOf(context, 'Old leases').map((column) => column.field)).toEqual([
+      'title',
+      'assigneeId',
+      'dueDate',
+      'tags',
+    ]);
+  });
+
+  it('keeps widths and extra columns of a List view that was already there', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const view = rows(context, 'projectView').find((row) => row['type'] === 'LIST') as Row;
+    const project = rows(context, 'project').find((row) => row['id'] === view['projectId']) as Row;
+    // As CoreTask first made it, then widened, before the layout ran.
+    view['settings'] = {
+      columns: [
+        { field: 'title', width: 420 },
+        { field: 'assigneeId' },
+        { field: 'priority' },
+        { field: 'status' },
+        { field: 'dueDate' },
+        { field: 'createdAt' },
+      ],
+    };
+    context.db.table('externalRef').rows = rows(context, 'externalRef').filter(
+      (row) => row['entityType'] !== 'list_layout',
+    );
+
+    await runImport(context);
+
+    const columns = columnsOf(context, project['name'] as string);
+    expect(columns[0]).toEqual({ field: 'title', width: 420 });
+    expect(columns.map((column) => column.field)).not.toContain('priority');
+    expect(columns.map((column) => column.field)).not.toContain('status');
+    expect(columns.at(-1)).toEqual({ field: 'createdAt' });
+  });
+
+  it('leaves a laid-out view as someone left it, adding only fields Asana added since', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const view = rows(context, 'projectView').find((row) => row['type'] === 'LIST') as Row;
+    const removed = fieldColumn(context, 'F2');
+    const settings = view['settings'] as { columns: { field: string }[] };
+    settings.columns = settings.columns.filter((column) => column.field !== removed);
+
+    const org = organisation();
+    const routes = org.routes;
+    await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        if (path === `/workspaces/${WS}/custom_fields`) {
+          return [
+            ...routes(path, params),
+            { gid: 'F4', name: 'Budget', resource_subtype: 'number' },
+          ];
+        }
+        if (path === '/projects/P1/custom_field_settings') {
+          return [...routes(path, params), { gid: 'CFS4', custom_field: { gid: 'F4' } }];
+        }
+        return routes(path, params);
+      },
+    });
+
+    const fields = columnsOf(context, 'Maintenance').map((column) => column.field);
+    expect(fields).not.toContain(removed);
+    expect(fields.slice(-2)).toEqual([fieldColumn(context, 'F4'), 'tags']);
+  });
+
+  it('puts an image pasted into a task’s text back in place, though no story told of the file', async () => {
+    const context = await setUp();
+    const org = organisation();
+    (org.tasks['T2'] as Row)['html_notes'] =
+      '<body>Parts list\n<img src="https://asanausercontent.com/p.png" data-asana-gid="A1" data-asana-type="attachment"></body>';
+    await runImport(context, org);
+
+    const attachmentRef = rows(context, 'externalRef').find(
+      (row) => row['entityType'] === 'attachment' && row['externalId'] === 'A1',
+    ) as Row;
+    const task = rows(context, 'task').find((row) => row['title'] === 'Order parts') as Row;
+    expect(String(task['description'])).toContain(
+      `data-attachment="${attachmentRef['entityId'] as string}"`,
+    );
+  });
+
+  it('reads a field again for an option added to it since, rather than clearing the value', async () => {
+    const context = await setUp();
+    const org = organisation();
+    (org.tasks['T1'] as Row)['custom_fields'] = [
+      { gid: 'F1', resource_subtype: 'enum', enum_value: { gid: 'O3' } },
+    ];
+    const routes = org.routes;
+    await runImport(context, {
+      ...org,
+      routes: (path: string, params: AsanaParams) =>
+        path === '/custom_fields/F1'
+          ? ({
+              gid: 'F1',
+              name: 'Priority',
+              resource_subtype: 'enum',
+              enum_options: [
+                { gid: 'O1', name: 'Low', color: 'green', enabled: true },
+                { gid: 'O2', name: 'High', color: 'red', enabled: true },
+                { gid: 'O3', name: 'Urgent', color: 'red', enabled: true },
+              ],
+            } as unknown as unknown[])
+          : routes(path, params),
+    });
+
+    const urgent = rows(context, 'customFieldOption').find(
+      (row) => row['label'] === 'Urgent',
+    ) as Row;
+    expect(urgent).toBeDefined();
+    const task = rows(context, 'task').find((row) => row['title'] === 'Fix the boiler') as Row;
+    const value = rows(context, 'taskCustomFieldValue').find(
+      (row) => row['taskId'] === task['id'] && (row['optionIds'] as string[] | undefined)?.length,
+    ) as Row;
+    expect(value['optionIds']).toEqual([urgent['id']]);
   });
 });
 

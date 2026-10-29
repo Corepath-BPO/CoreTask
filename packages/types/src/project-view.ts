@@ -140,6 +140,17 @@ export interface UpdateFieldOptionPayload {
  * looking up the field definition anyway — and a union would mean a type guard
  * at every cell for no additional safety.
  */
+/**
+ * A value a task holds for a field none of its projects shows: Asana keeps a
+ * field's value on a task that has moved on from the project it came from.
+ * Read only, already in words.
+ */
+export interface TaskOtherFieldValue {
+  field: { id: string; name: string; type: CustomFieldType };
+  /** "High", "2026-09-12" (ISO, for the client to format), "Ada Lovelace". */
+  label: string;
+}
+
 export interface TaskCustomFieldValue {
   customFieldId: string;
   text: string | null;
@@ -241,7 +252,13 @@ export interface ProjectFieldMetadata {
   statuses: { id: string; name: string; category: string; colorToken: string }[];
   priorities: { id: string; name: string; level: number; colorToken: string }[];
   sections: { id: string; name: string }[];
+  /** Everyone in the workspace: filters, people fields and mentions. */
   members: UserRef[];
+  /**
+   * Who a task here may be assigned to: the project's members, and the
+   * workspace's owner, who can be given work in any project.
+   */
+  assignees: UserRef[];
   /** The workspace's tags, for the Tags filter. */
   tags: TagRef[];
 }

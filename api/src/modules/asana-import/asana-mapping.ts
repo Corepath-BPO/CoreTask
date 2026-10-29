@@ -360,17 +360,31 @@ const USER_LINK = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
  * rather than paragraphs, so top-level text is split into `<p>`s here; inside
  * a list or a quote a newline is a `<br>`. A mention of someone who came
  * across becomes CoreTask's mention chip; anyone else stays as `@Name` text.
- * Embedded images go: they point at Asana, and their files are imported as
- * the task's attachments instead. Everything then passes the same sanitiser
- * every description write does.
+ * An embedded image becomes the task's own copy of that file, in place, once
+ * the file has come across (`image`); until then it is left out, and the run
+ * writes the text again after copying it. Everything then passes the same
+ * sanitiser every description write does.
  */
-export function asanaHtml(html: string | null | undefined, person: PersonLookup): string {
+/** The CoreTask attachment an Asana attachment became, when it has. */
+export type ImageLookup = (attachmentGid: string) => string | undefined;
+
+export function asanaHtml(
+  html: string | null | undefined,
+  person: PersonLookup,
+  image?: ImageLookup,
+): string {
   if (!html) return '';
 
   const body = html
     .replace(/^\s*<body>/i, '')
     .replace(/<\/body>\s*$/i, '')
-    .replace(/<img\b[^>]*>/gi, '')
+    .replace(/<img\b[^>]*>/gi, (tag: string) => {
+      const gid = /data-asana-type="attachment"/i.test(tag)
+        ? /data-asana-gid="([^"]+)"/i.exec(tag)?.[1]
+        : undefined;
+      const attachmentId = gid ? image?.(gid) : undefined;
+      return attachmentId ? `<img data-attachment="${attachmentId}" alt="">` : '';
+    })
     .replace(/<object\b[\s\S]*?<\/object>/gi, '')
     .replace(/<embed\b[^>]*>/gi, '')
     .replace(USER_LINK, (whole: string, attributes: string, label: string) => {
@@ -412,8 +426,22 @@ function inline(text: string, depth: number, afterBlock: boolean, beforeBlock: b
 }
 
 /** A task's or project's notes as a stored description; null when empty. */
-export function description(html: string | null | undefined, person: PersonLookup): string | null {
-  return normalizeRichText(asanaHtml(html, person)) ?? null;
+export function description(
+  html: string | null | undefined,
+  person: PersonLookup,
+  image?: ImageLookup,
+): string | null {
+  return normalizeRichText(asanaHtml(html, person, image)) ?? null;
+}
+
+/** The images Asana embedded in a task's text, by attachment gid. */
+export function inlineImageGids(html: string | null | undefined): string[] {
+  if (!html) return [];
+  return [...html.matchAll(/<img\b[^>]*>/gi)]
+    .map((match) => match[0])
+    .filter((tag) => /data-asana-type="attachment"/i.test(tag))
+    .map((tag) => /data-asana-gid="([^"]+)"/i.exec(tag)?.[1])
+    .filter((gid): gid is string => Boolean(gid));
 }
 
 /** A comment story as a stored comment body; null when there is nothing to say. */

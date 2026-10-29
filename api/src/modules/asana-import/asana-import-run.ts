@@ -13,7 +13,13 @@ import {
 } from '@coretask/contracts';
 import { deriveProjectKey } from '@coretask/validation';
 import type { Logger } from '@nestjs/common';
-import { ImportRunStatus, ImportSource, Prisma } from '@prisma/client';
+import {
+  ImportRunStatus,
+  ImportSource,
+  Prisma,
+  ProjectViewScope,
+  ProjectViewType,
+} from '@prisma/client';
 
 import type { PrismaService } from '../../database/prisma.service';
 import {
@@ -50,6 +56,7 @@ import {
   commentBody,
   description,
   fieldDefinition,
+  inlineImageGids,
   instant,
   linkedFilesHtml,
   projectColor,
@@ -61,6 +68,7 @@ import {
   uniqueKey,
   uniqueName,
   workspaceRole,
+  type ImageLookup,
   type PersonLookup,
 } from './asana-mapping';
 
@@ -111,6 +119,22 @@ const ATTACHMENT_FIELDS = 'name,host,size,download_url,view_url,permanent_url,cr
 const SEARCH_PAGE_SIZE = 100;
 /** A bound on one search's pages: 100,000 tasks. */
 const MAX_SEARCH_PAGES = 1_000;
+/** A List view column as its settings store it. */
+interface ViewColumn {
+  field: string;
+  width?: number;
+  isPinned?: boolean;
+}
+
+const TITLE = 'title';
+const ASSIGNEE = 'assigneeId';
+const DUE_DATE = 'dueDate';
+const TAGS = 'tags';
+/** CoreTask's own fields Asana has no counterpart for: always empty on its tasks. */
+const NOT_IN_ASANA = new Set(['priority', 'status', 'startDate', 'estimatedMinutes']);
+/** The view settings' own ceiling (`viewSettingsSchema`). */
+const MAX_VIEW_COLUMNS = 50;
+
 /** How far live sync walks up to a subtask's parent that is not here yet. */
 const MAX_LIVE_DEPTH = 5;
 /** People per "commented on by" search, to keep the query string short. */
@@ -230,6 +254,11 @@ export class AsanaImportRun {
   private phase = 'starting';
   private lastProgressAt = 0;
   private readonly person: PersonLookup = (gid) => this.people.get(gid);
+  private readonly image: ImageLookup = (gid) => this.ref('attachment', gid);
+  /** Tasks whose text embeds a file not copied yet: written again once it is. */
+  private readonly waitingImages = new Map<string, string>();
+  /** Fields read again this run because a value named an option they lacked. */
+  private readonly refreshedFields = new Map<string, Promise<FieldRef>>();
 
   constructor(
     private readonly deps: AsanaImportDeps,
@@ -873,6 +902,7 @@ export class AsanaImportRun {
     await this.importProjectMembers(project, projectId, lead);
     await this.importSections(project, projectId);
     await this.importProjectFields(project, projectId);
+    await this.layoutListView(project, projectId);
     await this.importStatusUpdates(project, projectId);
   }
 
@@ -935,6 +965,108 @@ export class AsanaImportRun {
       );
       counter.done += 1;
     }
+  }
+
+  /**
+   * The project's List view laid out as Asana lists a project: the task, its
+   * assignee and due date, the project's fields in Asana's order, then tags.
+   * CoreTask's own Priority, Status, Start date and Estimate are left out:
+   * Asana has none of them, so for its tasks they would only ever be empty.
+   * Widths and pins already set are kept, and so is any other column someone
+   * added here.
+   *
+   * Once per project. Later runs only add fields Asana has added since, so a
+   * column someone hid or moved stays as they left it. The layout's ref keeps
+   * which fields it has placed.
+   */
+  private async layoutListView(project: AsanaProject, projectId: string): Promise<void> {
+    const attached = await this.prisma.projectCustomField.findMany({
+      where: { projectId },
+      orderBy: { position: 'asc' },
+      select: { customFieldId: true },
+    });
+    const fieldColumns = attached.map((row) => `custom:${row.customFieldId}`);
+
+    const view = await this.prisma.projectView.findFirst({
+      where: {
+        projectId,
+        type: ProjectViewType.LIST,
+        scope: ProjectViewScope.PROJECT,
+        isDefault: true,
+      },
+    });
+    const layout = await this.prisma.externalRef.findUnique({
+      where: {
+        workspaceId_source_entityType_externalId: {
+          workspaceId: this.workspaceId,
+          source: ImportSource.ASANA,
+          entityType: 'list_layout',
+          externalId: project.gid,
+        },
+      },
+      select: { entityId: true, snapshot: true },
+    });
+    const settings = (view?.settings ?? {}) as Record<string, unknown>;
+    const current = Array.isArray(settings['columns']) ? (settings['columns'] as ViewColumn[]) : [];
+
+    let columns: ViewColumn[];
+    if (!view || layout?.entityId !== view.id) {
+      const asanaOrder = [TITLE, ASSIGNEE, DUE_DATE, ...fieldColumns, TAGS];
+      const set = new Map(current.map((column) => [column.field, column]));
+      const extras = current.filter(
+        (column) => !asanaOrder.includes(column.field) && !NOT_IN_ASANA.has(column.field),
+      );
+      columns = [...asanaOrder.map((field) => set.get(field) ?? { field }), ...extras];
+    } else {
+      const placed = new Set(((layout.snapshot ?? {}) as { fields?: string[] }).fields ?? []);
+      const present = new Set(current.map((column) => column.field));
+      const added = fieldColumns.filter((field) => !placed.has(field) && !present.has(field));
+      if (added.length === 0) {
+        await this.remember('list_layout', project.gid, view.id, { fields: fieldColumns });
+        return;
+      }
+      const tags = current.findIndex((column) => column.field === TAGS);
+      const at = tags === -1 ? current.length : tags;
+      columns = [
+        ...current.slice(0, at),
+        ...added.map((field) => ({ field })),
+        ...current.slice(at),
+      ];
+    }
+    columns = columns.slice(0, MAX_VIEW_COLUMNS);
+
+    const viewId = view
+      ? (
+          await this.prisma.projectView.update({
+            where: { id: view.id },
+            data: { settings: { ...settings, columns } as unknown as Prisma.InputJsonValue },
+            select: { id: true },
+          })
+        ).id
+      : (
+          await this.prisma.projectView.create({
+            data: {
+              workspaceId: this.workspaceId,
+              projectId,
+              name: 'List',
+              type: ProjectViewType.LIST,
+              scope: ProjectViewScope.PROJECT,
+              isDefault: true,
+              position: 0,
+              settings: {
+                columns,
+                filters: { combinator: 'AND', conditions: [] },
+                sorts: [],
+                groupBy: null,
+                density: 'COMFORTABLE',
+                showCompleted: true,
+              } as unknown as Prisma.InputJsonValue,
+            },
+            select: { id: true },
+          })
+        ).id;
+    await this.remember('list_layout', project.gid, viewId, { fields: fieldColumns });
+    this.counter('listViewsLaidOut').done += 1;
   }
 
   private async importProjectFields(project: AsanaProject, projectId: string): Promise<void> {
@@ -1178,7 +1310,7 @@ export class AsanaImportRun {
       sectionId: placement.sectionId,
       parentTaskId: placement.parentTaskId,
       title: clip(task.name, LIMITS.taskTitle, 'Untitled task'),
-      description: description(task.html_notes, this.person),
+      description: description(task.html_notes, this.person, this.image),
       status: done ? TaskStatus.DONE : TaskStatus.TODO,
       completedAt: done ? (instant(task.completed_at) ?? new Date()) : null,
       assigneeId: assignee?.id ?? null,
@@ -1189,6 +1321,10 @@ export class AsanaImportRun {
       kind,
       approvalStatus: approvalStatus(kind, task.approval_status),
     };
+
+    if (inlineImageGids(task.html_notes).some((gid) => !this.image(gid))) {
+      this.waitingImages.set(task.gid, task.html_notes ?? '');
+    }
 
     // Back out of Asana's trash: an earlier run archived it when it was deleted.
     const restored = this.sourceDeleted.has(`task:${task.gid}`);
@@ -1341,8 +1477,9 @@ export class AsanaImportRun {
     const cleared: string[] = [];
 
     for (const value of task.custom_fields ?? []) {
-      const field = await this.fieldOf(value.gid);
-      if (!field) continue;
+      const known = await this.fieldOf(value.gid);
+      if (!known) continue;
+      const field = await this.withOptions(value.gid, known, value);
 
       const columns = await this.valueColumns(field, value);
       if (!columns) {
@@ -1361,6 +1498,33 @@ export class AsanaImportRun {
         where: { taskId, customFieldId: { in: cleared } },
       });
     }
+  }
+
+  /**
+   * The field again from Asana when a value names an option it did not have:
+   * someone added one since the field was read. Once per field per run, or
+   * per live sync pass, so a value is never cleared for want of its option.
+   */
+  private withOptions(
+    gid: string,
+    field: FieldRef,
+    value: AsanaCustomFieldValue,
+  ): Promise<FieldRef> {
+    const named = [
+      ...(value.enum_value ? [value.enum_value.gid] : []),
+      ...(value.multi_enum_values ?? []).map((option) => option.gid),
+    ];
+    if (named.every((option) => field.options.has(option))) return Promise.resolve(field);
+
+    let pending = this.refreshedFields.get(gid);
+    if (!pending) {
+      pending = this.asana
+        .get<AsanaCustomField>(`/custom_fields/${gid}`, { opt_fields: FIELD_FIELDS })
+        .then(async (fresh) => (await this.saveField(fresh)) ?? field)
+        .catch(() => field);
+      this.refreshedFields.set(gid, pending);
+    }
+    return pending;
   }
 
   private async valueColumns(field: FieldRef, value: AsanaCustomFieldValue) {
@@ -1667,7 +1831,11 @@ export class AsanaImportRun {
         this.fail('comment', { gid: story.gid, name: item.name }, error);
       }
     }
-    if (stories.some((story) => story.resource_subtype === 'attachment_added')) {
+    // An image pasted into the text is a file Asana tells of in no story.
+    if (
+      this.waitingImages.has(item.gid) ||
+      stories.some((story) => story.resource_subtype === 'attachment_added')
+    ) {
       await this.importAttachments(item);
     }
   }
@@ -1852,6 +2020,15 @@ export class AsanaImportRun {
       }
     }
 
+    const waiting = this.waitingImages.get(item.gid);
+    if (waiting !== undefined) {
+      this.waitingImages.delete(item.gid);
+      await this.prisma.task.update({
+        where: { id: item.taskId },
+        data: { description: description(waiting, this.person, this.image) },
+      });
+    }
+
     if (links.length) {
       const task = await this.prisma.task.findUniqueOrThrow({
         where: { id: item.taskId },
@@ -1952,6 +2129,7 @@ export class AsanaImportRun {
     gids: readonly string[],
     withHistory: ReadonlySet<string>,
   ): Promise<LiveChange[]> {
+    this.refreshedFields.clear();
     const changes: LiveChange[] = [];
     await pool([...new Set(gids)], this.deps.concurrency, async (gid) => {
       try {

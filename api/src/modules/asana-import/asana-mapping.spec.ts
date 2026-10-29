@@ -10,6 +10,7 @@ import {
 
 import {
   approvalStatus,
+  inlineImageGids,
   calendarDate,
   clip,
   colorToken,
@@ -60,6 +61,21 @@ describe('Asana rich text', () => {
     expect(description(html, people)).toBe(
       '<p><a href="https://app.asana.com/0/1/2" target="_blank" rel="noopener noreferrer">Task</a></p>',
     );
+  });
+
+  it('puts an embedded image back as the task’s own copy of the file, once it is here', () => {
+    const attachmentId = '0190a8c2-6b3e-7c11-9a2b-1c2d3e4f5a6b';
+    const html =
+      '<body>See this\n<img src="https://asanausercontent.com/x.png" data-asana-gid="A1" data-asana-type="attachment"></body>';
+
+    expect(description(html, people, (gid) => (gid === 'A1' ? attachmentId : undefined))).toContain(
+      `data-attachment="${attachmentId}"`,
+    );
+    // Not copied yet: left out, as before, until the run writes it again.
+    expect(description(html, people)).not.toContain('<img');
+    expect(description(html, people)).toContain('See this');
+    expect(inlineImageGids(html)).toEqual(['A1']);
+    expect(inlineImageGids('<body><img src="https://asana/x.png"></body>')).toEqual([]);
   });
 
   it('treats empty notes as no description', () => {

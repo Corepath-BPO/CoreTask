@@ -1134,7 +1134,7 @@ export function ProjectListView({
         <BulkActionBar
           ref={bulkBarRef}
           count={selectedRows.length}
-          members={metadata?.members ?? []}
+          members={metadata?.assignees ?? metadata?.members ?? []}
           sections={metadata?.sections ?? []}
           hasTicket={selectedRows.some(isTicketRow)}
           taskCount={selectedRows.filter((row) => !isTicketRow(row)).length}

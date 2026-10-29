@@ -117,7 +117,7 @@ function CreateWorkItemForm({
   const [dueDate, setDueDate] = useState('');
 
   const sections = metadata?.sections ?? [];
-  const members = metadata?.members ?? [];
+  const members = metadata?.assignees ?? metadata?.members ?? [];
   const priorities = metadata?.priorities ?? [];
 
   const canSubmit = title.trim().length > 0 && !pending;

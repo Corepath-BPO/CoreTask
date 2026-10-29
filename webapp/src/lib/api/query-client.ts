@@ -162,6 +162,9 @@ export const queryKeys = {
     subtasks: (workspaceId: string, projectId: string, taskId: string) =>
       ['project-views', workspaceId, projectId, 'subtasks', taskId] as const,
   },
+  /** A task's values for fields none of its projects shows. */
+  taskOtherFields: (workspaceId: string, taskId: string) =>
+    ['task-other-fields', workspaceId, taskId] as const,
   attachments: {
     all: (workspaceId: string) => ['attachments', workspaceId] as const,
     /** `parentKind` keeps a task and a ticket with the same id from colliding. */

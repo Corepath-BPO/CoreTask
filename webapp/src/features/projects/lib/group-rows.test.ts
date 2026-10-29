@@ -99,6 +99,7 @@ const metadata: ProjectFieldMetadata = {
     { id: 's-1', name: 'Backlog' },
     { id: 's-2', name: 'Done' },
   ],
+  assignees: [],
   members: [
     { id: 'u-1', name: 'Ada', email: 'ada@x.dev', avatarUrl: null },
     { id: 'u-2', name: 'Grace', email: 'grace@x.dev', avatarUrl: null },

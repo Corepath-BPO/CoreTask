@@ -45,6 +45,7 @@ const metadata = (sections: { id: string; name: string }[]): ProjectFieldMetadat
   priorities: [],
   tags: [],
   sections,
+  assignees: [],
   members: [],
 });
 

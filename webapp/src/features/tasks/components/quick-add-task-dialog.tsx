@@ -22,11 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useFieldMetadata } from '@/features/projects/hooks/use-project-views';
 import { useProjects } from '@/features/projects/hooks/use-projects';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { useCurrentUser } from '@/stores/auth.store';
 
 import { useCreateTask } from '../hooks/use-tasks';
+import { onlyAssignable } from '../lib/assignable';
 
 /** Radix `Select` treats `''` as "no value", so absence needs a real token. */
 const NONE = '__none__';
@@ -57,6 +59,10 @@ export function QuickAddTaskDialog({
   const [title, setTitle] = useState('');
   const [projectId, setProjectId] = useState(NONE);
   const [assigneeId, setAssigneeId] = useState<string>(me?.id ?? NONE);
+  const { data: metadata } = useFieldMetadata(
+    open && projectId !== NONE ? workspaceId : undefined,
+    projectId === NONE ? '' : projectId,
+  );
   const [dueDate, setDueDate] = useState('');
 
   const reset = () => {
@@ -169,7 +175,11 @@ export function QuickAddTaskDialog({
                       No assignee
                     </span>
                   </SelectItem>
-                  {(members ?? []).map((member) => (
+                  {onlyAssignable(
+                    members,
+                    projectId === NONE ? undefined : metadata?.assignees,
+                    assigneeId === NONE ? null : assigneeId,
+                  ).map((member) => (
                     <SelectItem key={member.user.id} value={member.user.id}>
                       <span className="flex items-center gap-2">
                         <PersonAvatar

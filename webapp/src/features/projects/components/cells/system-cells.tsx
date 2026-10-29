@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { TaskDatePopover } from '@/features/tasks/components/task-date-popover';
+import { assignablePeople } from '@/features/tasks/lib/assignable';
 import { cn, daysUntil, formatDate, formatDue, formatTime, isOverdue } from '@/lib/utils';
 
 import { CellButton, EmptyCell } from './editable-cell';
@@ -289,7 +290,7 @@ export function AssigneeCell({ task, metadata, canEdit, onSave }: CellProps) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">Unassigned</SelectItem>
-          {(metadata?.members ?? []).map((member) => (
+          {assignablePeople(metadata?.assignees, metadata?.members, task.assignee).map((member) => (
             <SelectItem key={member.id} value={member.id}>
               {member.name}
             </SelectItem>
