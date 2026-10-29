@@ -120,6 +120,9 @@ services:
       # Resolved by the browser, not by the container, so it is the host origin.
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
       VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
+      # The same dev server also answers as staging through the tunnel, where
+      # the page must call the staging API: `host=origin`, comma-separated.
+      VITE_API_ORIGINS_BY_HOST: ${VITE_API_ORIGINS_BY_HOST:-}
       VITE_APP_NAME: ${VITE_APP_NAME:-CoreTask}
       # Bind mounts from a Windows or macOS host do not deliver inotify events
       # into the Linux container, so the watcher has to poll. Read by
@@ -179,6 +182,30 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # Cloudflare Tunnel: puts this stack on the internet as staging, with no port
+  # opened on the machine. The tunnel dials out to Cloudflare, and Cloudflare
+  # routes each staging hostname to a service on the compose network:
+  #   staging.coretask.org        -> http://coretask-webapp:5173
+  #   staging-api.coretask.org    -> http://coretask-api:3000
+  #   staging-files.coretask.org  -> http://coretask-storage:9000
+  # The routes live in the Cloudflare dashboard with the tunnel. Only the
+  # `tunnel` profile starts it:
+  #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tunnel up -d coretask-tunnel
+  # See docs/architecture/staging.md.
+  coretask-tunnel:
+    image: cloudflare/cloudflared:2026.10.1
+    container_name: coretask-tunnel
+    restart: unless-stopped
+    profiles: [tunnel]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # Empty unless set, so the rest of the stack starts without one.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - coretask-api
+      - coretask-webapp
+    networks: [coretask]
 
 volumes:
   coretask-api-node-modules:
