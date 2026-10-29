@@ -39,6 +39,8 @@ export interface ViewSettings {
   filters: ViewFilterGroup;
   sorts: ViewSort[];
   groupBy: string | null;
+  /** Groups in the field's own order, or reversed. Sections keep theirs. */
+  groupOrder?: SortDirection;
   density: RowDensity;
   cardFields?: string[];
   showCompleted: boolean;

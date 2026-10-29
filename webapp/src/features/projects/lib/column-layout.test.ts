@@ -6,6 +6,7 @@ import {
   ADD_COLUMN_WIDTH,
   clampWidth,
   columnWidth,
+  insertColumnAfter,
   isPinnedColumn,
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
@@ -228,5 +229,20 @@ describe('columns a saved view can no longer show', () => {
         metadata([]),
       ),
     ).toEqual([{ field: SystemField.STATUS }, { field: SystemField.DUE_DATE }]);
+  });
+});
+
+describe('insertColumnAfter', () => {
+  it('puts the new column just after the one asked from', () => {
+    expect(shape(insertColumnAfter(cols('title* a b'), 'a', 'x'))).toBe('title* a x b');
+  });
+
+  it('adds a column that is already there once only', () => {
+    const columns = cols('title* a b');
+    expect(insertColumnAfter(columns, 'a', 'b')).toBe(columns);
+  });
+
+  it('goes last when the column asked from is gone', () => {
+    expect(shape(insertColumnAfter(cols('title* a'), 'gone', 'x'))).toBe('title* a x');
   });
 });

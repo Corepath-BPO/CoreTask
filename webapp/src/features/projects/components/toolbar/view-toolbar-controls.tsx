@@ -28,6 +28,8 @@ export function ViewToolbarControls({
   dirty,
   onChange,
   onSaveAs,
+  filterOpen,
+  onFilterOpenChange,
 }: {
   viewType: ProjectViewType;
   settings: ViewSettings;
@@ -37,6 +39,9 @@ export function ViewToolbarControls({
   dirty: boolean;
   onChange: (patch: Partial<ViewSettings>) => void;
   onSaveAs: () => void;
+  /** The Filter popover, when the view opens it itself (a column's "Filter"). */
+  filterOpen?: boolean | undefined;
+  onFilterOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   return (
     <div className="flex items-center gap-1" role="group" aria-label="View settings">
@@ -46,7 +51,14 @@ export function ViewToolbarControls({
           Save as my view
         </Button>
       )}
-      <FilterPopover settings={settings} metadata={metadata} meId={meId} onChange={onChange} />
+      <FilterPopover
+        settings={settings}
+        metadata={metadata}
+        meId={meId}
+        onChange={onChange}
+        open={filterOpen}
+        onOpenChange={onFilterOpenChange}
+      />
       <SortPopover settings={settings} metadata={metadata} onChange={onChange} />
       <GroupPopover settings={settings} metadata={metadata} onChange={onChange} />
       <OptionsPopover

@@ -562,11 +562,13 @@ export function makeTrigger(subtype = '', configuration: Record<string, unknown>
  * task lands here" was the whole point of the click, and a rule that opens with
  * the answer already written is one somebody can edit rather than compose.
  */
-export function makeDefaultNodes(sectionId?: string): CanvasNode[] {
-  const trigger = makeTrigger(
-    sectionId ? 'TASK_MOVED_TO_SECTION' : '',
-    sectionId ? { sectionId } : {},
-  );
+export function makeDefaultNodes(sectionId?: string, fieldId?: string): CanvasNode[] {
+  // A field's column menu answers the trigger the same way: "when it changes".
+  const trigger = sectionId
+    ? makeTrigger('TASK_MOVED_TO_SECTION', { sectionId })
+    : fieldId
+      ? makeTrigger('CUSTOM_FIELD_CHANGED', { fieldId })
+      : makeTrigger('', {});
 
   const condition = makeNodeUnder('CONDITION', 'FIELD_COMPARISON', trigger.id, null, [trigger]);
 

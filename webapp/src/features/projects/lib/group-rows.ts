@@ -37,6 +37,21 @@ export function groupRows(
   groupBy: string | null,
   metadata: ProjectFieldMetadata | undefined,
   now: Date = new Date(),
+  order: 'ASC' | 'DESC' = 'ASC',
+): RowGroup[] {
+  const groups = groupRowsInOrder(tasks, groupBy, metadata, now);
+  if (order === 'ASC' || !groupBy || groupBy === SystemField.SECTION) return groups;
+  // Descending reverses the field's order; the group of tasks with no value
+  // stays at the bottom, where it is in either direction.
+  const empty = groups.filter((group) => group.key === null);
+  return [...groups.filter((group) => group.key !== null).reverse(), ...empty];
+}
+
+function groupRowsInOrder(
+  tasks: WorkItemRow[],
+  groupBy: string | null,
+  metadata: ProjectFieldMetadata | undefined,
+  now: Date,
 ): RowGroup[] {
   if (!groupBy || groupBy === SystemField.SECTION) {
     return groupBySection(tasks, metadata).map((group) => ({

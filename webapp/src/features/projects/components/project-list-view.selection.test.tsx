@@ -75,6 +75,7 @@ vi.mock('../hooks/use-project-views', () => ({
   useSubtasks: () => ({ data: undefined, isLoading: false, isError: false }),
   useFieldCatalog: () => ({ data: undefined, isLoading: false }),
   useAttachField: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveCustomField: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock('../hooks/use-projects', () => ({
   useProject: () => ({ data: undefined }),
