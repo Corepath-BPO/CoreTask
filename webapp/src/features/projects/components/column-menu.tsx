@@ -14,6 +14,8 @@ import {
   Pin,
   PinOff,
   Rows3,
+  Trash2,
+  Zap,
 } from 'lucide-react';
 
 import {
@@ -36,7 +38,7 @@ export interface ColumnMenuActions {
   onEditField?: (() => void) | undefined;
   onSort?: ((direction: SortDirection) => void) | undefined;
   onFilter?: (() => void) | undefined;
-  onGroup?: (() => void) | undefined;
+  onGroup?: ((direction: SortDirection) => void) | undefined;
   /** Fields that could be added as columns, each with its label. */
   addable?: { field: string; label: string }[] | undefined;
   onAdd?: ((field: string) => void) | undefined;
@@ -46,6 +48,10 @@ export interface ColumnMenuActions {
   isPinned?: boolean;
   onPin?: ((isPinned: boolean) => void) | undefined;
   onHide?: (() => void) | undefined;
+  /** A rule that starts when this field changes. */
+  onAddAutomation?: (() => void) | undefined;
+  /** Off this project, or out of the workspace: the field's own remove dialog. */
+  onDelete?: (() => void) | undefined;
 }
 
 /**
@@ -68,11 +74,13 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
     isPinned = false,
     onPin,
     onHide,
+    onAddAutomation,
+    onDelete,
   } = actions;
 
   const view = Boolean(onSort || onFilter || onGroup);
   const layout = Boolean((onAdd && addable.length > 0) || onMove || onPin || onHide);
-  if (!onEditField && !view && !layout) return null;
+  if (!onEditField && !view && !layout && !onAddAutomation && !onDelete) return null;
 
   return (
     <DropdownMenu>
@@ -116,10 +124,22 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
           </DropdownMenuItem>
         )}
         {onGroup && (
-          <DropdownMenuItem onSelect={onGroup}>
-            <Rows3 />
-            Group
-          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className={SUB_TRIGGER}>
+              <Rows3 />
+              Group
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onSelect={() => onGroup(SortDirection.ASC)}>
+                <ArrowUpNarrowWide />
+                Group ascending
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onGroup(SortDirection.DESC)}>
+                <ArrowDownWideNarrow />
+                Group descending
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )}
 
         {view && layout && <DropdownMenuSeparator />}
@@ -167,6 +187,22 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
           <DropdownMenuItem onSelect={onHide}>
             <EyeOff />
             Hide column
+          </DropdownMenuItem>
+        )}
+
+        {onAddAutomation && (view || layout || onEditField) && <DropdownMenuSeparator />}
+        {onAddAutomation && (
+          <DropdownMenuItem onSelect={onAddAutomation}>
+            <Zap />
+            Add automation to field
+          </DropdownMenuItem>
+        )}
+
+        {onDelete && <DropdownMenuSeparator />}
+        {onDelete && (
+          <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2 />
+            Delete field
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

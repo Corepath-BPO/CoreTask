@@ -152,6 +152,22 @@ describe('groupRows', () => {
     expect(groups[2]?.key).toBeNull();
   });
 
+  it('reverses the groups when asked, the empty one still last', () => {
+    const groups = groupRows(
+      rows(
+        item({ id: 'g', assignees: [{ id: 'u-2', name: 'Grace', email: 'g', avatarUrl: null }] }),
+        item({ id: 'a', assignees: [{ id: 'u-1', name: 'Ada', email: 'a', avatarUrl: null }] }),
+        item({ id: 'n' }),
+      ),
+      'assigneeId',
+      metadata,
+      undefined,
+      'DESC',
+    );
+
+    expect(groups.map((group) => group.name)).toEqual(['Grace', 'Ada', 'Unassigned']);
+  });
+
   it('groups by a single-select with every live option, then hidden ones in use, then none', () => {
     const value = (optionId: string) => [
       {

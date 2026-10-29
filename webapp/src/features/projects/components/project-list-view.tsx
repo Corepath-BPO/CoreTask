@@ -26,6 +26,7 @@ import {
   Search,
   SlidersHorizontal,
 } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -48,7 +49,13 @@ import { calendarDateFromNow, cn, formatDate } from '@/lib/utils';
 import { useCurrentUser } from '@/stores/auth.store';
 
 import { useTaskTemplates, useUseTaskTemplate } from '../hooks/use-task-templates';
-import { useFieldMetadata, useSetCustomFieldValue, useSubtasks } from '../hooks/use-project-views';
+import {
+  useFieldCatalog,
+  useFieldMetadata,
+  useRemoveCustomField,
+  useSetCustomFieldValue,
+  useSubtasks,
+} from '../hooks/use-project-views';
 import { useCreateSection, useProject, useRenameSection } from '../hooks/use-projects';
 import {
   ADD_COLUMN_WIDTH,
@@ -125,6 +132,7 @@ import {
 } from './cells/system-cells';
 
 import { EditCustomFieldDialog } from './field-picker/edit-custom-field-dialog';
+import { RemoveFieldDialog } from './field-picker/remove-field-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { findQueryableField } from '../lib/view-fields';
 
@@ -265,6 +273,18 @@ export function ProjectListView({
   const { data: metadata } = useFieldMetadata(workspaceId, projectId);
   const setFieldValue = useSetCustomFieldValue(workspaceId, projectId);
 
+  const navigate = useNavigate();
+
+  // A column's "Delete field": the field's own dialog, off this project or out
+  // of the workspace, as Customize › Fields offers it.
+  const [removingFieldId, setRemovingFieldId] = useState<string | null>(null);
+  const removingField = metadata?.customFields.find((field) => field.id === removingFieldId);
+  const removeField = useRemoveCustomField(workspaceId, projectId);
+  const fieldUsage = useFieldCatalog(workspaceId, projectId, '', [], removingFieldId !== null);
+  const removingUsage =
+    fieldUsage.data?.projectFields.find((entry) => entry.id === removingFieldId)?.usageCount ??
+    null;
+
   /** A column's "Filter": a row for that field in the Filter popover, which opens. */
   const filterByColumn = (field: string) => {
     const queryable = findQueryableField(field, metadata);
@@ -333,8 +353,8 @@ export function ProjectListView({
   const tasks = useMemo(() => (data?.items ?? []).map(toWorkItemRow), [data]);
 
   const groups = useMemo(
-    () => groupRows(tasks, settings.groupBy, metadata),
-    [tasks, settings.groupBy, metadata],
+    () => groupRows(tasks, settings.groupBy, metadata, undefined, settings.groupOrder ?? 'ASC'),
+    [tasks, settings.groupBy, metadata, settings.groupOrder],
   );
 
   /**
@@ -900,13 +920,25 @@ export function ProjectListView({
                   }
                   onGroup={
                     onSettingsChange
-                      ? (field) =>
+                      ? (field, direction) =>
                           onSettingsChange({
                             groupBy: field === SystemField.SECTION ? null : field,
+                            groupOrder: direction,
                           })
                       : undefined
                   }
                   onFilter={onSettingsChange ? filterByColumn : undefined}
+                  onAddAutomation={
+                    canEdit
+                      ? (fieldId) =>
+                          void navigate({
+                            to: '/projects/$projectId/automations/new',
+                            params: { projectId },
+                            search: { fieldId },
+                          })
+                      : undefined
+                  }
+                  onDeleteField={canEdit ? setRemovingFieldId : undefined}
                   onResizePreview={(preview) => setResizing(preview ? [preview] : null)}
                   widths={<ColumnWidths columns={shown} />}
                   addControl={
@@ -1234,6 +1266,29 @@ export function ProjectListView({
           projectId={projectId}
           field={editingField}
           onOpenChange={(open) => !open && setEditingFieldId(null)}
+        />
+      )}
+
+      {removingField && (
+        <RemoveFieldDialog
+          field={removingField}
+          usageCount={removingUsage}
+          pending={removeField.isPending}
+          onOpenChange={(open) => !open && setRemovingFieldId(null)}
+          onConfirm={(mode) => {
+            const field = removingField;
+            removeField.mutate(
+              { fieldId: field.id, mode },
+              {
+                onSuccess: () => {
+                  setRemovingFieldId(null);
+                  onColumnsChange(
+                    allColumns.filter((column) => column.field !== `custom:${field.id}`),
+                  );
+                },
+              },
+            );
+          }}
         />
       )}
     </div>

@@ -85,12 +85,45 @@ describe('a column’s menu', () => {
     expect(props.onFilter).toHaveBeenCalledWith('custom:f-priority');
 
     await open();
-    await user.click(screen.getByRole('menuitem', { name: 'Group' }));
-    expect(props.onGroup).toHaveBeenCalledWith('custom:f-priority');
+    screen.getByRole('menuitem', { name: 'Group' }).focus();
+    await user.keyboard('{ArrowRight}');
+    await user.click(await screen.findByRole('menuitem', { name: 'Group descending' }));
+    expect(props.onGroup).toHaveBeenCalledWith('custom:f-priority', 'DESC');
 
     await open();
     await user.click(screen.getByRole('menuitem', { name: 'Hide column' }));
     expect(props.onChange).toHaveBeenCalledWith([{ field: 'title' }, { field: 'assigneeId' }]);
+  });
+
+  it('adds an automation to the field and deletes it, as Asana’s menu ends', async () => {
+    const user = setupUser();
+    const onAddAutomation = vi.fn();
+    const onDeleteField = vi.fn();
+    renderHeader({ onAddAutomation, onDeleteField });
+    const open = () =>
+      user.click(screen.getByRole('button', { name: 'Show options for Priority column' }));
+
+    await open();
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items.slice(-2)).toEqual(['Add automation to field', 'Delete field']);
+
+    await user.click(screen.getByRole('menuitem', { name: 'Add automation to field' }));
+    expect(onAddAutomation).toHaveBeenCalledWith('f-priority');
+
+    await open();
+    await user.click(screen.getByRole('menuitem', { name: 'Delete field' }));
+    expect(onDeleteField).toHaveBeenCalledWith('f-priority');
+  });
+
+  it('offers neither on a column that is not a custom field', async () => {
+    const user = setupUser();
+    renderHeader({ onAddAutomation: vi.fn(), onDeleteField: vi.fn() });
+
+    await user.click(screen.getByRole('button', { name: 'Show options for Assignee column' }));
+
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items).not.toContain('Delete field');
+    expect(items).not.toContain('Add automation to field');
   });
 
   it('sorts by the column, either way', async () => {

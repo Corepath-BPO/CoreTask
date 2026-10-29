@@ -32,15 +32,26 @@ rows would buy ordering and constraints that a JSON array already gives, at the
 cost of a join on every read.
 
 The column list is edited from **Options → Fields**, where Asana keeps it; the
-standalone Fields button is gone. Each column also has Asana's header menu, the
-chevron that shows on hover (`column-menu.tsx`): **Edit field** for a custom
-field, then **Sort** (ascending or descending, replacing the view's sort),
-**Filter** (adds a row for the field and opens the Filter popover), **Group**,
-then **Add column** (a field not shown yet, placed just after this one),
-**Move column** (left or right, never in front of the Task column), **Pin** and
-**Hide column**. The Task column, like Asana's Name, only sorts. Someone who
-cannot edit the view sees only Sort, Filter and Group, which change their own
-unsaved copy of it. The same menu holds the row density
+standalone Fields button is gone. Each column also has Asana's header menu, the chevron that shows on hover
+(`column-menu.tsx`), in Asana's order:
+
+- **Edit field**, for a custom field.
+- **Sort** › ascending or descending, replacing the view's sort.
+- **Filter**, which adds a row for the field and opens the Filter popover.
+- **Group** › ascending or descending. Descending reverses the field's own
+  order (`settings.groupOrder`), and the group with no value stays last.
+- **Add column**: a field not shown yet, placed just after this one.
+- **Move column** › left or right, never in front of the Task column.
+- **Pin column** and **Hide column**.
+- **Add automation to field**, for a custom field: the builder opens on "when
+  this field changes" (`/automations/new?fieldId=`).
+- **Delete field**, for a custom field: the same dialog as Customize › Fields,
+  off this project or out of the workspace.
+
+The Task column, like Asana's Name, only sorts. Someone who cannot edit the
+view sees only Sort, Filter and Group, which change their own unsaved copy of
+it. Asana's Field access and permissions, AI auto-fill and Find and replace
+have no CoreTask feature behind them yet, so they are not offered. The same menu holds the row density
 (`COMFORTABLE` or `COMPACT`, applied as `data-density` on the scrolling pane)
 and "Show completed tasks". Toggling and reordering are pure functions in
 `column-layout.ts` (`toggleColumn`, `moveColumnBy`), and the title can never

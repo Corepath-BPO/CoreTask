@@ -58,6 +58,8 @@ export function ColumnHeaderTable({
   onSort,
   onFilter,
   onGroup,
+  onAddAutomation,
+  onDeleteField,
 }: {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
@@ -76,7 +78,10 @@ export function ColumnHeaderTable({
   /** The view's own settings, read by a column: absent where the view cannot change. */
   onSort?: ((field: string, direction: SortDirection) => void) | undefined;
   onFilter?: ((field: string) => void) | undefined;
-  onGroup?: ((field: string) => void) | undefined;
+  onGroup?: ((field: string, direction: SortDirection) => void) | undefined;
+  /** A custom field's rule and removal; absent for someone who may not. */
+  onAddAutomation?: ((fieldId: string) => void) | undefined;
+  onDeleteField?: ((fieldId: string) => void) | undefined;
 }) {
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so clicking the pin button
@@ -110,6 +115,7 @@ export function ColumnHeaderTable({
     const queryable = findQueryableField(field, metadata);
     // The Task column, as Asana's Name column, only sorts.
     const isTitle = isFixedColumn(field);
+    const customId = field.startsWith('custom:') ? field.slice('custom:'.length) : null;
     const arrange = canEdit && !isTitle;
 
     return {
@@ -121,7 +127,10 @@ export function ColumnHeaderTable({
           : undefined,
       onSort: queryable?.isSortable && onSort ? (direction) => onSort(field, direction) : undefined,
       onFilter: !isTitle && queryable?.isFilterable && onFilter ? () => onFilter(field) : undefined,
-      onGroup: !isTitle && queryable?.isGroupable && onGroup ? () => onGroup(field) : undefined,
+      onGroup:
+        !isTitle && queryable?.isGroupable && onGroup
+          ? (direction) => onGroup(field, direction)
+          : undefined,
       addable,
       onAdd: arrange ? (added) => onChange(insertColumnAfter(columns, field, added)) : undefined,
       onMove: arrange
@@ -132,6 +141,8 @@ export function ColumnHeaderTable({
       isPinned: isPinnedColumn(column),
       onPin: arrange ? (isPinned) => onChange(setPinned(columns, field, isPinned)) : undefined,
       onHide: arrange ? () => onChange(toggleColumn(columns, field)) : undefined,
+      onAddAutomation: customId && onAddAutomation ? () => onAddAutomation(customId) : undefined,
+      onDelete: customId && onDeleteField ? () => onDeleteField(customId) : undefined,
     };
   };
 

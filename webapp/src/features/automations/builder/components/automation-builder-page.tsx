@@ -105,6 +105,7 @@ function blankRule(
   sectionId: string | undefined,
   starterKey: string | undefined,
   drafted: AutomationDraft | undefined,
+  fieldId?: string,
 ): AutomationRuleGraph {
   /*
    * A starter arrives already shaped — its trigger and steps drawn, its blanks
@@ -120,7 +121,7 @@ function blankRule(
     ? makeDraftNodes(drafted)
     : starter
       ? makeStarterNodes(starter, sectionId)
-      : makeDefaultNodes(sectionId);
+      : makeDefaultNodes(sectionId, fieldId);
 
   return {
     id: '',
@@ -161,6 +162,7 @@ export function AutomationBuilderPage({
   projectId,
   ruleId,
   sectionId,
+  fieldId,
   starter,
   drafted,
   onDirtyChange,
@@ -171,6 +173,8 @@ export function AutomationBuilderPage({
   ruleId: string | null;
   /** Set when this was started from a section's lightning menu. */
   sectionId?: string;
+  /** Set when started from a field column's "Add automation to field". */
+  fieldId?: string;
   /** A starter's key, when begun from the library's list of them. */
   starter?: string;
   /** A rule drafted from a sentence on the Add automation page. */
@@ -226,7 +230,7 @@ export function AutomationBuilderPage({
    * had been drawn on it the moment anything else on the page changed.
    */
   const [blank] = useState<AutomationRuleGraph | null>(() =>
-    ruleId === null ? blankRule(projectId, sectionId, starter, drafted) : null,
+    ruleId === null ? blankRule(projectId, sectionId, starter, drafted, fieldId) : null,
   );
 
   const rule = fetched ?? blank;

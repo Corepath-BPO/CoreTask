@@ -94,6 +94,8 @@ export const viewSettingsSchema = z.object({
   filters: filterGroupSchema.default({ combinator: 'AND', conditions: [] }),
   sorts: z.array(sortEntrySchema).max(MAX_SORTS_PER_VIEW).default([]),
   groupBy: fieldRefSchema.nullable().default(null),
+  /** Groups in the field's own order (ASC) or reversed; sections keep theirs. */
+  groupOrder: z.enum(['ASC', 'DESC']).default('ASC'),
   density: z.enum(['COMPACT', 'COMFORTABLE']).default('COMFORTABLE'),
   /** Board-only, ignored by other types. */
   cardFields: z.array(fieldRefSchema).max(20).optional(),

@@ -19,6 +19,7 @@ import {
   withDescendants,
   withPlaceholder,
   type CanvasNode,
+  makeDefaultNodes,
 } from './graph-edits';
 
 const node = (over: Partial<CanvasNode>): CanvasNode =>
@@ -454,5 +455,13 @@ describe('reordering branch rows', () => {
   it('changes nothing for a move to where the row already is', () => {
     expect(moveBranchRow(rows, 'b', 1)).toEqual({});
     expect(hasEdits({ ...NO_EDITS, reordered: moveBranchRow(rows, 'b', 1) })).toBe(false);
+  });
+});
+
+describe('makeDefaultNodes from a field', () => {
+  it('starts the rule on "when this field changes"', () => {
+    const [trigger] = makeDefaultNodes(undefined, '0190a8c2-6b3e-7c11-9a2b-1c2d3e4f5a6b');
+    expect(trigger?.subtype).toBe('CUSTOM_FIELD_CHANGED');
+    expect(trigger?.configuration).toEqual({ fieldId: '0190a8c2-6b3e-7c11-9a2b-1c2d3e4f5a6b' });
   });
 });

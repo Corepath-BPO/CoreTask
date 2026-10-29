@@ -691,9 +691,15 @@ const projectAutomationsRoute = createRoute({
 const projectAutomationNewRoute = createRoute({
   getParentRoute: () => projectDetailRoute,
   path: '/automations/new',
-  validateSearch: (search: Record<string, unknown>): { sectionId?: string; starter?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { sectionId?: string; fieldId?: string; starter?: string } => ({
     ...(typeof search['sectionId'] === 'string' && UUID_PATTERN.test(search['sectionId'])
       ? { sectionId: search['sectionId'] }
+      : {}),
+    // From a field column's "Add automation to field": "when it changes".
+    ...(typeof search['fieldId'] === 'string' && UUID_PATTERN.test(search['fieldId'])
+      ? { fieldId: search['fieldId'] }
       : {}),
     // Only the shape is checked here; the builder opens blank on a key it does
     // not know, so an old link cannot break the page.
@@ -703,7 +709,7 @@ const projectAutomationNewRoute = createRoute({
   }),
   component: function AutomationNewRoute() {
     const { projectId } = projectAutomationNewRoute.useParams();
-    const { sectionId, starter } = projectAutomationNewRoute.useSearch();
+    const { sectionId, fieldId, starter } = projectAutomationNewRoute.useSearch();
     // A rule drafted from a sentence on the Add automation page, which rides
     // in the history entry rather than the address — see `drafted-rule.ts`.
     const drafted = useLocation({
@@ -717,10 +723,11 @@ const projectAutomationNewRoute = createRoute({
      */
     return (
       <AutomationBuilderDialog
-        key={`${starter ?? ''}:${sectionId ?? ''}:${drafted ? 'drafted' : ''}`}
+        key={`${starter ?? ''}:${sectionId ?? ''}:${fieldId ?? ''}:${drafted ? 'drafted' : ''}`}
         projectId={projectId}
         ruleId={null}
         {...(sectionId ? { sectionId } : {})}
+        {...(fieldId ? { fieldId } : {})}
         {...(starter ? { starter } : {})}
         {...(drafted ? { drafted } : {})}
       />
