@@ -58,6 +58,10 @@ export type AutomationJob = (typeof AutomationJob)[keyof typeof AutomationJob];
 export const ImportJob = {
   /** One run of the Asana importer, start to finish. */
   ASANA: 'asana-import',
+  /** Live sync: Asana's event streams read, and the tasks they name written. */
+  ASANA_LIVE_SYNC: 'asana-live-sync',
+  /** The nightly full Sync again behind live sync. */
+  ASANA_NIGHTLY_SYNC: 'asana-nightly-sync',
 } as const;
 export type ImportJob = (typeof ImportJob)[keyof typeof ImportJob];
 

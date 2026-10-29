@@ -54,6 +54,27 @@ export interface AsanaImportStatus {
   isTarget: boolean;
   /** This workspace's runs, newest first. */
   runs: ImportRun[];
+  /** Live sync, when the page is open in the workspace that holds the import. */
+  liveSync: AsanaLiveSyncStatus | null;
+}
+
+/**
+ * Live sync from Asana: changes made there come across within a minute or
+ * two, read from each project's Asana event stream. Asana is only read.
+ */
+export interface AsanaLiveSyncStatus {
+  enabled: boolean;
+  enabledBy: { id: string; name: string } | null;
+  enabledAt: string | null;
+  /** A full Sync again runs before the next live check: just switched on, or a stream lapsed. */
+  fullSyncPending: boolean;
+  lastPolledAt: string | null;
+  /** When the last change from Asana was applied. */
+  lastChangeAt: string | null;
+  /** Tasks updated from Asana today (UTC). */
+  changesToday: number;
+  /** The last problem, in a sentence; cleared by the next clean check. */
+  lastError: string | null;
 }
 
 export interface StartAsanaImportResult {

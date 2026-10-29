@@ -1,6 +1,12 @@
 import { WorkspaceRole } from '@coretask/contracts';
-import type { AsanaImportStatus, ImportRun, StartAsanaImportResult } from '@coretask/types';
+import type {
+  AsanaImportStatus,
+  AsanaLiveSyncStatus,
+  ImportRun,
+  StartAsanaImportResult,
+} from '@coretask/types';
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -8,6 +14,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
@@ -20,6 +27,7 @@ import { RequireWorkspaceRole } from '../../common/decorators/workspace.decorato
 import { WorkspaceMemberGuard } from '../workspace-members/workspace-member.guard';
 
 import { AsanaImportService } from './asana-import.service';
+import { SetAsanaLiveSyncDto } from './dto/live-sync.dto';
 
 /**
  * Integrations › Asana. Workspace administration, and a person's own act:
@@ -66,6 +74,23 @@ export class AsanaImportController {
     @CurrentUser('id') userId: string,
   ): Promise<StartAsanaImportResult> {
     return this.imports.start(workspaceId, userId);
+  }
+
+  @Put('live-sync')
+  @RequireVerifiedEmail()
+  @ApiOperation({
+    summary: 'Switch Asana live sync on or off',
+    description:
+      'While on, changes made in Asana come across within a minute or two, read from each imported project’s Asana event stream. Switching it on starts a full Sync again first. Asana is only read, never changed.',
+  })
+  @ApiErrorResponseDoc(400, 'This server has no Asana token set up')
+  @ApiErrorResponseDoc(409, 'This workspace does not hold the Asana import')
+  setLiveSync(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: SetAsanaLiveSyncDto,
+  ): Promise<AsanaLiveSyncStatus> {
+    return this.imports.setLiveSync(workspaceId, userId, dto.enabled);
   }
 
   @Get('imports/:runId')

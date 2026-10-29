@@ -11,6 +11,7 @@ import {
 import type { StorageService } from '../../integrations/storage/storage.service';
 
 import { AsanaImportRun, pool, readableError } from './asana-import-run';
+import { AsanaLiveSyncService } from './asana-live-sync.service';
 
 // ---------------------------------------------------------------------------
 // An in-memory stand-in for the Prisma calls the importer makes
@@ -63,9 +64,15 @@ function matches(row: Row, where: Row = {}): boolean {
     // A column never written reads as null, as it does in the database.
     if (condition === null) return value === null || value === undefined;
     if (condition !== null && typeof condition === 'object' && !(condition instanceof Date)) {
-      const operator = condition as { in?: unknown[]; not?: unknown };
+      const operator = condition as { in?: unknown[]; not?: unknown; gt?: Date; lt?: Date };
       if ('in' in operator) return (operator.in ?? []).includes(value);
-      if ('not' in operator) return value !== operator.not;
+      if ('not' in operator) {
+        return operator.not === null
+          ? value !== null && value !== undefined
+          : value !== operator.not;
+      }
+      if ('gt' in operator) return value instanceof Date && value > (operator.gt as Date);
+      if ('lt' in operator) return value instanceof Date && value < (operator.lt as Date);
       return false;
     }
     return value === condition;
@@ -146,6 +153,18 @@ class FakeTable {
     const row = this.rows.find((candidate) => matches(candidate, where));
     if (row) return Object.assign(row, update);
     return this.insert(create);
+  };
+  aggregate = async ({ where, _max }: { where?: Row; _max: Record<string, boolean> }) => {
+    const found = this.rows.filter((row) => matches(row, where));
+    const max = Object.fromEntries(
+      Object.keys(_max).map((field) => {
+        const values = found
+          .map((row) => row[field])
+          .filter((v): v is number => typeof v === 'number');
+        return [field, values.length ? Math.max(...values) : null];
+      }),
+    );
+    return { _max: max };
   };
   deleteMany = async ({ where }: { where: Row }) => {
     const before = this.rows.length;
@@ -955,6 +974,299 @@ describe('AsanaImportRun', () => {
       expect.objectContaining({ kind: 'history', externalId: 'T1', message: 'Asana timed out' }),
     ]);
     expect(rows(context, 'task')).toHaveLength(4);
+  });
+});
+
+describe('AsanaImportRun live sync', () => {
+  /** The organisation, with single tasks answered as `tasks` says. */
+  function liveOrg(
+    tasks: Record<string, () => unknown>,
+    extra?: (path: string) => unknown[] | null,
+  ) {
+    const org = organisation();
+    const routes = org.routes;
+    return {
+      ...org,
+      routes: (path: string, params: AsanaParams) => {
+        const one = /^\/tasks\/([^/]+)$/.exec(path)?.[1];
+        if (one && tasks[one]) return tasks[one]() as unknown[];
+        const answered = extra?.(path);
+        if (answered) return answered;
+        return routes(path, params);
+      },
+    };
+  }
+
+  async function liveRun(
+    context: Awaited<ReturnType<typeof setUp>>,
+    org: ReturnType<typeof liveOrg>,
+  ) {
+    const asana = fakeAsana(org.routes);
+    const run = new AsanaImportRun(
+      {
+        prisma: context.db.prisma,
+        asana: asana as unknown as AsanaApiClient,
+        storage: fakeStorage() as unknown as StorageService,
+        logger: logger as never,
+        concurrency: 3,
+      },
+      null,
+      context.workspaceId,
+      WS,
+      context.starterId,
+    );
+    await run.prepareLive();
+    return { run, asana };
+  }
+
+  const titled = (context: Awaited<ReturnType<typeof setUp>>, title: string) =>
+    rows(context, 'task').find((row) => row['title'] === title) as Row;
+
+  it('brings a changed task across and keeps its place', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const before = { ...titled(context, 'Fix the boiler') };
+    const org = organisation();
+    const changed = { ...org.tasks['T1'], name: 'Fix the boiler today', assignee: { gid: 'U1' } };
+    const { run } = await liveRun(context, liveOrg({ T1: () => changed }));
+
+    const changes = await run.syncTasks(['T1'], new Set());
+
+    const task = titled(context, 'Fix the boiler today');
+    expect(task['id']).toBe(before['id']);
+    expect(task['position']).toBe(before['position']);
+    const ada = rows(context, 'user').find((row) => row['email'] === 'ada@example.com') as Row;
+    expect(task['assigneeId']).toBe(ada['id']);
+    expect(changes).toEqual([{ taskId: before['id'], projectIds: expect.any(Array) }]);
+    expect(changes[0]?.projectIds).toContain(before['projectId']);
+  });
+
+  it('puts a new subtask under its parent, last', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const parent = titled(context, 'Fix the boiler');
+    const subtask = { gid: 'ST2', name: 'Order a valve', parent: { gid: 'T1' }, num_subtasks: 0 };
+    const { run } = await liveRun(context, liveOrg({ ST2: () => subtask }));
+
+    await run.syncTasks(['ST2'], new Set());
+
+    const added = titled(context, 'Order a valve');
+    expect(added['parentTaskId']).toBe(parent['id']);
+    const siblings = rows(context, 'task').filter(
+      (row) => row['parentTaskId'] === parent['id'] && row['id'] !== added['id'],
+    );
+    for (const sibling of siblings) {
+      expect(added['position'] as number).toBeGreaterThan(sibling['position'] as number);
+    }
+  });
+
+  it('archives a task Asana deleted', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const { run } = await liveRun(
+      context,
+      liveOrg({
+        T2: () => {
+          throw new AsanaApiError('/tasks/T2', 404, 'Unknown object: T2');
+        },
+      }),
+    );
+
+    await run.syncTasks(['T2'], new Set());
+
+    expect(titled(context, 'Order parts')['archivedAt']).toBeInstanceOf(Date);
+    const ref = rows(context, 'externalRef').find(
+      (row) => row['entityType'] === 'task' && row['externalId'] === 'T2',
+    ) as Row;
+    expect(ref['sourceDeletedAt']).toBeInstanceOf(Date);
+  });
+
+  it('reads a project’s sections again for a task moved into a new one', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const org = organisation();
+    const moved = {
+      ...org.tasks['T2'],
+      memberships: [{ project: { gid: 'P1' }, section: { gid: 'S9' } }],
+    };
+    const { run } = await liveRun(
+      context,
+      liveOrg({ T2: () => moved }, (path) =>
+        path === '/projects/P1/sections'
+          ? [
+              { gid: 'S1', name: 'To do' },
+              { gid: 'S2', name: 'Done' },
+              { gid: 'S9', name: 'Blocked' },
+            ]
+          : null,
+      ),
+    );
+
+    await run.syncTasks(['T2'], new Set());
+
+    const blocked = rows(context, 'section').find((row) => row['name'] === 'Blocked') as Row;
+    expect(blocked).toBeDefined();
+    expect(titled(context, 'Order parts')['sectionId']).toBe(blocked['id']);
+  });
+
+  it('leaves a new task in a project that did not come across for the next full run', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const before = rows(context, 'task').length;
+    const elsewhere = { gid: 'T9', name: 'Elsewhere', memberships: [{ project: { gid: 'PX' } }] };
+    const { run } = await liveRun(context, liveOrg({ T9: () => elsewhere }));
+
+    expect(await run.syncTasks(['T9'], new Set())).toEqual([]);
+    expect(rows(context, 'task')).toHaveLength(before);
+  });
+});
+
+describe('AsanaLiveSyncService', () => {
+  async function setUpLive(options: { needsFullSync: boolean; tokens: boolean }) {
+    const context = await setUp();
+    await runImport(context);
+    Object.assign(rows(context, 'importRun')[0] as Row, {
+      source: 'ASANA',
+      status: 'SUCCEEDED',
+      externalWorkspaceId: WS,
+      finishedAt: new Date(Date.now() - 60_000),
+      updatedAt: new Date(Date.now() - 60_000),
+    });
+    await context.db.table('asanaLiveSync').create({
+      data: {
+        workspaceId: context.workspaceId,
+        enabled: true,
+        enabledById: context.starterId,
+        needsFullSync: options.needsFullSync,
+        changesToday: 0,
+      },
+    });
+    if (options.tokens) {
+      for (const projectGid of ['P1', 'P2']) {
+        await context.db.table('asanaEventStream').create({
+          data: { workspaceId: context.workspaceId, projectGid, syncToken: `${projectGid}-token` },
+        });
+      }
+    }
+    return context;
+  }
+
+  function service(
+    context: Awaited<ReturnType<typeof setUp>>,
+    events: (resource: string, sync: string | null) => unknown,
+    tasks: Record<string, () => unknown> = {},
+  ) {
+    const org = organisation();
+    const routes = org.routes;
+    const asana = Object.assign(
+      fakeAsana((path, params) => {
+        const one = /^\/tasks\/([^/]+)$/.exec(path)?.[1];
+        if (one && tasks[one]) return tasks[one]() as unknown[];
+        return routes(path, params);
+      }),
+      { events: jest.fn(async (resource: string, sync: string | null) => events(resource, sync)) },
+    );
+    const queue = { add: jest.fn(async () => undefined) };
+    const relay = { toProjectAudience: jest.fn(async () => undefined) };
+    const live = new AsanaLiveSyncService(
+      context.db.prisma,
+      { asana: { enabled: true, concurrency: 3 } } as never,
+      asana as never,
+      fakeStorage() as never,
+      relay as never,
+      queue as never,
+    );
+    return { live, queue, relay, asana };
+  }
+
+  const liveSync = (context: Awaited<ReturnType<typeof setUp>>) =>
+    rows(context, 'asanaLiveSync')[0] as Row;
+
+  it('starts with a full run, once every project’s stream has a token', async () => {
+    const context = await setUpLive({ needsFullSync: true, tokens: false });
+    const { live, queue } = service(context, (resource) => ({
+      events: [],
+      sync: `${resource}-fresh`,
+      hasMore: false,
+      lapsed: true,
+    }));
+
+    await live.tick();
+
+    const streams = rows(context, 'asanaEventStream').map((row) => [
+      row['projectGid'],
+      row['syncToken'],
+    ]);
+    expect(streams).toEqual(
+      expect.arrayContaining([
+        ['P1', 'P1-fresh'],
+        ['P2', 'P2-fresh'],
+      ]),
+    );
+    expect(queue.add).toHaveBeenCalledWith('asana-import', expect.anything(), expect.anything());
+    expect(liveSync(context)['needsFullSync']).toBe(false);
+  });
+
+  it('applies the tasks the events name and tells open boards', async () => {
+    const context = await setUpLive({ needsFullSync: false, tokens: true });
+    const org = organisation();
+    const { live, queue, relay } = service(
+      context,
+      (resource, sync) => ({
+        events:
+          resource === 'P1'
+            ? [{ action: 'changed', resource: { gid: 'T1', resource_type: 'task' } }]
+            : [],
+        sync: `${sync}+1`,
+        hasMore: false,
+        lapsed: false,
+      }),
+      { T1: () => ({ ...org.tasks['T1'], name: 'Fix the boiler today' }) },
+    );
+
+    const result = await live.tick();
+
+    expect(result.changes).toBe(1);
+    const task = rows(context, 'task').find((row) => row['title'] === 'Fix the boiler today');
+    expect(task).toBeDefined();
+    expect(relay.toProjectAudience).toHaveBeenCalledWith(
+      context.workspaceId,
+      task?.['projectId'],
+      'work-item:updated',
+      expect.objectContaining({ workItemId: task?.['id'], source: 'asana' }),
+    );
+    expect(queue.add).not.toHaveBeenCalled();
+    expect(liveSync(context)['changesToday']).toBe(1);
+    expect(liveSync(context)['lastChangeAt']).toBeInstanceOf(Date);
+    const p1 = rows(context, 'asanaEventStream').find((row) => row['projectGid'] === 'P1') as Row;
+    expect(p1['syncToken']).toBe('P1-token+1');
+  });
+
+  it('asks for a full run when a stream’s token has lapsed', async () => {
+    const context = await setUpLive({ needsFullSync: false, tokens: true });
+    const { live, queue } = service(context, (resource, sync) => ({
+      events: [],
+      sync: resource === 'P1' ? 'P1-fresh' : `${sync}`,
+      hasMore: false,
+      lapsed: resource === 'P1',
+    }));
+
+    await live.tick();
+
+    expect(queue.add).toHaveBeenCalledWith('asana-import', expect.anything(), expect.anything());
+  });
+
+  it('waits while a full run is going', async () => {
+    const context = await setUpLive({ needsFullSync: false, tokens: true });
+    await context.db.table('importRun').create({
+      data: { workspaceId: context.workspaceId, status: 'RUNNING', updatedAt: new Date() },
+    });
+    const { live, asana } = service(context, () => {
+      throw new Error('not expected');
+    });
+
+    expect(await live.tick()).toEqual({ workspaces: 1, changes: 0 });
+    expect(asana.events).not.toHaveBeenCalled();
   });
 });
 

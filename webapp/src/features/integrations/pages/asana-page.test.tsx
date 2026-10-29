@@ -7,6 +7,7 @@ import { setupUser } from '@/test/test-utils';
 import { AsanaPage } from './asana-page';
 
 const start = vi.fn();
+const setLiveSync = vi.fn();
 const select = vi.fn();
 const navigate = vi.fn();
 let status: AsanaImportStatus;
@@ -20,6 +21,7 @@ vi.mock('@/features/workspaces/hooks/use-workspaces', () => ({
 vi.mock('../hooks/use-asana-import', () => ({
   useAsanaImportStatus: () => ({ data: status, isLoading: false }),
   useStartAsanaImport: () => ({ mutate: start, isPending: false }),
+  useSetAsanaLiveSync: () => ({ mutate: setLiveSync, isPending: false }),
 }));
 
 const base: AsanaImportStatus = {
@@ -31,7 +33,21 @@ const base: AsanaImportStatus = {
   target: null,
   isTarget: false,
   runs: [],
+  liveSync: null,
 };
+
+const liveSyncOff = {
+  enabled: false,
+  enabledBy: null,
+  enabledAt: null,
+  fullSyncPending: false,
+  lastPolledAt: null,
+  lastChangeAt: null,
+  changesToday: 0,
+  lastError: null,
+};
+
+const target = { id: 'ws-1', name: 'texasrenters.com (Asana)', slug: 'tr' };
 
 const run: ImportRun = {
   id: 'run-1',
@@ -58,11 +74,62 @@ const run: ImportRun = {
 };
 
 beforeEach(() => {
-  for (const mock of [start, select, navigate]) mock.mockReset();
+  for (const mock of [start, setLiveSync, select, navigate]) mock.mockReset();
   status = base;
 });
 
 describe('AsanaPage', () => {
+  it('switches live sync on in the workspace that holds the import', async () => {
+    status = { ...base, target, isTarget: true, liveSync: liveSyncOff };
+    const user = setupUser();
+    render(<AsanaPage />);
+
+    await user.click(screen.getByRole('switch', { name: 'Live sync' }));
+    expect(setLiveSync).toHaveBeenCalledWith(true);
+  });
+
+  it('says how live sync is doing while it is on', () => {
+    const minuteAgo = new Date(Date.now() - 60_000).toISOString();
+    status = {
+      ...base,
+      target,
+      isTarget: true,
+      liveSync: {
+        ...liveSyncOff,
+        enabled: true,
+        enabledBy: { id: 'u-1', name: 'Ernie' },
+        enabledAt: minuteAgo,
+        lastPolledAt: minuteAgo,
+        lastChangeAt: minuteAgo,
+        changesToday: 4,
+        lastError: 'Fix the boiler: Asana timed out',
+      },
+    };
+    render(<AsanaPage />);
+
+    expect(screen.getByRole('switch', { name: 'Live sync' })).toBeChecked();
+    expect(
+      screen.getByText(/Checked Asana 1 minute ago · 4 tasks updated today/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Last problem: Fix the boiler: Asana timed out')).toBeInTheDocument();
+  });
+
+  it('says a full sync comes first after live sync is switched on', () => {
+    status = {
+      ...base,
+      target,
+      isTarget: true,
+      liveSync: { ...liveSyncOff, enabled: true, fullSyncPending: true },
+    };
+    render(<AsanaPage />);
+    expect(screen.getByText(/Starting with a full sync/)).toBeInTheDocument();
+  });
+
+  it('leaves live sync out where the import is not', () => {
+    render(<AsanaPage />);
+    expect(screen.queryByRole('switch', { name: 'Live sync' })).not.toBeInTheDocument();
+  });
+
   it('names the missing settings when the server has no token', () => {
     status = { ...base, configured: false, missing: ['ASANA_ACCESS_TOKEN'], asanaWorkspace: null };
     render(<AsanaPage />);

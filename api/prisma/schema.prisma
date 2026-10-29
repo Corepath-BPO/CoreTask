@@ -267,6 +267,7 @@ model User {
   slackInstallations         SlackInstallation[]
   slackLinks                 SlackUserLink[]
   importRunsStarted          ImportRun[]              @relation("ImportRunStartedBy")
+  asanaLiveSyncsEnabled      AsanaLiveSync[]          @relation("AsanaLiveSyncEnabledBy")
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -745,6 +746,8 @@ model Workspace {
   domains                 WorkspaceDomain[]
   importRuns              ImportRun[]
   externalRefs            ExternalRef[]
+  asanaLiveSync           AsanaLiveSync?
+  asanaEventStreams       AsanaEventStream[]
 
   @@index([createdById])
   @@index([archivedAt])
@@ -3220,4 +3223,53 @@ model ExternalRef {
   @@unique([workspaceId, source, entityType, externalId])
   @@index([workspaceId, entityType, entityId])
   @@map("external_refs")
+}
+
+/// Live sync from Asana into the workspace that holds its import.
+///
+/// While on, the worker reads each imported project's Asana event stream every
+/// 30 seconds and re-reads the tasks those events name, so a change made in
+/// Asana shows here within a minute or two. Asana is only read. A full Sync
+/// again runs when live sync is switched on, every night, and whenever a
+/// stream has lapsed, since Asana's events can drop one now and then.
+model AsanaLiveSync {
+  workspaceId   String    @id @db.Uuid
+  enabled       Boolean   @default(false)
+  /// Who switched it on: the actor for anything it has to credit to someone.
+  enabledById   String?   @db.Uuid
+  enabledAt     DateTime?
+  /// The next tick starts a full Sync again first: just switched on, a stream
+  /// lapsed, or it is night.
+  needsFullSync Boolean   @default(false)
+  lastPolledAt  DateTime?
+  /// When the last change from Asana was applied.
+  lastChangeAt  DateTime?
+  /// Tasks applied today, and the day they were counted on (UTC).
+  changesToday  Int       @default(0)
+  countedOn     DateTime? @db.Date
+  /// The last thing that went wrong, in a sentence; cleared by a clean tick.
+  lastError     String?   @db.VarChar(500)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabledBy User?     @relation("AsanaLiveSyncEnabledBy", fields: [enabledById], references: [id], onDelete: SetNull)
+
+  @@map("asana_live_syncs")
+}
+
+/// Where one imported Asana project's event stream was last read up to.
+model AsanaEventStream {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @db.Uuid
+  projectGid  String   @db.VarChar(64)
+  /// Asana's sync token. Valid for 24 hours; a lapsed one asks for a full sync.
+  syncToken   String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, projectGid])
+  @@map("asana_event_streams")
 }

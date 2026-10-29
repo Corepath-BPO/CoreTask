@@ -538,6 +538,7 @@ export const ApiRoutes = {
     start: (workspaceId: string) => `/workspaces/${workspaceId}/integrations/asana/imports`,
     run: (workspaceId: string, runId: string) =>
       `/workspaces/${workspaceId}/integrations/asana/imports/${runId}`,
+    liveSync: (workspaceId: string) => `/workspaces/${workspaceId}/integrations/asana/live-sync`,
   },
   webhookSubscriptions: {
     list: (workspaceId: string) => `/workspaces/${workspaceId}/webhook-subscriptions`,

@@ -1,5 +1,6 @@
 import type {
   AsanaImportStatus,
+  AsanaLiveSyncStatus,
   ImportRun as ImportRunDto,
   ImportTargetWorkspace,
   StartAsanaImportResult,
@@ -65,7 +66,7 @@ export class AsanaImportService {
       orderBy: { createdAt: 'desc' },
       take: RUN_HISTORY,
     });
-    const base = { runs: runs.map(toRunDto), target: null, isTarget: false };
+    const base = { runs: runs.map(toRunDto), target: null, isTarget: false, liveSync: null };
 
     const missing = this.missingSettings();
     if (missing.length > 0) {
@@ -109,6 +110,99 @@ export class AsanaImportService {
         : `Only people in the Asana workspace "${directory.workspace.name}" may import it, and your e-mail is not among its members.`,
       target,
       isTarget: target?.id === workspaceId,
+      liveSync: target?.id === workspaceId ? await this.liveSyncStatus(workspaceId) : null,
+    };
+  }
+
+  /**
+   * Live sync on or off, in the workspace that holds the import and by
+   * someone who may import it. Switching it on asks for a full Sync again
+   * first, so the live checks start from a complete copy; switching it off
+   * forgets where each project's stream had read up to.
+   */
+  async setLiveSync(
+    workspaceId: string,
+    userId: string,
+    enabled: boolean,
+  ): Promise<AsanaLiveSyncStatus> {
+    if (this.missingSettings().length > 0) throw AppException.badRequest('ASANA_NOT_CONFIGURED');
+
+    const directory = await this.loadDirectory().catch((error: unknown) => {
+      throw AppException.serviceUnavailable(
+        'SERVICE_UNAVAILABLE',
+        `Asana did not answer: ${describe(error)}`,
+      );
+    });
+    if (!(await this.isAsanaMember(userId, directory))) {
+      throw AppException.forbidden('FORBIDDEN', 'Only members of the Asana workspace may sync it.');
+    }
+    const target = await this.targetFor(directory.workspace.gid, userId);
+    if (target?.id !== workspaceId) {
+      throw AppException.conflict(
+        'RESOURCE_CONFLICT',
+        'Live sync runs in the workspace that holds the Asana import. Import it first, or switch it on there.',
+      );
+    }
+
+    if (enabled) {
+      await this.prisma.asanaLiveSync.upsert({
+        where: { workspaceId },
+        create: {
+          workspaceId,
+          enabled: true,
+          enabledById: userId,
+          enabledAt: new Date(),
+          needsFullSync: true,
+        },
+        update: {
+          enabled: true,
+          enabledById: userId,
+          enabledAt: new Date(),
+          needsFullSync: true,
+          lastError: null,
+        },
+      });
+    } else {
+      await this.prisma.$transaction([
+        this.prisma.asanaLiveSync.updateMany({
+          where: { workspaceId },
+          data: { enabled: false, needsFullSync: false },
+        }),
+        this.prisma.asanaEventStream.deleteMany({ where: { workspaceId } }),
+      ]);
+    }
+    this.logger.log({ workspaceId, userId, enabled }, 'Asana live sync switched');
+
+    return (await this.liveSyncStatus(workspaceId)) as AsanaLiveSyncStatus;
+  }
+
+  private async liveSyncStatus(workspaceId: string): Promise<AsanaLiveSyncStatus> {
+    const row = await this.prisma.asanaLiveSync.findUnique({
+      where: { workspaceId },
+      include: { enabledBy: { select: { id: true, name: true } } },
+    });
+    if (!row) {
+      return {
+        enabled: false,
+        enabledBy: null,
+        enabledAt: null,
+        fullSyncPending: false,
+        lastPolledAt: null,
+        lastChangeAt: null,
+        changesToday: 0,
+        lastError: null,
+      };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+      enabled: row.enabled,
+      enabledBy: row.enabledBy,
+      enabledAt: row.enabledAt?.toISOString() ?? null,
+      fullSyncPending: row.needsFullSync,
+      lastPolledAt: row.lastPolledAt?.toISOString() ?? null,
+      lastChangeAt: row.lastChangeAt?.toISOString() ?? null,
+      changesToday: row.countedOn?.toISOString().slice(0, 10) === today ? row.changesToday : 0,
+      lastError: row.lastError,
     };
   }
 

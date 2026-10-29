@@ -6,6 +6,29 @@
  * or one Asana leaves out for that object.
  */
 
+/** One entry of a resource's event stream (`GET /events`). */
+export interface AsanaEvent {
+  action: string;
+  resource: { gid: string; resource_type: string; resource_subtype?: string | null };
+  /** What the resource was added to or removed from: a project, section or task. */
+  parent?: { gid: string; resource_type: string } | null;
+  change?: { field?: string; action?: string } | null;
+  created_at?: string;
+}
+
+/** One read of an event stream. */
+export interface AsanaEventsPage {
+  events: AsanaEvent[];
+  /** The token to read on from. */
+  sync: string;
+  hasMore: boolean;
+  /**
+   * The token sent had lapsed, or none was sent: Asana answers with a fresh
+   * one and no events, so what happened in between is unknown.
+   */
+  lapsed: boolean;
+}
+
 export interface AsanaRef {
   gid: string;
   name?: string;
