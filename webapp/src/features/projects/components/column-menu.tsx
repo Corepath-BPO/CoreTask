@@ -27,6 +27,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+/** A submenu row's icon sized and tinted as a plain row's is. */
+const SUB_TRIGGER =
+  "gap-2 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
+
 /** What one column's menu may do; an action left out is not offered. */
 export interface ColumnMenuActions {
   onEditField?: (() => void) | undefined;
@@ -89,7 +93,7 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
 
         {onSort && (
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger className={SUB_TRIGGER}>
               <ArrowUpDown />
               Sort
             </DropdownMenuSubTrigger>
@@ -122,7 +126,7 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
 
         {onAdd && addable.length > 0 && (
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger className={SUB_TRIGGER}>
               <Columns3 />
               Add column
             </DropdownMenuSubTrigger>
@@ -137,7 +141,7 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
         )}
         {onMove && (
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger className={SUB_TRIGGER}>
               <MoveHorizontal />
               Move column
             </DropdownMenuSubTrigger>
