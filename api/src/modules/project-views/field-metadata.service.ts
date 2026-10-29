@@ -2,6 +2,7 @@ import type { ColorToken } from '@coretask/contracts';
 import type { CustomFieldType } from '@coretask/contracts';
 import type { ProjectFieldMetadata } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
+import { WorkspaceRole } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
@@ -25,26 +26,28 @@ export class FieldMetadataService {
   ) {}
 
   async forProject(workspaceId: string, projectId: string): Promise<ProjectFieldMetadata> {
-    const [customFields, statuses, priorities, sections, members, tags] = await Promise.all([
-      this.fields.list(workspaceId, projectId),
-      this.definitions.listStatuses(workspaceId, projectId),
-      this.definitions.listPriorities(workspaceId),
-      this.prisma.section.findMany({
-        where: { projectId },
-        orderBy: { position: 'asc' },
-        select: { id: true, name: true },
-      }),
-      this.prisma.workspaceMember.findMany({
-        where: { workspaceId, user: { isServiceAccount: false } },
-        select: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
-        orderBy: { user: { name: 'asc' } },
-      }),
-      this.prisma.tag.findMany({
-        where: { workspaceId },
-        orderBy: { nameKey: 'asc' },
-        select: { id: true, name: true, color: true },
-      }),
-    ]);
+    const [customFields, statuses, priorities, sections, members, tags, assignable] =
+      await Promise.all([
+        this.fields.list(workspaceId, projectId),
+        this.definitions.listStatuses(workspaceId, projectId),
+        this.definitions.listPriorities(workspaceId),
+        this.prisma.section.findMany({
+          where: { projectId },
+          orderBy: { position: 'asc' },
+          select: { id: true, name: true },
+        }),
+        this.prisma.workspaceMember.findMany({
+          where: { workspaceId, user: { isServiceAccount: false } },
+          select: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
+          orderBy: { user: { name: 'asc' } },
+        }),
+        this.prisma.tag.findMany({
+          where: { workspaceId },
+          orderBy: { nameKey: 'asc' },
+          select: { id: true, name: true, color: true },
+        }),
+        this.assignableIds(workspaceId, projectId),
+      ]);
 
     return {
       customFields,
@@ -62,8 +65,25 @@ export class FieldMetadataService {
       })),
       sections,
       members: members.map((member) => member.user),
+      assignees: members.map((member) => member.user).filter((user) => assignable.has(user.id)),
       tags: tags.map((tag) => ({ ...tag, color: tag.color as ColorToken })),
     };
+  }
+
+  /**
+   * Who may be given a task in this project: its members, as Asana offers a
+   * project's members, and the workspace's owner — whoever set the workspace
+   * up is assignable everywhere, member or not.
+   */
+  private async assignableIds(workspaceId: string, projectId: string): Promise<Set<string>> {
+    const [projectMembers, owners] = await Promise.all([
+      this.prisma.projectMember.findMany({ where: { projectId }, select: { userId: true } }),
+      this.prisma.workspaceMember.findMany({
+        where: { workspaceId, role: WorkspaceRole.OWNER },
+        select: { userId: true },
+      }),
+    ]);
+    return new Set([...projectMembers, ...owners].map((row) => row.userId));
   }
 
   /**

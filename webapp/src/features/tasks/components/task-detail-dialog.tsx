@@ -83,6 +83,8 @@ import { CommentThread } from '@/features/comments/components/comment-thread';
 import { CollaboratorsRow } from '@/features/followers/components/collaborators-row';
 import { CustomFieldCell } from '@/features/projects/components/cells/custom-field-cell';
 import { FieldTypeIcon } from '@/features/projects/components/field-picker/field-type-icon';
+import { TaskOtherFields } from '@/features/tasks/components/task-other-fields';
+import { onlyAssignable } from '@/features/tasks/lib/assignable';
 import {
   useFieldMetadata,
   useSetCustomFieldValue,
@@ -829,7 +831,11 @@ function TaskDetailBody({
                   No assignee
                 </span>
               </SelectItem>
-              {(members ?? []).map((member) => (
+              {onlyAssignable(
+                members,
+                task.projectId ? metadata?.assignees : undefined,
+                task.assigneeId,
+              ).map((member) => (
                 <SelectItem key={member.user.id} value={member.user.id}>
                   <span className="flex items-center gap-2">
                     <PersonAvatar
@@ -1151,6 +1157,8 @@ function TaskDetailBody({
           ))}
         </div>
       )}
+
+      <TaskOtherFields workspaceId={workspaceId} taskId={task.id} />
 
       <section className="space-y-1">
         <h3 className="text-sm font-semibold">Description</h3>

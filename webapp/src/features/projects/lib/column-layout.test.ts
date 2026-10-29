@@ -191,6 +191,7 @@ describe('columns a saved view can no longer show', () => {
       priorities: [],
       tags: [],
       sections: [],
+      assignees: [],
       members: [],
     }) as ProjectFieldMetadata;
 

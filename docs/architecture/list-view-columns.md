@@ -39,6 +39,12 @@ and "Show completed tasks". Toggling and reordering are pure functions in
 be toggled off. Which system fields are offered as columns comes from
 `SYSTEM_FIELD_CATALOG`'s `isColumn` flag in `@coretask/contracts`.
 
+A new List view starts with Task, Assignee, Priority, Status and Due date, then
+the project's own fields in the project's order, up to the schema's 50
+columns, so a project's fields are not hidden behind Options › Fields from the
+start. A project imported from Asana gets Asana's layout instead
+(`docs/integrations/asana-import.md`).
+
 ## What a view can actually show
 
 `visibleColumns(columns, metadata)` filters at render, and drops two things:

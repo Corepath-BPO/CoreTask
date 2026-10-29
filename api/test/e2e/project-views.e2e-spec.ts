@@ -1952,4 +1952,96 @@ describe('Project views and custom fields (e2e)', () => {
       });
     });
   });
+  // -------------------------------------------------------------------------
+  describe('assignees and fields from other projects', () => {
+    const metadataUrl = (scope: Scope) =>
+      url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/field-metadata`);
+
+    it('offers the project’s members and the workspace owner as assignees', async () => {
+      const scope = await setupScope();
+      const outsider = await registerUser('Not on the project');
+      await context.prisma.workspaceMember.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          userId: outsider.userId,
+          role: WorkspaceRole.MEMBER,
+        },
+      });
+      await context.prisma.projectMember.deleteMany({
+        where: { projectId: scope.projectId, userId: scope.owner.userId },
+      });
+      await context.prisma.projectMember.create({
+        data: {
+          projectId: scope.projectId,
+          userId: scope.member.userId,
+          workspaceId: scope.workspaceId,
+          role: 'EDITOR',
+        },
+      });
+
+      const response = await request(server())
+        .get(metadataUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const assignees = response.body.data.assignees.map((person: { id: string }) => person.id);
+      // The owner, though no longer a member of this project, and the member who is.
+      expect(assignees.sort()).toEqual([scope.owner.userId, scope.member.userId].sort());
+      // Everyone stays in `members`, for filters and people fields.
+      expect(response.body.data.members.map((person: { id: string }) => person.id)).toContain(
+        outsider.userId,
+      );
+    });
+
+    it('lists a task’s values for fields none of its projects shows, read only', async () => {
+      const scope = await setupScope();
+      const elsewhere = await request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/projects`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ name: 'Where it came from' })
+        .expect(201);
+      const field = await context.prisma.customField.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          name: 'Lease end',
+          type: 'DATE',
+          createdById: scope.owner.userId,
+        },
+      });
+      await context.prisma.projectCustomField.create({
+        data: { projectId: elsewhere.body.data.id, customFieldId: field.id },
+      });
+      await context.prisma.taskCustomFieldValue.create({
+        data: { taskId: scope.taskId, customFieldId: field.id, dateValue: new Date('2026-12-31') },
+      });
+
+      const response = await request(server())
+        .get(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/custom-fields/others`))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      expect(response.body.data).toEqual([
+        {
+          field: { id: field.id, name: 'Lease end', type: 'DATE' },
+          label: '2026-12-31T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('starts a new List view with the project’s own fields as columns', async () => {
+      const scope = await setupScope();
+      const field = await createField(scope, { name: 'Effort', type: 'NUMBER' }).expect(201);
+      await context.prisma.projectView.deleteMany({ where: { projectId: scope.projectId } });
+
+      const response = await request(server())
+        .get(viewsUrl(scope))
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .expect(200);
+
+      const list = response.body.data.find((view: { type: string }) => view.type === 'LIST');
+      expect(list.settings.columns.map((column: { field: string }) => column.field)).toContain(
+        `custom:${field.body.data.id}`,
+      );
+    });
+  });
 });

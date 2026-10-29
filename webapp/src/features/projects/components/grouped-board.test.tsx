@@ -80,6 +80,7 @@ const metadata: ProjectFieldMetadata = {
   priorities: [],
   tags: [],
   sections: [{ id: 's-1', name: 'Backlog' }],
+  assignees: [],
   members: [],
 };
 

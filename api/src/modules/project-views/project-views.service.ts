@@ -16,7 +16,10 @@ import { ProjectsService } from '../projects/projects.service';
 
 import type { CreateProjectViewDto, UpdateProjectViewDto } from './dto/project-view.dto';
 
-/** Columns a new List view starts with. */
+/** The view settings' own ceiling on columns (`viewSettingsSchema`). */
+const MAX_COLUMNS = 50;
+
+/** Columns a new List view starts with, before the project's own fields. */
 const DEFAULT_LIST_COLUMNS = [
   SystemField.TITLE,
   SystemField.ASSIGNEE,
@@ -250,6 +253,17 @@ export class ProjectViewsService {
 
     if (missing.length === 0) return;
 
+    // A new List shows the project's own fields after the standard columns,
+    // so fields the project already has are not hidden behind Options › Fields.
+    const fields = missing.includes(ProjectViewType.LIST)
+      ? await this.prisma.projectCustomField.findMany({
+          where: { projectId },
+          orderBy: { position: 'asc' },
+          select: { customFieldId: true },
+        })
+      : [];
+    const fieldColumns = fields.map((field) => `custom:${field.customFieldId}`);
+
     await this.prisma.projectView.createMany({
       data: missing.map((type, index) => ({
         workspaceId,
@@ -259,7 +273,7 @@ export class ProjectViewsService {
         scope: ProjectViewScope.PROJECT,
         isDefault: true,
         position: index,
-        settings: defaultSettings(type) as unknown as Prisma.InputJsonValue,
+        settings: defaultSettings(type, fieldColumns) as unknown as Prisma.InputJsonValue,
       })),
       // Two requests can race here; the loser simply adds nothing.
       skipDuplicates: true,
@@ -352,9 +366,13 @@ function defaultColumns(type: ProjectViewType) {
   return type === ProjectViewType.LIST ? DEFAULT_LIST_COLUMNS.map((field) => ({ field })) : [];
 }
 
-function defaultSettings(type: ProjectViewType): ViewSettings {
+function defaultSettings(type: ProjectViewType, fieldColumns: string[] = []): ViewSettings {
+  const columns =
+    type === ProjectViewType.LIST
+      ? [...defaultColumns(type), ...fieldColumns.map((field) => ({ field }))].slice(0, MAX_COLUMNS)
+      : defaultColumns(type);
   return {
-    columns: defaultColumns(type),
+    columns,
     filters: { combinator: 'AND', conditions: [] },
     sorts: [],
     // A Board groups by section, which is what the existing board already does.

@@ -8,6 +8,7 @@ import type {
   RemoveFieldMode,
   RemoveFieldResult,
   Task,
+  TaskOtherFieldValue,
   UpdateCustomFieldPayload,
   UpdateProjectViewPayload,
 } from '@coretask/types';
@@ -177,4 +178,7 @@ export const customFieldsApi = {
     payload: Record<string, unknown>,
   ): Promise<unknown> =>
     apiClient.put(ApiRoutes.customFields.taskValue(workspaceId, taskId, fieldId), payload),
+
+  otherValues: (workspaceId: string, taskId: string): Promise<TaskOtherFieldValue[]> =>
+    apiClient.get<TaskOtherFieldValue[]>(ApiRoutes.customFields.otherValues(workspaceId, taskId)),
 };

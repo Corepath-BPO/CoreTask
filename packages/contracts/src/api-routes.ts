@@ -478,6 +478,9 @@ export const ApiRoutes = {
     /** `PUT` sets, `DELETE` clears. */
     taskValue: (workspaceId: string, taskId: string, fieldId: string) =>
       `/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`,
+    /** The task's values for fields none of its projects shows. */
+    otherValues: (workspaceId: string, taskId: string) =>
+      `/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/others`,
     /** The definition itself — rename, re-describe, archive or restore — needing no project. */
     libraryField: (workspaceId: string, fieldId: string) =>
       `/workspaces/${workspaceId}/custom-fields/${fieldId}`,

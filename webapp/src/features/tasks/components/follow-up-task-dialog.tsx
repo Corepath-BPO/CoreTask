@@ -21,10 +21,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useCreateComment } from '@/features/comments/hooks/use-comments';
+import { useFieldMetadata } from '@/features/projects/hooks/use-project-views';
 import { useWorkspaceMembers } from '@/features/workspaces/hooks/use-workspaces';
 import { escapeHtml } from '@/lib/rich-text';
 
 import { useCreateTask } from '../hooks/use-tasks';
+import { onlyAssignable } from '../lib/assignable';
 
 /** What a follow-up starts from: the task it follows. */
 export interface FollowUpSource {
@@ -98,6 +100,10 @@ function FollowUpForm({
   onDone: (taskId: string | null) => void;
 }) {
   const { data: members } = useWorkspaceMembers(workspaceId);
+  const { data: metadata } = useFieldMetadata(
+    source.projectId ? workspaceId : undefined,
+    source.projectId ?? '',
+  );
   const createTask = useCreateTask(workspaceId, { announce: false });
   const comment = useCreateComment(workspaceId, { kind: 'task', id: source.id });
 
@@ -153,7 +159,11 @@ function FollowUpForm({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NOBODY}>No assignee</SelectItem>
-            {(members ?? []).map((member) => (
+            {onlyAssignable(
+              members,
+              source.projectId ? metadata?.assignees : undefined,
+              assigneeId === NOBODY ? null : assigneeId,
+            ).map((member) => (
               <SelectItem key={member.user.id} value={member.user.id}>
                 {member.user.name}
               </SelectItem>

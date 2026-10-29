@@ -17,6 +17,7 @@ import type {
   RemoveFieldMode,
   RemoveFieldResult,
   TaskCustomFieldValue,
+  TaskOtherFieldValue,
 } from '@coretask/types';
 import { safeParseFieldSettings } from '@coretask/validation';
 import { Injectable, Logger } from '@nestjs/common';
@@ -746,6 +747,72 @@ export class CustomFieldsService {
     });
 
     return toValueDto(value);
+  }
+
+  /**
+   * The values a task holds for fields none of its projects shows, in words.
+   *
+   * Asana keeps a field's value on a task that moves on: a lease that went
+   * from "Prepare New Lease" to "LEASE PROCESS COMPLETE" still carries the
+   * first project's fields. Attaching every such field to the project it
+   * ended in would give one project two hundred columns, so the panel lists
+   * them apart, read only, rather than not at all.
+   */
+  async otherValues(
+    workspaceId: string,
+    taskId: string,
+    actor: ActorContext,
+  ): Promise<TaskOtherFieldValue[]> {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, workspaceId, AND: [this.access.taskWhere(actor)] },
+      select: { id: true, projectId: true, parentTaskId: true },
+    });
+    if (!task) throw AppException.notFound('RESOURCE_NOT_FOUND', 'Task not found.');
+
+    const links = await this.prisma.taskProject.findMany({
+      where: { taskId: task.id },
+      select: { projectId: true },
+    });
+    const projectIds = [task.projectId, ...links.map((link) => link.projectId)].filter(
+      (id): id is string => Boolean(id),
+    );
+    const shown = await this.prisma.projectCustomField.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { customFieldId: true },
+    });
+
+    const rows = await this.prisma.taskCustomFieldValue.findMany({
+      where: {
+        taskId: task.id,
+        customFieldId: { notIn: shown.map((row) => row.customFieldId) },
+        customField: { workspaceId, isArchived: false },
+      },
+      include: {
+        customField: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            settings: true,
+            options: { select: { id: true, label: true } },
+          },
+        },
+      },
+    });
+
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: rows.flatMap((row) => row.userIds) } },
+      select: { id: true, name: true },
+    });
+    const peopleNames = new Map(people.map((person) => [person.id, person.name]));
+
+    return rows
+      .map((row) => ({
+        field: { id: row.customField.id, name: row.customField.name, type: row.customField.type },
+        label: labelValue(row.customField, toValueDto(row), peopleNames)?.label ?? null,
+      }))
+      .filter((entry): entry is TaskOtherFieldValue => entry.label !== null && entry.label !== '')
+      .sort((a, b) => a.field.name.localeCompare(b.field.name));
   }
 
   async clearValue(

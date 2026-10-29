@@ -64,6 +64,31 @@ Writes go straight to the database. Imported tasks therefore fire no rules,
 webhooks, notifications or e-mails. Anyone who is assigned a task in a private
 project joins that project as an editor, so they can open their own task.
 
+### How it looks here
+
+- **List view.** Each project's List view is laid out as Asana lays one out:
+  Task, Assignee, Due date, the project's fields in Asana's order, then Tags.
+  CoreTask's own Priority, Status, Start date and Estimate are left out, since
+  Asana has none of them and they would be empty on every Asana task. Widths,
+  pins and any other column already there are kept. This happens once per
+  project (its `list_layout` ref records which fields it placed); later runs
+  only add fields Asana has added since, so a column someone hides or moves
+  stays as they left it.
+- **Fields from other projects.** Asana keeps a field's value on a task that
+  moves on, so a lease in "LEASE PROCESS COMPLETE" still carries the fields of
+  "Prepare New Lease". Those values come across like any other, and the task
+  panel lists them, read only, under "Fields from other projects" rather than
+  making them columns of a project that never used them.
+- **Pasted images.** An image pasted into a task's text is one of the task's
+  files, though Asana writes no "attached" story for it. The run copies it
+  whenever the text embeds one, and the description shows it in place
+  (`<img data-attachment>`), once the file has come across.
+- **New options.** A value naming an option the field did not have when it was
+  read (someone added one since) has the field read again, once per run or per
+  live sync pass, instead of the value being cleared.
+- **Assignees.** A project's assignee pickers offer its members, as Asana's
+  memberships say, and the workspace's owner, who is assignable everywhere.
+
 ## Running it again
 
 `external_refs` maps every imported record to its Asana gid. A run looks each

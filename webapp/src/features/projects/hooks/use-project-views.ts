@@ -560,6 +560,15 @@ function sameSettings(a: Record<string, unknown>, b: Record<string, unknown> | u
   return left.every(([key, value]) => JSON.stringify(rightMap.get(key)) === JSON.stringify(value));
 }
 
+/** A task's values for fields none of its projects shows, for the panel. */
+export function useTaskOtherFields(workspaceId: string | undefined, taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.taskOtherFields(workspaceId ?? '', taskId ?? ''),
+    queryFn: () => customFieldsApi.otherValues(workspaceId as string, taskId as string),
+    enabled: Boolean(workspaceId && taskId),
+  });
+}
+
 export function useSetCustomFieldValue(workspaceId: string | undefined, projectId: string) {
   return useMutation({
     mutationFn: ({

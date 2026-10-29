@@ -27,6 +27,7 @@ const metadata = (customFields: CustomField[]): ProjectFieldMetadata => ({
   priorities: [],
   tags: [],
   sections: [],
+  assignees: [],
   members: [],
 });
 

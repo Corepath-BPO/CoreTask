@@ -1,5 +1,10 @@
 import type { WorkspaceRole } from '@coretask/contracts';
-import type { CustomField, RemoveFieldResult, TaskCustomFieldValue } from '@coretask/types';
+import type {
+  CustomField,
+  RemoveFieldResult,
+  TaskCustomFieldValue,
+  TaskOtherFieldValue,
+} from '@coretask/types';
 import {
   Body,
   Controller,
@@ -261,6 +266,21 @@ export class WorkspaceCustomFieldsController {
 @ApiErrorResponseDoc(401, 'Missing or invalid access token')
 export class TaskCustomFieldsController {
   constructor(private readonly fields: CustomFieldsService) {}
+
+  @Get('others')
+  @ApiOperation({
+    summary: 'A task’s values for fields none of its projects shows',
+    description:
+      'Fields from projects the task has left, as Asana keeps them: each field and its value in words, read only.',
+  })
+  @ApiErrorResponseDoc(404, 'No such task')
+  otherValues(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Actor() actor: ActorContext,
+  ): Promise<TaskOtherFieldValue[]> {
+    return this.fields.otherValues(workspaceId, taskId, actor);
+  }
 
   @Put(':fieldId')
   @ApiOperation({
