@@ -1,10 +1,4 @@
-import {
-  CLOSED_TASK_STATUSES,
-  CLOSED_TICKET_STATUSES,
-  ProjectVisibility,
-  hasProjectAdminOverride,
-  type WorkspaceRole,
-} from '@coretask/contracts';
+import { CLOSED_TASK_STATUSES, CLOSED_TICKET_STATUSES, WorkspaceRole } from '@coretask/contracts';
 import type { Prisma } from '@prisma/client';
 
 export interface HandOverCounts {
@@ -16,8 +10,8 @@ export interface HandOverCounts {
 
 /**
  * Takes someone's open tasks and tickets off them as their access ends: to
- * the member a super admin named, where that member can open the work, and
- * unassigned otherwise. Asana's deprovisioning does the same hand-over.
+ * the member a super admin named, where that member may be given the work,
+ * and unassigned otherwise. Asana's deprovisioning does the same hand-over.
  *
  * Only open work. A finished task records who did it, and rewriting that
  * would falsify history; the same goes for comments and reported tickets.
@@ -49,28 +43,33 @@ export async function handOverOpenWork(
   let ticketsReassigned = 0;
 
   if (to) {
-    // Pointing someone at work they cannot open helps nobody, so a private
-    // project's work goes only to its members or to someone who sees every
-    // project anyway.
-    const reachable: Prisma.ProjectWhereInput | undefined = hasProjectAdminOverride(to.role)
-      ? undefined
+    // The assignee rule of `project-access/assignable.ts`: work in a project
+    // goes to its members, a task linked into another project to a member of
+    // either, and anything to the owner. Work in no project goes to anyone.
+    const anywhere = to.role === WorkspaceRole.OWNER;
+    const member: Prisma.ProjectWhereInput = { members: { some: { userId: to.userId } } };
+    const taskWhere: Prisma.TaskWhereInput = anywhere
+      ? {}
       : {
           OR: [
-            { visibility: ProjectVisibility.PUBLIC },
-            { members: { some: { userId: to.userId } } },
+            { projectId: null },
+            { project: member },
+            { projectLinks: { some: { project: member } } },
           ],
         };
-    const where = reachable ? { OR: [{ projectId: null }, { project: reachable }] } : {};
+    const ticketWhere: Prisma.TicketWhereInput = anywhere
+      ? {}
+      : { OR: [{ projectId: null }, { project: member }] };
 
     tasksReassigned = (
       await tx.task.updateMany({
-        where: { ...openTasks, ...where },
+        where: { ...openTasks, ...taskWhere },
         data: { assigneeId: to.userId },
       })
     ).count;
     ticketsReassigned = (
       await tx.ticket.updateMany({
-        where: { ...openTickets, ...where },
+        where: { ...openTickets, ...ticketWhere },
         data: { assigneeId: to.userId },
       })
     ).count;

@@ -173,9 +173,12 @@ export class AdminService {
     const since7 = new Date(now - 7 * DAY_MS);
     const since30 = new Date(now - 30 * DAY_MS);
 
+    // The people first, then every count in one batch on one connection: firing
+    // some twenty queries at once made the pool open that many connections in
+    // a burst, and a slow connect failed the whole page.
+    const members = await this.listMembers(workspaceId);
     const [
       workspace,
-      members,
       pendingInvitations,
       expiredInvitations,
       teams,
@@ -192,12 +195,11 @@ export class AdminService {
       verifiedDomains,
       lastImport,
       liveSync,
-    ] = await Promise.all([
+    ] = await this.prisma.$transaction([
       this.prisma.workspace.findUniqueOrThrow({
         where: { id: workspaceId },
         select: { id: true, name: true, createdAt: true },
       }),
-      this.listMembers(workspaceId),
       this.prisma.workspaceInvitation.count({
         where: { workspaceId, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date(now) } },
       }),

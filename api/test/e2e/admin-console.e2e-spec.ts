@@ -98,6 +98,17 @@ describe('Admin console (e2e)', () => {
       request(server()).patch(path).set('Authorization', `Bearer ${actor.token}`).send(body),
   });
 
+  /** Work in a project goes only to its members, so assignees join it first. */
+  const joinProject = (scope: Scope, actor: Actor, projectId = scope.projectId) =>
+    context.prisma.projectMember.create({
+      data: {
+        workspaceId: scope.workspaceId,
+        projectId,
+        userId: actor.userId,
+        role: ProjectMemberRole.EDITOR,
+      },
+    });
+
   const createTask = async (scope: Scope, assigneeId: string, sectionId = scope.sectionId) => {
     const task = await as(scope.owner)
       .post(url(`/workspaces/${scope.workspaceId}/tasks`), {
@@ -306,30 +317,23 @@ describe('Admin console (e2e)', () => {
         .expect(400);
     });
 
-    it('hands open work to the recipient only where they can open it', async () => {
+    /** The assignee rule: a project's work goes to its members, even in a public project. */
+    it('hands open work to the recipient only in projects they are a member of', async () => {
       const scope = await setupScope();
       const leaver = await registerUser('Leaver');
       const leaverId = await join(scope, leaver, WorkspaceRole.MEMBER);
       const recipient = await registerUser('Recipient');
       await join(scope, recipient, WorkspaceRole.MEMBER);
+      await joinProject(scope, leaver);
+      await joinProject(scope, recipient);
 
-      const hidden = await as(scope.owner)
-        .post(url(`/workspaces/${scope.workspaceId}/projects`), {
-          name: 'Board only',
-          visibility: 'PRIVATE',
-        })
+      const other = await as(scope.owner)
+        .post(url(`/workspaces/${scope.workspaceId}/projects`), { name: 'Other board' })
         .expect(201);
-      await context.prisma.projectMember.create({
-        data: {
-          workspaceId: scope.workspaceId,
-          projectId: hidden.body.data.id,
-          userId: leaver.userId,
-          role: ProjectMemberRole.EDITOR,
-        },
-      });
+      await joinProject(scope, leaver, other.body.data.id);
 
       const visibleTask = await createTask(scope, leaver.userId);
-      const hiddenTask = await createTask(scope, leaver.userId, hidden.body.data.sections[0].id);
+      const hiddenTask = await createTask(scope, leaver.userId, other.body.data.sections[0].id);
 
       const response = await as(scope.owner)
         .post(adminUrl(scope, `/members/${leaverId}/deactivate`), {
@@ -448,6 +452,8 @@ describe('Admin console (e2e)', () => {
       const leaverId = await join(scope, leaver, WorkspaceRole.MEMBER);
       const recipient = await registerUser('Recipient');
       await join(scope, recipient, WorkspaceRole.MEMBER);
+      await joinProject(scope, leaver);
+      await joinProject(scope, recipient);
       const taskId = await createTask(scope, leaver.userId);
 
       const response = await as(scope.owner)
@@ -475,6 +481,7 @@ describe('Admin console (e2e)', () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       await join(scope, member, WorkspaceRole.MEMBER);
+      await joinProject(scope, member);
       await createTask(scope, member.userId);
       // An account made for someone, as the Asana import does, never signed in.
       const placeholder = await context.prisma.user.create({

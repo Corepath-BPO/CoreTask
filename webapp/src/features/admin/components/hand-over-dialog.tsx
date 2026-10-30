@@ -77,7 +77,7 @@ export function HandOverDialog({
           <Field
             label={`Their open work: ${work}`}
             htmlFor="hand-over-recipient"
-            hint="Work in a private project the new assignee can’t open is left unassigned."
+            hint="Work in a project the new assignee isn’t a member of is left unassigned."
           >
             <Select value={recipient} onValueChange={setRecipient} disabled={pending}>
               <SelectTrigger id="hand-over-recipient" className="w-full">

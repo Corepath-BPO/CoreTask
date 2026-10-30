@@ -187,7 +187,7 @@ export class MembersService {
    * The row stays, with its role, teams and project places, so reactivating
    * gives back exactly what was there; and an Asana sync or an SSO sign-in
    * that would add them again finds the row and leaves it be. Their open work
-   * goes to `reassignToUserId` where that member can open it, and is
+   * goes to `reassignToUserId` where that member may be assigned it, and is
    * unassigned otherwise: nothing should wait on someone who cannot get in.
    */
   async deactivate(

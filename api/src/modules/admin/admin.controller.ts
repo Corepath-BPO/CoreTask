@@ -81,7 +81,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Deactivate a member',
     description:
-      'They lose access at once but keep their role, teams and projects for reactivation. Their open tasks and tickets go to `reassignToUserId` where that member can open them, and are unassigned otherwise. The owner cannot be deactivated, and you must outrank the member.',
+      'They lose access at once but keep their role, teams and projects for reactivation. Their open tasks and tickets go to `reassignToUserId` in the projects that member may be assigned in (its members, or the owner anywhere), and are unassigned otherwise. The owner cannot be deactivated, and you must outrank the member.',
   })
   @ApiParam({ name: 'memberId', format: 'uuid' })
   @ApiErrorResponseDoc(400, 'The owner, or a recipient who is not an active member')
@@ -119,7 +119,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Remove a member, handing their work to someone',
     description:
-      'As the Members page’s remove, with the hand-over of `deactivate`: their open work goes to `reassignToUserId` where that member can open it.',
+      'As the Members page’s remove, with the hand-over of `deactivate`: their open work goes to `reassignToUserId` in the projects that member may be assigned in.',
   })
   @ApiParam({ name: 'memberId', format: 'uuid' })
   @ApiErrorResponseDoc(400, 'The owner, or a recipient who is not an active member')

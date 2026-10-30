@@ -6,7 +6,7 @@ export class HandOverDto {
     format: 'uuid',
     nullable: true,
     description:
-      'An active member to take over their open tasks and tickets, in the projects that member can open. Omitted, the work is unassigned.',
+      'An active member to take over their open tasks and tickets, in the projects that member may be assigned in: its members, or the owner anywhere. Omitted, the work is unassigned.',
   })
   @IsOptional()
   @IsUUID()
