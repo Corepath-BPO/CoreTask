@@ -107,6 +107,19 @@ export interface AsanaProject extends AsanaRef {
   created_at?: string;
 }
 
+/** A task template: the task it makes, as Asana's task templates API gives it. */
+export interface AsanaTaskTemplate extends AsanaRef {
+  created_by?: AsanaRef | null;
+  template?: {
+    name?: string | null;
+    description?: string | null;
+    html_description?: string | null;
+    relative_due_on?: number | null;
+    task_resource_subtype?: string | null;
+    subtasks?: { name?: string | null }[];
+  } | null;
+}
+
 export interface AsanaTag extends AsanaRef {
   color?: string | null;
 }

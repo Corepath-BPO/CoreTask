@@ -41,6 +41,9 @@ export const LIMITS = {
   userName: 120,
   statusTitle: 200,
   portfolioName: 120,
+  templateName: 120,
+  /** An activity line's text (`activity_logs.summary`). */
+  activitySummary: 500,
   filename: 255,
   /**
    * A text field's value: what the field editor accepts (`MaxLength(2000)` on

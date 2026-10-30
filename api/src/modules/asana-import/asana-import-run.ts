@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   ActivityAction,
   ActivityEntity,
@@ -41,6 +43,7 @@ import type {
   AsanaStory,
   AsanaTag,
   AsanaTask,
+  AsanaTaskTemplate,
   AsanaTeam,
   AsanaUser,
   AsanaWorkspaceMembership,
@@ -114,6 +117,7 @@ const FIELD_FIELDS =
 const PROJECT_FIELDS =
   'name,archived,color,html_notes,owner,team,privacy_setting,start_on,due_on,completed,completed_at,created_at';
 const TAG_FIELDS = 'name,color';
+const TASK_TEMPLATE_FIELDS = 'name,template,created_by';
 const STORY_FIELDS =
   'resource_subtype,text,html_text,created_at,created_by.name,created_by.email,is_pinned,likes.user';
 const ATTACHMENT_FIELDS = 'name,host,size,download_url,view_url,permanent_url,created_at';
@@ -220,6 +224,24 @@ export interface LiveChange {
 }
 
 /** A task already in CoreTask, waiting for its comments and files. */
+/** Which of a task's stories a history read writes; its changes always. */
+interface HistoryParts {
+  comments: boolean;
+  files: boolean;
+}
+
+const WHOLE_HISTORY: HistoryParts = { comments: true, files: true };
+/** A task live sync read because it changed, not because of a comment or a file. */
+const CHANGES_ONLY: HistoryParts = { comments: false, files: false };
+
+/** The activity line an Asana story about a change becomes, where one says more than "updated". */
+const HISTORY_ACTIONS: Record<string, ActivityAction> = {
+  assigned: ActivityAction.ASSIGNED,
+  unassigned: ActivityAction.UNASSIGNED,
+  marked_complete: ActivityAction.STATUS_CHANGED,
+  marked_incomplete: ActivityAction.STATUS_CHANGED,
+};
+
 interface DetailItem {
   gid: string;
   taskId: string;
@@ -984,6 +1006,79 @@ export class AsanaImportRun {
     await this.importProjectFields(project, projectId);
     await this.layoutListView(project, projectId);
     await this.importStatusUpdates(project, projectId);
+    await this.importTaskTemplates(project, projectId);
+  }
+
+  /**
+   * The project's task templates, offered in its Add menu. Asana's give the
+   * task's name, description, kind, due date (days after it is made) and
+   * subtasks' names, which is what a CoreTask template holds. One deleted in
+   * Asana goes; one made in CoreTask has no ref and stays.
+   */
+  private async importTaskTemplates(project: AsanaProject, projectId: string): Promise<void> {
+    let templates: AsanaTaskTemplate[];
+    try {
+      templates = await this.asana.list<AsanaTaskTemplate>('/task_templates', {
+        project: project.gid,
+        opt_fields: TASK_TEMPLATE_FIELDS,
+      });
+    } catch (error) {
+      // A plan or a project without task templates: nothing to bring.
+      if (error instanceof AsanaApiError && [402, 403, 404].includes(error.status)) return;
+      this.fail('task_templates', project, error);
+      return;
+    }
+
+    const kept = new Set<string>();
+    for (const template of templates) {
+      try {
+        kept.add(await this.saveTaskTemplate(template, projectId));
+      } catch (error) {
+        this.fail('task_template', template, error);
+      }
+    }
+
+    const known = [...this.refs]
+      .filter(([key]) => key.startsWith('task_template:'))
+      .map(([, id]) => id)
+      .filter((id) => !kept.has(id));
+    if (known.length > 0) {
+      await this.prisma.taskTemplate.deleteMany({ where: { projectId, id: { in: known } } });
+    }
+  }
+
+  private async saveTaskTemplate(template: AsanaTaskTemplate, projectId: string): Promise<string> {
+    const task = template.template ?? {};
+    const creator = await this.personOf(template.created_by);
+    const name = clip(template.name, LIMITS.templateName, 'Template');
+    const data = {
+      name,
+      title: clip(task.name, LIMITS.taskTitle, name),
+      description: description(task.html_description ?? null, this.person),
+      kind: taskKind(task.task_resource_subtype ?? undefined),
+      dueInDays: typeof task.relative_due_on === 'number' ? task.relative_due_on : null,
+      subtasks: (task.subtasks ?? [])
+        .map((subtask) => clip(subtask.name, LIMITS.taskTitle, ''))
+        .filter(Boolean)
+        .map((title) => ({ title })),
+    };
+    this.counter('taskTemplates').done += 1;
+    return this.upsert(
+      'task_template',
+      template.gid,
+      (id) => this.prisma.taskTemplate.update({ where: { id }, data: { ...data, projectId } }),
+      () =>
+        this.prisma.taskTemplate.create({
+          data: {
+            ...data,
+            workspaceId: this.workspaceId,
+            projectId,
+            createdById: creator?.id ?? this.starterId,
+          },
+          select: { id: true },
+        }),
+      template,
+    );
   }
 
   private async importProjectMembers(
@@ -2043,29 +2138,84 @@ export class AsanaImportRun {
   }
 
   /**
-   * One task's comments, and its files when its stories say it has some. A
-   * comment Asana no longer lists was deleted there, and is here too.
+   * One task's history as Asana tells it: its comments, its files when its
+   * stories say it has some, and what was changed on it ("assigned to Earl",
+   * "changed the due date"). A comment Asana no longer lists was deleted
+   * there, and is here too. Live sync, reading a task only because it
+   * changed, writes its changes alone (`parts`).
    */
-  private async readHistory(item: DetailItem): Promise<void> {
+  private async readHistory(item: DetailItem, parts: HistoryParts = WHOLE_HISTORY): Promise<void> {
     const stories = await this.asana.list<AsanaStory>(`/tasks/${item.gid}/stories`, {
       opt_fields: STORY_FIELDS,
     });
-    for (const story of stories) {
-      if (story.resource_subtype !== 'comment_added') continue;
-      try {
-        await this.importComment(story, item.taskId);
-      } catch (error) {
-        this.fail('comment', { gid: story.gid, name: item.name }, error);
+    if (parts.comments) {
+      for (const story of stories) {
+        if (story.resource_subtype !== 'comment_added') continue;
+        try {
+          await this.importComment(story, item.taskId);
+        } catch (error) {
+          this.fail('comment', { gid: story.gid, name: item.name }, error);
+        }
       }
+      await this.dropDeletedComments(item.taskId, stories);
     }
-    await this.dropDeletedComments(item.taskId, stories);
+    try {
+      await this.importChanges(item.taskId, stories);
+    } catch (error) {
+      this.fail('history_changes', { gid: item.gid, name: item.name }, error);
+    }
     // An image pasted into the text is a file Asana tells of in no story.
     if (
-      this.waitingImages.has(item.gid) ||
-      stories.some((story) => story.resource_subtype === 'attachment_added')
+      parts.files &&
+      (this.waitingImages.has(item.gid) ||
+        stories.some((story) => story.resource_subtype === 'attachment_added'))
     ) {
       await this.importAttachments(item);
     }
+  }
+
+  /**
+   * Asana's record of what changed on a task, as lines in the task's
+   * activity, beside CoreTask's own. Each line's id is a UUID v7 made from
+   * its story (`historyId`): it sorts at the time the change happened, and
+   * writing it again is a duplicate the database skips, so a story costs one
+   * write however often the task is read.
+   */
+  private async importChanges(taskId: string, stories: readonly AsanaStory[]): Promise<void> {
+    const changes = stories.filter(
+      (story) => story.resource_subtype && story.resource_subtype !== 'comment_added',
+    );
+    if (changes.length === 0) return;
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true },
+    });
+
+    const rows: Prisma.ActivityLogCreateManyInput[] = [];
+    for (const story of changes) {
+      const at = instant(story.created_at);
+      const line = changeLine(story);
+      if (!at || !line) continue;
+      const actor = line.byRule ? undefined : await this.personOf(story.created_by);
+      rows.push({
+        id: historyId(this.workspaceId, story.gid, at),
+        workspaceId: this.workspaceId,
+        actorId: actor?.id ?? null,
+        action: HISTORY_ACTIONS[story.resource_subtype ?? ''] ?? ActivityAction.UPDATED,
+        entity: ActivityEntity.TASK,
+        entityId: taskId,
+        projectId: task?.projectId ?? null,
+        summary: clip(line.text, LIMITS.activitySummary, 'changed this task'),
+        metadata: { source: 'asana', story: story.gid, subtype: story.resource_subtype ?? null },
+        createdAt: at,
+      });
+    }
+    if (rows.length === 0) return;
+    const { count } = await this.prisma.activityLog.createMany({
+      data: rows,
+      skipDuplicates: true,
+    });
+    this.counter('changeHistory').done += count;
   }
 
   /**
@@ -2654,15 +2804,11 @@ export class AsanaImportRun {
     if (!placement) return null;
 
     const taskId = await this.saveTask(task, placement, () => null);
-    if (history) {
-      await this.readHistory({
-        gid,
-        taskId,
-        name: task.name ?? '',
-        subtasks: 0,
-        isSubtask: Boolean(task.parent),
-      });
-    }
+    // Its comments and files when the events were about those; what changed always.
+    await this.readHistory(
+      { gid, taskId, name: task.name ?? '', subtasks: 0, isSubtask: Boolean(task.parent) },
+      history ? WHOLE_HISTORY : CHANGES_ONLY,
+    );
     await this.grantAssigneeAccess(taskId);
 
     const projectIds = new Set<string>();
@@ -2959,6 +3105,38 @@ function stableJson(value: unknown): string {
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
   }
   return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * A story about a change, as the line CoreTask shows after its actor's name.
+ * Asana's text starts with whoever made the change ("IT assigned to Earl"),
+ * which CoreTask writes itself; "Asana changed Status to New" was a rule,
+ * shown as CoreTask shows a rule's change, with no person.
+ */
+export function changeLine(story: AsanaStory): { text: string; byRule: boolean } | null {
+  const text = story.text?.trim();
+  if (!text) return null;
+  const actor = story.created_by?.name?.trim();
+  if (actor && text.startsWith(`${actor} `)) {
+    return { text: text.slice(actor.length + 1), byRule: false };
+  }
+  if (text.startsWith('Asana ')) return { text: text.slice('Asana '.length), byRule: true };
+  return { text, byRule: !story.created_by };
+}
+
+/**
+ * A UUID v7 for the activity line a story becomes: its time is the story's,
+ * so the line sorts among the task's others, and the rest is a hash of the
+ * story, so the same story always makes the same id.
+ */
+export function historyId(workspaceId: string, storyGid: string, at: Date): string {
+  const bytes = Buffer.alloc(16);
+  bytes.writeUIntBE(Math.min(Math.max(at.getTime(), 0), 2 ** 48 - 1), 0, 6);
+  createHash('sha256').update(`${workspaceId}:${storyGid}`).digest().copy(bytes, 6, 0, 10);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** The gids `before` lists that `now` does not. */
