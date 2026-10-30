@@ -6,6 +6,7 @@ import {
   createWorkItemSchema,
   moveWorkItemSchema,
   projectWorkItemQuerySchema,
+  replaceAssigneeSchema,
   updateWorkItemSchema,
 } from './work-item.js';
 
@@ -227,5 +228,23 @@ describe('bulkWorkItemSchema', () => {
       bulkWorkItemSchema.safeParse({ workItemIds: [uuid], update: { customFieldValues: many } })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('replaceAssigneeSchema', () => {
+  it('takes someone else, or nobody, in place of a person', () => {
+    expect(replaceAssigneeSchema.safeParse({ fromUserId: uuid, toUserId: fieldId }).success).toBe(
+      true,
+    );
+    expect(replaceAssigneeSchema.safeParse({ fromUserId: uuid, toUserId: null }).success).toBe(
+      true,
+    );
+  });
+
+  it('refuses replacing a person with themselves', () => {
+    const result = replaceAssigneeSchema.safeParse({ fromUserId: uuid, toUserId: uuid });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['toUserId']);
   });
 });

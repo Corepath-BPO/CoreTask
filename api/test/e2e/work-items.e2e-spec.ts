@@ -765,6 +765,122 @@ describe('Project work items (e2e)', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('replacing an assignee', () => {
+    const replace = (scope: Scope, body: Record<string, unknown>, actor: Actor = scope.owner) =>
+      request(server())
+        .post(`${itemsUrl(scope)}/replace-assignee`)
+        .set('Authorization', `Bearer ${actor.token}`)
+        .send(body);
+
+    const assigned = async (scope: Scope, title: string, assigneeId: string, type = 'TASK') => {
+      const response = await create(scope, {
+        type,
+        title,
+        sectionId: scope.sectionId,
+        assigneeIds: [assigneeId],
+      }).expect(201);
+      return response.body.data.id as string;
+    };
+
+    const assigneeOf = async (id: string) =>
+      (
+        (await context.prisma.task.findUnique({ where: { id } })) ??
+        (await context.prisma.ticket.findUnique({ where: { id } }))
+      )?.assigneeId;
+
+    it('hands a person’s open rows to someone else, with a story each', async () => {
+      const scope = await setupScope();
+      const task = await assigned(scope, 'Fix the boiler', scope.member.userId);
+      const ticket = await assigned(scope, 'Printer down', scope.member.userId, 'TICKET');
+      const done = await assigned(scope, 'Old work', scope.member.userId);
+      await context.prisma.task.update({ where: { id: done }, data: { completedAt: new Date() } });
+      const others = await assigned(scope, 'Not theirs', scope.owner.userId);
+      const body = { fromUserId: scope.member.userId, toUserId: scope.owner.userId };
+
+      const counted = await replace(scope, { ...body, dryRun: true }).expect(201);
+      expect(counted.body.data).toEqual({ replaced: 0, remaining: 2 });
+      expect(await assigneeOf(task)).toBe(scope.member.userId);
+
+      const response = await replace(scope, body).expect(201);
+
+      expect(response.body.data).toEqual({ replaced: 2, remaining: 0 });
+      expect(await assigneeOf(task)).toBe(scope.owner.userId);
+      expect(await assigneeOf(ticket)).toBe(scope.owner.userId);
+      // A finished row keeps whoever did it.
+      expect(await assigneeOf(done)).toBe(scope.member.userId);
+      expect(await assigneeOf(others)).toBe(scope.owner.userId);
+      // Each row's own story, as a single reassignment would write.
+      const stories = await context.prisma.activityLog.findMany({
+        where: {
+          workspaceId: scope.workspaceId,
+          action: 'ASSIGNED',
+          summary: 'Assigned to Owner',
+        },
+      });
+      expect(stories.map((story) => story.entityId).sort()).toEqual([task, ticket].sort());
+    });
+
+    it('takes completed rows too when asked, and can leave them with nobody', async () => {
+      const scope = await setupScope();
+      const done = await assigned(scope, 'Old work', scope.member.userId);
+      await context.prisma.task.update({ where: { id: done }, data: { completedAt: new Date() } });
+
+      const response = await replace(scope, {
+        fromUserId: scope.member.userId,
+        toUserId: null,
+        includeCompleted: true,
+      }).expect(201);
+
+      expect(response.body.data).toEqual({ replaced: 1, remaining: 0 });
+      expect(await assigneeOf(done)).toBeNull();
+    });
+
+    it('hands over a hundred rows a request and says how many are left', async () => {
+      const scope = await setupScope();
+      await context.prisma.task.createMany({
+        data: Array.from({ length: 101 }, (_, index) => ({
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          sectionId: scope.sectionId,
+          title: `Task ${index}`,
+          position: index,
+          createdById: scope.owner.userId,
+          assigneeId: scope.member.userId,
+        })),
+      });
+      const body = { fromUserId: scope.member.userId, toUserId: scope.owner.userId };
+
+      expect((await replace(scope, body).expect(201)).body.data).toEqual({
+        replaced: 100,
+        remaining: 1,
+      });
+      expect((await replace(scope, body).expect(201)).body.data).toEqual({
+        replaced: 1,
+        remaining: 0,
+      });
+    }, 60_000);
+
+    it('refuses the same person on both sides, and someone outside the workspace', async () => {
+      const scope = await setupScope();
+      await assigned(scope, 'Fix the boiler', scope.member.userId);
+
+      await replace(scope, {
+        fromUserId: scope.member.userId,
+        toUserId: scope.member.userId,
+      }).expect(422);
+      await replace(scope, {
+        fromUserId: scope.member.userId,
+        toUserId: scope.outsider.userId,
+      }).expect(400);
+      await replace(
+        scope,
+        { fromUserId: scope.member.userId, toUserId: scope.owner.userId },
+        scope.outsider,
+      ).expect(403);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('authorization', () => {
     it('refuses somebody who is not in the workspace', async () => {
       const scope = await setupScope();

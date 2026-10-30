@@ -6,6 +6,8 @@ import type {
   ProjectWorkItem,
   ProjectWorkItemPage,
   ProjectWorkItemQuery,
+  ReplaceAssigneePayload,
+  ReplaceAssigneeResult,
   UpdateWorkItemPayload,
 } from '@coretask/types';
 
@@ -94,4 +96,15 @@ export const workItemsApi = {
     payload: BulkWorkItemPayload,
   ): Promise<BulkWorkItemResult> =>
     apiClient.post<BulkWorkItemResult>(`${base(workspaceId, projectId)}/bulk`, payload),
+
+  /** Find and replace on the Assignee column: up to a hundred rows a call. */
+  replaceAssignee: (
+    workspaceId: string,
+    projectId: string,
+    payload: ReplaceAssigneePayload,
+  ): Promise<ReplaceAssigneeResult> =>
+    apiClient.post<ReplaceAssigneeResult>(
+      `${base(workspaceId, projectId)}/replace-assignee`,
+      payload,
+    ),
 };

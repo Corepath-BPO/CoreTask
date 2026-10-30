@@ -5,6 +5,7 @@ import type {
   ProjectWorkItem,
   ProjectWorkItemPage,
   ProjectWorkItemQuery,
+  ReplaceAssigneePayload,
   UpdateWorkItemPayload,
 } from '@coretask/types';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -136,6 +137,70 @@ export function useBulkUpdateWorkItems(workspaceId: string | undefined, projectI
       await invalidateProjectWork(workspaceId as string, projectId);
     },
     onError: (error) => reportError(error, 'Could not update those.'),
+  });
+}
+
+/** How many rows assigned to someone Find and replace would hand over. */
+export function useAssignedCount(
+  workspaceId: string | undefined,
+  projectId: string,
+  userId: string | null,
+  includeCompleted: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.workItems.assigned(
+      workspaceId ?? '',
+      projectId,
+      userId ?? '',
+      includeCompleted,
+    ),
+    queryFn: async () => {
+      const { remaining } = await workItemsApi.replaceAssignee(workspaceId as string, projectId, {
+        fromUserId: userId as string,
+        toUserId: null,
+        includeCompleted,
+        dryRun: true,
+      });
+      return remaining;
+    },
+    enabled: Boolean(workspaceId && projectId && userId),
+  });
+}
+
+/**
+ * Find and replace on the Assignee column, to the last row.
+ *
+ * The server hands over a hundred rows a request and says how many are left,
+ * so this asks again until none are, telling `onProgress` as it goes. One
+ * correlation id across the requests, as for a bulk edit, so this tab takes
+ * every row's socket event as its own. Refreshed when it stops, whether or
+ * not it finished: the rows already handed over have changed either way.
+ */
+export function useReplaceAssignee(workspaceId: string | undefined, projectId: string) {
+  return useMutation({
+    mutationFn: async ({
+      onProgress,
+      ...payload
+    }: Omit<ReplaceAssigneePayload, 'dryRun' | 'correlationId'> & {
+      onProgress?: (done: number, total: number) => void;
+    }) => {
+      const correlationId = nextCorrelationId();
+      let done = 0;
+      for (;;) {
+        const { replaced, remaining } = await workItemsApi.replaceAssignee(
+          workspaceId as string,
+          projectId,
+          { ...payload, correlationId },
+        );
+        done += replaced;
+        onProgress?.(done, done + remaining);
+        if (remaining === 0 || replaced === 0) return done;
+      }
+    },
+    onSettled: async () => {
+      await invalidateProjectWork(workspaceId as string, projectId);
+    },
+    onError: (error) => reportError(error, 'Could not replace the assignee.'),
   });
 }
 

@@ -1,16 +1,19 @@
-import { SystemField } from '@coretask/contracts';
+import { SORT_DIRECTION_LABEL, SortDirection, SystemField } from '@coretask/contracts';
 import type { ProjectFieldMetadata, ViewSettings } from '@coretask/types';
 import { Rows3 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 import { fieldLabel, groupableFields } from '../../lib/view-fields';
 import { FieldTypeIcon } from '../field-picker/field-type-icon';
 
 /**
  * Asana's Group menu: section, status, priority, assignee and due date, then
- * the project's own single-select and people fields.
+ * the project's own single-select and people fields. Grouped by a field, the
+ * groups run in its order or the reverse, as the column menu's "Group
+ * ascending / descending" sets; sections have only the order they are in.
  */
 export function GroupPopover({
   settings,
@@ -28,6 +31,7 @@ export function GroupPopover({
   );
   const custom = fields.filter((field) => field.origin === 'custom');
   const active = current !== SystemField.SECTION;
+  const order = settings.groupOrder ?? SortDirection.ASC;
 
   const choose = (ref: string) => onChange({ groupBy: ref === SystemField.SECTION ? null : ref });
 
@@ -44,7 +48,12 @@ export function GroupPopover({
           {active && <span className="max-w-24 truncate">{fieldLabel(current, metadata)}</span>}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 space-y-1">
+      {/* Scrolls within the room below the button, as the dropdown menus do:
+          a project with many fields would otherwise push Order off-screen. */}
+      <PopoverContent
+        align="end"
+        className="max-h-(--radix-popover-content-available-height) w-64 space-y-1 overflow-y-auto"
+      >
         <p className="px-2 pb-1 text-sm font-medium">Group by</p>
         <GroupChoice
           value={SystemField.SECTION}
@@ -76,6 +85,33 @@ export function GroupPopover({
               />
             ))}
           </>
+        )}
+
+        {active && (
+          <section className="space-y-1.5 px-2 pt-2" aria-label="Group order">
+            <p className="text-xs font-medium text-muted-foreground">Order</p>
+            <div
+              role="radiogroup"
+              aria-label="Group order"
+              className="flex rounded-md border p-0.5"
+            >
+              {[SortDirection.ASC, SortDirection.DESC].map((direction) => (
+                <button
+                  key={direction}
+                  type="button"
+                  role="radio"
+                  aria-checked={order === direction}
+                  onClick={() => onChange({ groupOrder: direction })}
+                  className={cn(
+                    'flex-1 cursor-pointer rounded px-2 py-1 text-xs',
+                    order === direction ? 'bg-muted font-medium' : 'text-muted-foreground',
+                  )}
+                >
+                  {SORT_DIRECTION_LABEL[direction]}
+                </button>
+              ))}
+            </div>
+          </section>
         )}
       </PopoverContent>
     </Popover>

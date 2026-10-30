@@ -118,3 +118,11 @@ export class BulkWorkItemResultDto {
   })
   items!: ProjectWorkItemDto[];
 }
+
+export class ReplaceAssigneeResultDto {
+  @ApiProperty({ description: 'Rows this request handed over.' })
+  replaced!: number;
+
+  @ApiProperty({ description: 'Rows still assigned to the person, for the next request.' })
+  remaining!: number;
+}

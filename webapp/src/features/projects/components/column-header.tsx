@@ -1,4 +1,4 @@
-import { SYSTEM_FIELD_CATALOG, type SortDirection } from '@coretask/contracts';
+import { SYSTEM_FIELD_CATALOG, SystemField, type SortDirection } from '@coretask/contracts';
 import type { ProjectFieldMetadata, ViewColumn } from '@coretask/types';
 import {
   DndContext,
@@ -74,6 +74,7 @@ export function ColumnHeaderTable({
   onGroup,
   onAddAutomation,
   onDeleteField,
+  onReplaceAssignee,
 }: {
   columns: ViewColumn[];
   metadata: ProjectFieldMetadata | undefined;
@@ -96,6 +97,8 @@ export function ColumnHeaderTable({
   /** A custom field's rule and removal; absent for someone who may not. */
   onAddAutomation?: ((fieldId: string) => void) | undefined;
   onDeleteField?: ((fieldId: string) => void) | undefined;
+  /** Find and replace on the Assignee column; absent for someone who may not. */
+  onReplaceAssignee?: (() => void) | undefined;
 }) {
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so clicking the pin button
@@ -139,6 +142,7 @@ export function ColumnHeaderTable({
         canEdit && onEditField && field.startsWith('custom:')
           ? () => onEditField(field.slice('custom:'.length))
           : undefined,
+      onReplaceAssignee: canEdit && field === SystemField.ASSIGNEE ? onReplaceAssignee : undefined,
       onSort: queryable?.isSortable && onSort ? (direction) => onSort(field, direction) : undefined,
       onFilter: !isTitle && queryable?.isFilterable && onFilter ? () => onFilter(field) : undefined,
       onGroup:

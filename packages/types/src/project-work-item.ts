@@ -266,3 +266,25 @@ export interface BulkWorkItemResult {
   /** Every row touched, in the order it was named, as it now stands. */
   items: ProjectWorkItem[];
 }
+
+/**
+ * Asana's "Find and replace" on the Assignee column: the project's rows
+ * assigned to one person, handed to another or to nobody.
+ */
+export interface ReplaceAssigneePayload {
+  fromUserId: string;
+  /** Null takes the person off the rows without giving them to anyone. */
+  toUserId: string | null;
+  /** Done tasks and resolved tickets as well. Absent means open rows only. */
+  includeCompleted?: boolean;
+  /** Count the rows without changing any. */
+  dryRun?: boolean;
+  correlationId?: string;
+}
+
+export interface ReplaceAssigneeResult {
+  /** Rows this request handed over. */
+  replaced: number;
+  /** Rows still assigned to `fromUserId`, for the next request to take. */
+  remaining: number;
+}
