@@ -108,6 +108,15 @@ describe('Automation versions (e2e)', () => {
       .send({ name: 'Intake' })
       .expect(201);
     const sections = project.body.data.sections as { id: string }[];
+    // On the project, so its rules may assign them.
+    await context.prisma.projectMember.create({
+      data: {
+        projectId: project.body.data.id as string,
+        userId: member.userId,
+        workspaceId,
+        role: 'EDITOR',
+      },
+    });
 
     const task = await request(server())
       .post(url(`/workspaces/${workspaceId}/tasks`))

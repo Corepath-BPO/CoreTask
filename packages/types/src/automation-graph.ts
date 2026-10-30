@@ -236,6 +236,13 @@ export interface AutomationMetadata {
   priorities: { id: string; name: string; colorToken: string }[];
   members: { id: string; name: string; email: string; avatarUrl: string | null }[];
   /**
+   * Who a step may give work to — "Assign to", a checklist subtask, a new
+   * task: the project's members and the workspace's owner, the list the
+   * runner holds a rule to. Optional only so a client built before the limit
+   * keeps reading the response; without it, `members`.
+   */
+  assignees?: { id: string; name: string; email: string; avatarUrl: string | null }[];
+  /**
    * The workspace's teams, for the step that makes one responsible for the
    * task. Optional only so a client built before teams were offered keeps
    * reading the response.

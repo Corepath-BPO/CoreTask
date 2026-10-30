@@ -120,6 +120,12 @@ describe('Project work items (e2e)', () => {
       .set('Authorization', `Bearer ${actor.token}`)
       .send(body);
 
+  /** Makes someone a member of the scope's project, who may then be given its work. */
+  const joinProject = (scope: Scope, userId: string) =>
+    context.prisma.projectMember.create({
+      data: { projectId: scope.projectId, userId, workspaceId: scope.workspaceId, role: 'EDITOR' },
+    });
+
   // -------------------------------------------------------------------------
   describe('creating', () => {
     it('creates a task through the shared endpoint', async () => {
@@ -790,6 +796,7 @@ describe('Project work items (e2e)', () => {
 
     it('hands a person’s open rows to someone else, with a story each', async () => {
       const scope = await setupScope();
+      await joinProject(scope, scope.member.userId);
       const task = await assigned(scope, 'Fix the boiler', scope.member.userId);
       const ticket = await assigned(scope, 'Printer down', scope.member.userId, 'TICKET');
       const done = await assigned(scope, 'Old work', scope.member.userId);
@@ -822,6 +829,7 @@ describe('Project work items (e2e)', () => {
 
     it('takes completed rows too when asked, and can leave them with nobody', async () => {
       const scope = await setupScope();
+      await joinProject(scope, scope.member.userId);
       const done = await assigned(scope, 'Old work', scope.member.userId);
       await context.prisma.task.update({ where: { id: done }, data: { completedAt: new Date() } });
 
@@ -862,6 +870,7 @@ describe('Project work items (e2e)', () => {
 
     it('refuses the same person on both sides, and someone outside the workspace', async () => {
       const scope = await setupScope();
+      await joinProject(scope, scope.member.userId);
       await assigned(scope, 'Fix the boiler', scope.member.userId);
 
       await replace(scope, {
@@ -877,6 +886,67 @@ describe('Project work items (e2e)', () => {
         { fromUserId: scope.member.userId, toUserId: scope.owner.userId },
         scope.outsider,
       ).expect(403);
+    });
+
+    it('hands nothing to someone in the workspace but not in the project', async () => {
+      const scope = await setupScope();
+      const task = await assigned(scope, 'Fix the boiler', scope.owner.userId);
+
+      const refused = await replace(scope, {
+        fromUserId: scope.owner.userId,
+        toUserId: scope.member.userId,
+      }).expect(400);
+
+      expect(refused.body.error.message).toBe(
+        'Only members of this project can be assigned its work.',
+      );
+      expect(await assigneeOf(task)).toBe(scope.owner.userId);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('the assignee limit', () => {
+    const update = (scope: Scope, id: string, body: Record<string, unknown>) =>
+      request(server())
+        .patch(`${itemsUrl(scope)}/${id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send(body);
+
+    it('gives work only to the project’s members, as the picker offers', async () => {
+      const scope = await setupScope();
+
+      // In the workspace, not in the project.
+      await create(scope, {
+        type: 'TASK',
+        title: 'Fix the boiler',
+        assigneeIds: [scope.member.userId],
+      }).expect(400);
+
+      await joinProject(scope, scope.member.userId);
+      const created = await create(scope, {
+        type: 'TASK',
+        title: 'Fix the boiler',
+        assigneeIds: [scope.member.userId],
+      }).expect(201);
+      expect(created.body.data.assignees[0].id).toBe(scope.member.userId);
+    });
+
+    it('refuses a new assignee from outside, but keeps one given before the limit', async () => {
+      const scope = await setupScope();
+      const task = await create(scope, { type: 'TASK', title: 'Fix the boiler' }).expect(201);
+      const id = task.body.data.id as string;
+
+      await update(scope, id, { assigneeIds: [scope.member.userId] }).expect(400);
+
+      // Assigned before the limit, or brought across from Asana: an edit of
+      // anything else leaves them be.
+      await context.prisma.task.update({
+        where: { id },
+        data: { assigneeId: scope.member.userId },
+      });
+      const renamed = await update(scope, id, { title: 'Fix the boiler today' }).expect(200);
+      expect(renamed.body.data.assignees[0].id).toBe(scope.member.userId);
+      await update(scope, id, { assigneeIds: [scope.member.userId] }).expect(200);
     });
   });
 

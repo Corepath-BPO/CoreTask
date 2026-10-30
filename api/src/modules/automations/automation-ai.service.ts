@@ -13,6 +13,7 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../database/prisma.service';
 import { AiClient, AiUnavailableError, type AiTool } from '../../integrations/ai/ai-client';
+import { assignableIds } from '../project-access/assignable';
 
 import {
   choiceTool,
@@ -605,14 +606,19 @@ export class AutomationAiService {
     });
 
     const [members, sections, statuses, priorities, fields] = await Promise.all([
+      // Only whom "Assign to" may give the task: the project's members and
+      // the owner. Anyone else would be a choice the step then refuses.
       may(AiPermission.ASSIGN)
-        ? this.prisma.workspaceMember
-            .findMany({
+        ? Promise.all([
+            this.prisma.workspaceMember.findMany({
               where: { workspaceId: rule.workspaceId, user: { isServiceAccount: false } },
               select: { user: { select: { id: true, name: true } } },
               take: 200,
-            })
-            .then((rows) => rows.map((row) => row.user))
+            }),
+            assignableIds(this.prisma, rule.workspaceId, [rule.projectId]),
+          ]).then(([rows, assignable]) =>
+            rows.map((row) => row.user).filter((user) => assignable?.has(user.id) ?? true),
+          )
         : [],
       may(AiPermission.SECTION)
         ? this.prisma.section.findMany({

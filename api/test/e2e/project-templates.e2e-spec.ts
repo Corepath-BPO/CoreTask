@@ -67,6 +67,11 @@ describe('Project templates and duplicates (e2e)', () => {
       .expect(201);
     const projectId = created.body.data.id as string;
     const base = `/workspaces/${workspaceId}/projects/${projectId}`;
+    // Bea works on Leasing, so its tasks may be hers — and a copy that brings
+    // the members along brings her assignment with them.
+    await context.prisma.projectMember.create({
+      data: { projectId, userId: member.userId, workspaceId, role: 'EDITOR' },
+    });
 
     const legal = await request(server())
       .post(url(`${base}/sections`))

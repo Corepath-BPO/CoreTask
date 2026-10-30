@@ -1,4 +1,4 @@
-import { AutomationNodeType } from '@coretask/contracts';
+import { AutomationAction, AutomationNodeType, subtaskEntries } from '@coretask/contracts';
 import type { AutomationNode, Prisma } from '@prisma/client';
 
 /**
@@ -60,6 +60,35 @@ export function readSnapshot(value: Prisma.JsonValue | null | undefined): Snapsh
   }
 
   return nodes;
+}
+
+/**
+ * Everyone a version's steps give work to: "Assign to", the people its
+ * checklist subtasks go to, and a new task's assignee. A condition that only
+ * names someone ("is assigned to Earl") gives nobody anything.
+ */
+export function ruleAssignees(nodes: readonly SnapshotNode[]): string[] {
+  const people = new Set<string>();
+  for (const node of nodes) {
+    if (node.nodeType !== AutomationNodeType.ACTION) continue;
+    const config = (node.configuration ?? {}) as Record<string, unknown>;
+    switch (node.subtype) {
+      case AutomationAction.ASSIGN_USER:
+        add(people, config['userId'] ?? config['assigneeId']);
+        break;
+      case AutomationAction.CREATE_TASK:
+        add(people, config['assigneeId']);
+        break;
+      case AutomationAction.CREATE_SUBTASK:
+        for (const entry of subtaskEntries(config)) add(people, entry.assigneeId);
+        break;
+    }
+  }
+  return [...people];
+}
+
+function add(people: Set<string>, value: unknown): void {
+  if (typeof value === 'string' && value !== '') people.add(value);
 }
 
 /** What a version is triggered by: what it was published with. */

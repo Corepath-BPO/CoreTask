@@ -98,6 +98,17 @@ describe('Item activity (e2e)', () => {
     });
   };
 
+  /** Makes someone a member of the scope's project, who may then be given its work. */
+  const joinProject = (scope: Scope, actor: Actor) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: actor.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
+
   const feedOf = async (
     scope: Scope,
     actor: Actor = scope.owner,
@@ -134,6 +145,7 @@ describe('Item activity (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
 
       await patchTask(scope, {
         assigneeId: ada.userId,
@@ -307,6 +319,7 @@ describe('Item activity (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
       await patchTask(scope, { assigneeId: ada.userId }).expect(200);
 
       await patchTask(scope, { title: 'Quiet rename' }).expect(200);
@@ -338,6 +351,7 @@ describe('Item activity (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
       await patchTask(scope, { assigneeId: ada.userId }).expect(200);
 
       await request(server())

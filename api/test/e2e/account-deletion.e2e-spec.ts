@@ -148,6 +148,10 @@ describe('Deleting an account (e2e)', () => {
         await as(bob).post(`/workspaces/${bobs}/projects`, { name: 'Shared' }).expect(201)
       ).body.data;
       const sectionId = project.sections[0].id as string;
+      // In the project, so Bob may give her its work.
+      await context.prisma.projectMember.create({
+        data: { projectId: project.id, userId: ada.userId, workspaceId: bobs, role: 'EDITOR' },
+      });
       const open = (
         await as(bob)
           .post(`/workspaces/${bobs}/tasks`, { title: 'Open', sectionId, assigneeId: ada.userId })

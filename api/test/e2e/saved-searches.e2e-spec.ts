@@ -62,6 +62,10 @@ describe('Advanced search (e2e)', () => {
     const maintenance = await project('Maintenance');
     const leasing = await project('Leasing');
     const board = await project('Board only', 'PRIVATE');
+    // The member is given the leak, so is on the (public) project that holds it.
+    await context.prisma.projectMember.create({
+      data: { projectId: maintenance, userId: member.userId, workspaceId, role: 'EDITOR' },
+    });
 
     const task = async (
       who: { auth: Record<string, string> },

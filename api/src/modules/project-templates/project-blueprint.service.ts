@@ -27,6 +27,7 @@ import {
   type RuleSnapshot,
 } from '../automations/library/automation-templates.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { assignableIds } from '../project-access/assignable';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { ProjectsService } from '../projects/projects.service';
 
@@ -311,8 +312,6 @@ export class ProjectBlueprintService {
         })
       ).map((row) => row.userId),
     );
-    const person = (id: string | null) => (id && members.has(id) ? id : null);
-
     if (blueprint.members.length > 0) {
       await this.prisma.projectMember.createMany({
         data: blueprint.members
@@ -328,6 +327,16 @@ export class ProjectBlueprintService {
       });
     }
 
+    const person = (id: string | null) => (id && members.has(id) ? id : null);
+    // Work here goes only to the new project's members and the owner, as
+    // anywhere else: assignees brought without their membership are left
+    // off. A people field may still name anyone in the workspace.
+    const assignable = await assignableIds(this.prisma, workspaceId, [projectId]);
+    const assignee = (id: string | null) => {
+      const kept = person(id);
+      return kept && (assignable?.has(kept) ?? true) ? kept : null;
+    };
+
     if (blueprint.taskTemplates.length > 0) {
       await this.prisma.taskTemplate.createMany({
         data: blueprint.taskTemplates.map((template) => ({
@@ -339,14 +348,17 @@ export class ProjectBlueprintService {
           description: template.description,
           kind: template.kind,
           priority: template.priority,
-          assigneeId: person(template.assigneeId),
+          assigneeId: assignee(template.assigneeId),
           dueInDays: template.dueInDays,
           subtasks: (template.subtasks ?? []) as Prisma.InputJsonValue,
         })),
       });
     }
 
-    await this.writeTasks(workspaceId, projectId, actor, blueprint, sectionIds, person, options);
+    await this.writeTasks(workspaceId, projectId, actor, blueprint, sectionIds, options, {
+      person,
+      assignee,
+    });
 
     // Rules last, so their sections and fields can be matched by name.
     const result: StartedProject = { projectId, rulesNeedingAttention: [], rulesSkipped: 0 };
@@ -414,9 +426,15 @@ export class ProjectBlueprintService {
     actor: ActorContext,
     blueprint: Blueprint,
     sectionIds: readonly string[],
-    person: (id: string | null) => string | null,
     options: StartOptions,
+    people: {
+      /** Someone still in the workspace, for a people field. */
+      person: (id: string | null) => string | null;
+      /** Someone work in the new project may go to, for an assignee. */
+      assignee: (id: string | null) => string | null;
+    },
   ): Promise<void> {
+    const { person, assignee } = people;
     if (blueprint.tasks.length === 0) return;
 
     // Workspace-wide statuses travel; a status the old project defined for
@@ -475,7 +493,7 @@ export class ProjectBlueprintService {
           completedAt: done ? new Date() : null,
           priority: task.priority,
           priorityDefinitionId: task.priorityDefinitionId,
-          assigneeId: person(task.assigneeId),
+          assigneeId: assignee(task.assigneeId),
           estimatedMinutes: task.estimatedMinutes,
           ...(task.recurrence ? { recurrence: task.recurrence as Prisma.InputJsonValue } : {}),
           startDate: day(task.startOffset),

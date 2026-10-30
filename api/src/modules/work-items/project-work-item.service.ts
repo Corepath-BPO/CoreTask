@@ -28,6 +28,7 @@ import {
 } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import { assertAssignable } from '../project-access/assignable';
 import { taskSiblingsIn } from '../tasks/task-projects';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { planPlacement } from '../../common/utils/position.util';
@@ -279,6 +280,8 @@ export class ProjectWorkItemService {
       );
     }
 
+    await assertAssignable(this.prisma, workspaceId, [projectId], payload.assigneeIds ?? []);
+
     const sectionId = await this.resolveSection(projectId, payload.sectionId);
     const position = await this.nextPosition(workspaceId, projectId, sectionId, payload.afterId);
 
@@ -374,6 +377,13 @@ export class ProjectWorkItemService {
     payload: UpdateWorkItemPayload,
   ): Promise<ProjectWorkItem> {
     const before = await this.getById(workspaceId, projectId, workItemId);
+
+    // Only a new assignee is checked: a task can keep one given before the
+    // limit, or brought across from Asana, through any other edit.
+    const assignee = payload.assigneeIds === undefined ? undefined : payload.assigneeIds[0];
+    if (assignee && assignee !== before.assignees[0]?.id) {
+      await assertAssignable(this.prisma, workspaceId, projectsOf(before), [assignee]);
+    }
 
     const updated =
       before.type === WorkItemType.TICKET
@@ -1098,4 +1108,13 @@ export type WorkItemPrismaClient = Prisma.TransactionClient;
 /** A task's estimate, off its details; a ticket carries none. */
 function estimateOf(item: ProjectWorkItem): number | null {
   return item.details.kind === 'TASK' ? item.details.estimatedMinutes : null;
+}
+
+/** Every project an item is in: where it was read, its home, and those it is linked into. */
+function projectsOf(item: ProjectWorkItem): (string | undefined)[] {
+  return [
+    item.projectId,
+    item.homeProjectId,
+    ...(item.memberships ?? []).map((membership) => membership.projectId),
+  ];
 }

@@ -60,6 +60,7 @@ import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { FormulaValuesService } from '../custom-fields/formula-values.service';
 import { FollowersService } from '../followers/followers.service';
 import { taskLink, taskRef } from '../followers/item-ref';
+import { assertAssignable } from '../project-access/assignable';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
@@ -374,6 +375,7 @@ export class TasksService {
       : await this.resolvePlacement(workspaceId, actor, dto);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
     await this.assertAssigneeCanSee(workspaceId, placement.projectId, dto.assigneeId);
+    await assertAssignable(this.prisma, workspaceId, [placement.projectId], [dto.assigneeId]);
 
     const parent = dto.parentTaskId
       ? await this.requireTask(workspaceId, dto.parentTaskId, actor, WorkspaceRole.MEMBER)
@@ -525,6 +527,16 @@ export class TasksService {
     const existing = await this.requireTask(workspaceId, taskId, actor, WorkspaceRole.MEMBER);
     await this.assertAssigneeIsMember(workspaceId, dto.assigneeId);
     await this.assertAssigneeCanSee(workspaceId, existing.projectId, dto.assigneeId);
+    // A new assignee only: one given before the limit, or brought across from
+    // Asana, stays through any other edit.
+    if (dto.assigneeId && dto.assigneeId !== existing.assigneeId) {
+      await assertAssignable(
+        this.prisma,
+        workspaceId,
+        [existing.projectId, ...(await linkedProjectIds(this.prisma, taskId))],
+        [dto.assigneeId],
+      );
+    }
     await this.assertTeamInWorkspace(workspaceId, dto.teamId);
 
     const data: Prisma.TaskUpdateInput = {};
