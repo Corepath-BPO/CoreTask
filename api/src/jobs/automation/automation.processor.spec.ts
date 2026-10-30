@@ -22,7 +22,7 @@ describe('AutomationProcessor', () => {
 
   const webhooks = { enqueueRuleSend: jest.fn().mockResolvedValue(undefined) };
   const emails = { enqueueMessage: jest.fn().mockResolvedValue(undefined) };
-  const config = { http: { webUrl: 'http://localhost:5173,http://preview.test' } };
+  const config = { webOrigin: 'http://localhost:5173' };
 
   const build = (events: unknown[]) => {
     const runner = {

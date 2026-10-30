@@ -54,7 +54,7 @@ export class SsoResponder {
   }
 
   get webUrl(): string {
-    return this.config.sso.webUrl;
+    return this.config.webOrigin;
   }
 
   remember(response: Response, state: SsoState): void {

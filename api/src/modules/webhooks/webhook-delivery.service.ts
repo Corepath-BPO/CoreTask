@@ -410,7 +410,7 @@ export class WebhookDeliveryService {
     return {
       projectName: project?.name ?? null,
       sectionName: section?.name ?? null,
-      webUrl: this.config.http.webUrl,
+      webUrl: this.config.webOrigin,
     };
   }
 
