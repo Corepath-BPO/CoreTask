@@ -1,4 +1,5 @@
 export type * from './account-security.js';
+export type * from './admin.js';
 export type * from './activity.js';
 export type * from './automation-graph.js';
 export type * from './automation-rule.js';

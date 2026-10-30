@@ -294,7 +294,7 @@ export class TeamsService {
   }
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
-    const membership = await this.members.findMembership(workspaceId, userId);
+    const membership = await this.members.findActiveMembership(workspaceId, userId);
 
     if (!membership) {
       throw AppException.badRequest(

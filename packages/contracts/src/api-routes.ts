@@ -103,6 +103,20 @@ export const ApiRoutes = {
     transferOwnership: (workspaceId: string, memberId: string) =>
       `/workspaces/${workspaceId}/members/${memberId}/transfer-ownership`,
   },
+  /** The admin console: a workspace's super admins and its owner only. */
+  admin: {
+    overview: (workspaceId: string) => `/workspaces/${workspaceId}/admin/overview`,
+    members: (workspaceId: string) => `/workspaces/${workspaceId}/admin/members`,
+    deactivate: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/admin/members/${memberId}/deactivate`,
+    reactivate: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/admin/members/${memberId}/reactivate`,
+    remove: (workspaceId: string, memberId: string) =>
+      `/workspaces/${workspaceId}/admin/members/${memberId}/remove`,
+    teams: (workspaceId: string) => `/workspaces/${workspaceId}/admin/teams`,
+    invitationLink: (workspaceId: string, invitationId: string) =>
+      `/workspaces/${workspaceId}/admin/invitations/${invitationId}/link`,
+  },
   /**
    * Nested under the workspace on purpose: the `:workspaceId` segment is what
    * `WorkspaceMemberGuard` reads, so tenant isolation comes from the URL shape

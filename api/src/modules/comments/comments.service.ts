@@ -568,7 +568,7 @@ export class CommentsService {
     if (ids.length === 0) return [];
 
     const members = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId, userId: { in: ids } },
+      where: { workspaceId, userId: { in: ids }, deactivatedAt: null },
       select: { userId: true },
     });
 

@@ -25,8 +25,10 @@ datasource db {
 // Enums
 // ---------------------------------------------------------------------------
 
+/// SUPER_ADMIN runs the admin console; the owner counts as one as well.
 enum WorkspaceRole {
   OWNER
+  SUPER_ADMIN
   ADMIN
   MANAGER
   MEMBER
@@ -156,6 +158,8 @@ enum ActivityAction {
   MEMBER_ADDED
   MEMBER_REMOVED
   MEMBER_ROLE_CHANGED
+  MEMBER_DEACTIVATED
+  MEMBER_REACTIVATED
   FIELD_CHANGED
   ATTACHED
   DETACHED
@@ -270,6 +274,7 @@ model User {
   asanaLiveSyncsEnabled      AsanaLiveSync[]          @relation("AsanaLiveSyncEnabledBy")
   memberships                WorkspaceMember[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
+  deactivatedMembers         WorkspaceMember[]        @relation("MemberDeactivatedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
   ledProjects                Project[]                @relation("ProjectLead")
   projectMemberships         ProjectMember[]          @relation("ProjectMemberships")
@@ -804,20 +809,26 @@ model WorkspaceDomain {
 }
 
 model WorkspaceMember {
-  id           String        @id @default(uuid(7)) @db.Uuid
-  workspaceId  String        @db.Uuid
-  userId       String        @db.Uuid
-  role         WorkspaceRole @default(MEMBER)
-  invitedById  String?       @db.Uuid
+  id              String        @id @default(uuid(7)) @db.Uuid
+  workspaceId     String        @db.Uuid
+  userId          String        @db.Uuid
+  role            WorkspaceRole @default(MEMBER)
+  invitedById     String?       @db.Uuid
   /// The person's My Tasks auto-sort rules here; contracts' `myTasksRulesOf` fills gaps.
-  myTasksRules Json          @default("{}")
-  joinedAt     DateTime      @default(now())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  myTasksRules    Json          @default("{}")
+  /// Set while a super admin has cut this person's access off. The row stays,
+  /// so their role, teams and projects come back on reactivation, and an
+  /// Asana sync or SSO sign-in that would add them again finds it and stops.
+  deactivatedAt   DateTime?
+  deactivatedById String?       @db.Uuid
+  joinedAt        DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  invitedBy User?     @relation("MemberInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy     User?     @relation("MemberInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  deactivatedBy User?     @relation("MemberDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, userId])
   @@index([userId])

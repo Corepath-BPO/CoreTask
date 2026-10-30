@@ -167,7 +167,7 @@ export class TaskTemplatesService {
     ].filter((id): id is string => Boolean(id));
     const [rows, assignable] = await Promise.all([
       this.prisma.workspaceMember.findMany({
-        where: { workspaceId, userId: { in: named } },
+        where: { workspaceId, userId: { in: named }, deactivatedAt: null },
         select: { userId: true },
       }),
       assignableIds(this.prisma, workspaceId, [projectId]),

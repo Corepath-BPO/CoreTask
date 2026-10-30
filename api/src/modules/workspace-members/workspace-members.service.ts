@@ -24,9 +24,17 @@ const MEMBER_USER_SELECT = {
 export class WorkspaceMembersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** The row, deactivated or not: what decides whether someone can be added again. */
   findMembership(workspaceId: string, userId: string): Promise<WorkspaceMember | null> {
     return this.prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId, userId } },
+    });
+  }
+
+  /** A membership that opens the workspace: what pointing work at someone needs. */
+  findActiveMembership(workspaceId: string, userId: string): Promise<WorkspaceMember | null> {
+    return this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId }, deactivatedAt: null },
     });
   }
 
@@ -41,6 +49,12 @@ export class WorkspaceMembersService {
 
     if (!membership) {
       throw AppException.forbidden('WORKSPACE_ACCESS_DENIED');
+    }
+
+    // Said plainly rather than as "not a member": they were let in once, and
+    // the reason they no longer are is theirs to know.
+    if (membership.deactivatedAt) {
+      throw AppException.forbidden('WORKSPACE_MEMBERSHIP_DEACTIVATED');
     }
 
     return membership;
@@ -79,10 +93,14 @@ export class WorkspaceMembersService {
     return membership;
   }
 
-  /** People only: the service account behind an API key is managed from the API keys page. */
+  /**
+   * People only: the service account behind an API key is managed from the API
+   * keys page. Deactivated members are left out, since nothing may be pointed
+   * at them; the admin console lists them.
+   */
   async listMembers(workspaceId: string): Promise<WorkspaceMemberDto[]> {
     const members = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId, user: { isServiceAccount: false } },
+      where: { workspaceId, deactivatedAt: null, user: { isServiceAccount: false } },
       orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
       include: { user: { select: MEMBER_USER_SELECT } },
     });

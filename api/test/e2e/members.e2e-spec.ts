@@ -485,7 +485,8 @@ describe('Member management (e2e)', () => {
           workspaceId_userId: { workspaceId: scope.workspaceId, userId: scope.owner.userId },
         },
       });
-      expect(previous.role).toBe(WorkspaceRole.ADMIN);
+      // Still a super admin, so the admin console stays open to them.
+      expect(previous.role).toBe(WorkspaceRole.SUPER_ADMIN);
     });
 
     /** There must always be exactly one owner, at every instant. */

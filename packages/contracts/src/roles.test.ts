@@ -74,6 +74,14 @@ describe('canManageMember', () => {
     }
   });
 
+  /** Super admins cannot demote each other; only the owner outranks them. */
+  it('puts a super admin above admins and below the owner', () => {
+    expect(canManageMember(WorkspaceRole.SUPER_ADMIN, WorkspaceRole.ADMIN)).toBe(true);
+    expect(canManageMember(WorkspaceRole.SUPER_ADMIN, WorkspaceRole.SUPER_ADMIN)).toBe(false);
+    expect(canManageMember(WorkspaceRole.OWNER, WorkspaceRole.SUPER_ADMIN)).toBe(true);
+    expect(canManageMember(WorkspaceRole.ADMIN, WorkspaceRole.SUPER_ADMIN)).toBe(false);
+  });
+
   it('never lets anyone touch the owner', () => {
     for (const role of Object.values(WorkspaceRole)) {
       expect(canManageMember(role, WorkspaceRole.OWNER)).toBe(false);
@@ -84,11 +92,18 @@ describe('canManageMember', () => {
 describe('grantableRoles', () => {
   it('gives an owner everything except ownership', () => {
     expect(grantableRoles(WorkspaceRole.OWNER)).toEqual([
+      WorkspaceRole.SUPER_ADMIN,
       WorkspaceRole.ADMIN,
       WorkspaceRole.MANAGER,
       WorkspaceRole.MEMBER,
       WorkspaceRole.GUEST,
     ]);
+  });
+
+  /** As in Asana, a super admin can make other super admins. */
+  it('lets a super admin grant their own role but not an admin', () => {
+    expect(grantableRoles(WorkspaceRole.SUPER_ADMIN)[0]).toBe(WorkspaceRole.SUPER_ADMIN);
+    expect(grantableRoles(WorkspaceRole.ADMIN)).not.toContain(WorkspaceRole.SUPER_ADMIN);
   });
 
   it('stops at the actor’s own rank', () => {
