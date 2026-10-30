@@ -99,7 +99,7 @@ const TALLIES: { key: string; one: string; many: string }[] = [
   { key: 'attachments', one: 'file', many: 'files' },
   { key: 'links', one: 'linked file', many: 'linked files' },
   { key: 'emptyFiles', one: 'empty file skipped', many: 'empty files skipped' },
-  { key: 'flattened', one: 'nested subtask moved up', many: 'nested subtasks moved up' },
+  { key: 'nested', one: 'subtask of a subtask', many: 'subtasks of subtasks' },
   {
     key: 'archived',
     one: 'task deleted in Asana, archived',

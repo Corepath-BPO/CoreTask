@@ -51,6 +51,7 @@ import type {
 import type { StorageService } from '../../integrations/storage/storage.service';
 import { normalizeRichText } from '../../common/utils/rich-text.util';
 import { readSnapshot, ruleAssignees } from '../automations/versions/rule-snapshot';
+import { descendantIds } from '../tasks/task-tree';
 
 import {
   LIMITS,
@@ -1908,9 +1909,10 @@ export class AsanaImportRun {
   // -------------------------------------------------------------------------
 
   /**
-   * Every top-level task's subtasks. CoreTask nests one level, so a subtask's
-   * own subtasks are placed under the top-level task too and counted as
-   * flattened.
+   * Every top-level task's subtasks, at every level: a subtask's own
+   * subtasks go under it, as Asana nests them. One that an earlier run laid
+   * under the top-level task, when CoreTask nested one level, moves back
+   * under its own parent.
    */
   private async importSubtasks(topLevel: DetailItem[]): Promise<DetailItem[]> {
     const items: DetailItem[] = [...topLevel];
@@ -1964,11 +1966,11 @@ export class AsanaImportRun {
           isSubtask: true,
         });
         counter.done += 1;
-        if (depth > 0) this.counter('flattened').done += 1;
+        if (depth > 0) this.counter('nested').done += 1;
 
         if ((child.num_subtasks ?? 0) > 0) {
           counter.total = (counter.total ?? 0) + (child.num_subtasks ?? 0);
-          await this.importChildren(child.gid, parentTaskId, projectId, items, depth + 1);
+          await this.importChildren(child.gid, taskId, projectId, items, depth + 1);
         }
       } catch (error) {
         this.fail('subtask', child, error);
@@ -2039,18 +2041,14 @@ export class AsanaImportRun {
     });
   }
 
-  /** A task Asana deleted, and its subtasks, archived; their refs say why. */
+  /** A task Asana deleted, and its subtasks at every level, archived; their refs say why. */
   private async archiveGone(task: {
     id: string;
     title: string;
     projectId: string | null;
   }): Promise<number> {
     const archivedAt = new Date();
-    const subtasks = await this.prisma.task.findMany({
-      where: { parentTaskId: task.id, archivedAt: null },
-      select: { id: true },
-    });
-    const ids = [task.id, ...subtasks.map((subtask) => subtask.id)];
+    const ids = [task.id, ...(await descendantIds(this.prisma, [task.id]))];
 
     const { count } = await this.prisma.task.updateMany({
       where: { id: { in: ids }, archivedAt: null },
@@ -2820,10 +2818,10 @@ export class AsanaImportRun {
   }
 
   /**
-   * Where a task Asana changed belongs here. A subtask goes under its top
-   * task, as a full run nests it. A top-level task stays in the project it is
-   * already in while Asana still has it there. Either keeps its place unless
-   * it moved, and goes last where it moved to.
+   * Where a task Asana changed belongs here. A subtask goes under its own
+   * parent, at whatever level, as a full run nests it. A top-level task stays
+   * in the project it is already in while Asana still has it there. Either
+   * keeps its place unless it moved, and goes last where it moved to.
    */
   private async livePlacement(task: AsanaTask, depth: number): Promise<Placement | null> {
     const existingId = this.ref('task', task.gid);
@@ -2843,19 +2841,12 @@ export class AsanaImportRun {
       if (!parentId) return null;
       const parent = await this.prisma.task.findUnique({
         where: { id: parentId },
-        select: { id: true, projectId: true, parentTaskId: true },
+        select: { id: true, projectId: true },
       });
       if (!parent) return null;
-      const top = parent.parentTaskId
-        ? await this.prisma.task.findUnique({
-            where: { id: parent.parentTaskId },
-            select: { id: true, projectId: true },
-          })
-        : parent;
-      if (!top) return null;
 
-      const placement = { projectId: top.projectId, sectionId: null, parentTaskId: top.id };
-      const stays = existing?.parentTaskId === top.id;
+      const placement = { projectId: parent.projectId, sectionId: null, parentTaskId: parent.id };
+      const stays = existing?.parentTaskId === parent.id;
       return { ...placement, position: stays ? null : await this.lastPosition(placement) };
     }
 

@@ -19,6 +19,7 @@ import {
   ArchiveRestore,
   ArrowRightToLine,
   Calendar,
+  ChevronRight,
   CircleCheck,
   CircleUserRound,
   Copy,
@@ -37,7 +38,7 @@ import {
   UserRound,
   Zap,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
@@ -787,6 +788,32 @@ function TaskDetailBody({
           </p>
         )}
 
+        {/* Asana's trail back up: subtasks nest to any depth, so the way out
+            of one is every task above it, the top-level task first. */}
+        {(task.ancestors?.length ?? 0) > 0 && (
+          <nav aria-label="Subtask of" className="text-xs text-muted-foreground">
+            Subtask of{' '}
+            {task.ancestors?.map((ancestor, index) => (
+              <Fragment key={ancestor.id}>
+                {index > 0 && (
+                  <ChevronRight className="inline size-3 align-[-2px]" aria-hidden="true" />
+                )}
+                {onOpenTask ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTask(ancestor.id)}
+                    className="cursor-pointer font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    {ancestor.title}
+                  </button>
+                ) : (
+                  <span className="font-medium text-foreground">{ancestor.title}</span>
+                )}
+              </Fragment>
+            ))}
+          </nav>
+        )}
+
         {task.duplicateOf && (
           <DuplicateBanner
             workspaceId={workspaceId}
@@ -1245,14 +1272,38 @@ function TaskDetailBody({
                 >
                   <CircleCheck className="size-5" aria-hidden="true" />
                 </button>
-                <span
-                  className={cn(
-                    'min-w-0 flex-1 truncate text-sm',
-                    done && 'text-muted-foreground line-through decoration-muted-foreground/50',
-                  )}
-                >
-                  {subtask.title}
-                </span>
+                {/* The name opens the subtask, as a row in Asana's pane does —
+                    the way down to subtasks of its own. */}
+                {onOpenTask ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTask(subtask.id)}
+                    className={cn(
+                      'min-w-0 flex-1 cursor-pointer truncate text-left text-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40',
+                      done && 'text-muted-foreground line-through decoration-muted-foreground/50',
+                    )}
+                  >
+                    {subtask.title}
+                  </button>
+                ) : (
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate text-sm',
+                      done && 'text-muted-foreground line-through decoration-muted-foreground/50',
+                    )}
+                  >
+                    {subtask.title}
+                  </span>
+                )}
+                {subtask.subtaskCount > 0 && (
+                  <span
+                    className="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground"
+                    aria-label={`${subtask.completedSubtaskCount} of ${subtask.subtaskCount} subtasks done`}
+                  >
+                    <ListChecks className="size-3.5" aria-hidden="true" />
+                    {subtask.completedSubtaskCount}/{subtask.subtaskCount}
+                  </span>
+                )}
                 <SubtaskTail
                   subtask={subtask}
                   canEdit={canEdit}

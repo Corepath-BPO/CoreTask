@@ -211,6 +211,12 @@ export interface TaskDetail extends Task {
   duplicateOf: { id: string; title: string } | null;
   /** The ticket this is a subtask of, for the link back to it. */
   parentTicket: { id: string; key: string; title: string } | null;
+  /**
+   * The tasks this is a subtask of, from the top-level task down to its
+   * parent — subtasks nest to any depth. Empty for a top-level task; absent
+   * from responses that do not carry it.
+   */
+  ancestors?: { id: string; title: string }[];
 }
 
 /** A project a task is in besides its home, with its section there. */

@@ -585,20 +585,36 @@ describe('AsanaImportRun', () => {
     expect(job.snapshot().counts['assigneesAddedToProjects']).toEqual({ done: 1 });
   });
 
-  it('nests subtasks one level, moving deeper ones up under the top task', async () => {
+  it('nests subtasks as Asana does, a subtask’s own under it', async () => {
     const context = await setUp();
     const { job } = await runImport(context);
 
-    const top = rows(context, 'task').find((row) => row['title'] === 'Fix the boiler') as Row;
-    const subtasks = rows(context, 'task').filter((row) => row['parentTaskId'] === top['id']);
-    expect(subtasks.map((row) => row['title']).sort()).toEqual([
-      'Check pressure',
-      'Write down the reading',
-    ]);
+    const titled = (title: string) =>
+      rows(context, 'task').find((row) => row['title'] === title) as Row;
+    const top = titled('Fix the boiler');
+    const check = titled('Check pressure');
+    const reading = titled('Write down the reading');
+    expect(check['parentTaskId']).toBe(top['id']);
+    expect(reading['parentTaskId']).toBe(check['id']);
     expect(
-      subtasks.every((row) => row['projectId'] === top['projectId'] && row['sectionId'] === null),
+      [check, reading].every(
+        (row) => row['projectId'] === top['projectId'] && row['sectionId'] === null,
+      ),
     ).toBe(true);
-    expect(job.snapshot().counts['flattened']).toEqual({ done: 1 });
+    expect(job.snapshot().counts['nested']).toEqual({ done: 1 });
+  });
+
+  it('moves a subtask an earlier run laid under the top task back under its parent', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const titled = (title: string) =>
+      rows(context, 'task').find((row) => row['title'] === title) as Row;
+    // As a run that nested one level left it.
+    titled('Write down the reading')['parentTaskId'] = titled('Fix the boiler')['id'];
+
+    await runImport(context);
+
+    expect(titled('Write down the reading')['parentTaskId']).toBe(titled('Check pressure')['id']);
   });
 
   it('keeps comments, not system history, crediting whoever wrote them', async () => {

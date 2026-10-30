@@ -131,10 +131,16 @@ describe('Project templates and duplicates (e2e)', () => {
       })
       .expect(201);
     const draftId = draft.body.data.id as string;
-    await request(server())
+    const clauses = await request(server())
       .post(items)
       .set(owner.auth)
       .send({ type: 'TASK', title: 'Check the clauses', parentId: draftId })
+      .expect(201);
+    // And a subtask of that subtask: they nest to any depth.
+    await request(server())
+      .post(items)
+      .set(owner.auth)
+      .send({ type: 'TASK', title: 'Check the break clause', parentId: clauses.body.data.id })
       .expect(201);
     await request(server())
       .put(url(`/workspaces/${workspaceId}/tasks/${draftId}/custom-fields/${fieldId}`))
@@ -187,7 +193,11 @@ describe('Project templates and duplicates (e2e)', () => {
     expect(draft?.customFieldValues).toEqual([
       expect.objectContaining({ customFieldId: scope.fieldId, textValue: 'L-204' }),
     ]);
-    expect(tasks.find((task) => task.title === 'Check the clauses')?.parentTaskId).toBe(draft?.id);
+    const clauses = tasks.find((task) => task.title === 'Check the clauses');
+    expect(clauses?.parentTaskId).toBe(draft?.id);
+    expect(tasks.find((task) => task.title === 'Check the break clause')?.parentTaskId).toBe(
+      clauses?.id,
+    );
     expect(tasks.find((task) => task.title === 'Collect deposit')?.status).toBe('DONE');
 
     // The rule watches the copy's own Legal review, and is live.

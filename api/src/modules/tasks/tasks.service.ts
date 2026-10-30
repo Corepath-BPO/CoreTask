@@ -65,6 +65,7 @@ import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTaskDto, MoveTaskDto, TaskListQueryDto, UpdateTaskDto } from './dto/task.dto';
 import { linkedProjectIds, taskSiblingsIn } from './task-projects';
+import { ancestorsOf, descendantIds } from './task-tree';
 import { spawnNextOccurrence } from './task-recurrence';
 import {
   taskDetailInclude,
@@ -222,8 +223,9 @@ export class TasksService {
    * fields, and a drill-down is not a view. Keeping them apart means expanding
    * a row cannot be made to reach outside the project by way of a filter.
    *
-   * Unpaged on purpose — nesting is one level deep and a parent with enough
-   * children to need paging is a parent that wants to be its own project.
+   * One level, as Asana's list expands a row: a subtask's own subtasks open
+   * in the task panel. Unpaged on purpose — a parent with enough children to
+   * need paging is a parent that wants to be its own project.
    */
   async listSubtasksForView(
     workspaceId: string,
@@ -314,18 +316,26 @@ export class TasksService {
 
     // The other projects, as far as the reader can see them.
     const linkIds = task.projectLinks.map((link) => link.project.id);
-    const visible = linkIds.length
-      ? new Set(
-          (
-            await this.prisma.project.findMany({
+    const [visible, ancestors, completed] = await Promise.all([
+      linkIds.length
+        ? this.prisma.project
+            .findMany({
               where: { AND: [{ id: { in: linkIds } }, this.access.projectWhere(actor)] },
               select: { id: true },
             })
-          ).map((row) => row.id),
-        )
-      : new Set<string>();
+            .then((rows) => new Set(rows.map((row) => row.id)))
+        : new Set<string>(),
+      // The trail back up, for "Subtask of": subtasks nest to any depth, and
+      // live in their parent's project, so the reader can see every one.
+      ancestorsOf(this.prisma, task),
+      // A subtask with its own subtasks shows how far along they are.
+      this.completedSubtaskCounts(task.subtasks.map((subtask) => subtask.id)),
+    ]);
 
-    return toTaskDetailDto(task, (projectId) => visible.has(projectId));
+    return {
+      ...toTaskDetailDto(task, (projectId) => visible.has(projectId), completed),
+      ancestors,
+    };
   }
 
   /**
@@ -352,8 +362,9 @@ export class TasksService {
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
     });
 
-    // Nesting stops at one level, so a subtask's own completed count is always 0.
-    return subtasks.map((subtask) => toTaskDto(subtask));
+    // A subtask can have its own, so each carries how many of those are done.
+    const completed = await this.completedSubtaskCounts(subtasks.map((subtask) => subtask.id));
+    return subtasks.map((subtask) => toTaskDto(subtask, completed.get(subtask.id) ?? 0));
   }
 
   async create(workspaceId: string, actor: ActorContext, dto: CreateTaskDto): Promise<Task> {
@@ -377,15 +388,10 @@ export class TasksService {
     await this.assertAssigneeCanSee(workspaceId, placement.projectId, dto.assigneeId);
     await assertAssignable(this.prisma, workspaceId, [placement.projectId], [dto.assigneeId]);
 
+    // A subtask may have subtasks of its own, to any depth, as Asana's may.
     const parent = dto.parentTaskId
       ? await this.requireTask(workspaceId, dto.parentTaskId, actor, WorkspaceRole.MEMBER)
       : null;
-
-    if (parent?.parentTaskId) {
-      // One level of nesting. Deeper trees need a different UI and a recursive
-      // rollup; allowing them silently would produce tasks nothing renders.
-      throw AppException.badRequest('BAD_REQUEST', 'A subtask cannot have its own subtasks.');
-    }
 
     const siblings = await this.siblings(
       workspaceId,
@@ -1100,10 +1106,10 @@ export class TasksService {
     const archivedAt = new Date();
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Archiving a parent takes its subtasks with it; leaving them visible
-      // under a hidden parent would strand them.
+      // Archiving a parent takes its subtasks with it, at every level; leaving
+      // them visible under a hidden parent would strand them.
       await tx.task.updateMany({
-        where: { parentTaskId: taskId, archivedAt: null },
+        where: { id: { in: await descendantIds(tx, [taskId]) }, archivedAt: null },
         data: { archivedAt },
       });
 

@@ -80,10 +80,10 @@ export class TasksController {
   @ApiOperation({
     summary: 'Create a task',
     description:
-      'A `sectionId` implies its project. Pass `parentTaskId` to create a subtask; nesting is one level deep.',
+      'A `sectionId` implies its project. Pass `parentTaskId` to create a subtask; a subtask may have subtasks of its own, to any depth.',
   })
   @ApiEnvelopeResponse(TaskDto, { status: 201 })
-  @ApiErrorResponseDoc(400, 'Section/project mismatch, unknown assignee, or nesting too deep')
+  @ApiErrorResponseDoc(400, 'Section/project mismatch, or an unknown assignee')
   @ApiErrorResponseDoc(422, 'Validation failed')
   create(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
