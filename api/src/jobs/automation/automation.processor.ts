@@ -66,7 +66,7 @@ export class AutomationProcessor extends WorkerHost {
     }
 
     // And for "Send an email": composed with the task's link, then queued.
-    const webUrl = (this.config.http.webUrl.split(',')[0] ?? '').trim();
+    const webUrl = this.config.webOrigin;
     for (const request of result.emails) {
       await this.emails.enqueueMessage(composeRuleEmail(request, webUrl));
     }

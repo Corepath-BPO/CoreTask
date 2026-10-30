@@ -230,7 +230,7 @@ export class WorkspaceDeletionService {
         where: { id: { in: userIds }, isActive: true, deletedAt: null },
         select: { email: true, name: true },
       });
-      const webUrl = this.config.corsOrigins[0] ?? this.config.http.webUrl;
+      const webUrl = this.config.webOrigin;
       await Promise.all(
         people.map((person) => {
           const message = workspaceDeletedEmail({
