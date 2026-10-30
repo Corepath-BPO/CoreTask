@@ -282,9 +282,10 @@ export class InvitationsService {
       metadata: { email: invitation.email },
     });
 
-    // `WEB_URL` may list several origins; the first is the app's own.
-    const webUrl = (this.config.corsOrigins[0] ?? this.config.http.webUrl).replace(/\/$/, '');
-    return { url: `${webUrl}/invitations/${token}`, expiresAt: expiresAt.toISOString() };
+    return {
+      url: `${this.config.webOrigin}/invitations/${token}`,
+      expiresAt: expiresAt.toISOString(),
+    };
   }
 
   async revoke(workspaceId: string, actorId: string, invitationId: string): Promise<void> {
