@@ -112,6 +112,8 @@ describe('links when WEB_URL lists several origins', () => {
             .fn()
             .mockResolvedValue({ email: 'ada@example.com', name: 'Ada', isServiceAccount: false }),
         },
+        // The dispatcher stays silent for a deactivated member; this one is active.
+        workspaceMember: { findUnique: jest.fn().mockResolvedValue({ deactivatedAt: null }) },
       } as never,
       { enqueueMessage } as never,
       config,
