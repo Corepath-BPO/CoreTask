@@ -136,6 +136,36 @@ describe('Repeating tasks (e2e)', () => {
     expect(await occurrences(scope)).toHaveLength(2);
   });
 
+  it('brings its open subtasks, at every level, to the next one, open again', async () => {
+    const scope = await setup();
+    await repeatWeekly(scope, '2030-01-07');
+    const subtask = (title: string, parentTaskId: string, status?: string) =>
+      request(server())
+        .post(url(`/workspaces/${scope.workspaceId}/tasks`))
+        .set(scope.auth)
+        .send({ title, parentTaskId, ...(status ? { status } : {}) })
+        .expect(201)
+        .then((response) => response.body.data.id as string);
+    const check = await subtask('Check the ledger', scope.taskId);
+    await subtask('Tick off March', check, 'DONE');
+
+    await request(server())
+      .patch(taskUrl(scope))
+      .set(scope.auth)
+      .send({ status: 'DONE' })
+      .expect(200);
+
+    const [, next] = await occurrences(scope);
+    const copiedCheck = await context.prisma.task.findFirstOrThrow({
+      where: { parentTaskId: next?.id },
+    });
+    const copiedMarch = await context.prisma.task.findFirstOrThrow({
+      where: { parentTaskId: copiedCheck.id },
+    });
+    expect(copiedCheck.title).toBe('Check the ledger');
+    expect(copiedMarch).toMatchObject({ title: 'Tick off March', completedAt: null });
+  });
+
   it('refuses a pattern it cannot follow, and stops repeating on null', async () => {
     const scope = await setup();
     await request(server())

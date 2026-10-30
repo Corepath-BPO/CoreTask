@@ -92,6 +92,7 @@ import {
 } from './automation-event.publisher';
 import { directComparison, numberComparison } from './condition-comparison';
 import { dropLinkToHome, endOfSection, leaveHome } from '../tasks/task-projects';
+import { descendantIds } from '../tasks/task-tree';
 import { spawnNextOccurrence } from '../tasks/task-recurrence';
 import { ticketLifecycle } from '../tickets/ticket-lifecycle';
 
@@ -2173,7 +2174,10 @@ export class AutomationRunnerService {
         // Subtasks that belong to no project are left as they are.
         if (before.projectId) {
           await this.prisma.task.updateMany({
-            where: { parentTaskId: task.id, projectId: before.projectId },
+            where: {
+              id: { in: await descendantIds(this.prisma, [task.id]) },
+              projectId: before.projectId,
+            },
             data: { projectId: project.id, sectionId },
           });
         }
@@ -2571,9 +2575,13 @@ export class AutomationRunnerService {
          */
         await this.updateTask(task, { projectId: null, sectionId: null }, rule, event);
 
-        // Its subtasks in this project leave with it, as they follow a move.
+        // Its subtasks in this project, at every level, leave with it, as they
+        // follow a move.
         await this.prisma.task.updateMany({
-          where: { parentTaskId: task.id, projectId: before.projectId },
+          where: {
+            id: { in: await descendantIds(this.prisma, [task.id]) },
+            projectId: before.projectId,
+          },
           data: { projectId: null, sectionId: null },
         });
 

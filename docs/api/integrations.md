@@ -87,8 +87,8 @@ POST /api/v1/workspaces/{workspaceId}/tasks/{taskId}/comments
 ```
 
 Break it into subtasks. A subtask is an ordinary task with a `parentTaskId`
-(one level deep), so it is completed and commented on exactly like its parent,
-by its own id:
+(and may have subtasks of its own, to any depth), so it is completed and
+commented on exactly like its parent, by its own id:
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/tasks

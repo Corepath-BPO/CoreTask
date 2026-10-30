@@ -1,5 +1,5 @@
 import { TASK_PRIORITIES, TASK_STATUSES } from '@coretask/contracts';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /** Swagger models mirroring `Task*` in `@coretask/types`. */
 
@@ -166,7 +166,11 @@ export class TaskSectionRefDto {
 }
 
 export class TaskDetailDto extends TaskDto {
-  @ApiProperty({ type: [TaskDto], description: 'One level deep; subtasks cannot nest further.' })
+  @ApiProperty({
+    type: [TaskDto],
+    description:
+      'Its direct subtasks. Subtasks nest to any depth: each says how many of its own it has.',
+  })
   subtasks!: TaskDto[];
 
   @ApiProperty({ type: TaskProjectRefDto, nullable: true })
@@ -184,6 +188,13 @@ export class TaskDetailDto extends TaskDto {
     example: null,
   })
   duplicateOf!: { id: string; title: string } | null;
+
+  @ApiPropertyOptional({
+    description:
+      'The tasks this is a subtask of, top-level task first, as `{ id, title }`. Empty for a top-level task.',
+    example: [],
+  })
+  ancestors?: { id: string; title: string }[];
 }
 
 export class TaskListSummaryDto {

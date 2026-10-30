@@ -2,6 +2,8 @@ import { TaskStatus, type Prisma, type PrismaClient } from '@prisma/client';
 
 import { appendPosition } from '../../common/utils/position.util';
 
+import { descendantIds } from './task-tree';
+
 /**
  * Multi-homing — a task in several projects.
  *
@@ -115,9 +117,9 @@ export async function leaveHome(db: Db, taskId: string): Promise<Placement | nul
       ...(placement ? { position: placement.position } : {}),
     },
   });
-  // Subtasks live with their parent's home.
+  // Subtasks live with their parent's home, at every level.
   await db.task.updateMany({
-    where: { parentTaskId: taskId },
+    where: { id: { in: await descendantIds(db, [taskId]) } },
     data: { projectId: placement?.projectId ?? null, sectionId: placement?.sectionId ?? null },
   });
 

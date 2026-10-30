@@ -111,8 +111,12 @@ export function toTaskDto(task: TaskWithRelations, completedSubtaskCount = 0): T
 export function toTaskDetailDto(
   task: TaskWithDetail,
   canSee: (projectId: string) => boolean = () => true,
+  /** Done subtasks under each subtask, for the ones that have their own. */
+  completedBelow: ReadonlyMap<string, number> = new Map(),
 ): TaskDetail {
-  const subtasks = task.subtasks.map((subtask) => toTaskDto(subtask));
+  const subtasks = task.subtasks.map((subtask) =>
+    toTaskDto(subtask, completedBelow.get(subtask.id) ?? 0),
+  );
 
   return {
     ...toTaskDto(task, subtasks.filter((subtask) => subtask.status === TaskStatus.DONE).length),

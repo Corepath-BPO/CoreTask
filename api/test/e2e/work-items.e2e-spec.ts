@@ -213,7 +213,7 @@ describe('Project work items (e2e)', () => {
       }).expect(400);
     });
 
-    it('refuses a subtask of a subtask', async () => {
+    it('makes a subtask of a subtask, as Asana does, in the parent’s project', async () => {
       const scope = await setupScope();
       const parent = await create(scope, { type: 'TASK', title: 'Parent' }).expect(201);
       const child = await create(scope, {
@@ -222,11 +222,42 @@ describe('Project work items (e2e)', () => {
         parentId: parent.body.data.id,
       }).expect(201);
 
-      await create(scope, {
+      const grandchild = await create(scope, {
         type: 'TASK',
         title: 'Grandchild',
         parentId: child.body.data.id,
-      }).expect(400);
+      }).expect(201);
+
+      expect(grandchild.body.data).toMatchObject({
+        parentId: child.body.data.id,
+        projectId: scope.projectId,
+      });
+    });
+
+    it('archives a task with its subtasks at every level', async () => {
+      const scope = await setupScope();
+      const parent = await create(scope, { type: 'TASK', title: 'Parent' }).expect(201);
+      const child = await create(scope, {
+        type: 'TASK',
+        title: 'Child',
+        parentId: parent.body.data.id,
+      }).expect(201);
+      const grandchild = await create(scope, {
+        type: 'TASK',
+        title: 'Grandchild',
+        parentId: child.body.data.id,
+      }).expect(201);
+
+      await request(server())
+        .post(`${itemsUrl(scope)}/bulk`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ workItemIds: [parent.body.data.id], archived: true })
+        .expect(201);
+
+      const row = await context.prisma.task.findUniqueOrThrow({
+        where: { id: grandchild.body.data.id as string },
+      });
+      expect(row.archivedAt).not.toBeNull();
     });
 
     it('writes an activity entry naming the type', async () => {

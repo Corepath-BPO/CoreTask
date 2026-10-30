@@ -296,18 +296,38 @@ describe('Tasks (e2e)', () => {
         .expect(404);
     });
 
-    it('refuses to nest more than one level deep', async () => {
+    it('nests a subtask’s own subtasks to any depth, with the trail back up', async () => {
       const scope = await setupScope();
       const parent = await createTask(scope, { title: 'Parent' });
       const child = await createTask(scope, { title: 'Child', parentTaskId: parent.id });
+      const grandchild = await createTask(scope, { title: 'Grandchild', parentTaskId: child.id });
+      await createTask(scope, { title: 'Done below', parentTaskId: grandchild.id, status: 'DONE' });
+      await createTask(scope, { title: 'Open below', parentTaskId: grandchild.id });
 
-      const response = await request(server())
-        .post(tasksUrl(scope))
-        .set('Authorization', `Bearer ${scope.owner.token}`)
-        .send({ title: 'Grandchild', parentTaskId: child.id })
-        .expect(400);
+      const detail = (id: string) =>
+        request(server())
+          .get(`${tasksUrl(scope)}/${id}`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .expect(200);
 
-      expect(response.body.error.message).toMatch(/cannot have its own subtasks/i);
+      const deepest = await detail(grandchild.id);
+      expect(deepest.body.data.ancestors).toEqual([
+        { id: parent.id, title: 'Parent' },
+        { id: child.id, title: 'Child' },
+      ]);
+      expect(deepest.body.data.subtaskCount).toBe(2);
+      expect(deepest.body.data.completedSubtaskCount).toBe(1);
+
+      // A subtask row in its parent's panel says how far its own have got.
+      const middle = await detail(child.id);
+      expect(middle.body.data.subtasks).toEqual([
+        expect.objectContaining({
+          title: 'Grandchild',
+          subtaskCount: 2,
+          completedSubtaskCount: 1,
+        }),
+      ]);
+      expect((await detail(parent.id)).body.data.ancestors).toEqual([]);
     });
   });
 
@@ -746,18 +766,21 @@ describe('Tasks (e2e)', () => {
       expect(restored.body.data.archivedAt).toBeNull();
     });
 
-    it('archives subtasks along with their parent', async () => {
+    it('archives subtasks along with their parent, at every level', async () => {
       const scope = await setupScope();
       const parent = await createTask(scope, { title: 'Parent' });
       const child = await createTask(scope, { title: 'Child', parentTaskId: parent.id });
+      const grandchild = await createTask(scope, { title: 'Grandchild', parentTaskId: child.id });
 
       await request(server())
         .delete(`${tasksUrl(scope)}/${parent.id}`)
         .set('Authorization', `Bearer ${scope.owner.token}`)
         .expect(200);
 
-      const row = await context.prisma.task.findUniqueOrThrow({ where: { id: child.id } });
-      expect(row.archivedAt).not.toBeNull();
+      for (const id of [child.id, grandchild.id]) {
+        const row = await context.prisma.task.findUniqueOrThrow({ where: { id } });
+        expect(row.archivedAt).not.toBeNull();
+      }
     });
 
     it('keeps the row rather than deleting it', async () => {

@@ -12,6 +12,7 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { normalizeRichText } from '../../../common/utils/rich-text.util';
 import { initialSchedule, resolveSchedule } from '../../../common/utils/schedule.util';
 import { PrismaService } from '../../../database/prisma.service';
+import { descendantIds } from '../../tasks/task-tree';
 import { taskToWorkItem, workItemTaskInclude } from '../lib/work-item.mapper';
 
 type TaskRow = Prisma.TaskGetPayload<{ include: typeof workItemTaskInclude }>;
@@ -141,20 +142,14 @@ export class TaskWorkItemRepository {
             workspaceId,
             OR: [{ projectId }, { projectLinks: { some: { projectId } } }],
           },
-          select: { id: true, parentTaskId: true, projectId: true, sectionId: true },
+          select: { id: true, projectId: true, sectionId: true },
         })
       : null;
     const linkedParent = parent !== null && parent.projectId !== projectId;
 
+    // A subtask's own subtasks are welcome, to any depth, as Asana's are.
     if (payload.parentId && !parent) {
       throw AppException.badRequest('BAD_REQUEST', 'That parent is not in this project.');
-    }
-
-    if (parent?.parentTaskId) {
-      // One level of nesting, the same rule the task module enforces. A deeper
-      // tree needs a recursive rollup and a UI that can draw it; allowing it
-      // quietly produces rows nothing renders.
-      throw AppException.badRequest('BAD_REQUEST', 'A subtask cannot have its own subtasks.');
     }
 
     await this.assertAssigneesAreMembers(workspaceId, payload.assigneeIds);
@@ -361,9 +356,10 @@ export class TaskWorkItemRepository {
         });
       }
 
-      // A hidden parent must not leave visible children stranded under it.
+      // A hidden parent must not leave visible children stranded under it,
+      // at any level.
       await tx.task.updateMany({
-        where: { parentTaskId: taskId, archivedAt: null },
+        where: { id: { in: await descendantIds(tx, [taskId]) }, archivedAt: null },
         data: { archivedAt },
       });
 

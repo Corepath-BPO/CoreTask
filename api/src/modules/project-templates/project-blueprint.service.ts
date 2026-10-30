@@ -99,6 +99,9 @@ export interface StartOptions {
   keepProgress: boolean;
 }
 
+/** A task as a blueprint reads it: the row and its field values. */
+type TaskRow = Prisma.TaskGetPayload<{ include: { customFieldValues: true } }>;
+
 /** The calendar day of an instant, as UTC midnight milliseconds. */
 const dayOf = (date: Date) =>
   Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -178,17 +181,14 @@ export class ProjectBlueprintService {
             where: { projectId, parentTaskId: null, parentTicketId: null, archivedAt: null },
             orderBy: [{ position: 'asc' }, { id: 'asc' }],
             take: MAX_BLUEPRINT_TASKS,
-            include: {
-              customFieldValues: true,
-              subtasks: {
-                where: { archivedAt: null },
-                orderBy: [{ position: 'asc' }, { id: 'asc' }],
-                include: { customFieldValues: true },
-              },
-            },
+            include: { customFieldValues: true },
           })
         : [],
     ]);
+    // Every level of subtask, hung under its parent: they nest to any depth.
+    const below = has(BlueprintPart.SUBTASKS)
+      ? await this.subtaskTree(tasks.map((task) => task.id))
+      : new Map<string, TaskRow[]>();
 
     const fieldIds = fields.map((field) => field.customFieldId);
     const fieldSet = new Set(fieldIds);
@@ -203,7 +203,6 @@ export class ProjectBlueprintService {
     const offset = (date: Date | null) =>
       has(BlueprintPart.DATES) && date ? Math.round((dayOf(date) - anchor) / DAY_MS) : null;
 
-    type TaskRow = (typeof tasks)[number] | (typeof tasks)[number]['subtasks'][number];
     const toBlueprintTask = (task: TaskRow, subtasks: BlueprintTask[]): BlueprintTask => ({
       title: task.title,
       description: task.description,
@@ -256,14 +255,9 @@ export class ProjectBlueprintService {
         dueInDays: template.dueInDays,
         subtasks: template.subtasks,
       })),
-      tasks: tasks.map((task) =>
-        toBlueprintTask(
-          task,
-          has(BlueprintPart.SUBTASKS)
-            ? task.subtasks.map((subtask) => toBlueprintTask(subtask, []))
-            : [],
-        ),
-      ),
+      tasks: tasks.map(function withSubtasks(task: TaskRow): BlueprintTask {
+        return toBlueprintTask(task, (below.get(task.id) ?? []).map(withSubtasks));
+      }),
       members: members.map((member) => ({ userId: member.userId, role: member.role })),
     };
   }
@@ -420,6 +414,32 @@ export class ProjectBlueprintService {
     });
   }
 
+  /**
+   * The open subtasks under these tasks at every level, each parent's in
+   * board order. A level per query; a task seen twice — a loop nothing should
+   * make — is left out rather than walked again.
+   */
+  private async subtaskTree(parentIds: readonly string[]): Promise<Map<string, TaskRow[]>> {
+    const children = new Map<string, TaskRow[]>();
+    const seen = new Set(parentIds);
+    let level = [...parentIds];
+    while (level.length > 0) {
+      const rows = await this.prisma.task.findMany({
+        where: { parentTaskId: { in: level }, archivedAt: null },
+        orderBy: [{ position: 'asc' }, { id: 'asc' }],
+        include: { customFieldValues: true },
+      });
+      level = [];
+      for (const row of rows) {
+        if (!row.parentTaskId || seen.has(row.id)) continue;
+        seen.add(row.id);
+        level.push(row.id);
+        children.set(row.parentTaskId, [...(children.get(row.parentTaskId) ?? []), row]);
+      }
+    }
+    return children;
+  }
+
   private async writeTasks(
     workspaceId: string,
     projectId: string,
@@ -439,10 +459,14 @@ export class ProjectBlueprintService {
 
     // Workspace-wide statuses travel; a status the old project defined for
     // itself does not exist here, so the task falls back to its plain state.
+    const everyTask = (task: BlueprintTask): BlueprintTask[] => [
+      task,
+      ...task.subtasks.flatMap(everyTask),
+    ];
     const statusIds = [
       ...new Set(
         blueprint.tasks
-          .flatMap((task) => [task, ...task.subtasks])
+          .flatMap(everyTask)
           .map((task) => task.statusDefinitionId)
           .filter((id): id is string => Boolean(id)),
       ),

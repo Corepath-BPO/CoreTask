@@ -70,19 +70,6 @@ async function spawn(
     include: {
       customFieldValues: true,
       followers: { select: { userId: true } },
-      subtasks: {
-        where: { archivedAt: null },
-        orderBy: [{ position: 'asc' }, { id: 'asc' }],
-        select: {
-          title: true,
-          description: true,
-          assigneeId: true,
-          priority: true,
-          priorityDefinitionId: true,
-          estimatedMinutes: true,
-          position: true,
-        },
-      },
     },
   });
 
@@ -207,25 +194,49 @@ async function spawn(
       });
     }
 
-    if (task.subtasks.length > 0) {
-      await tx.task.createMany({
-        data: task.subtasks.map((subtask) => ({
-          workspaceId: task.workspaceId,
-          projectId: task.projectId,
-          sectionId: task.sectionId,
-          parentTaskId: created.id,
-          title: subtask.title,
-          description: subtask.description,
-          assigneeId: subtask.assigneeId,
-          priority: subtask.priority,
-          priorityDefinitionId: subtask.priorityDefinitionId,
-          estimatedMinutes: subtask.estimatedMinutes,
-          position: subtask.position,
-          createdById,
-          ...status,
-        })),
+    // Its open subtasks come along at every level, each open again.
+    const copied = new Set([task.id]);
+    const copySubtasks = async (fromId: string, toId: string): Promise<void> => {
+      const subtasks = await tx.task.findMany({
+        where: { parentTaskId: fromId, archivedAt: null },
+        orderBy: [{ position: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          assigneeId: true,
+          priority: true,
+          priorityDefinitionId: true,
+          estimatedMinutes: true,
+          position: true,
+        },
       });
-    }
+      for (const subtask of subtasks) {
+        // A loop in the data, which nothing should make, ends the copy.
+        if (copied.has(subtask.id)) continue;
+        copied.add(subtask.id);
+        const copy = await tx.task.create({
+          data: {
+            workspaceId: task.workspaceId,
+            projectId: task.projectId,
+            sectionId: task.sectionId,
+            parentTaskId: toId,
+            title: subtask.title,
+            description: subtask.description,
+            assigneeId: subtask.assigneeId,
+            priority: subtask.priority,
+            priorityDefinitionId: subtask.priorityDefinitionId,
+            estimatedMinutes: subtask.estimatedMinutes,
+            position: subtask.position,
+            createdById,
+            ...status,
+          },
+          select: { id: true },
+        });
+        await copySubtasks(subtask.id, copy.id);
+      }
+    };
+    await copySubtasks(task.id, created.id);
 
     await tx.activityLog.create({
       data: {
