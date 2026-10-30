@@ -572,6 +572,15 @@ describe('Teams (e2e)', () => {
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
       const project = await createProject(scope);
+      // Only a member of the project may be given its work.
+      await context.prisma.projectMember.create({
+        data: {
+          projectId: project.id,
+          userId: member.userId,
+          workspaceId: scope.workspaceId,
+          role: 'EDITOR',
+        },
+      });
 
       await request(server())
         .post(url(`/workspaces/${scope.workspaceId}/tasks`))

@@ -64,8 +64,13 @@ time the page looks, so **Sync again** is never left disabled by it.
 | Goals, messages, forms, others' My Tasks and portfolios               | Not readable: Asana's API has no route for messages or forms, and answers 403 for another person's My Tasks or portfolio.                                                                            |
 
 Writes go straight to the database. Imported tasks therefore fire no rules,
-webhooks, notifications or e-mails. Anyone who is assigned a task in a private
-project joins that project as an editor, so they can open their own task.
+webhooks, notifications or e-mails. Asana lets anyone in the workspace be
+assigned a task, or be named by a rule's checklist, in a project they are not
+a member of; CoreTask gives a project's work only to its members and the
+workspace's owner. So whoever Asana gives work to in a project joins it as an
+editor: the assignee of any of its tasks (on live sync too, as the task comes
+across), and anyone the project's active rules assign or hand a checklist
+subtask to, once a full run ends.
 
 ### How it looks here
 
@@ -91,6 +96,11 @@ project joins that project as an editor, so they can open their own task.
   live sync pass, instead of the value being cleared.
 - **Assignees.** A project's assignee pickers offer its members, as Asana's
   memberships say, and the workspace's owner, who is assignable everywhere.
+  The server holds every other way in to the same list
+  (`project-access/assignable.ts`): the API, the task panel, rules, Slack and
+  templates. A rule's "Assign to" someone outside it fails with a line in the
+  run log; a checklist or new task the rule makes is left unassigned instead.
+  A task keeps an assignee given before the limit through any other edit.
 
 ## Running it again
 

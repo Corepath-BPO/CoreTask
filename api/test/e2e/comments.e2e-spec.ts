@@ -43,6 +43,7 @@ describe('Comments (e2e)', () => {
   interface Scope {
     owner: Actor;
     workspaceId: string;
+    projectId: string;
     taskId: string;
     ticketId: string;
     ticketKey: string;
@@ -91,6 +92,7 @@ describe('Comments (e2e)', () => {
     return {
       owner,
       workspaceId,
+      projectId: project.body.data.id as string,
       taskId: task.body.data.id as string,
       ticketId: ticket.body.data.id as string,
       ticketKey: ticket.body.data.key as string,
@@ -103,6 +105,17 @@ describe('Comments (e2e)', () => {
       data: { workspaceId: scope.workspaceId, userId: actor.userId, role },
     });
   };
+
+  /** Makes someone a member of the scope's project, who may then be given its work. */
+  const joinProject = (scope: Scope, actor: Actor) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: actor.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
 
   const taskThread = (scope: Scope) =>
     url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}/comments`);
@@ -537,6 +550,7 @@ describe('Comments (e2e)', () => {
       const scope = await setupScope();
       const assignee = await registerUser('Ada');
       await addMember(scope, assignee, WorkspaceRole.MEMBER);
+      await joinProject(scope, assignee);
 
       await request(server())
         .patch(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}`))
@@ -757,6 +771,7 @@ describe('Comments (e2e)', () => {
       const scope = await setupScope();
       const assignee = await registerUser('Assignee');
       await addMember(scope, assignee, WorkspaceRole.MEMBER);
+      await joinProject(scope, assignee);
 
       await request(server())
         .patch(url(`/workspaces/${scope.workspaceId}/tasks/${scope.taskId}`))

@@ -78,6 +78,7 @@ import { diffItemStories, snapshotFromTask } from '../activity-logs/item-stories
 import { toValueDto } from '../custom-fields/custom-field-value.mapper';
 import { FormulaValuesService } from '../custom-fields/formula-values.service';
 import { labelValue } from '../custom-fields/lib/value-labels';
+import { assignableIds, isAssignable } from '../project-access/assignable';
 
 import { completionData, priorityData, readActionId, statusData } from './action-config';
 import type { RuleEmailRequest, RuleWebhookRequest } from '../../jobs/queue-names';
@@ -102,6 +103,9 @@ import { readSnapshot, type SnapshotNode } from './versions/rule-snapshot';
  * rule, never from the rows the builder is editing.
  */
 type AutomationNode = SnapshotNode;
+
+/** Why "Assign to" did nothing: the person is not someone this project's work may go to. */
+const NOT_A_PROJECT_MEMBER = 'That person is not a member of this project.';
 
 /** What one action attempt produced, for the log. */
 interface ActionOutcome {
@@ -1896,6 +1900,18 @@ export class AutomationRunnerService {
         if (!member) {
           return { succeeded: false, message: 'That person is no longer in this workspace.' };
         }
+        // And the project's: a rule gives work only to someone its pickers
+        // offer — a member, or the workspace's owner.
+        if (
+          !(await isAssignable(
+            this.prisma,
+            rule.workspaceId,
+            [task.projectId, rule.projectId],
+            userId,
+          ))
+        ) {
+          return { succeeded: false, message: NOT_A_PROJECT_MEMBER };
+        }
 
         const before = task.assigneeId;
         const events = await this.updateTask(task, { assigneeId: userId }, rule, event);
@@ -2378,21 +2394,28 @@ export class AutomationRunnerService {
 
         /*
          * Membership is re-checked at execution time, as ASSIGN_USER's is —
-         * but a person who has left costs their row its assignee, not the
-         * checklist its existence. The rule's job is the subtasks; a departed
-         * name is reported in the log here and refused by the validator the
-         * next time the rule is edited.
+         * the workspace's and the project's — but a person who has left costs
+         * their row its assignee, not the checklist its existence. The rule's
+         * job is the subtasks; a departed name is reported in the log here and
+         * refused by the validator the next time the rule is edited.
          */
         const named = [
           ...new Set(entries.flatMap((entry) => (entry.assigneeId ? [entry.assigneeId] : []))),
         ];
-        const members = named.length
-          ? await this.prisma.workspaceMember.findMany({
-              where: { workspaceId: rule.workspaceId, userId: { in: named } },
-              select: { userId: true },
-            })
-          : [];
-        const live = new Set(members.map((member) => member.userId));
+        const [members, assignable] = named.length
+          ? await Promise.all([
+              this.prisma.workspaceMember.findMany({
+                where: { workspaceId: rule.workspaceId, userId: { in: named } },
+                select: { userId: true },
+              }),
+              assignableIds(this.prisma, rule.workspaceId, [task.projectId, rule.projectId]),
+            ])
+          : [[], null];
+        const live = new Set(
+          members
+            .map((member) => member.userId)
+            .filter((userId) => assignable?.has(userId) ?? true),
+        );
         let departed = 0;
 
         /*
@@ -2473,7 +2496,7 @@ export class AutomationRunnerService {
         const notes = [
           aiNote,
           departed > 0
-            ? `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace.`
+            ? `${departed} subtask${departed === 1 ? ' was' : 's were'} left unassigned: the person named is no longer in this workspace or this project.`
             : '',
         ].filter(Boolean);
 
@@ -3134,8 +3157,15 @@ export class AutomationRunnerService {
         where: { workspaceId: rule.workspaceId, userId: config['assigneeId'] },
         select: { userId: true },
       });
-      if (member) assigneeId = member.userId;
-      else notes.push('The assignee is no longer in this workspace, so the task is unassigned.');
+      if (!member) {
+        notes.push('The assignee is no longer in this workspace, so the task is unassigned.');
+      } else if (
+        !(await isAssignable(this.prisma, rule.workspaceId, [project.id], member.userId))
+      ) {
+        notes.push('The assignee is not a member of this project, so the task is unassigned.');
+      } else {
+        assigneeId = member.userId;
+      }
     }
 
     const days = config['dueInDays'];
@@ -3850,6 +3880,16 @@ export class AutomationRunnerService {
         });
         if (!member) {
           return { succeeded: false, message: 'That person is no longer in this workspace.' };
+        }
+        if (
+          !(await isAssignable(
+            this.prisma,
+            rule.workspaceId,
+            [ticket.projectId, rule.projectId],
+            userId,
+          ))
+        ) {
+          return { succeeded: false, message: NOT_A_PROJECT_MEMBER };
         }
         const before = ticket.assigneeId;
         await write({ assigneeId: userId });

@@ -2,11 +2,11 @@ import type { ColorToken } from '@coretask/contracts';
 import type { CustomFieldType } from '@coretask/contracts';
 import type { ProjectFieldMetadata } from '@coretask/types';
 import { Injectable } from '@nestjs/common';
-import { WorkspaceRole } from '@prisma/client';
 
 import { PrismaService } from '../../database/prisma.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { DefinitionsService } from '../definitions/definitions.service';
+import { assignableIds } from '../project-access/assignable';
 
 import type { CustomFieldMap } from './lib/query-compiler';
 
@@ -46,7 +46,7 @@ export class FieldMetadataService {
           orderBy: { nameKey: 'asc' },
           select: { id: true, name: true, color: true },
         }),
-        this.assignableIds(workspaceId, projectId),
+        assignableIds(this.prisma, workspaceId, [projectId]),
       ]);
 
     return {
@@ -65,25 +65,13 @@ export class FieldMetadataService {
       })),
       sections,
       members: members.map((member) => member.user),
-      assignees: members.map((member) => member.user).filter((user) => assignable.has(user.id)),
+      // Who may be given a task here; the server holds every other way in to
+      // the same list (`project-access/assignable.ts`).
+      assignees: members
+        .map((member) => member.user)
+        .filter((user) => assignable?.has(user.id) ?? true),
       tags: tags.map((tag) => ({ ...tag, color: tag.color as ColorToken })),
     };
-  }
-
-  /**
-   * Who may be given a task in this project: its members, as Asana offers a
-   * project's members, and the workspace's owner — whoever set the workspace
-   * up is assignable everywhere, member or not.
-   */
-  private async assignableIds(workspaceId: string, projectId: string): Promise<Set<string>> {
-    const [projectMembers, owners] = await Promise.all([
-      this.prisma.projectMember.findMany({ where: { projectId }, select: { userId: true } }),
-      this.prisma.workspaceMember.findMany({
-        where: { workspaceId, role: WorkspaceRole.OWNER },
-        select: { userId: true },
-      }),
-    ]);
-    return new Set([...projectMembers, ...owners].map((row) => row.userId));
   }
 
   /**

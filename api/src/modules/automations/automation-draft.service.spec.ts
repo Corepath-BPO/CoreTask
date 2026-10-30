@@ -56,6 +56,11 @@ const prisma = {
     people.map((user) => ({ userId: user.id, user })),
     'userId',
   ),
+  // Both on the project, so either may be given its work.
+  projectMember: table(
+    people.map((user) => ({ userId: user.id, projectId: PROJECT })),
+    'userId',
+  ),
   projectCustomField: table([{ customField: risk }]),
   customField: table([{ id: RISK, type: 'SINGLE_SELECT' }]),
   webhookEndpoint: table([] as Record<string, unknown>[]),
@@ -227,7 +232,7 @@ describe('AutomationDraftService', () => {
       'UPDATE_STATUS',
     ]);
     expect(result.notes).toEqual([
-      'The person to assign is not a member of this workspace.',
+      'The person to assign is not a member of this project.',
       'A condition on Priority is… compared it with something it cannot hold.',
       'Nobody here is called Pat.',
     ]);

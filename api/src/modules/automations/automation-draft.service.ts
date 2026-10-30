@@ -547,6 +547,9 @@ function offerSteps(meta: AutomationMetadataResponse): Offer<DraftStep> {
   });
 
   const people = named(meta.members);
+  // Whom a step may give work to — the project's members and the owner, the
+  // list the runner holds a rule to. Anyone may still be named or notified.
+  const assignable = named(meta.assignees ?? meta.members);
   const sections = named(meta.sections);
   const statuses = named(meta.statuses);
   const priorities = named(meta.priorities);
@@ -606,10 +609,10 @@ function offerSteps(meta: AutomationMetadataResponse): Offer<DraftStep> {
       inputSchema: objectOf({ person_id: person('Who.') }),
     },
     (input) => {
-      const chosen = pick(people, input['person_id']);
+      const chosen = pick(assignable, input['person_id']);
       return chosen
         ? action(AutomationAction.ASSIGN_USER, { userId: chosen.id })
-        : 'The person to assign is not a member of this workspace.';
+        : 'The person to assign is not a member of this project.';
     },
   );
   add(
@@ -855,7 +858,7 @@ function offerSteps(meta: AutomationMetadataResponse): Offer<DraftStep> {
         const row = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
         const title = text(row['title'], TITLE_MAX);
         if (!title) return [];
-        const assignee = pick(people, row['person_id']);
+        const assignee = pick(assignable, row['person_id']);
         const dueInDays = whole(row['due_in_days'], 0, DAYS_MAX);
         return [
           {
@@ -913,7 +916,7 @@ function offerSteps(meta: AutomationMetadataResponse): Offer<DraftStep> {
     (input) => {
       const title = text(input['title'], TITLE_MAX);
       if (!title) return 'The new task had no name.';
-      const assignee = pick(people, input['person_id']);
+      const assignee = pick(assignable, input['person_id']);
       const into = pick(sections, input['section_id']);
       const body = text(input['description'], BODY_MAX);
       const dueInDays = whole(input['due_in_days'], 0, DAYS_MAX);

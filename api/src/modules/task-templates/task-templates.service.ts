@@ -13,6 +13,7 @@ import { AppException } from '../../common/exceptions/app.exception';
 import type { ActorContext } from '../../common/types/api.types';
 import { normalizeRichText } from '../../common/utils/rich-text.util';
 import { PrismaService } from '../../database/prisma.service';
+import { assignableIds } from '../project-access/assignable';
 import { ProjectAccessService } from '../project-access/project-access.service';
 import { TasksService } from '../tasks/tasks.service';
 
@@ -164,15 +165,19 @@ export class TaskTemplatesService {
       template.assigneeId,
       ...template.subtasks.map((subtask) => subtask.assigneeId ?? null),
     ].filter((id): id is string => Boolean(id));
-    const members = new Set(
-      (
-        await this.prisma.workspaceMember.findMany({
-          where: { workspaceId, userId: { in: named } },
-          select: { userId: true },
-        })
-      ).map((row) => row.userId),
-    );
-    const person = (id: string | null | undefined) => (id && members.has(id) ? id : null);
+    const [rows, assignable] = await Promise.all([
+      this.prisma.workspaceMember.findMany({
+        where: { workspaceId, userId: { in: named } },
+        select: { userId: true },
+      }),
+      assignableIds(this.prisma, workspaceId, [projectId]),
+    ]);
+    const members = new Set(rows.map((row) => row.userId));
+    // Someone who has left the workspace, or was never in this project — a
+    // template brought across from Asana may name either — leaves the task
+    // unassigned rather than the template unusable.
+    const person = (id: string | null | undefined) =>
+      id && members.has(id) && (assignable?.has(id) ?? true) ? id : null;
 
     // The chosen section, or the project's first — where Add task lands.
     const section =

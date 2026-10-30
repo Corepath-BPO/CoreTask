@@ -149,7 +149,15 @@ export function SubtaskListFields({
   onChange: (configuration: Record<string, unknown>) => void;
 }) {
   const rows = readRows(configuration);
-  const members = metadata?.members ?? [];
+  // Who a subtask may go to: the project's members and the owner, as the
+  // runner holds a rule to, and whoever a row already names.
+  const allowed = metadata?.assignees
+    ? new Set([
+        ...metadata.assignees.map((person) => person.id),
+        ...rows.flatMap((row) => (row.assigneeId ? [row.assigneeId] : [])),
+      ])
+    : null;
+  const members = (metadata?.members ?? []).filter((member) => allowed?.has(member.id) ?? true);
   const aiDecides = configuration['aiDecides'] === true;
   // The "Use AI…" entry carries whether a model is set up, and why not.
   const aiEntry = metadata?.actions.find((entry) => entry.subtype === 'AI_ACTION');

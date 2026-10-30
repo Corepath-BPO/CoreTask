@@ -95,6 +95,17 @@ describe('Project views and custom fields (e2e)', () => {
     };
   };
 
+  /** Puts the member on the scope's project, so its work may be given to them. */
+  const joinProject = (scope: Scope) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: scope.member.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
+
   const viewsUrl = (scope: Scope) =>
     url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/views`);
   const fieldsUrl = (scope: Scope) =>
@@ -1423,6 +1434,7 @@ describe('Project views and custom fields (e2e)', () => {
 
     it('notifies the task’s collaborators only when the project asked, and never the actor', async () => {
       const scope = await setupScope();
+      await joinProject(scope);
 
       // Assigning makes the member a collaborator; the owner already is one.
       await request(server())
@@ -1800,6 +1812,7 @@ describe('Project views and custom fields (e2e)', () => {
 
       it('orders people by name on both kinds', async () => {
         const scope = await setupScope();
+        await joinProject(scope);
         await createItem(scope, { title: 'Owner’s task', assigneeIds: [scope.owner.userId] });
         await createItem(scope, {
           type: 'TICKET',
@@ -1853,6 +1866,7 @@ describe('Project views and custom fields (e2e)', () => {
     describe('filtering', () => {
       it('applies a filter with no sort at all', async () => {
         const scope = await setupScope();
+        await joinProject(scope);
         await createItem(scope, { title: 'Mine', assigneeIds: [scope.member.userId] });
         await createItem(scope, {
           type: 'TICKET',

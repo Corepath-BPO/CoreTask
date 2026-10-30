@@ -538,6 +538,53 @@ describe('AsanaImportRun', () => {
     ]);
   });
 
+  it('makes whoever Asana gives work to in a project a member of it', async () => {
+    const context = await setUp();
+    await runImport(context);
+    const maintenance = rows(context, 'project').find(
+      (project) => project['name'] === 'Maintenance',
+    ) as Row;
+    const bob = rows(context, 'user').find((user) => user['email'] === 'bob@example.com') as Row;
+    const carol = await context.db
+      .table('user')
+      .create({ data: { email: 'carol@example.com', name: 'Carol' } });
+    await context.db.table('workspaceMember').create({
+      data: { workspaceId: context.workspaceId, userId: carol['id'], role: 'MEMBER' },
+    });
+    // A rule here hands Carol a checklist subtask, though no Asana membership names her.
+    await context.db.table('automationRule').create({
+      data: {
+        workspaceId: context.workspaceId,
+        projectId: maintenance['id'],
+        status: 'ACTIVE',
+        publishedVersion: {
+          nodes: [
+            {
+              id: 'n1',
+              nodeType: 'ACTION',
+              subtype: 'CREATE_SUBTASK',
+              configuration: { subtasks: [{ title: 'Sign the lease', assigneeId: carol['id'] }] },
+            },
+          ],
+        },
+      },
+    });
+
+    const { job } = await runImport(context);
+
+    const members = rows(context, 'projectMember').filter(
+      (row) => row['projectId'] === maintenance['id'],
+    );
+    // Bob, assigned "Fix the boiler", and Carol, named by the rule.
+    expect(members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: bob['id'], role: 'EDITOR' }),
+        expect.objectContaining({ userId: carol['id'], role: 'EDITOR' }),
+      ]),
+    );
+    expect(job.snapshot().counts['assigneesAddedToProjects']).toEqual({ done: 1 });
+  });
+
   it('nests subtasks one level, moving deeper ones up under the top task', async () => {
     const context = await setUp();
     const { job } = await runImport(context);
