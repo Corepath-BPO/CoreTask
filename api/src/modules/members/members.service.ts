@@ -262,6 +262,14 @@ export class MembersService {
 
       await tx.workspaceMember.delete({ where: { id: memberId } });
 
+      // Remembered, so their identity provider cannot quietly sign them back
+      // in by address: only an invitation brings them back now.
+      await tx.workspaceDeparture.upsert({
+        where: { workspaceId_userId: { workspaceId, userId: target.userId } },
+        create: { workspaceId, userId: target.userId },
+        update: { departedAt: new Date() },
+      });
+
       return {
         tasksUnassigned: tasks.count,
         ticketsUnassigned: tickets.count,

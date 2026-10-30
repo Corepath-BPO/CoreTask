@@ -166,7 +166,9 @@ to their account themselves (**Connect my account** in Settings), and they
 must still be members of the workspace. Once `acme.com` is verified, anyone
 the provider signs in with an `@acme.com` address gets in: an existing account
 with that address is connected and added to the workspace as a member, and
-someone with no account gets one.
+someone with no account gets one. Except someone an admin removed from the
+workspace, or who left it: CoreTask remembers that, and only an invitation
+brings them back. Once they accept it, the provider signs them in again.
 
 Add the domain, then publish the TXT record CoreTask shows **at the domain
 itself** (host `@`), e.g.
