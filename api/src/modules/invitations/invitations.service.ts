@@ -14,6 +14,7 @@ import {
 } from '@coretask/contracts';
 import type {
   AcceptInvitationResult,
+  AdminInvitationLink,
   WorkspaceInvitation,
   WorkspaceInvitationPreview,
 } from '@coretask/types';
@@ -21,6 +22,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma, WorkspaceInvitation as PrismaInvitation } from '@prisma/client';
 
 import { AppException } from '../../common/exceptions/app.exception';
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { EmailQueue } from '../../jobs/email/email.queue';
@@ -53,6 +55,7 @@ export class InvitationsService {
     private readonly activity: ActivityLogsService,
     private readonly notifications: NotificationDispatcher,
     private readonly emails: EmailQueue,
+    private readonly config: AppConfigService,
   ) {}
 
   /**
@@ -239,6 +242,49 @@ export class InvitationsService {
     });
 
     return invitations.map(toInvitationDto);
+  }
+
+  /**
+   * A fresh link to a pending invitation, for a super admin to pass on by hand
+   * when the e-mail does not reach them. Only a token's hash is ever kept, so
+   * there is no old link to read back: this issues a new one, which ends the
+   * previous link, and gives the offer a full lifetime again. Accepting still
+   * needs an account at the invited address, so a link that travels further
+   * than meant opens nothing.
+   */
+  async issueLink(
+    workspaceId: string,
+    actorId: string,
+    invitationId: string,
+  ): Promise<AdminInvitationLink> {
+    const invitation = await this.prisma.workspaceInvitation.findFirst({
+      where: { id: invitationId, workspaceId, acceptedAt: null, revokedAt: null },
+      select: { id: true, email: true },
+    });
+    if (!invitation) {
+      throw AppException.notFound('RESOURCE_NOT_FOUND', 'Invitation not found.');
+    }
+
+    const token = randomBytes(INVITATION_TOKEN_BYTES).toString('base64url');
+    const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 86_400_000);
+    await this.prisma.workspaceInvitation.update({
+      where: { id: invitationId },
+      data: { tokenHash: hashToken(token), expiresAt },
+    });
+
+    await this.activity.record({
+      workspaceId,
+      actorId,
+      action: ActivityAction.UPDATED,
+      entity: ActivityEntity.WORKSPACE_MEMBER,
+      entityId: invitationId,
+      summary: `Made a new invitation link for ${invitation.email}`,
+      metadata: { email: invitation.email },
+    });
+
+    // `WEB_URL` may list several origins; the first is the app's own.
+    const webUrl = (this.config.corsOrigins[0] ?? this.config.http.webUrl).replace(/\/$/, '');
+    return { url: `${webUrl}/invitations/${token}`, expiresAt: expiresAt.toISOString() };
   }
 
   async revoke(workspaceId: string, actorId: string, invitationId: string): Promise<void> {

@@ -100,7 +100,7 @@ export class MembersController {
   @ApiOperation({
     summary: 'Transfer ownership to another member',
     description:
-      'Owner only. The outgoing owner becomes an ADMIN rather than losing access, and both changes share a transaction so the workspace never has two owners or none.',
+      'Owner only. The outgoing owner becomes a SUPER_ADMIN rather than losing access, and both changes share a transaction so the workspace never has two owners or none.',
   })
   @ApiParam({ name: 'memberId', format: 'uuid' })
   @ApiEnvelopeResponse(WorkspaceMemberDto)

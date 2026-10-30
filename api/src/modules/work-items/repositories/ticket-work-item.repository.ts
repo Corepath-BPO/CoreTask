@@ -293,7 +293,7 @@ export class TicketWorkItemRepository {
     if (!assigneeIds?.length) return;
 
     const count = await this.prisma.workspaceMember.count({
-      where: { workspaceId, userId: { in: assigneeIds } },
+      where: { workspaceId, userId: { in: assigneeIds }, deactivatedAt: null },
     });
 
     if (count !== new Set(assigneeIds).size) {

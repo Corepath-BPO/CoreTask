@@ -1,8 +1,6 @@
 import {
   ActivityAction,
   ActivityEntity,
-  CLOSED_TASK_STATUSES,
-  CLOSED_TICKET_STATUSES,
   NotificationType,
   ProjectVisibility,
   WorkspaceRole,
@@ -21,6 +19,8 @@ import { RealtimeGateway } from '../../websocket/realtime.gateway';
 import { NotificationDispatcher } from '../../integrations/notifications/notification.dispatcher';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WorkspaceMembersService } from '../workspace-members/workspace-members.service';
+
+import { handOverOpenWork, type HandOverCounts } from './hand-over';
 
 const MEMBER_USER_SELECT = {
   id: true,
@@ -151,6 +151,7 @@ export class MembersService {
     workspaceId: string,
     actorId: string,
     memberId: string,
+    options: { reassignToUserId?: string | null } = {},
   ): Promise<RemoveMemberResult> {
     const target = await this.requireMember(workspaceId, memberId);
     const leaving = target.userId === actorId;
@@ -169,7 +170,125 @@ export class MembersService {
       this.assertOutranks(actor.role, target.role, false);
     }
 
-    return this.endMembership(target, actorId, leaving);
+    const recipient =
+      options.reassignToUserId && !leaving
+        ? await this.requireRecipient(workspaceId, options.reassignToUserId, target)
+        : null;
+
+    const result = await this.endMembership(target, actorId, leaving, recipient);
+    await this.tellRecipient(workspaceId, recipient, result);
+    return result;
+  }
+
+  /**
+   * Cuts a member's access off without ending the membership, as Asana's
+   * admin console deactivates someone.
+   *
+   * The row stays, with its role, teams and project places, so reactivating
+   * gives back exactly what was there; and an Asana sync or an SSO sign-in
+   * that would add them again finds the row and leaves it be. Their open work
+   * goes to `reassignToUserId` where that member can open it, and is
+   * unassigned otherwise: nothing should wait on someone who cannot get in.
+   */
+  async deactivate(
+    workspaceId: string,
+    actorId: string,
+    memberId: string,
+    options: { reassignToUserId?: string | null } = {},
+  ): Promise<HandOverCounts> {
+    const actor = await this.members.requireRole(workspaceId, actorId, WorkspaceRole.SUPER_ADMIN);
+    const target = await this.requireMember(workspaceId, memberId);
+
+    if (target.role === WorkspaceRole.OWNER) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'The owner cannot be deactivated. Transfer ownership first.',
+      );
+    }
+    this.assertOutranks(actor.role, target.role, target.userId === actorId);
+    if (target.deactivatedAt) {
+      throw AppException.conflict('RESOURCE_CONFLICT', 'This member is already deactivated.');
+    }
+
+    const recipient = options.reassignToUserId
+      ? await this.requireRecipient(workspaceId, options.reassignToUserId, target)
+      : null;
+
+    const counts = await this.prisma.$transaction(async (tx) => {
+      const handedOver = await handOverOpenWork(tx, {
+        workspaceId,
+        fromUserId: target.userId,
+        to: recipient,
+      });
+      await tx.workspaceMember.update({
+        where: { id: memberId },
+        data: { deactivatedAt: new Date(), deactivatedById: actorId },
+      });
+      return handedOver;
+    });
+
+    // After the write, as with removal: their open tabs stop receiving the
+    // workspace now, not at their next request. Their project rooms too, since
+    // the project places they keep for reactivation still name them.
+    await this.realtime.evictFromWorkspace(workspaceId, target.userId);
+    const projects = await this.prisma.project.findMany({
+      where: { workspaceId },
+      select: { id: true },
+    });
+    await Promise.all(
+      projects.map((project) => this.realtime.evictFromProject(project.id, target.userId)),
+    );
+
+    await this.activity.record({
+      workspaceId,
+      actorId,
+      action: ActivityAction.MEMBER_DEACTIVATED,
+      entity: ActivityEntity.WORKSPACE_MEMBER,
+      entityId: target.userId,
+      summary: 'Deactivated a member',
+      metadata: { role: target.role, reassignedTo: recipient?.userId ?? null, ...counts },
+    });
+    await this.tellRecipient(workspaceId, recipient, counts);
+
+    this.logger.log({ workspaceId, memberId, ...counts }, 'Member deactivated');
+    return counts;
+  }
+
+  /** Gives a deactivated member their access back, with the role they held. */
+  async reactivate(workspaceId: string, actorId: string, memberId: string): Promise<void> {
+    const actor = await this.members.requireRole(workspaceId, actorId, WorkspaceRole.SUPER_ADMIN);
+    const target = await this.requireMember(workspaceId, memberId);
+
+    this.assertOutranks(actor.role, target.role, target.userId === actorId);
+    if (!target.deactivatedAt) {
+      throw AppException.conflict('RESOURCE_CONFLICT', 'This member is not deactivated.');
+    }
+
+    await this.prisma.workspaceMember.update({
+      where: { id: memberId },
+      data: { deactivatedAt: null, deactivatedById: null },
+    });
+
+    await this.activity.record({
+      workspaceId,
+      actorId,
+      action: ActivityAction.MEMBER_REACTIVATED,
+      entity: ActivityEntity.WORKSPACE_MEMBER,
+      entityId: target.userId,
+      summary: 'Reactivated a member',
+      metadata: { role: target.role },
+    });
+
+    await this.notifications.dispatch({
+      userId: target.userId,
+      workspaceId,
+      type: NotificationType.WORKSPACE_INVITE,
+      title: 'Your access is back',
+      body: 'A super admin reactivated your membership of this workspace.',
+      entity: ActivityEntity.WORKSPACE_MEMBER,
+      entityId: target.userId,
+      actionUrl: '/',
+    });
   }
 
   /**
@@ -183,14 +302,21 @@ export class MembersService {
       where: { workspaceId_userId: { workspaceId, userId } },
     });
     if (!membership)
-      return { removed: true, tasksUnassigned: 0, ticketsUnassigned: 0, teamsLeft: 0 };
+      return {
+        removed: true,
+        tasksReassigned: 0,
+        ticketsReassigned: 0,
+        tasksUnassigned: 0,
+        ticketsUnassigned: 0,
+        teamsLeft: 0,
+      };
     if (membership.role === WorkspaceRole.OWNER) {
       throw AppException.badRequest(
         'BAD_REQUEST',
         'Transfer ownership before leaving the workspace.',
       );
     }
-    return this.endMembership(membership, userId, true);
+    return this.endMembership(membership, userId, true, null);
   }
 
   /** Ends one membership, after whatever check the caller needed. */
@@ -198,35 +324,21 @@ export class MembersService {
     target: WorkspaceMember,
     actorId: string,
     leaving: boolean,
+    recipient: { userId: string; role: WorkspaceRole } | null,
   ): Promise<RemoveMemberResult> {
     const { workspaceId, id: memberId } = target;
 
     /*
      * Assignment points at a *user*, not a membership, so nothing in the schema
      * clears it — the board would keep showing work assigned to someone who can
-     * no longer open it. Unassigning shares the transaction with the removal so
-     * the two can never disagree.
-     *
-     * Only open work. A finished task records who did it, and rewriting that
-     * would falsify history; the same goes for comments and reported tickets.
+     * no longer open it. Handing it over shares the transaction with the
+     * removal so the two can never disagree.
      */
     const result = await this.prisma.$transaction(async (tx) => {
-      const tasks = await tx.task.updateMany({
-        where: {
-          workspaceId,
-          assigneeId: target.userId,
-          status: { notIn: [...CLOSED_TASK_STATUSES] },
-        },
-        data: { assigneeId: null },
-      });
-
-      const tickets = await tx.ticket.updateMany({
-        where: {
-          workspaceId,
-          assigneeId: target.userId,
-          status: { notIn: [...CLOSED_TICKET_STATUSES] },
-        },
-        data: { assigneeId: null },
+      const handedOver = await handOverOpenWork(tx, {
+        workspaceId,
+        fromUserId: target.userId,
+        to: recipient,
       });
 
       /*
@@ -262,11 +374,7 @@ export class MembersService {
 
       await tx.workspaceMember.delete({ where: { id: memberId } });
 
-      return {
-        tasksUnassigned: tasks.count,
-        ticketsUnassigned: tickets.count,
-        teamsLeft: teams.count,
-      };
+      return { ...handedOver, teamsLeft: teams.count };
     });
 
     /*
@@ -302,9 +410,10 @@ export class MembersService {
   /**
    * Hands the workspace to another member.
    *
-   * The outgoing owner becomes an admin rather than losing access: dropping them
-   * to nothing would lock them out of something they built, and there is no
-   * undo. Both writes share a transaction, so there is never an instant with two
+   * The outgoing owner becomes a super admin rather than losing access:
+   * dropping them to nothing would lock them out of something they built, and
+   * there is no undo. A super admin still runs the admin console, so handing
+   * the workspace on does not also hand away its administration. Both writes share a transaction, so there is never an instant with two
    * owners or none.
    */
   async transferOwnership(
@@ -322,7 +431,7 @@ export class MembersService {
     await this.prisma.$transaction([
       this.prisma.workspaceMember.update({
         where: { id: actor.id },
-        data: { role: WorkspaceRole.ADMIN },
+        data: { role: WorkspaceRole.SUPER_ADMIN },
       }),
       this.prisma.workspaceMember.update({
         where: { id: memberId },
@@ -371,6 +480,52 @@ export class MembersService {
     );
   }
 
+  /** Who may take over someone's open work: another member who can get in. */
+  private async requireRecipient(
+    workspaceId: string,
+    userId: string,
+    from: WorkspaceMember,
+  ): Promise<{ userId: string; role: WorkspaceRole }> {
+    if (userId === from.userId) {
+      throw AppException.badRequest('BAD_REQUEST', 'Choose someone else to take over their work.');
+    }
+    const recipient = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId }, deactivatedAt: null },
+      select: { userId: true, role: true, user: { select: { isServiceAccount: true } } },
+    });
+    if (!recipient || recipient.user.isServiceAccount) {
+      throw AppException.badRequest(
+        'BAD_REQUEST',
+        'Their work can only go to an active member of this workspace.',
+      );
+    }
+    return { userId: recipient.userId, role: recipient.role };
+  }
+
+  /** One notification for the whole hand-over, rather than one per task. */
+  private async tellRecipient(
+    workspaceId: string,
+    recipient: { userId: string } | null,
+    counts: HandOverCounts,
+  ): Promise<void> {
+    if (!recipient || counts.tasksReassigned + counts.ticketsReassigned === 0) return;
+
+    const parts = [
+      counts.tasksReassigned > 0 ? plural(counts.tasksReassigned, 'task') : null,
+      counts.ticketsReassigned > 0 ? plural(counts.ticketsReassigned, 'ticket') : null,
+    ].filter(Boolean);
+    await this.notifications.dispatch({
+      userId: recipient.userId,
+      workspaceId,
+      type: NotificationType.TASK_ASSIGNED,
+      title: `${parts.join(' and ')} handed over to you`,
+      body: 'A super admin reassigned open work from someone who no longer has access.',
+      entity: ActivityEntity.WORKSPACE_MEMBER,
+      entityId: recipient.userId,
+      actionUrl: '/my-tasks',
+    });
+  }
+
   private async requireMember(workspaceId: string, memberId: string): Promise<WorkspaceMember> {
     const member = await this.prisma.workspaceMember.findFirst({
       where: { id: memberId, workspaceId },
@@ -408,4 +563,8 @@ export class MembersService {
       user: member.user,
     };
   }
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

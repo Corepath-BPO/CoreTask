@@ -373,7 +373,7 @@ export class InboundEmailService {
     const userId = members.get(email);
     if (!userId) return null;
     const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId: inbox.workspaceId, userId },
+      where: { workspaceId: inbox.workspaceId, userId, deactivatedAt: null },
       select: { userId: true, role: true },
     });
     if (!member) return null;
@@ -387,6 +387,7 @@ export class InboundEmailService {
     const rows = await this.prisma.workspaceMember.findMany({
       where: {
         workspaceId,
+        deactivatedAt: null,
         user: { email: { in: addresses, mode: 'insensitive' } },
       },
       select: { userId: true, user: { select: { email: true } } },
@@ -398,7 +399,7 @@ export class InboundEmailService {
   private async credit(inbox: ProjectEmailInbox): Promise<ActorContext> {
     const author = inbox.createdById
       ? await this.prisma.workspaceMember.findFirst({
-          where: { workspaceId: inbox.workspaceId, userId: inbox.createdById },
+          where: { workspaceId: inbox.workspaceId, userId: inbox.createdById, deactivatedAt: null },
           select: { userId: true, role: true },
         })
       : null;

@@ -66,6 +66,7 @@ import { SsoModule } from './modules/sso/sso.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { MembersModule } from './modules/members/members.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { RedisModule } from './redis/redis.module';
 import { WebsocketModule } from './websocket/websocket.module';
@@ -114,6 +115,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     WorkspacesModule,
     WorkspaceMembersModule,
     MembersModule,
+    AdminModule,
     AccountDeletionModule,
     InvitationsModule,
     TeamsModule,

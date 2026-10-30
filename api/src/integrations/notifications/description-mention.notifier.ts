@@ -64,7 +64,7 @@ export class DescriptionMentionNotifier {
     if (added.length === 0) return;
 
     const rows = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId: change.workspaceId, userId: { in: added } },
+      where: { workspaceId: change.workspaceId, userId: { in: added }, deactivatedAt: null },
       select: { userId: true },
     });
     const memberIds = await this.access.filterVisibleTo(

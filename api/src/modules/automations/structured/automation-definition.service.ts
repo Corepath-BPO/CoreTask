@@ -478,7 +478,7 @@ export class AutomationDefinitionService {
           : [],
         memberIds.length
           ? this.prisma.workspaceMember.findMany({
-              where: { workspaceId, userId: { in: memberIds } },
+              where: { workspaceId, userId: { in: memberIds }, deactivatedAt: null },
               select: { userId: true },
             })
           : [],

@@ -1889,7 +1889,7 @@ export class AutomationRunnerService {
         // Membership is re-checked at execution time: the rule may have been
         // written months ago and that person may have left since.
         const member = await this.prisma.workspaceMember.findFirst({
-          where: { workspaceId: rule.workspaceId, userId },
+          where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId },
           select: { id: true },
         });
 
@@ -2273,7 +2273,7 @@ export class AutomationRunnerService {
 
         // Only people still in the workspace hear from it.
         const members = await this.prisma.workspaceMember.findMany({
-          where: { workspaceId: rule.workspaceId, userId: { in: [...ids] } },
+          where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: [...ids] } },
           select: { user: { select: { email: true } } },
           take: MAX_EMAIL_RECIPIENTS,
         });
@@ -2388,7 +2388,7 @@ export class AutomationRunnerService {
         ];
         const members = named.length
           ? await this.prisma.workspaceMember.findMany({
-              where: { workspaceId: rule.workspaceId, userId: { in: named } },
+              where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: named } },
               select: { userId: true },
             })
           : [];
@@ -2600,7 +2600,7 @@ export class AutomationRunnerService {
         // Re-checked now, as an assignment is: the rule may be months old.
         const members = add.length
           ? await this.prisma.workspaceMember.findMany({
-              where: { workspaceId: rule.workspaceId, userId: { in: add } },
+              where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: add } },
               select: { userId: true },
             })
           : [];
@@ -2838,7 +2838,7 @@ export class AutomationRunnerService {
      */
     if (changed.includes('assigneeId') && updated.assigneeId) {
       const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: rule.workspaceId, userId: updated.assigneeId },
+        where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: updated.assigneeId },
         select: { userId: true },
       });
       if (member) {
@@ -3063,6 +3063,7 @@ export class AutomationRunnerService {
     const candidates = [project.leadId, project.statusUpdates[0]?.authorId, rule.createdById];
     const members = await this.prisma.workspaceMember.findMany({
       where: {
+        deactivatedAt: null,
         workspaceId: rule.workspaceId,
         userId: { in: candidates.filter((id): id is string => Boolean(id)) },
       },
@@ -3131,7 +3132,7 @@ export class AutomationRunnerService {
     let assigneeId: string | null = null;
     if (typeof config['assigneeId'] === 'string' && config['assigneeId'] !== '') {
       const member = await this.prisma.workspaceMember.findFirst({
-        where: { workspaceId: rule.workspaceId, userId: config['assigneeId'] },
+        where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: config['assigneeId'] },
         select: { userId: true },
       });
       if (member) assigneeId = member.userId;
@@ -3845,7 +3846,7 @@ export class AutomationRunnerService {
       case AutomationAction.ASSIGN_USER: {
         const userId = String(config['userId'] ?? config['assigneeId'] ?? '');
         const member = await this.prisma.workspaceMember.findFirst({
-          where: { workspaceId: rule.workspaceId, userId },
+          where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId },
           select: { id: true },
         });
         if (!member) {
@@ -3960,7 +3961,7 @@ export class AutomationRunnerService {
           for (const follower of followers) ids.add(follower.userId);
         }
         const members = await this.prisma.workspaceMember.findMany({
-          where: { workspaceId: rule.workspaceId, userId: { in: [...ids] } },
+          where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: [...ids] } },
           select: { user: { select: { email: true } } },
           take: MAX_EMAIL_RECIPIENTS,
         });
@@ -4004,7 +4005,7 @@ export class AutomationRunnerService {
         }
         const members = add.length
           ? await this.prisma.workspaceMember.findMany({
-              where: { workspaceId: rule.workspaceId, userId: { in: add } },
+              where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: add } },
               select: { userId: true },
             })
           : [];

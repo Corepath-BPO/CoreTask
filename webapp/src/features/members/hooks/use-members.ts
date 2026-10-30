@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { ApiError } from '@/lib/api/api-error';
 import { queryClient, queryKeys } from '@/lib/api/query-client';
+import { humanizeEnum } from '@/lib/utils';
 
 import { membersApi } from '../api/members.api';
 
@@ -30,7 +31,7 @@ export function useUpdateMemberRole(workspaceId: string | undefined) {
       membersApi.updateRole(workspaceId as string, memberId, { role }),
     onSuccess: async (member) => {
       await invalidateMembership(workspaceId as string);
-      toast.success(`${member.user.name} is now a ${member.role.toLowerCase()}`);
+      toast.success(`${member.user.name} is now a ${humanizeEnum(member.role).toLowerCase()}`);
     },
     onError: (error) => reportError(error, 'Could not change that role.'),
   });

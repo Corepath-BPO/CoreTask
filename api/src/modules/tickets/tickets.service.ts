@@ -476,7 +476,7 @@ export class TicketsService {
     if (!assigneeId) return;
 
     const membership = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: assigneeId } },
+      where: { workspaceId_userId: { workspaceId, userId: assigneeId }, deactivatedAt: null },
       select: { id: true },
     });
 

@@ -167,7 +167,7 @@ export class TaskTemplatesService {
     const members = new Set(
       (
         await this.prisma.workspaceMember.findMany({
-          where: { workspaceId, userId: { in: named } },
+          where: { workspaceId, userId: { in: named }, deactivatedAt: null },
           select: { userId: true },
         })
       ).map((row) => row.userId),

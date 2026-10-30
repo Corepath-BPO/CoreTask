@@ -1130,7 +1130,7 @@ export class CustomFieldsService {
         }
 
         const members = await this.prisma.workspaceMember.findMany({
-          where: { workspaceId, userId: { in: ids } },
+          where: { workspaceId, userId: { in: ids }, deactivatedAt: null },
           select: { userId: true },
         });
 

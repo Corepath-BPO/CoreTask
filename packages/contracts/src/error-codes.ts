@@ -102,6 +102,7 @@ export const ErrorCode = {
   // Authorization / tenancy
   FORBIDDEN: 'FORBIDDEN',
   WORKSPACE_ACCESS_DENIED: 'WORKSPACE_ACCESS_DENIED',
+  WORKSPACE_MEMBERSHIP_DEACTIVATED: 'WORKSPACE_MEMBERSHIP_DEACTIVATED',
   INSUFFICIENT_WORKSPACE_ROLE: 'INSUFFICIENT_WORKSPACE_ROLE',
   WORKSPACE_CONTEXT_REQUIRED: 'WORKSPACE_CONTEXT_REQUIRED',
   /** Used by the realtime gateway; over REST an invisible project is a 404. */
@@ -219,6 +220,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
 
   FORBIDDEN: 'You do not have permission to perform this action.',
   WORKSPACE_ACCESS_DENIED: 'You are not a member of this workspace.',
+  WORKSPACE_MEMBERSHIP_DEACTIVATED: 'A super admin has deactivated your access to this workspace.',
   INSUFFICIENT_WORKSPACE_ROLE: 'Your workspace role does not allow this action.',
   WORKSPACE_CONTEXT_REQUIRED: 'A workspace context is required for this request.',
   PROJECT_ACCESS_DENIED: 'You do not have access to this project.',

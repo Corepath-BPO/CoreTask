@@ -97,7 +97,10 @@ export class CalendarFeedsService {
     const feed = await this.prisma.calendarFeed.findUnique({ where: { token } });
     if (!feed) throw notFound();
     const member = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId: feed.workspaceId, userId: feed.userId } },
+      where: {
+        workspaceId_userId: { workspaceId: feed.workspaceId, userId: feed.userId },
+        deactivatedAt: null,
+      },
       select: { role: true },
     });
     if (!member) throw notFound();
