@@ -160,7 +160,7 @@ describe('Single sign-on (e2e)', () => {
 
   const server = () => context.app.getHttpServer();
   const url = (path: string) => `${API_PREFIX}${path}`;
-  const web = (path: string) => `${config.sso.webUrl}${path}`;
+  const web = (path: string) => `${config.webOrigin}${path}`;
 
   interface Actor {
     token: string;

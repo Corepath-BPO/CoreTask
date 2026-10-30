@@ -65,7 +65,7 @@ export class NotificationDispatcher {
     });
     if (!user || user.isServiceAccount) return;
 
-    const webUrl = this.config.http.webUrl.replace(/\/$/, '');
+    const webUrl = this.config.webOrigin;
     const link = input.actionUrl
       ? input.actionUrl.startsWith('http')
         ? input.actionUrl

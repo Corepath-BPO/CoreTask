@@ -58,8 +58,10 @@ staging origin can PUT and GET files.
 
 How each piece copes with two origins:
 
-- **API.** `WEB_URL` is the CORS allowlist, comma-separated. The WebSocket
-  gateway accepts any origin and authenticates the socket itself.
+- **API.** `WEB_URL` is the CORS allowlist, comma-separated. Every link the
+  API builds — e-mails, calendar feeds, Slack, SSO redirects — goes to the
+  first origin only (`AppConfigService.webOrigin`). The WebSocket gateway
+  accepts any origin and authenticates the socket itself.
 - **Webapp.** One dev server answers on both hosts. `VITE_API_ORIGINS_BY_HOST`
   swaps the API origin for a page served on a listed host (`env.ts`), so
   `localhost:5173` keeps calling the local API. Vite admits any

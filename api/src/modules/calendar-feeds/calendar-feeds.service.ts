@@ -157,7 +157,7 @@ export class CalendarFeedsService {
       });
     }
 
-    const webUrl = this.webUrl();
+    const webUrl = this.config.webOrigin;
     const events: IcsEvent[] = [];
     for (const task of tasks) {
       const when = whenOf(task);
@@ -187,11 +187,6 @@ export class CalendarFeedsService {
       lastFetchedAt: row.lastFetchedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     };
-  }
-
-  /** The first of WEB_URL's origins: the one people open. */
-  private webUrl(): string {
-    return (this.config.http.webUrl.split(',')[0] ?? '').trim().replace(/\/$/, '');
   }
 }
 

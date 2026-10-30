@@ -70,7 +70,7 @@ export class SlackService {
   }
 
   get webUrl(): string {
-    return this.config.corsOrigins[0] ?? this.config.http.webUrl;
+    return this.config.webOrigin;
   }
 
   async status(workspaceId: string, actor: ActorContext): Promise<SlackStatus> {

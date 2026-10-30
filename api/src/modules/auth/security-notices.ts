@@ -53,7 +53,7 @@ export class SecurityNotices {
         subject: notice.subject,
         heading: notice.heading,
         lines: notice.lines,
-        webUrl: this.config.http.webUrl,
+        webUrl: this.config.webOrigin,
         ...(notice.showSettingsLink === undefined
           ? {}
           : { showSettingsLink: notice.showSettingsLink }),

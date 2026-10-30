@@ -71,7 +71,13 @@ export const envSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
 
-    WEB_URL: z.string().min(1).default('http://localhost:5173'),
+    WEB_URL: z
+      .string()
+      .refine(
+        (value) => value.split(',').some((origin) => origin.trim().replace(/\/$/, '').length > 0),
+        'Must name at least one origin.',
+      )
+      .default('http://localhost:5173'),
     API_URL: z.string().min(1).default('http://localhost:3000'),
     API_PORT: port.default(3000),
 

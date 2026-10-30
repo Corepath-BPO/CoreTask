@@ -37,7 +37,6 @@ export class AppConfigService {
     return {
       port: this.env.API_PORT,
       apiUrl: this.env.API_URL,
-      webUrl: this.env.WEB_URL,
     } as const;
   }
 
@@ -49,6 +48,17 @@ export class AppConfigService {
     return this.env.WEB_URL.split(',')
       .map((origin) => origin.trim().replace(/\/$/, ''))
       .filter((origin) => origin.length > 0);
+  }
+
+  /**
+   * The web app's address for every link CoreTask builds — e-mails, feeds,
+   * Slack, redirects: the first of `WEB_URL`'s origins, with no trailing
+   * slash. The rest are only let in by CORS. There is deliberately no getter
+   * for `WEB_URL` itself, since a link joined to the whole list leads nowhere.
+   */
+  get webOrigin(): string {
+    // Never empty: the schema refuses a WEB_URL that names no origin.
+    return this.corsOrigins[0] ?? '';
   }
 
   get database() {
@@ -176,7 +186,7 @@ export class AppConfigService {
       apiBaseUrl: this.env.SLACK_API_BASE_URL.replace(/\/+$/, ''),
       authorizeUrl: this.env.SLACK_AUTHORIZE_URL,
       timeoutMs: this.env.SLACK_TIMEOUT_MS,
-      redirectUri: `${this.corsOrigins[0] ?? this.env.WEB_URL}/integrations/slack/callback`,
+      redirectUri: `${this.webOrigin}/integrations/slack/callback`,
       enabled: Boolean(this.env.SLACK_CLIENT_ID),
     } as const;
   }
@@ -195,7 +205,6 @@ export class AppConfigService {
     const microsoftBase = `${this.env.MICROSOFT_SSO_LOGIN_URL.replace(/\/+$/, '')}/${this.env.MICROSOFT_SSO_TENANT}`;
     return {
       apiBase,
-      webUrl: this.corsOrigins[0] ?? this.env.WEB_URL,
       timeoutMs: this.env.SSO_TIMEOUT_MS,
       google: {
         enabled: Boolean(this.env.GOOGLE_SSO_CLIENT_ID),

@@ -46,7 +46,7 @@ export class EmailProcessor extends WorkerHost {
             name: data.name,
             token: data.token,
             expiresAt: data.expiresAt,
-            webUrl: this.config.http.webUrl,
+            webUrl: this.config.webOrigin,
             welcome: data.welcome,
           }),
         );
@@ -66,7 +66,7 @@ export class EmailProcessor extends WorkerHost {
             // Absent on a job queued before projects could be named.
             projectName: data.projectName ?? null,
             expiresAt: data.expiresAt,
-            webUrl: this.config.http.webUrl,
+            webUrl: this.config.webOrigin,
           }),
         );
         return;
@@ -85,7 +85,7 @@ export class EmailProcessor extends WorkerHost {
             name: data.name,
             token: data.token,
             expiresAt: data.expiresAt,
-            webUrl: this.config.http.webUrl,
+            webUrl: this.config.webOrigin,
           }),
         );
         return;
@@ -98,7 +98,7 @@ export class EmailProcessor extends WorkerHost {
             name: data.name,
             token: data.token,
             expiresAt: data.expiresAt,
-            webUrl: this.config.http.webUrl,
+            webUrl: this.config.webOrigin,
           }),
         );
         return;
