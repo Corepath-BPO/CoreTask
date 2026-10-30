@@ -325,7 +325,8 @@ function Domains({ workspaceId }: { workspaceId: string }) {
       <p className="text-sm text-muted-foreground">
         Once a domain is verified, anyone your identity provider signs in with an address there gets
         in — as a member, with an account made for them if they have none. Until then it signs in
-        only people who connected it themselves.
+        only people who connected it themselves. Either way, someone removed from the workspace, or
+        who left, needs an invitation to come back.
       </p>
 
       {domains.isLoading ? (

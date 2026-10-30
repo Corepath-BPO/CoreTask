@@ -945,6 +945,77 @@ describe('Single sign-on (e2e)', () => {
       ).toBe(1);
     });
 
+    it('keeps out an account the workspace removed, or that left, until it is invited back', async () => {
+      const setup = await setupSaml();
+      const domain = `acme-${randomUUID().slice(0, 8)}.test`;
+      await verifyDomain(setup, domain);
+      const membersUrl = url(`/workspaces/${setup.workspaceId}/members`);
+      const membership = (userId: string) =>
+        context.prisma.workspaceMember.findUnique({
+          where: { workspaceId_userId: { workspaceId: setup.workspaceId, userId } },
+        });
+      const ray = await registerUser('Ray Removed', `ray@${domain}`);
+      const lee = await registerUser('Lee Leaving', `lee@${domain}`);
+      await confirmEmail(context, ray.userId);
+      await confirmEmail(context, lee.userId);
+
+      // Added by hand and removed by an admin, without ever signing in by SSO here.
+      const added = await context.prisma.workspaceMember.create({
+        data: { workspaceId: setup.workspaceId, userId: ray.userId, role: WorkspaceRole.MEMBER },
+      });
+      await request(server()).delete(`${membersUrl}/${added.id}`).set(as(setup.owner)).expect(200);
+
+      const removed = await samlSignIn(setup, { nameId: 'ray-1', email: ray.email });
+      expect(removed.headers['location']).toBe(web('/login?ssoError=SSO_ACCOUNT_NOT_FOUND'));
+      expect(cookieFrom(removed, REFRESH_TOKEN_COOKIE)).toBeNull();
+      expect(await membership(ray.userId)).toBeNull();
+      expect(await context.prisma.userIdentity.count({ where: { userId: ray.userId } })).toBe(0);
+
+      // Never in the workspace: the first sign-in joins, as before.
+      const first = await sessionFrom(
+        await samlSignIn(setup, { nameId: 'lee-1', email: lee.email }),
+      );
+      expect(first.user.id).toBe(lee.userId);
+      const joined = await membership(lee.userId);
+      expect(joined?.role).toBe(WorkspaceRole.MEMBER);
+
+      // Leaving, then disconnecting the provider so it no longer knows the NameID.
+      await request(server()).delete(`${membersUrl}/${joined?.id}`).set(as(lee)).expect(200);
+      const identities = (
+        await request(server()).get(url('/auth/sso/identities')).set(as(lee)).expect(200)
+      ).body.data as { id: string }[];
+      expect(identities).toHaveLength(1);
+      await request(server())
+        .delete(url(`/auth/sso/identities/${identities[0]?.id}`))
+        .set(as(lee))
+        .expect(204);
+      const left = await samlSignIn(setup, { nameId: 'lee-1', email: lee.email });
+      expect(left.headers['location']).toBe(web('/login?ssoError=SSO_ACCOUNT_NOT_FOUND'));
+      expect(await membership(lee.userId)).toBeNull();
+
+      // An invitation brings Ray back, and the provider signs them in from then on.
+      await confirmEmail(context, setup.owner.userId);
+      const invitation = await request(server())
+        .post(url(`/workspaces/${setup.workspaceId}/invitations`))
+        .set(as(setup.owner))
+        .send({ email: ray.email, role: WorkspaceRole.MEMBER })
+        .expect(201);
+      const token = `invite-${randomUUID()}`;
+      await context.prisma.workspaceInvitation.update({
+        where: { id: invitation.body.data.id as string },
+        data: { tokenHash: createHash('sha256').update(token).digest('hex') },
+      });
+      await request(server())
+        .post(url(`/invitations/${token}/accept`))
+        .set(as(ray))
+        .expect(200);
+      const back = await sessionFrom(
+        await samlSignIn(setup, { nameId: 'ray-1', email: ray.email }),
+      );
+      expect(back.user.id).toBe(ray.userId);
+      expect(await membership(ray.userId)).not.toBeNull();
+    });
+
     it('turns away an address at a domain the workspace has not verified', async () => {
       const setup = await setupSaml();
       const response = await samlSignIn(setup, { nameId: 'x-1', email: uniqueEmail('stranger') });

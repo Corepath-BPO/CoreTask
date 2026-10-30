@@ -273,6 +273,7 @@ model User {
   importRunsStarted          ImportRun[]              @relation("ImportRunStartedBy")
   asanaLiveSyncsEnabled      AsanaLiveSync[]          @relation("AsanaLiveSyncEnabledBy")
   memberships                WorkspaceMember[]
+  workspaceDepartures        WorkspaceDeparture[]
   invitedMembers             WorkspaceMember[]        @relation("MemberInvitedBy")
   deactivatedMembers         WorkspaceMember[]        @relation("MemberDeactivatedBy")
   createdWorkspaces          Workspace[]              @relation("WorkspaceCreatedBy")
@@ -712,6 +713,7 @@ model Workspace {
 
   createdBy               User                     @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   members                 WorkspaceMember[]
+  departures              WorkspaceDeparture[]
   invitations             WorkspaceInvitation[]
   apiKeys                 ApiKey[]
   webhookEndpoints        WebhookEndpoint[]
@@ -834,6 +836,23 @@ model WorkspaceMember {
   @@index([userId])
   @@index([workspaceId, role])
   @@map("workspace_members")
+}
+
+/// Someone whose membership a workspace ended: removed by an admin, or left.
+/// Single sign-on reads it before letting an account in by its address alone,
+/// since only an invitation brings back someone CoreTask has let go. Read only
+/// while they are not a member, so rejoining leaves it in place.
+model WorkspaceDeparture {
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  departedAt  DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_departures")
 }
 
 /// A pending offer of membership, addressed to an e-mail rather than a user —

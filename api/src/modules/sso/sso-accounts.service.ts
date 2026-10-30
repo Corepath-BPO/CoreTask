@@ -171,7 +171,9 @@ export class SsoAccountsService {
    * already been connected to, while they are still in the workspace; else,
    * when the workspace has verified the address's domain, the account with
    * that address or a new one, made a member. Anyone else is turned away:
-   * the provider speaks only for its own domains.
+   * the provider speaks only for its own domains. So is an account the
+   * workspace removed, or that left: CoreTask decided about them, and only
+   * an invitation brings them back.
    */
   async signInWithSaml(
     connection: SamlConnection,
@@ -205,8 +207,15 @@ export class SsoAccountsService {
       const existing = await this.users.findByEmail(email);
       if (existing) {
         assertCanClaimByAddress(existing, await this.connections(existing.id));
+        const member = await this.members.findMembership(connection.workspaceId, existing.id);
+        // Someone the workspace let go reaches this point when the identity
+        // check above never saw them: they had not signed in with this
+        // provider, or disconnected it. Turned away before anything is connected.
+        if (!member && (await this.departed(connection.workspaceId, existing.id))) {
+          throw AppException.forbidden('SSO_ACCOUNT_NOT_FOUND');
+        }
         const user = await this.connect(existing, input, { emailProven: true });
-        if (!(await this.members.findMembership(connection.workspaceId, user.id))) {
+        if (!member) {
           await this.members.addMember({
             workspaceId: connection.workspaceId,
             userId: user.id,
@@ -423,6 +432,15 @@ export class SsoAccountsService {
       select: { id: true },
     });
     return claimed !== null;
+  }
+
+  /** Whether the workspace ever removed them, or they left it. */
+  private async departed(workspaceId: string, userId: string): Promise<boolean> {
+    const departure = await this.prisma.workspaceDeparture.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+      select: { userId: true },
+    });
+    return departure !== null;
   }
 
   /** The provider vouches for them, so they are in: as a member, like an accepted invitation. */
