@@ -10,8 +10,14 @@
  * fails the API test suite instead of drifting silently.
  */
 
+/**
+ * A super admin runs the workspace from the admin console, as Asana's super
+ * admins run an organisation. The owner counts as one too; it stays the only
+ * role that can delete the workspace or hand it on.
+ */
 export const WorkspaceRole = {
   OWNER: 'OWNER',
+  SUPER_ADMIN: 'SUPER_ADMIN',
   ADMIN: 'ADMIN',
   MANAGER: 'MANAGER',
   MEMBER: 'MEMBER',
@@ -23,6 +29,7 @@ export const WORKSPACE_ROLES = Object.values(WorkspaceRole);
 /** Ordered from most to least privileged — used for `hasAtLeastRole` checks. */
 export const WORKSPACE_ROLE_RANK: Record<WorkspaceRole, number> = {
   OWNER: 50,
+  SUPER_ADMIN: 45,
   ADMIN: 40,
   MANAGER: 30,
   MEMBER: 20,
@@ -174,6 +181,9 @@ export const ActivityAction = {
   MEMBER_ADDED: 'MEMBER_ADDED',
   MEMBER_REMOVED: 'MEMBER_REMOVED',
   MEMBER_ROLE_CHANGED: 'MEMBER_ROLE_CHANGED',
+  /** A super admin cut a member's access off without ending the membership. */
+  MEMBER_DEACTIVATED: 'MEMBER_DEACTIVATED',
+  MEMBER_REACTIVATED: 'MEMBER_REACTIVATED',
   /** A custom field's value on a task changed. */
   FIELD_CHANGED: 'FIELD_CHANGED',
   ATTACHED: 'ATTACHED',

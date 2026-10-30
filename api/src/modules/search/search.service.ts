@@ -178,6 +178,7 @@ export class SearchService {
     const members = await this.prisma.workspaceMember.findMany({
       where: {
         workspaceId,
+        deactivatedAt: null,
         user: {
           OR: [
             { name: { contains: term, mode: 'insensitive' } },

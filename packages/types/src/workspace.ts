@@ -102,6 +102,9 @@ export interface UpdateMemberRolePayload {
 /** What removing a member did, beyond ending their access. */
 export interface RemoveMemberResult {
   removed: true;
+  /** Open tasks handed to the member a super admin named, where they can open them. */
+  tasksReassigned: number;
+  ticketsReassigned: number;
   /** Open tasks that were unassigned, because the assignee can no longer see them. */
   tasksUnassigned: number;
   ticketsUnassigned: number;

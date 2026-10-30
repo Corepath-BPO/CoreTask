@@ -189,7 +189,7 @@ export class PortfoliosService {
     this.assertOwnerOrManager(portfolio.ownerId, actor);
 
     const member = await this.prisma.workspaceMember.findFirst({
-      where: { workspaceId, userId },
+      where: { workspaceId, userId, deactivatedAt: null },
       select: { userId: true },
     });
     if (!member)

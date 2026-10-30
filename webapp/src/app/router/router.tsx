@@ -8,6 +8,15 @@ import {
 } from '@tanstack/react-router';
 
 import { AppLayout } from '@/app/layouts/app-layout';
+import {
+  AdminComingSoon,
+  AdminConsolePage,
+  AdminIndex,
+} from '@/features/admin/pages/admin-console-page';
+import { AdminMembersPage } from '@/features/admin/pages/admin-members-page';
+import { AdminOverviewPage } from '@/features/admin/pages/admin-overview-page';
+import { AdminTeamsPage } from '@/features/admin/pages/admin-teams-page';
+import { ADMIN_TABS } from '@/features/admin/lib/admin-tabs';
 import { AuthLayout } from '@/app/layouts/auth-layout';
 import { RootLayout } from '@/app/layouts/root-layout';
 import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page';
@@ -437,6 +446,55 @@ const integrationsAsanaRoute = createRoute({
   path: '/asana',
   component: AsanaPage,
 });
+
+/**
+ * The admin console, a shell with tabs like Integrations: the shell owns the
+ * header and the super admin gate, and each tab is a route so a URL names it.
+ */
+const adminRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/admin',
+  component: AdminConsolePage,
+});
+
+const adminIndexRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/',
+  component: AdminIndex,
+});
+
+const adminOverviewRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/overview',
+  component: AdminOverviewPage,
+});
+
+const adminMembersRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/members',
+  component: () => <AdminMembersPage />,
+});
+
+const adminGuestsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/guests',
+  component: () => <AdminMembersPage guests />,
+});
+
+const adminTeamsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/teams',
+  component: AdminTeamsPage,
+});
+
+/** One route per unbuilt tab, each saying what it will hold. */
+const adminComingSoonRoutes = ADMIN_TABS.filter((tab) => tab.comingSoon).map((tab) =>
+  createRoute({
+    getParentRoute: () => adminRoute,
+    path: `/${tab.segment}`,
+    component: () => <AdminComingSoon segment={tab.segment} />,
+  }),
+);
 
 /**
  * Where a reset link lands. Off the root rather than the guest gate: someone
@@ -930,6 +988,14 @@ const routeTree = rootRoute.addChildren([
       integrationsConnectedAppsRoute,
       integrationsSlackRoute,
       integrationsAsanaRoute,
+    ]),
+    adminRoute.addChildren([
+      adminIndexRoute,
+      adminOverviewRoute,
+      adminMembersRoute,
+      adminGuestsRoute,
+      adminTeamsRoute,
+      ...adminComingSoonRoutes,
     ]),
     goalsRoute,
     calendarRoute,

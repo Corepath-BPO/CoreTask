@@ -538,7 +538,7 @@ export class ProjectsService {
     if (!leadId) return;
 
     const membership = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: leadId } },
+      where: { workspaceId_userId: { workspaceId, userId: leadId }, deactivatedAt: null },
       select: { id: true },
     });
 

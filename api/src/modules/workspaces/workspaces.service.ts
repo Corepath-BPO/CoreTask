@@ -43,6 +43,8 @@ export class WorkspacesService {
     const memberships = await this.prisma.workspaceMember.findMany({
       where: {
         userId,
+        // A deactivated membership opens nothing, so it is not offered.
+        deactivatedAt: null,
         workspace: {
           archivedAt: null,
           ...(oauthAppId && {

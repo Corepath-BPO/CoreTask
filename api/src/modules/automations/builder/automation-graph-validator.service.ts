@@ -678,7 +678,7 @@ export class AutomationGraphValidatorService {
         : [],
       userIds.size
         ? this.prisma.workspaceMember.findMany({
-            where: { workspaceId, userId: { in: [...userIds] } },
+            where: { workspaceId, userId: { in: [...userIds] }, deactivatedAt: null },
             select: { userId: true },
           })
         : [],

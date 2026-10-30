@@ -105,7 +105,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!userId || !workspaceId) return { joined: false };
 
     const membership = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
+      where: { workspaceId_userId: { workspaceId, userId }, deactivatedAt: null },
       select: { id: true },
     });
 

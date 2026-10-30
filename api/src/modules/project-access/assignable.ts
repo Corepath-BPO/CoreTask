@@ -34,7 +34,12 @@ export async function assignableIds(
 
   const [members, owners] = await Promise.all([
     db.projectMember.findMany({
-      where: { projectId: { in: projects } },
+      // A deactivated member keeps their project places for reactivation,
+      // but nothing new goes to them.
+      where: {
+        projectId: { in: projects },
+        user: { memberships: { some: { workspaceId, deactivatedAt: null } } },
+      },
       select: { userId: true },
     }),
     db.workspaceMember.findMany({

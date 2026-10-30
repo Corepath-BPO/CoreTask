@@ -217,7 +217,7 @@ export class GoalsService {
   ): Promise<void> {
     if (dto.ownerId) {
       const member = await this.prisma.workspaceMember.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: dto.ownerId } },
+        where: { workspaceId_userId: { workspaceId, userId: dto.ownerId }, deactivatedAt: null },
         select: { id: true },
       });
       if (!member) {

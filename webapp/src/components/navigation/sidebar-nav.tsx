@@ -1,3 +1,4 @@
+import { WorkspaceRole, hasAtLeastRole } from '@coretask/contracts';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ListFilter, Star } from 'lucide-react';
 import { Fragment } from 'react';
@@ -17,6 +18,9 @@ interface SidebarNavProps {
 
 export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { workspace } = useActiveWorkspace();
+  const role = (workspace?.role ?? WorkspaceRole.GUEST) as WorkspaceRole;
+  const visible = (item: NavItem) => !item.minRole || hasAtLeastRole(role, item.minRole);
 
   return (
     <nav aria-label="Primary" className="flex flex-col gap-6">
@@ -30,7 +34,7 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
             )}
 
             <ul className="space-y-0.5">
-              {section.items.map((item) => (
+              {section.items.filter(visible).map((item) => (
                 <li key={item.to}>
                   <NavLink
                     item={item}

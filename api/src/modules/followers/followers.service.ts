@@ -68,7 +68,7 @@ export class FollowersService {
     if (wanted.length === 0) return [];
 
     const members = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId, userId: { in: wanted } },
+      where: { workspaceId, userId: { in: wanted }, deactivatedAt: null },
       select: { userId: true },
     });
     const projectId = await this.projectIdOf(link);
@@ -103,7 +103,7 @@ export class FollowersService {
     const wanted = [...new Set(userIds)];
 
     const members = await this.prisma.workspaceMember.findMany({
-      where: { workspaceId: ref.workspaceId, userId: { in: wanted } },
+      where: { workspaceId: ref.workspaceId, userId: { in: wanted }, deactivatedAt: null },
       select: { userId: true, user: { select: { name: true } } },
     });
     if (members.length !== wanted.length) {

@@ -344,6 +344,7 @@ export class SlackInteractionsService {
       const members = await this.prisma.workspaceMember.findMany({
         where: {
           workspaceId,
+          deactivatedAt: null,
           user: {
             isServiceAccount: false,
             ...(query
@@ -473,6 +474,7 @@ export class SlackInteractionsService {
     const membership = await this.prisma.workspaceMember.findUnique({
       where: {
         workspaceId_userId: { workspaceId: installation.workspaceId, userId: link.userId },
+        deactivatedAt: null,
       },
       select: { role: true },
     });

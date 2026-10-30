@@ -1,3 +1,4 @@
+import { WorkspaceRole } from '@coretask/contracts';
 import {
   BarChart3,
   CalendarDays,
@@ -9,6 +10,7 @@ import {
   Plug,
   Search,
   Settings,
+  ShieldCheck,
   Target,
   Ticket,
   Users,
@@ -28,6 +30,8 @@ export interface NavItem {
    * sidebar went on advertising them as unbuilt.
    */
   comingSoon?: boolean;
+  /** Shown only to people with at least this role in the active workspace. */
+  minRole?: WorkspaceRole;
 }
 
 export interface NavSection {
@@ -74,6 +78,12 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'account',
     items: [
       { label: 'Integrations', to: '/integrations', icon: Plug },
+      {
+        label: 'Admin console',
+        to: '/admin',
+        icon: ShieldCheck,
+        minRole: WorkspaceRole.SUPER_ADMIN,
+      },
       { label: 'Settings', to: '/settings', icon: Settings },
     ],
   },

@@ -278,7 +278,7 @@ export class FormsService {
   private async creditFor(form: { workspaceId: string; createdById: string | null }) {
     const author = form.createdById
       ? await this.prisma.workspaceMember.findFirst({
-          where: { workspaceId: form.workspaceId, userId: form.createdById },
+          where: { workspaceId: form.workspaceId, userId: form.createdById, deactivatedAt: null },
           select: { userId: true, role: true },
         })
       : null;

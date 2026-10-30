@@ -37,6 +37,9 @@ export class NotificationDispatcher {
   /** Never throws: a notification failure must not roll back the action behind it. */
   async dispatch(input: CreateNotificationInput): Promise<void> {
     try {
+      // Someone whose access a super admin cut off hears nothing more from it.
+      if (input.workspaceId && (await this.isDeactivated(input.workspaceId, input.userId))) return;
+
       const notification = await this.notifications.create(input);
 
       this.realtime.emitToUser(input.userId, ServerEvent.NOTIFICATION_CREATED, {
@@ -53,6 +56,14 @@ export class NotificationDispatcher {
     } catch (error) {
       this.logger.error({ err: error, userId: input.userId }, 'Failed to dispatch notification');
     }
+  }
+
+  private async isDeactivated(workspaceId: string, userId: string): Promise<boolean> {
+    const member = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+      select: { deactivatedAt: true },
+    });
+    return Boolean(member?.deactivatedAt);
   }
 
   /** The same notification by email, when its kind is one the person asked for. */

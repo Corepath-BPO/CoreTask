@@ -307,7 +307,7 @@ export class ProjectBlueprintService {
     const members = new Set(
       (
         await this.prisma.workspaceMember.findMany({
-          where: { workspaceId },
+          where: { workspaceId, deactivatedAt: null },
           select: { userId: true },
         })
       ).map((row) => row.userId),

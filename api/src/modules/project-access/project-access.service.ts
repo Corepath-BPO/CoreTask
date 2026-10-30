@@ -1,5 +1,6 @@
 import {
   ProjectVisibility,
+  WORKSPACE_ROLES,
   WorkspaceRole,
   canManageProject,
   canSeeProject,
@@ -43,7 +44,8 @@ export type ItemParentWhere =
     }
   | Record<never, never>;
 
-const ADMIN_ROLES: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN];
+/** Every role that reaches every project: owner, super admin and admin. */
+const ADMIN_ROLES: WorkspaceRole[] = WORKSPACE_ROLES.filter(hasProjectAdminOverride);
 
 /**
  * The single place that answers "may this person see this project, and as what?".
@@ -161,7 +163,11 @@ export class ProjectAccessService {
 
     if (!actor.role) {
       branches.push({
-        workspace: { members: { some: { userId: actor.userId, role: { in: ADMIN_ROLES } } } },
+        workspace: {
+          members: {
+            some: { userId: actor.userId, role: { in: ADMIN_ROLES }, deactivatedAt: null },
+          },
+        },
       });
     }
 
@@ -363,7 +369,12 @@ export class ProjectAccessService {
         select: { userId: true },
       }),
       this.prisma.workspaceMember.findMany({
-        where: { workspaceId, userId: { in: candidates }, role: { in: ADMIN_ROLES } },
+        where: {
+          workspaceId,
+          userId: { in: candidates },
+          role: { in: ADMIN_ROLES },
+          deactivatedAt: null,
+        },
         select: { userId: true },
       }),
     ]);
@@ -394,13 +405,13 @@ export class ProjectAccessService {
 
   /**
    * Everyone a private project's events may reach: its members plus the
-   * workspace's OWNER and ADMIN. Distinct, in no particular order.
+   * workspace's owner, super admins and admins. Distinct, in no particular order.
    */
   async audienceUserIds(workspaceId: string, projectId: string): Promise<string[]> {
     const [members, admins] = await Promise.all([
       this.prisma.projectMember.findMany({ where: { projectId }, select: { userId: true } }),
       this.prisma.workspaceMember.findMany({
-        where: { workspaceId, role: { in: ADMIN_ROLES } },
+        where: { workspaceId, role: { in: ADMIN_ROLES }, deactivatedAt: null },
         select: { userId: true },
       }),
     ]);
@@ -417,7 +428,10 @@ export class ProjectAccessService {
     const project = await this.prisma.project.findFirst({
       where: {
         id: projectId,
-        AND: [{ workspace: { members: { some: { userId } } } }, this.projectWhere({ userId })],
+        AND: [
+          { workspace: { members: { some: { userId, deactivatedAt: null } } } },
+          this.projectWhere({ userId }),
+        ],
       },
       select: { id: true },
     });

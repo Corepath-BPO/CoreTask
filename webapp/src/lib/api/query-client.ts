@@ -38,6 +38,11 @@ export const queryKeys = {
       [...queryKeys.workspaces.all, 'members', workspaceId] as const,
     invitations: (workspaceId: string) =>
       [...queryKeys.workspaces.all, 'invitations', workspaceId] as const,
+    /**
+     * The admin console's reads. Under `workspaces.all`, so every membership
+     * change, which invalidates that, refreshes the console with it.
+     */
+    admin: (workspaceId: string) => [...queryKeys.workspaces.all, 'admin', workspaceId] as const,
   },
   invitationPreview: (token: string) => ['invitation-preview', token] as const,
   apiKeys: {

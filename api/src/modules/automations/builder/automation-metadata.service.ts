@@ -143,7 +143,7 @@ export class AutomationMetadataService {
         select: { id: true, name: true, colorToken: true },
       }),
       this.prisma.workspaceMember.findMany({
-        where: { workspaceId, user: { isServiceAccount: false } },
+        where: { workspaceId, deactivatedAt: null, user: { isServiceAccount: false } },
         select: {
           user: { select: { id: true, name: true, email: true, avatarUrl: true } },
         },

@@ -180,8 +180,8 @@ export function MemberRow({ member, workspaceId, actorRole, isSelf, onLeave }: M
               <AlertDialogHeader>
                 <AlertDialogTitle>Make {member.user.name} the owner?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  You become an administrator, and only they will be able to transfer ownership
-                  again. This cannot be undone on your own.
+                  You become a super admin, and only they will be able to transfer ownership again.
+                  This cannot be undone on your own.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
