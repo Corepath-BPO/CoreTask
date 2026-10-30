@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { assignablePeople } from '@/features/tasks/lib/assignable';
 
 import { RadioItem } from './radio-item';
 import { MultiSelect } from './value-controls';
@@ -191,7 +192,12 @@ export function CreateTaskFields({
           </SelectTrigger>
           <SelectContent>
             <RadioItem value={NONE}>Nobody</RadioItem>
-            {(metadata?.members ?? []).map((member) => (
+            {/* The project's members and the owner, and whoever is named already. */}
+            {assignablePeople(
+              metadata?.assignees,
+              metadata?.members,
+              metadata?.members.find((member) => member.id === text('assigneeId')),
+            ).map((member) => (
               <RadioItem key={member.id} value={member.id}>
                 {member.name}
               </RadioItem>

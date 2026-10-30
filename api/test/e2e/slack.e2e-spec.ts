@@ -684,6 +684,15 @@ describe('Slack app (e2e)', () => {
       await install(scope);
       await linkBea(scope);
       await connectChannel(scope);
+      // Taking the task means being given it, which only the project's members may be.
+      await context.prisma.projectMember.create({
+        data: {
+          projectId: scope.projectId,
+          userId: scope.member.userId,
+          workspaceId: scope.workspaceId,
+          role: 'EDITOR',
+        },
+      });
 
       const created = await request(server())
         .post(url(`/workspaces/${scope.workspaceId}/tasks`))

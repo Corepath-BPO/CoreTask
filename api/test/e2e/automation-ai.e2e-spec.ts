@@ -127,6 +127,15 @@ describe('AI steps in rules (e2e)', () => {
       .send({ name: 'Leasing' })
       .expect(201);
     const sections = project.body.data.sections as { id: string }[];
+    // Bea is on the project, so she is someone its work may be given to.
+    await context.prisma.projectMember.create({
+      data: {
+        projectId: project.body.data.id as string,
+        userId: member.userId,
+        workspaceId,
+        role: 'EDITOR',
+      },
+    });
 
     const task = await request(server())
       .post(url(`/workspaces/${workspaceId}/tasks`))

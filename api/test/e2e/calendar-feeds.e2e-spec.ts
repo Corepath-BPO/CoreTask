@@ -62,6 +62,10 @@ describe('Calendar feeds (e2e)', () => {
       .send({ name: 'Leasing' })
       .expect(201);
     const projectId = project.body.data.id as string;
+    // The member is given work in Leasing, so is on that project (not on Secret).
+    await context.prisma.projectMember.create({
+      data: { projectId, userId: member.userId, workspaceId, role: 'EDITOR' },
+    });
     const secret = await request(server())
       .post(url(`/workspaces/${workspaceId}/projects`))
       .set(owner.auth)

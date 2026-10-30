@@ -28,6 +28,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { assignablePeople } from '@/features/tasks/lib/assignable';
 import { cn, humanizeEnum } from '@/lib/utils';
 
 import type { CanvasNode } from '../lib/graph-edits';
@@ -430,11 +431,17 @@ function ActionFields({
   );
 
   switch (subtype) {
+    // The project's members and the owner, whom the runner will hand work to,
+    // and whoever a rule written before the limit already names.
     case 'ASSIGN_USER':
       return picker(
         'userId',
         'Assign to',
-        metadata?.members.map((member) => ({ id: member.id, name: member.name })),
+        assignablePeople(
+          metadata?.assignees,
+          metadata?.members,
+          metadata?.members.find((member) => member.id === read('userId')),
+        ).map((member) => ({ id: member.id, name: member.name })),
         'Choose somebody',
       );
 

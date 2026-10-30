@@ -30,6 +30,7 @@ import { diffItemStories, snapshotFromTicket } from '../activity-logs/item-stori
 import { AutomationEventPublisher } from '../automations/automation-event.publisher';
 import { FollowersService } from '../followers/followers.service';
 import { ticketLink, ticketRef } from '../followers/item-ref';
+import { assertAssignable } from '../project-access/assignable';
 import { ProjectAccessService } from '../project-access/project-access.service';
 
 import type { CreateTicketDto, TicketListQueryDto, UpdateTicketDto } from './dto/ticket.dto';
@@ -116,6 +117,7 @@ export class TicketsService {
       await this.access.requireAccess(workspaceId, dto.projectId, actor, WorkspaceRole.MEMBER);
     }
     await this.assertAssigneeCanSee(workspaceId, dto.projectId ?? null, dto.assigneeId);
+    await assertAssignable(this.prisma, workspaceId, [dto.projectId], [dto.assigneeId]);
 
     const status = dto.status ?? TicketStatus.OPEN;
 
@@ -223,6 +225,10 @@ export class TicketsService {
       targetProjectId,
       dto.assigneeId === undefined ? existing.assigneeId : dto.assigneeId,
     );
+    // A new assignee only: one given before the limit stays through any other edit.
+    if (dto.assigneeId && dto.assigneeId !== existing.assigneeId) {
+      await assertAssignable(this.prisma, workspaceId, [targetProjectId], [dto.assigneeId]);
+    }
 
     const data: Prisma.TicketUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;

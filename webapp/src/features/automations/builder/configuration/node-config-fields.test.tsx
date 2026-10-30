@@ -569,6 +569,54 @@ describe('ticket rules', () => {
   });
 });
 
+describe('who a step gives work to', () => {
+  // Maya is a member of the project; Jonas is in the workspace only.
+  const limited = { ...metadata, assignees: [metadata.members[0]] } as AutomationMetadata;
+
+  function renderAction(subtype: string, configuration: Record<string, unknown>) {
+    const node = {
+      id: 'n-1',
+      type: 'ACTION',
+      subtype,
+      configuration,
+      position: { x: 0, y: 0 },
+      parentId: null,
+      branchKey: null,
+      order: 0,
+    } as CanvasNode;
+    render(<NodeConfigFields node={node} metadata={limited} onChange={vi.fn()} />);
+  }
+
+  it('offers "Assign to" only the project’s people, as the rule will run', async () => {
+    const user = setupUser();
+    renderAction('ASSIGN_USER', {});
+
+    await user.click(screen.getByLabelText('Assign to'));
+
+    expect(await screen.findByRole('option', { name: 'Maya Okafor' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Jonas Feld' })).not.toBeInTheDocument();
+  });
+
+  it('still shows someone a rule named before the limit', () => {
+    renderAction('ASSIGN_USER', { userId: 'u-2' });
+
+    expect(screen.getByLabelText('Assign to')).toHaveTextContent('Jonas Feld');
+  });
+
+  it('gives a checklist row only to the project’s people, or whoever it names already', async () => {
+    const user = setupUser();
+    renderAction('CREATE_SUBTASK', {
+      subtasks: [{ title: 'Review' }, { title: 'Sign off', assigneeId: 'u-2' }],
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Subtask 1 assignee' }));
+
+    expect(await screen.findByRole('option', { name: /Maya Okafor/ })).toBeInTheDocument();
+    // Named by the second row, so still drawn — and still offered.
+    expect(screen.getByRole('option', { name: /Jonas Feld/ })).toBeInTheDocument();
+  });
+});
+
 describe('the Wait step', () => {
   function renderWait(configuration: Record<string, unknown>) {
     const onChange = vi.fn();

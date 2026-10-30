@@ -167,6 +167,17 @@ describe('Automations (e2e)', () => {
     ...overrides,
   });
 
+  /** Puts the member on the project, so its work may be given to them. */
+  const joinProject = (scope: Scope) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: scope.member.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
+
   // -------------------------------------------------------------------------
   describe('running a rule with parentage', () => {
     /*
@@ -1950,6 +1961,7 @@ describe('Automations (e2e)', () => {
 
     it('runs a ticket rule: checks the ticket, then triages it', async () => {
       const scope = await setupScope();
+      await joinProject(scope);
       const ticketsUrl = url(`/workspaces/${scope.workspaceId}/tickets`);
       const report = async (title: string, type: string) =>
         (
@@ -2646,6 +2658,36 @@ describe('Automations (e2e)', () => {
       expect(log.succeeded).toBe(false);
       expect(log.message).toMatch(/no longer in this workspace/i);
     });
+
+    it('gives no work to someone in the workspace but not in the project', async () => {
+      // As the picker never offers them: a rule may not hand them the task either.
+      const scope = await setupScope();
+      const ruleId = await publishedRule(scope);
+      const live = await context.prisma.automationRule.findUniqueOrThrow({ where: { id: ruleId } });
+      const version = await context.prisma.automationRuleVersion.findUniqueOrThrow({
+        where: { id: live.publishedVersionId ?? '' },
+      });
+      await context.prisma.automationRuleVersion.update({
+        where: { id: version.id },
+        data: {
+          nodes: (version.nodes as { subtype: string }[]).map((node) =>
+            node.subtype === 'ASSIGN_USER'
+              ? { ...node, configuration: { userId: scope.member.userId } }
+              : node,
+          ),
+        },
+      });
+
+      await runner.handle(moveEvent(scope));
+
+      const task = await context.prisma.task.findUniqueOrThrow({ where: { id: scope.taskId } });
+      expect(task.assigneeId).not.toBe(scope.member.userId);
+      const log = await context.prisma.automationExecutionLog.findFirstOrThrow({
+        where: { execution: { ruleId } },
+      });
+      expect(log.succeeded).toBe(false);
+      expect(log.message).toBe('That person is not a member of this project.');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2973,6 +3015,7 @@ describe('Automations (e2e)', () => {
        * and a row naming neither is created bare, as every row was before.
        */
       const scope = await setupScope();
+      await joinProject(scope);
 
       await publishRule(scope, 'Checklist', { sectionId: scope.sectionId }, [
         {
@@ -3084,6 +3127,34 @@ describe('Automations (e2e)', () => {
       const logs = await context.prisma.automationExecutionLog.findMany();
       expect(logs.map((log) => [log.succeeded, log.message])).toEqual([
         [true, expect.stringContaining('no longer in this workspace')],
+      ]);
+    });
+
+    it('creates a subtask unassigned when its person is not in the project', async () => {
+      // In the workspace, not the project: no work here may go to them, but
+      // the checklist is still made.
+      const scope = await setupScope();
+
+      await publishRule(scope, 'Checklist', { sectionId: scope.sectionId }, [
+        {
+          nodeType: 'ACTION',
+          subtype: 'CREATE_SUBTASK',
+          configuration: { subtasks: [{ title: 'Review', assigneeId: scope.member.userId }] },
+        },
+      ]);
+
+      const result = await runner.handle(moveEvent(scope));
+      expect(result.executed).toBe(1);
+
+      const subtasks = await context.prisma.task.findMany({
+        where: { parentTaskId: scope.taskId },
+      });
+      expect(subtasks.map((subtask) => [subtask.title, subtask.assigneeId])).toEqual([
+        ['Review', null],
+      ]);
+      const logs = await context.prisma.automationExecutionLog.findMany();
+      expect(logs.map((log) => [log.succeeded, log.message])).toEqual([
+        [true, expect.stringContaining('or this project')],
       ]);
     });
 

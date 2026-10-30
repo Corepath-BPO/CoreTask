@@ -100,6 +100,17 @@ describe('Followers (e2e)', () => {
     });
   };
 
+  /** Makes someone a member of the scope's project, who may then be given its work. */
+  const joinProject = (scope: Scope, actor: Actor) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: actor.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
+
   const taskFollowers = (scope: Scope, taskId = scope.taskId) =>
     url(`/workspaces/${scope.workspaceId}/tasks/${taskId}/followers`);
   const ticketFollowers = (scope: Scope, ref = scope.ticketKey) =>
@@ -133,6 +144,7 @@ describe('Followers (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
 
       await patchTask(scope, scope.owner, { assigneeId: ada.userId }).expect(200);
 
@@ -160,6 +172,7 @@ describe('Followers (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
 
       const created = await request(server())
         .post(url(`/workspaces/${scope.workspaceId}/projects/${scope.projectId}/work-items`))
@@ -327,6 +340,7 @@ describe('Followers (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
       await patchTask(scope, scope.owner, { assigneeId: ada.userId }).expect(200);
 
       const left = await request(server())
@@ -363,6 +377,7 @@ describe('Followers (e2e)', () => {
       const manager = await registerUser('Manager');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
       await addMember(scope, manager, WorkspaceRole.MANAGER);
+      await joinProject(scope, ada);
       await patchTask(scope, scope.owner, { assigneeId: ada.userId }).expect(200);
 
       await request(server())
@@ -398,6 +413,7 @@ describe('Followers (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
       await patchTask(scope, scope.owner, { assigneeId: ada.userId }).expect(200);
 
       await context.prisma.workspaceMember.deleteMany({
@@ -444,6 +460,7 @@ describe('Followers (e2e)', () => {
       const scope = await setupScope();
       const ada = await registerUser('Ada Lovelace');
       await addMember(scope, ada, WorkspaceRole.MEMBER);
+      await joinProject(scope, ada);
       await patchTask(scope, scope.owner, { assigneeId: ada.userId }).expect(200);
 
       await request(server())

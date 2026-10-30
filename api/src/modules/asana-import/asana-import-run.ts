@@ -4,11 +4,11 @@ import {
   ActivityAction,
   ActivityEntity,
   AttachmentStatus,
+  AutomationRuleStatus,
   CustomFieldType,
   POSITION_STEP,
   ProjectMemberRole,
   ProjectStatus,
-  ProjectVisibility,
   TaskStatus,
   WorkspaceRole,
   tagNameKey,
@@ -50,6 +50,7 @@ import type {
 } from '../../integrations/asana/asana.types';
 import type { StorageService } from '../../integrations/storage/storage.service';
 import { normalizeRichText } from '../../common/utils/rich-text.util';
+import { readSnapshot, ruleAssignees } from '../automations/versions/rule-snapshot';
 
 import {
   LIMITS,
@@ -284,7 +285,6 @@ export class AsanaImportRun {
   /** Tags asked for by gid, once each. */
   private readonly pendingTagGids = new Map<string, Promise<string | undefined>>();
   private readonly projectGids = new Set<string>();
-  private readonly privateProjects = new Set<string>();
   private readonly dependencies = new Map<string, string[]>();
   private readonly counts: Record<string, Counter | number> = {};
   private readonly errors: ImportError[] = [];
@@ -999,7 +999,6 @@ export class AsanaImportRun {
     );
 
     this.projectGids.add(project.gid);
-    if (visibility === ProjectVisibility.PRIVATE) this.privateProjects.add(projectId);
 
     await this.importProjectMembers(project, projectId, lead);
     await this.importSections(project, projectId);
@@ -2729,7 +2728,7 @@ export class AsanaImportRun {
       await this.importDependencies();
       this.dependencies.clear();
     }
-    await this.grantAssigneesAccess();
+    await this.grantAssigneesAccess([projectId]);
     this.counter('newProjects').done += 1;
     return projectId;
   }
@@ -2912,26 +2911,14 @@ export class AsanaImportRun {
     return { taskId: task.id, projectIds: task.projectId ? [task.projectId] : [] };
   }
 
-  /** Whoever is assigned a task in a private project joins it, as a full run makes them. */
+  /** Whoever is assigned a task joins its project, as a full run makes them. */
   private async grantAssigneeAccess(taskId: string): Promise<void> {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      select: { assigneeId: true, project: { select: { id: true, visibility: true } } },
+      select: { assigneeId: true, projectId: true },
     });
-    if (!task?.assigneeId || !task.project) return;
-    if (task.project.visibility !== ProjectVisibility.PRIVATE) return;
-    await this.prisma.projectMember.createMany({
-      data: [
-        {
-          projectId: task.project.id,
-          userId: task.assigneeId,
-          workspaceId: this.workspaceId,
-          role: ProjectMemberRole.EDITOR,
-          addedById: this.starterId,
-        },
-      ],
-      skipDuplicates: true,
-    });
+    if (!task?.assigneeId || !task.projectId) return;
+    await this.joinProjects([{ projectId: task.projectId, userId: task.assigneeId }]);
   }
 
   /** After everything already in this place, where a person's new task goes. */
@@ -2990,34 +2977,89 @@ export class AsanaImportRun {
   }
 
   /**
-   * Asana lets an assignee see their task in a project they are not a member
-   * of; CoreTask grants access by project. So whoever is assigned work in a
-   * private project joins it as an editor, rather than owning a task they
-   * cannot open.
+   * Whoever Asana gives work to in a project joins it as an editor.
+   *
+   * Asana lets anyone in the workspace be assigned a task, or be named by a
+   * rule's checklist, in a project they are not a member of. CoreTask gives a
+   * project's work only to its members and the workspace's owner
+   * (`project-access/assignable.ts`), and grants access by project. So the
+   * assignee of a task here, and anyone the project's active rules give work
+   * to, joins it — rather than holding work they cannot open, or a rule
+   * leaving its subtasks unassigned. The projects this run brought, or
+   * `projectIds` when given.
    */
-  private async grantAssigneesAccess(): Promise<void> {
-    if (this.privateProjects.size === 0) return;
+  private async grantAssigneesAccess(projectIds?: readonly string[]): Promise<void> {
+    const projects = projectIds
+      ? [...projectIds]
+      : [...this.projectGids]
+          .map((gid) => this.ref('project', gid))
+          .filter((id): id is string => Boolean(id));
+    if (projects.length === 0) return;
 
-    const assignments = await this.prisma.task.findMany({
-      where: {
-        workspaceId: this.workspaceId,
-        projectId: { in: [...this.privateProjects] },
-        assigneeId: { not: null },
-      },
-      select: { projectId: true, assigneeId: true },
-      distinct: ['projectId', 'assigneeId'],
-    });
-    const result = await this.prisma.projectMember.createMany({
-      data: assignments.map((row) => ({
+    const [assignments, rules] = await Promise.all([
+      this.prisma.task.findMany({
+        where: {
+          workspaceId: this.workspaceId,
+          projectId: { in: projects },
+          assigneeId: { not: null },
+          archivedAt: null,
+        },
+        select: { projectId: true, assigneeId: true },
+        distinct: ['projectId', 'assigneeId'],
+      }),
+      this.prisma.automationRule.findMany({
+        where: {
+          workspaceId: this.workspaceId,
+          projectId: { in: projects },
+          status: AutomationRuleStatus.ACTIVE,
+        },
+        select: { projectId: true, publishedVersion: { select: { nodes: true } } },
+      }),
+    ]);
+    const joined = await this.joinProjects([
+      ...assignments.map((row) => ({
         projectId: row.projectId as string,
         userId: row.assigneeId as string,
-        workspaceId: this.workspaceId,
-        role: ProjectMemberRole.EDITOR,
-        addedById: this.starterId,
       })),
+      ...rules.flatMap((rule) =>
+        ruleAssignees(readSnapshot(rule.publishedVersion?.nodes) ?? []).map((userId) => ({
+          projectId: rule.projectId,
+          userId,
+        })),
+      ),
+    ]);
+    this.counter('assigneesAddedToProjects').done += joined;
+  }
+
+  /**
+   * Makes each person an editor of each project, unless they already belong
+   * to it or own the workspace — the owner may be given work anywhere — or
+   * have left the workspace. How many joined.
+   */
+  private async joinProjects(
+    pairs: readonly { projectId: string; userId: string }[],
+  ): Promise<number> {
+    if (pairs.length === 0) return 0;
+    const people = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId: this.workspaceId, userId: { in: pairs.map((pair) => pair.userId) } },
+      select: { userId: true, role: true },
+    });
+    const joinable = new Set(
+      people.filter((person) => person.role !== WorkspaceRole.OWNER).map((person) => person.userId),
+    );
+    const result = await this.prisma.projectMember.createMany({
+      data: pairs
+        .filter((pair) => joinable.has(pair.userId))
+        .map((pair) => ({
+          projectId: pair.projectId,
+          userId: pair.userId,
+          workspaceId: this.workspaceId,
+          role: ProjectMemberRole.EDITOR,
+          addedById: this.starterId,
+        })),
       skipDuplicates: true,
     });
-    this.counter('assigneesAddedToProjects').done = result.count;
+    return result.count;
   }
 
   private async recordActivity(): Promise<void> {

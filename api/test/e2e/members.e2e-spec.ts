@@ -90,6 +90,17 @@ describe('Member management (e2e)', () => {
     return member.id;
   };
 
+  /** Makes someone a member of the scope's project, who may then be given its work. */
+  const joinProject = (scope: Scope, actor: Actor) =>
+    context.prisma.projectMember.create({
+      data: {
+        projectId: scope.projectId,
+        userId: actor.userId,
+        workspaceId: scope.workspaceId,
+        role: 'EDITOR',
+      },
+    });
+
   const ownMembershipId = async (scope: Scope, actor: Actor): Promise<string> => {
     const member = await context.prisma.workspaceMember.findUniqueOrThrow({
       where: { workspaceId_userId: { workspaceId: scope.workspaceId, userId: actor.userId } },
@@ -340,6 +351,7 @@ describe('Member management (e2e)', () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
+      await joinProject(scope, member);
 
       const task = await request(server())
         .post(url(`/workspaces/${scope.workspaceId}/tasks`))
@@ -376,6 +388,7 @@ describe('Member management (e2e)', () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
+      await joinProject(scope, member);
 
       const task = await request(server())
         .post(url(`/workspaces/${scope.workspaceId}/tasks`))

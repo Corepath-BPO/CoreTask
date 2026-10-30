@@ -937,6 +937,15 @@ describe('Tasks (e2e)', () => {
       await context.prisma.workspaceMember.create({
         data: { workspaceId: scope.workspaceId, userId: member.userId, role: WorkspaceRole.MEMBER },
       });
+      // Only a member of the project may be given its work.
+      await context.prisma.projectMember.create({
+        data: {
+          projectId: scope.projectId,
+          userId: member.userId,
+          workspaceId: scope.workspaceId,
+          role: 'EDITOR',
+        },
+      });
 
       await createTask(scope, { title: 'For you', assigneeId: member.userId });
 
@@ -956,6 +965,50 @@ describe('Tasks (e2e)', () => {
       expect(notifications).toHaveLength(0);
     });
   });
+
+  describe('the assignee limit', () => {
+    it('gives the task panel’s tasks only to the project’s members', async () => {
+      const scope = await setupScope();
+      const member = await registerUser('Member');
+      await context.prisma.workspaceMember.create({
+        data: { workspaceId: scope.workspaceId, userId: member.userId, role: WorkspaceRole.MEMBER },
+      });
+      const task = await createTask(scope);
+      const assign = (assigneeId: string) =>
+        request(server())
+          .patch(`${tasksUrl(scope)}/${task.id}`)
+          .set('Authorization', `Bearer ${scope.owner.token}`)
+          .send({ assigneeId });
+
+      // In the workspace, not in the project: refused, as the picker never offers them.
+      const refused = await assign(member.userId).expect(400);
+      expect(refused.body.error.message).toBe(
+        'Only members of this project can be assigned its work.',
+      );
+
+      // Given before the limit: a rename leaves them be.
+      await context.prisma.task.update({
+        where: { id: task.id },
+        data: { assigneeId: member.userId },
+      });
+      await request(server())
+        .patch(`${tasksUrl(scope)}/${task.id}`)
+        .set('Authorization', `Bearer ${scope.owner.token}`)
+        .send({ title: 'Renamed' })
+        .expect(200);
+
+      await context.prisma.projectMember.create({
+        data: {
+          projectId: scope.projectId,
+          userId: member.userId,
+          workspaceId: scope.workspaceId,
+          role: 'EDITOR',
+        },
+      });
+      await createTask(scope, { title: 'For you', assigneeId: member.userId });
+    });
+  });
+
   describe('counts on the row', () => {
     it('counts live comments and confirmed files, and nothing else', async () => {
       const scope = await setupScope();
