@@ -277,7 +277,10 @@ export function AdminMembersPage({ guests = false }: { guests?: boolean }) {
                     ))}
                 {!isLoading && shown.length === 0 && (
                   <tr>
-                    <td colSpan={HEADERS.length} className="px-3 py-8 text-center text-muted-foreground">
+                    <td
+                      colSpan={HEADERS.length}
+                      className="px-3 py-8 text-center text-muted-foreground"
+                    >
                       {scoped.length === 0
                         ? guests
                           ? 'No guests in this workspace.'
@@ -311,10 +314,7 @@ export function AdminMembersPage({ guests = false }: { guests?: boolean }) {
         onConfirm={confirmHandOver}
       />
 
-      <AlertDialog
-        open={transferTo !== null}
-        onOpenChange={(open) => !open && setTransferTo(null)}
-      >
+      <AlertDialog open={transferTo !== null} onOpenChange={(open) => !open && setTransferTo(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Make {transferTo?.user.name} the owner?</AlertDialogTitle>
@@ -376,7 +376,11 @@ function MemberRow({
             <AvatarFallback className="text-[11px]">{initials(member.user.name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0">
-            <p className={deactivated ? 'truncate font-medium text-muted-foreground' : 'truncate font-medium'}>
+            <p
+              className={
+                deactivated ? 'truncate font-medium text-muted-foreground' : 'truncate font-medium'
+              }
+            >
               {member.user.name}
               {isSelf && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
             </p>
@@ -574,8 +578,17 @@ function PendingInvitations({ workspaceId }: { workspaceId: string | undefined }
           </DialogHeader>
           {link && (
             <div className="flex items-center gap-2">
-              <Input readOnly value={link.url} aria-label="Invitation link" className="font-mono text-xs" />
-              <CopyButton value={link.url} label="Copy invitation link" successMessage="Link copied" />
+              <Input
+                readOnly
+                value={link.url}
+                aria-label="Invitation link"
+                className="font-mono text-xs"
+              />
+              <CopyButton
+                value={link.url}
+                label="Copy invitation link"
+                successMessage="Link copied"
+              />
             </div>
           )}
         </DialogContent>

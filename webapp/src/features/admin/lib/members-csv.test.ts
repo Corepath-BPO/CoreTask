@@ -28,7 +28,9 @@ const member = (name: string): AdminMember => ({
 
 describe('membersCsv', () => {
   it('writes a header and one row per person', () => {
-    const [header, row] = membersCsv([member('Pat')]).trim().split('\r\n');
+    const [header, row] = membersCsv([member('Pat')])
+      .trim()
+      .split('\r\n');
 
     expect(header).toMatch(/^Name,Email,Role,Status,/);
     expect(row).toBe(

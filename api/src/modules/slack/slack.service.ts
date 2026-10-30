@@ -133,7 +133,10 @@ export class SlackService {
       throw AppException.badRequest('SLACK_INSTALL_INVALID');
     }
     const membership = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId: state.workspaceId, userId }, deactivatedAt: null },
+      where: {
+        workspaceId_userId: { workspaceId: state.workspaceId, userId },
+        deactivatedAt: null,
+      },
       select: { role: true },
     });
     if (!membership || !hasAtLeastRole(membership.role, WorkspaceRole.ADMIN)) {

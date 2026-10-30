@@ -8,7 +8,10 @@ const COLUMNS: { header: string; value: (member: AdminMember) => string | number
   { header: 'Joined', value: (member) => member.joinedAt },
   { header: 'Last active', value: (member) => member.user.lastActiveAt ?? '' },
   { header: 'Sign-in methods', value: (member) => member.user.signInMethods.join(' ') },
-  { header: 'Two-step verification', value: (member) => (member.user.twoFactorEnabled ? 'Yes' : 'No') },
+  {
+    header: 'Two-step verification',
+    value: (member) => (member.user.twoFactorEnabled ? 'Yes' : 'No'),
+  },
   { header: 'Open tasks', value: (member) => member.openTasks },
   { header: 'Open tickets', value: (member) => member.openTickets },
   { header: 'Deactivated', value: (member) => member.deactivatedAt ?? '' },

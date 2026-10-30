@@ -46,7 +46,10 @@ export function AdminOverviewPage() {
 
   return (
     <div className="space-y-6">
-      <section aria-label="Workspace in numbers" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section
+        aria-label="Workspace in numbers"
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      >
         <StatCard
           label="People"
           value={count.format(people.total - people.deactivated)}

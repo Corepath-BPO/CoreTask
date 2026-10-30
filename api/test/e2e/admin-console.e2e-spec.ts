@@ -125,23 +125,25 @@ describe('Admin console (e2e)', () => {
       },
     ];
 
-    it.each([WorkspaceRole.ADMIN, WorkspaceRole.MANAGER, WorkspaceRole.MEMBER, WorkspaceRole.GUEST])(
-      'refuses a workspace %s on every route',
-      async (role) => {
-        const scope = await setupScope();
-        const caller = await registerUser('Caller');
-        await join(scope, caller, role);
-        const target = await registerUser('Target');
-        const targetId = await join(scope, target, WorkspaceRole.GUEST);
+    it.each([
+      WorkspaceRole.ADMIN,
+      WorkspaceRole.MANAGER,
+      WorkspaceRole.MEMBER,
+      WorkspaceRole.GUEST,
+    ])('refuses a workspace %s on every route', async (role) => {
+      const scope = await setupScope();
+      const caller = await registerUser('Caller');
+      await join(scope, caller, role);
+      const target = await registerUser('Target');
+      const targetId = await join(scope, target, WorkspaceRole.GUEST);
 
-        for (const route of routes(scope, targetId)) {
-          const response = await as(caller)[route.method](route.path).expect(403);
-          expect(response.body.error.code).toBe('INSUFFICIENT_WORKSPACE_ROLE');
-        }
-        // Nothing the refused calls asked for happened.
-        expect((await membershipOf(scope, target)).deactivatedAt).toBeNull();
-      },
-    );
+      for (const route of routes(scope, targetId)) {
+        const response = await as(caller)[route.method](route.path).expect(403);
+        expect(response.body.error.code).toBe('INSUFFICIENT_WORKSPACE_ROLE');
+      }
+      // Nothing the refused calls asked for happened.
+      expect((await membershipOf(scope, target)).deactivatedAt).toBeNull();
+    });
 
     it('refuses someone outside the workspace', async () => {
       const scope = await setupScope();
@@ -189,7 +191,9 @@ describe('Admin console (e2e)', () => {
       const scope = await setupScope();
       const superAdmin = await registerUser('Super');
       const superAdminId = await join(scope, superAdmin, WorkspaceRole.SUPER_ADMIN);
-      await as(scope.owner).post(adminUrl(scope, `/members/${superAdminId}/deactivate`)).expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${superAdminId}/deactivate`))
+        .expect(200);
 
       const response = await as(superAdmin).get(adminUrl(scope, '/overview')).expect(403);
       expect(response.body.error.code).toBe('WORKSPACE_MEMBERSHIP_DEACTIVATED');
@@ -289,7 +293,9 @@ describe('Admin console (e2e)', () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/deactivate`)).expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/deactivate`))
+        .expect(200);
 
       await as(scope.owner)
         .post(url(`/workspaces/${scope.workspaceId}/tasks`), {
@@ -367,9 +373,15 @@ describe('Admin console (e2e)', () => {
       const otherId = await join(scope, other, WorkspaceRole.SUPER_ADMIN);
       const ownerId = (await membershipOf(scope, scope.owner)).id;
 
-      await as(one).post(adminUrl(scope, `/members/${ownerId}/deactivate`)).expect(400);
-      await as(one).post(adminUrl(scope, `/members/${otherId}/deactivate`)).expect(403);
-      await as(one).post(adminUrl(scope, `/members/${oneId}/deactivate`)).expect(403);
+      await as(one)
+        .post(adminUrl(scope, `/members/${ownerId}/deactivate`))
+        .expect(400);
+      await as(one)
+        .post(adminUrl(scope, `/members/${otherId}/deactivate`))
+        .expect(403);
+      await as(one)
+        .post(adminUrl(scope, `/members/${oneId}/deactivate`))
+        .expect(403);
     });
 
     it('says so when they are already deactivated', async () => {
@@ -377,31 +389,45 @@ describe('Admin console (e2e)', () => {
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
 
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/deactivate`)).expect(200);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/deactivate`)).expect(409);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/deactivate`))
+        .expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/deactivate`))
+        .expect(409);
     });
 
     it('is undone by reactivating, with the same role', async () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MANAGER);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/deactivate`)).expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/deactivate`))
+        .expect(200);
 
       const response = await as(scope.owner)
         .post(adminUrl(scope, `/members/${memberId}/reactivate`))
         .expect(200);
       expect(response.body.data).toMatchObject({ status: 'ACTIVE', role: WorkspaceRole.MANAGER });
 
-      await as(member).get(url(`/workspaces/${scope.workspaceId}/projects`)).expect(200);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/reactivate`)).expect(409);
+      await as(member)
+        .get(url(`/workspaces/${scope.workspaceId}/projects`))
+        .expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/reactivate`))
+        .expect(409);
     });
 
     it('records both in the activity trail', async () => {
       const scope = await setupScope();
       const member = await registerUser('Member');
       const memberId = await join(scope, member, WorkspaceRole.MEMBER);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/deactivate`)).expect(200);
-      await as(scope.owner).post(adminUrl(scope, `/members/${memberId}/reactivate`)).expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/deactivate`))
+        .expect(200);
+      await as(scope.owner)
+        .post(adminUrl(scope, `/members/${memberId}/reactivate`))
+        .expect(200);
 
       const lines = await context.prisma.activityLog.findMany({
         where: { workspaceId: scope.workspaceId, entityId: member.userId },

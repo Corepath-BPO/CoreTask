@@ -202,7 +202,12 @@ export class AdminService {
         where: { workspaceId, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date(now) } },
       }),
       this.prisma.workspaceInvitation.count({
-        where: { workspaceId, acceptedAt: null, revokedAt: null, expiresAt: { lte: new Date(now) } },
+        where: {
+          workspaceId,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { lte: new Date(now) },
+        },
       }),
       this.prisma.team.count({ where: { workspaceId } }),
       this.prisma.project.count({ where: { workspaceId, archivedAt: null } }),
@@ -278,9 +283,7 @@ export class AdminService {
         id: workspace.id,
         name: workspace.name,
         createdAt: workspace.createdAt.toISOString(),
-        owner: owner
-          ? { id: owner.user.id, name: owner.user.name, email: owner.user.email }
-          : null,
+        owner: owner ? { id: owner.user.id, name: owner.user.name, email: owner.user.email } : null,
       },
       people: {
         total: members.length,

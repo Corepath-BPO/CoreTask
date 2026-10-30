@@ -75,7 +75,10 @@ export function AdminTeamsPage() {
                     </tr>
                   ))
                 : (teams ?? []).map((team) => (
-                    <tr key={team.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <tr
+                      key={team.id}
+                      className="border-b border-border last:border-0 hover:bg-muted/30"
+                    >
                       <td className="px-3 py-3">
                         <Link
                           to="/teams/$teamId"

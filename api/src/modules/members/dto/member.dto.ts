@@ -19,7 +19,8 @@ export class RemoveMemberResultDto {
 
   @ApiProperty({
     example: 2,
-    description: 'Open tasks handed to the member named to take them over, where they can open them.',
+    description:
+      'Open tasks handed to the member named to take them over, where they can open them.',
   })
   tasksReassigned!: number;
 

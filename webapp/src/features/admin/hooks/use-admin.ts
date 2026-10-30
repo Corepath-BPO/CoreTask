@@ -113,7 +113,8 @@ export function useAdminRemoveMember(workspaceId: string | undefined) {
 /** Issues a fresh link; the previous one stops working. */
 export function useInvitationLink(workspaceId: string | undefined) {
   return useMutation({
-    mutationFn: (invitationId: string) => adminApi.invitationLink(workspaceId as string, invitationId),
+    mutationFn: (invitationId: string) =>
+      adminApi.invitationLink(workspaceId as string, invitationId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.workspaces.invitations(workspaceId as string),

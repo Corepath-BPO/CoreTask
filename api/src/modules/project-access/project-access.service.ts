@@ -163,7 +163,11 @@ export class ProjectAccessService {
 
     if (!actor.role) {
       branches.push({
-        workspace: { members: { some: { userId: actor.userId, role: { in: ADMIN_ROLES }, deactivatedAt: null } } },
+        workspace: {
+          members: {
+            some: { userId: actor.userId, role: { in: ADMIN_ROLES }, deactivatedAt: null },
+          },
+        },
       });
     }
 
