@@ -2405,7 +2405,11 @@ export class AutomationRunnerService {
         const [members, assignable] = named.length
           ? await Promise.all([
               this.prisma.workspaceMember.findMany({
-                where: { workspaceId: rule.workspaceId, deactivatedAt: null, userId: { in: named } },
+                where: {
+                  workspaceId: rule.workspaceId,
+                  deactivatedAt: null,
+                  userId: { in: named },
+                },
                 select: { userId: true },
               }),
               assignableIds(this.prisma, rule.workspaceId, [task.projectId, rule.projectId]),
