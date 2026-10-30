@@ -200,6 +200,25 @@ export const bulkWorkItemSchema = z
   );
 
 /**
+ * Find and replace on the Assignee column. The rows are found on the server,
+ * not named, because most of a project is not on screen; each request hands
+ * over at most `BULK_WORK_ITEM_LIMIT` of them and says how many are left.
+ */
+export const replaceAssigneeSchema = z
+  .object({
+    fromUserId: uuidSchema,
+    toUserId: uuidSchema.nullable(),
+    includeCompleted: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    correlationId,
+  })
+  .strict()
+  .refine((value) => value.fromUserId !== value.toUserId, {
+    message: 'Choose someone else to replace them with',
+    path: ['toUserId'],
+  });
+
+/**
  * `types` arrives comma-separated rather than repeated.
  *
  * Axios serialises an array as `types[]=…`, which strict validation rejects as
@@ -268,4 +287,5 @@ export type CreateWorkItemInput = z.infer<typeof createWorkItemSchema>;
 export type UpdateWorkItemInput = z.infer<typeof updateWorkItemSchema>;
 export type MoveWorkItemInput = z.infer<typeof moveWorkItemSchema>;
 export type BulkWorkItemInput = z.infer<typeof bulkWorkItemSchema>;
+export type ReplaceAssigneeInput = z.infer<typeof replaceAssigneeSchema>;
 export type ProjectWorkItemQueryInput = z.infer<typeof projectWorkItemQuerySchema>;

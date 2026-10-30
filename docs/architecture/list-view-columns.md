@@ -36,10 +36,19 @@ standalone Fields button is gone. Each column also has Asana's header menu, the 
 (`column-menu.tsx`), in Asana's order:
 
 - **Edit field**, for a custom field.
+- **Find and replace assignee**, on the Assignee column for someone who can
+  edit: every open task here assigned to one person handed to another, or to
+  nobody, completed ones too if asked (`replace-assignee-dialog.tsx`). The
+  server finds the rows, since most of a project is not on screen, and gives
+  each to the new person through the same update a single edit takes, a
+  hundred a request (`POST …/work-items/replace-assignee`); the dialog asks
+  again until none are left and shows how far it has got.
 - **Sort** › ascending or descending, replacing the view's sort.
 - **Filter**, which adds a row for the field and opens the Filter popover.
 - **Group** › ascending or descending. Descending reverses the field's own
-  order (`settings.groupOrder`), and the group with no value stays last.
+  order (`settings.groupOrder`), and the group with no value stays last. The
+  toolbar's Group popover offers the same order once a field is chosen, and
+  the Board runs its columns in it.
 - **Add column**: a field not shown yet, placed just after this one.
 - **Move column** › left or right, never in front of the Task column.
 - **Pin column** and **Hide column**.
@@ -50,8 +59,8 @@ standalone Fields button is gone. Each column also has Asana's header menu, the 
 
 The Task column, like Asana's Name, only sorts. Someone who cannot edit the
 view sees only Sort, Filter and Group, which change their own unsaved copy of
-it. Asana's Field access and permissions, AI auto-fill and Find and replace
-have no CoreTask feature behind them yet, so they are not offered. The same menu holds the row density
+it. Asana's Field access and permissions and AI auto-fill have no CoreTask
+feature behind them yet, so they are not offered. The same menu holds the row density
 (`COMFORTABLE` or `COMPACT`, applied as `data-density` on the scrolling pane)
 and "Show completed tasks". Toggling and reordering are pure functions in
 `column-layout.ts` (`toggleColumn`, `moveColumnBy`), and the title can never

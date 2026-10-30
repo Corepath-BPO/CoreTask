@@ -13,6 +13,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Replace,
   Rows3,
   Trash2,
   Zap,
@@ -36,6 +37,8 @@ const SUB_TRIGGER =
 /** What one column's menu may do; an action left out is not offered. */
 export interface ColumnMenuActions {
   onEditField?: (() => void) | undefined;
+  /** The Assignee column's "Find and replace": one person's rows to another. */
+  onReplaceAssignee?: (() => void) | undefined;
   onSort?: ((direction: SortDirection) => void) | undefined;
   onFilter?: (() => void) | undefined;
   onGroup?: ((direction: SortDirection) => void) | undefined;
@@ -63,6 +66,7 @@ export interface ColumnMenuActions {
 export function ColumnMenu({ label, actions }: { label: string; actions: ColumnMenuActions }) {
   const {
     onEditField,
+    onReplaceAssignee,
     onSort,
     onFilter,
     onGroup,
@@ -78,9 +82,10 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
     onDelete,
   } = actions;
 
+  const own = Boolean(onEditField || onReplaceAssignee);
   const view = Boolean(onSort || onFilter || onGroup);
   const layout = Boolean((onAdd && addable.length > 0) || onMove || onPin || onHide);
-  if (!onEditField && !view && !layout && !onAddAutomation && !onDelete) return null;
+  if (!own && !view && !layout && !onAddAutomation && !onDelete) return null;
 
   return (
     <DropdownMenu>
@@ -90,14 +95,20 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
       >
         <ChevronDown className="size-3.5" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end" className="w-56">
         {onEditField && (
           <DropdownMenuItem onSelect={onEditField}>
             <Pencil />
             Edit field
           </DropdownMenuItem>
         )}
-        {onEditField && view && <DropdownMenuSeparator />}
+        {onReplaceAssignee && (
+          <DropdownMenuItem onSelect={onReplaceAssignee}>
+            <Replace />
+            Find and replace assignee
+          </DropdownMenuItem>
+        )}
+        {own && view && <DropdownMenuSeparator />}
 
         {onSort && (
           <DropdownMenuSub>
@@ -190,7 +201,7 @@ export function ColumnMenu({ label, actions }: { label: string; actions: ColumnM
           </DropdownMenuItem>
         )}
 
-        {onAddAutomation && (view || layout || onEditField) && <DropdownMenuSeparator />}
+        {onAddAutomation && (view || layout || own) && <DropdownMenuSeparator />}
         {onAddAutomation && (
           <DropdownMenuItem onSelect={onAddAutomation}>
             <Zap />

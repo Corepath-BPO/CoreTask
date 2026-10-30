@@ -146,6 +146,14 @@ export const queryKeys = {
       [...queryKeys.workItems.all(workspaceId, projectId), 'list', query] as const,
     detail: (workspaceId: string, projectId: string, workItemId: string) =>
       [...queryKeys.workItems.all(workspaceId, projectId), 'detail', workItemId] as const,
+    /** How many rows Find and replace would hand over. */
+    assigned: (workspaceId: string, projectId: string, userId: string, includeCompleted: boolean) =>
+      [
+        ...queryKeys.workItems.all(workspaceId, projectId),
+        'assigned',
+        userId,
+        includeCompleted,
+      ] as const,
   },
   projectViews: {
     all: (workspaceId: string, projectId: string) =>

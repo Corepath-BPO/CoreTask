@@ -1,6 +1,6 @@
 import { CustomFieldType } from '@coretask/contracts';
 import type { ProjectFieldMetadata, ViewSettings } from '@coretask/types';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/test-utils';
@@ -182,6 +182,29 @@ describe('GroupPopover', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: 'Severity' }));
     expect(onChange).toHaveBeenCalledWith({ groupBy: 'custom:f-sev' });
+    // Sections keep the order they are in: no order to choose.
+    expect(screen.queryByRole('radiogroup', { name: 'Group order' })).not.toBeInTheDocument();
+  });
+
+  it('turns a field’s groups around, as the column menu does', () => {
+    const onChange = vi.fn();
+    renderWithProviders(
+      <GroupPopover
+        settings={settings({ groupBy: 'custom:f-sev' })}
+        metadata={metadata}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Group, by Severity' }));
+    const order = screen.getByRole('radiogroup', { name: 'Group order' });
+    expect(within(order).getByRole('radio', { name: 'Ascending' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    fireEvent.click(within(order).getByRole('radio', { name: 'Descending' }));
+
+    expect(onChange).toHaveBeenCalledWith({ groupOrder: 'DESC' });
   });
 });
 

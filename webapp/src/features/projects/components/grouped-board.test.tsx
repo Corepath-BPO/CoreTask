@@ -105,4 +105,22 @@ describe('GroupedBoard', () => {
     // A value column has nothing to rename and no rule to attach.
     expect(within(doing).queryByRole('button', { name: /rename/i })).not.toBeInTheDocument();
   });
+
+  it('runs the columns in the view’s group order, with "no value" last either way', () => {
+    renderWithProviders(
+      <GroupedBoard
+        workspaceId="ws-1"
+        projectId="p-1"
+        tasks={[item('a', { id: 'st-doing', name: 'Doing' }), item('b', null)].map(toWorkItemRow)}
+        settings={{ ...DEFAULT_VIEW_SETTINGS, groupBy: 'status', groupOrder: 'DESC' }}
+        metadata={metadata}
+        canEdit
+        onOpenTask={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getAllByRole('region').map((column) => column.getAttribute('aria-label')),
+    ).toEqual(['Doing', 'To do', 'No status']);
+  });
 });

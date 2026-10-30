@@ -13,8 +13,11 @@ import type {
   ProjectWorkItem,
   ProjectWorkItemPage,
   ProjectWorkItemQuery,
+  ReplaceAssigneePayload,
+  ReplaceAssigneeResult,
   UpdateWorkItemPayload,
 } from '@coretask/types';
+import { BULK_WORK_ITEM_LIMIT } from '@coretask/validation';
 import { Injectable } from '@nestjs/common';
 import {
   ActivityAction,
@@ -688,6 +691,46 @@ export class ProjectWorkItemService {
     }
 
     return results;
+  }
+
+  /**
+   * Find and replace on the Assignee column: the project's rows assigned to
+   * one person, handed to another or to nobody.
+   *
+   * The rows are found here rather than named by the caller, because most of
+   * a project is not on screen. They are the List's rows — top-level, not
+   * archived, and open unless `includeCompleted` — and each goes through
+   * `update` like a single edit, with its own story, rule triggers and
+   * realtime push. A request takes at most `BULK_WORK_ITEM_LIMIT` of them, so
+   * three hundred rows are a few short requests rather than one long one; a
+   * row handed over no longer matches, so the next request carries on where
+   * this one stopped.
+   */
+  async replaceAssignee(
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    payload: ReplaceAssigneePayload,
+  ): Promise<ReplaceAssigneeResult> {
+    await this.projects.requireProject(workspaceId, projectId);
+
+    const query: ProjectWorkItemQuery = payload.includeCompleted ? {} : { showCompleted: false };
+    const [taskIds, ticketIds] = await Promise.all([
+      this.tasks.listIds(workspaceId, projectId, query, [{ assigneeId: payload.fromUserId }]),
+      this.tickets.listIds(workspaceId, projectId, query, [{ assigneeId: payload.fromUserId }]),
+    ]);
+    const ids = [...taskIds, ...ticketIds];
+    if (payload.dryRun) return { replaced: 0, remaining: ids.length };
+
+    const batch = ids.slice(0, BULK_WORK_ITEM_LIMIT);
+    const change: UpdateWorkItemPayload = {
+      assigneeIds: payload.toUserId ? [payload.toUserId] : [],
+      ...(payload.correlationId ? { correlationId: payload.correlationId } : {}),
+    };
+    for (const id of batch) {
+      await this.update(workspaceId, projectId, userId, id, change);
+    }
+    return { replaced: batch.length, remaining: ids.length - batch.length };
   }
 
   // ---------------------------------------------------------------- internals

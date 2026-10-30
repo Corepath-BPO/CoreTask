@@ -126,6 +126,33 @@ describe('a column’s menu', () => {
     expect(items).not.toContain('Add automation to field');
   });
 
+  it('finds and replaces on the Assignee column, and on no other', async () => {
+    const user = setupUser();
+    const onReplaceAssignee = vi.fn();
+    renderHeader({ onReplaceAssignee });
+
+    await user.click(screen.getByRole('button', { name: 'Show options for Assignee column' }));
+    expect(screen.getAllByRole('menuitem')[0]).toHaveTextContent('Find and replace assignee');
+    await user.click(screen.getByRole('menuitem', { name: 'Find and replace assignee' }));
+    expect(onReplaceAssignee).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Show options for Priority column' }));
+    expect(
+      screen.queryByRole('menuitem', { name: 'Find and replace assignee' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps find and replace from someone who cannot edit', async () => {
+    const user = setupUser();
+    renderHeader({ canEdit: false, onReplaceAssignee: vi.fn() });
+
+    await user.click(screen.getByRole('button', { name: 'Show options for Assignee column' }));
+
+    expect(
+      screen.queryByRole('menuitem', { name: 'Find and replace assignee' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('sorts by the column, either way', async () => {
     const user = setupUser();
     const props = renderHeader();

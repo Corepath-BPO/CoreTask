@@ -134,6 +134,7 @@ import {
 
 import { EditCustomFieldDialog } from './field-picker/edit-custom-field-dialog';
 import { RemoveFieldDialog } from './field-picker/remove-field-dialog';
+import { ReplaceAssigneeDialog } from './replace-assignee-dialog';
 import { FieldPickerPopover } from './field-picker/field-picker-popover';
 import { findQueryableField } from '../lib/view-fields';
 
@@ -299,6 +300,7 @@ export function ProjectListView({
   // A column's "Delete field": the field's own dialog, off this project or out
   // of the workspace, as Customize › Fields offers it.
   const [removingFieldId, setRemovingFieldId] = useState<string | null>(null);
+  const [replacingAssignee, setReplacingAssignee] = useState(false);
   const removingField = metadata?.customFields.find((field) => field.id === removingFieldId);
   const removeField = useRemoveCustomField(workspaceId, projectId);
   const fieldUsage = useFieldCatalog(workspaceId, projectId, '', [], removingFieldId !== null);
@@ -1005,6 +1007,7 @@ export function ProjectListView({
                       : undefined
                   }
                   onDeleteField={canEdit ? setRemovingFieldId : undefined}
+                  onReplaceAssignee={canEdit ? () => setReplacingAssignee(true) : undefined}
                   onResizePreview={(preview) => setResizing(preview ? [preview] : null)}
                   widths={<ColumnWidths columns={shown} />}
                   addControl={
@@ -1343,6 +1346,16 @@ export function ProjectListView({
               },
             );
           }}
+        />
+      )}
+
+      {replacingAssignee && (
+        <ReplaceAssigneeDialog
+          workspaceId={workspaceId}
+          projectId={projectId}
+          people={metadata?.members ?? []}
+          assignees={metadata?.assignees ?? metadata?.members ?? []}
+          onOpenChange={setReplacingAssignee}
         />
       )}
     </div>

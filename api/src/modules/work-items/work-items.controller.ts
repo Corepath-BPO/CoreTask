@@ -4,12 +4,14 @@ import type {
   ProjectWorkItem,
   ProjectWorkItemPage,
   ProjectWorkItemQuery,
+  ReplaceAssigneeResult,
 } from '@coretask/types';
 import {
   bulkWorkItemSchema,
   createWorkItemSchema,
   moveWorkItemSchema,
   projectWorkItemQuerySchema,
+  replaceAssigneeSchema,
   updateWorkItemSchema,
 } from '@coretask/validation';
 import {
@@ -40,6 +42,7 @@ import {
   BulkWorkItemResultDto,
   ProjectWorkItemDto,
   ProjectWorkItemPageDto,
+  ReplaceAssigneeResultDto,
 } from './dto/work-item-response.dto';
 import { ProjectWorkItemService } from './project-work-item.service';
 
@@ -187,6 +190,35 @@ export class WorkItemsController {
 
     const items = await this.workItems.bulk(workspaceId, projectId, userId, parsed.data);
     return { items };
+  }
+
+  @Post('replace-assignee')
+  @ApiOperation({
+    summary: 'Hand one person’s rows to another',
+    description:
+      'Find and replace on the Assignee column. The server finds the project’s rows assigned ' +
+      'to `fromUserId` (open ones, unless `includeCompleted`) and gives each to `toUserId`, or ' +
+      'to nobody, through the same path a single edit takes. At most 100 rows a request: the ' +
+      'answer says how many are left, and the caller asks again until none are. `dryRun` ' +
+      'counts them without changing any.',
+  })
+  @ApiEnvelopeResponse(ReplaceAssigneeResultDto)
+  @ApiErrorResponseDoc(400, 'The same person on both sides, or someone not in the workspace')
+  async replaceAssignee(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentWorkspace('role') role: WorkspaceRole,
+    @Body() body: unknown,
+  ): Promise<ReplaceAssigneeResult> {
+    this.assertMayWrite(role);
+
+    const parsed = replaceAssigneeSchema.safeParse(body);
+    if (!parsed.success) {
+      invalid('Invalid replace request.', parsed.error);
+    }
+
+    return this.workItems.replaceAssignee(workspaceId, projectId, userId, parsed.data);
   }
 
   @Patch(':workItemId')

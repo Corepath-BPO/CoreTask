@@ -56,8 +56,8 @@ export function GroupedBoard({
   onOpenTask: (taskId: string) => void;
 }) {
   const groups = useMemo(
-    () => groupRows(tasks, settings.groupBy, metadata),
-    [tasks, settings.groupBy, metadata],
+    () => groupRows(tasks, settings.groupBy, metadata, undefined, settings.groupOrder ?? 'ASC'),
+    [tasks, settings.groupBy, metadata, settings.groupOrder],
   );
   const manualOrder = isManualOrder(settings);
   const cardFields = settings.cardFields ?? [];
